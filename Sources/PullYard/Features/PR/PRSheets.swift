@@ -83,7 +83,7 @@ struct ReviewSheet: View {
     @State private var confirmDiscard = false
 
     var body: some View {
-        SheetFrame(title: "Review #\(pr.number)", model: model) {
+        SheetFrame(title: "Review \(model.provider.numberPrefix)\(pr.number)", model: model) {
             if !model.pending.isEmpty {
                 Label("Inline comments to be submitted: \(model.pending.count)", systemImage: "text.bubble")
                     .foregroundStyle(Color.syMuted)
@@ -92,8 +92,10 @@ struct ReviewSheet: View {
                 .frame(maxHeight: 260)
             Picker("", selection: $event) {
                 Text("Comment — without approval").tag("COMMENT")
-                Text("Approve").tag("APPROVE").disabled(pr.viewerDidAuthor)
-                Text("Request changes").tag("REQUEST_CHANGES").disabled(pr.viewerDidAuthor)
+                Text("Approve").tag("APPROVE").disabled(!(pr.viewerCanApprove ?? !pr.viewerDidAuthor) || pr.viewerApproved == true)
+                if model.features.requestChanges {
+                    Text("Request changes").tag("REQUEST_CHANGES").disabled(pr.viewerDidAuthor)
+                }
             }
             .pickerStyle(.radioGroup)
             .labelsHidden()
@@ -144,7 +146,7 @@ struct MergeSheet: View {
     var body: some View {
         let readiness = MergeStatusBar.status(pr, requirements: model.requirements)
         let blocked = !readiness.ready && pr.mergeStateStatus != nil && pr.mergeStateStatus != "UNKNOWN"
-        SheetFrame(title: "Merge #\(pr.number) into \(pr.baseRefName)", model: model) {
+        SheetFrame(title: "Merge \(model.provider.numberPrefix)\(pr.number) into \(pr.baseRefName)", model: model) {
             Label(readiness.text, systemImage: readiness.icon)
                 .font(.syCallout)
                 .foregroundStyle(readiness.ready ? Color.syText : readiness.color)
@@ -153,11 +155,11 @@ struct MergeSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: Radius.m).fill(readiness.color.opacity(Tint.banner)))
             Picker("Method", selection: $method) {
-                ForEach(allowed) { Text($0.title).tag($0) }
+                ForEach(allowed) { Text($0 == .MERGE && model.provider == .gitlab ? "Merge" : $0.title).tag($0) }
             }
             .onChange(of: method) { _, m in prefill(m) }
             if method != .REBASE {
-                TextField("Commit title (GitHub default)", text: $title)
+                TextField("Commit title (\(model.features.serviceTitle) default)", text: $title)
                 ComposerBox(text: $message, placeholder: "Commit description (optional)", minHeight: 80)
                     .frame(maxHeight: 160)
             }
@@ -169,7 +171,7 @@ struct MergeSheet: View {
                     Button("Enable auto-merge") {
                         Task { if await model.enableAutoMerge(method: method.rawValue) { dismiss() } }
                     }
-                    .help("Merge automatically when checks and reviews pass")
+                    .help(model.provider == .gitlab ? "Merge automatically when the pipeline succeeds" : "Merge automatically when checks and reviews pass")
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -196,7 +198,7 @@ struct MergeSheet: View {
 
     private func prefill(_ m: MergeMethod) {
         switch m {
-        case .SQUASH: title = "\(pr.title) (#\(pr.number))"
+        case .SQUASH: title = model.provider.isGitHub ? "\(pr.title) (#\(pr.number))" : pr.title
         case .MERGE: title = ""
         case .REBASE: title = ""
         }
@@ -211,7 +213,7 @@ struct EditPRSheet: View {
     @State private var text = ""
 
     var body: some View {
-        SheetFrame(title: "Edit #\(pr.number)", model: model) {
+        SheetFrame(title: "Edit \(model.provider.numberPrefix)\(pr.number)", model: model) {
             TextField("Title", text: $title).textFieldStyle(.roundedBorder)
             ComposerBox(text: $text, placeholder: "Description (Markdown)", minHeight: 260)
                 .frame(maxHeight: 420)

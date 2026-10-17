@@ -79,9 +79,10 @@ enum ConversationHTML {
         if t.viewerCanReply { actions += "<button data-n=\"\(nonce)\" data-act=\"reply\" data-id=\"\(esc(t.id))\">\("Reply")</button>" }
         if t.isResolved, t.viewerCanUnresolve { actions += "<button data-n=\"\(nonce)\" data-act=\"unresolve\" data-id=\"\(esc(t.id))\">\("Unresolve")</button>" }
         if !t.isResolved, t.viewerCanResolve { actions += "<button data-n=\"\(nonce)\" data-act=\"resolve\" data-id=\"\(esc(t.id))\">\("Resolve")</button>" }
-        actions += "<button class=\"ghost\" data-n=\"\(nonce)\" data-act=\"file\" data-id=\"\(esc(t.path))\">\("View in files")</button>"
+        if !t.path.isEmpty { actions += "<button class=\"ghost\" data-n=\"\(nonce)\" data-act=\"file\" data-id=\"\(esc(t.path))\">\("View in files")</button>" }
+        let title = t.path.isEmpty ? "Thread" : esc(t.path) + (line.map { "<span class=\"ln\">:\($0)</span>" } ?? "")
         return """
-        <details class="thread"\(t.isResolved ? "" : " open")><summary class="th">\(esc(t.path))\(line.map { "<span class=\"ln\">:\($0)</span>" } ?? "")\(tags)</summary>
+        <details class="thread"\(t.isResolved ? "" : " open")><summary class="th">\(title)\(tags)</summary>
         \(hunk(t.comments.nodes.first?.diffHunk))\(comments)<div class="actions">\(actions)</div></details>
         """
     }
@@ -159,6 +160,7 @@ enum ConversationHTML {
             case "CHANGES_REQUESTED": return ("±", "bad", "requested changes")
             case "DISMISSED": return ("✕", "", "review dismissed")
             case "PENDING": return ("…", "", "pending review")
+            case "DISCUSSION": return ("💬", "", "started a thread")
             default: return ("💬", "", "reviewed")
             }
         }()
@@ -205,6 +207,8 @@ enum ConversationHTML {
             return event("🏷", "", actor: item.actor, text: "label" + " \(label(l))", date: item.createdAt)
         case "RenamedTitleEvent":
             return event("✎", "", actor: item.actor, text: "title" + ": <s>\(esc(item.previousTitle ?? ""))</s> → \(esc(item.currentTitle ?? ""))", date: item.createdAt)
+        case "SystemNote":
+            return systemNote(item)
         case "CrossReferencedEvent":
             guard let s = item.source, let url = s.url else { return "" }
             let name = "\(s.repository?.nameWithOwner ?? "")#\(s.number ?? 0)"
@@ -212,6 +216,23 @@ enum ConversationHTML {
         default:
             return ""
         }
+    }
+
+    private static func systemNote(_ item: TimelineItem) -> String {
+        let text = (item.body ?? "").components(separatedBy: "\n").first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
+        guard !text.isEmpty else { return "" }
+        let lower = text.lowercased()
+        let (icon, cls): (String, String) = {
+            if lower.hasPrefix("unapproved") || lower.hasPrefix("closed") { return ("✕", "bad") }
+            if lower.hasPrefix("approved") || lower.hasPrefix("reopened") || lower.contains("as **ready**") { return ("✓", "ok") }
+            if lower.hasPrefix("merged") { return ("⇢", "merged") }
+            if lower.hasPrefix("added") && lower.contains("commit") { return ("●", "") }
+            if lower.contains("label") { return ("🏷", "") }
+            if lower.contains("review") { return ("👁", "") }
+            if lower.hasPrefix("mentioned") { return ("↗", "") }
+            return ("•", "")
+        }()
+        return event(icon, cls, actor: item.actor, text: MarkdownHTML.inline(text), date: item.createdAt)
     }
 
     private static func page(_ content: String) -> String {
