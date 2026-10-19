@@ -15,6 +15,32 @@ const MAX_REPOS: usize = 8;
 
 thread_local! {
     static LAST: RefCell<Option<(String, Vec<StackEntry>, DateTime<Utc>)>> = const { RefCell::new(None) };
+    static ACTIVE: RefCell<std::rc::Weak<StacksList>> = const { RefCell::new(std::rc::Weak::new()) };
+}
+
+pub fn open_first() {
+    let Some(me) = ACTIVE.with(|a| a.borrow().upgrade()) else { return };
+    let entry = me.entries.borrow().first().cloned();
+    if let Some(e) = entry {
+        if let Some(row) = me.list.row_at_index(0) {
+            me.list.select_row(Some(&row));
+        }
+        open_entry(&e);
+    }
+}
+
+fn open_entry(e: &StackEntry) {
+    let r = ItemRef { repo: e.repo.clone(), number: e.tree.current };
+    if let Some(m) = app::pr_model(&r) {
+        match e.tree.nodes.get(&e.tree.current) {
+            Some(node) => {
+                let nodes = stack::store::memory_nodes(&m.api, &e.repo).unwrap_or_else(|| e.tree.nodes.values().cloned().collect());
+                m.seed_stack(node, &nodes);
+            }
+            None => m.set_tab(PrTab::Stack),
+        }
+    }
+    app::select(Some(Route::Pr(r)));
 }
 
 pub fn reset() {
@@ -64,6 +90,7 @@ pub fn build() -> gtk::Widget {
         status,
     });
     *holder.borrow_mut() = Some(Rc::downgrade(&me));
+    ACTIVE.with(|a| *a.borrow_mut() = Rc::downgrade(&me));
     let content = vbox(0);
     content.append(&pages);
     content.append(&footer(&me.status));
@@ -79,17 +106,7 @@ pub fn build() -> gtk::Widget {
         let Some(me) = w.upgrade() else { return };
         let entry = me.entries.borrow().get(row.index().max(0) as usize).cloned();
         if let Some(e) = entry {
-            let r = ItemRef { repo: e.repo.clone(), number: e.tree.current };
-            if let Some(m) = app::pr_model(&r) {
-                match e.tree.nodes.get(&e.tree.current) {
-                    Some(node) => {
-                        let nodes = stack::store::memory_nodes(&m.api, &e.repo).unwrap_or_else(|| e.tree.nodes.values().cloned().collect());
-                        m.seed_stack(node, &nodes);
-                    }
-                    None => m.set_tab(PrTab::Stack),
-                }
-            }
-            app::select(Some(Route::Pr(r)));
+            open_entry(&e);
         }
     });
     let w = Rc::downgrade(&me);

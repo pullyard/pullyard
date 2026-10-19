@@ -311,7 +311,7 @@ pub fn run(_app: Rc<App>) {
     p.act(move || app::select(Some(Route::Repo(rp)))).wait(8000).shot("14-repo");
     p.act(|| crate::ui::repos::show_blame(crate::brand::env_var("TOUR_BLAME_PATH").unwrap_or_else(|| "Package.swift".into()), None)).wait(7000).shot("14-repo-blame");
     p.act(|| app::set_section(Section::Projects)).wait(5000).shot("15-projects");
-    p.act(|| app::set_section(Section::Stacks)).wait(5000).shot("15b-stacks");
+    p.act(|| app::set_section(Section::Stacks)).wait(5000).act(crate::ui::stacks::open_first).wait(4000).shot("15b-stacks");
     p.act(|| app::set_section(Section::Claude)).wait(4000).shot("16-claude");
     p.act(|| {
         let ws = app::get().claude.clone();
