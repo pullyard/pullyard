@@ -90,14 +90,13 @@ enum StackViewMode: String {
 
 struct StackTab: View {
     static let modeKey = "stack.view"
-    static let supportAskedKey = "stack.graphSupportAsked"
+    static let supportAskedKey = "stack.graphSupportShown"
 
     let model: PRDetailModel
     let tree: StackTree
     @Environment(AppModel.self) private var app
     @AppStorage(StackTab.modeKey) private var mode = StackViewMode.list.rawValue
     @AppStorage(StackTab.supportAskedKey) private var supportAsked = false
-    @State private var askSupport = false
     @State private var loading: Int?
     @State private var view: StackViewport?
     @State private var size: CGSize = .zero
@@ -148,12 +147,6 @@ struct StackTab: View {
                 }
             }
         }
-        .alert("Like the stack graph?", isPresented: $askSupport) {
-            Button("Buy a Pizza 🍕") { openInBrowser(Support.pizzaURL) }
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("PullYard is free and built by one developer. If it saves you time, you can be part of it by buying a pizza that keeps it going. We only ask once.")
-        }
         .onChange(of: tree) { bindInput() }
         .onChange(of: notesFor) { bindInput() }
         .task(id: tree.nodes.values.map { "\($0.number):\($0.headRefName)" }.sorted()) { matchSessions() }
@@ -162,8 +155,25 @@ struct StackTab: View {
     private func switchMode(_ next: StackViewMode) {
         mode = next.rawValue
         guard next == .graph, !supportAsked else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { askForSupport() }
+    }
+
+    private func askForSupport() {
+        guard !supportAsked, isGraph else { return }
         supportAsked = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { askSupport = true }
+        let alert = NSAlert()
+        alert.messageText = "Like the stack graph?"
+        alert.informativeText = "PullYard is free and built by one developer. If it saves you time, you can be part of it by buying a pizza that keeps it going. We only ask once."
+        alert.addButton(withTitle: "Buy a Pizza 🍕")
+        alert.addButton(withTitle: "OK")
+        let handle: (NSApplication.ModalResponse) -> Void = { response in
+            if response == .alertFirstButtonReturn { openInBrowser(Support.pizzaURL) }
+        }
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: window, completionHandler: handle)
+        } else {
+            handle(alert.runModal())
+        }
     }
 
     private var graph: some View {
