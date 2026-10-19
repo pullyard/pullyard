@@ -188,15 +188,15 @@ public static class SmokeTour
         Log($"stack {model.StackTree?.Count ?? 0} nodes");
         model.Tab = PRTab.Stack;
         await Step("stack list", 3000);
-        Memory("stack list");
         await Shot("06b-pr-stack-list");
+        Memory("stack list");
         StackTab.Last?.SetGraph(true);
         await Step("stack support", 2000);
         await Shot("06c-stack-support");
         CloseDialogs(root);
         await Step("stack graph", 1500);
-        Memory("stack graph");
         await Shot("06d-pr-stack-graph");
+        Memory("stack graph");
         if (StackTab.Last is { CurrentNumber: { } n } tab)
         {
             StackNotes.Shared.Replace(NoteKey(model, n), new[]
@@ -208,10 +208,11 @@ public static class SmokeTour
             await Step("stack notes", 1500);
             await Shot("06e-pr-stack-notes");
             tab.ShowNotes(null);
+            await Step("stack notes closed", 1000);
             tab.FitGraph();
-            await Step("stack fit", 1500);
-            Memory("stack fit");
+            await Step("stack fit", 2500);
             await Shot("06f-pr-stack-fit");
+            Memory("stack fit");
             tab.SetGraph(false);
         }
         model.Tab = PRTab.Conversation;

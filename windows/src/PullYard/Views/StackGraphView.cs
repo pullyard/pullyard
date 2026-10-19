@@ -477,8 +477,8 @@ public sealed class StackGraphView : Grid
         var top = Ui.Columns((head, Ui.Star), (right, Ui.Auto));
         top.ColumnSpacing = 4;
         var title = StackUi.Fixed(node.Title, 13, "text", FontWeights.SemiBold);
-        title.Margin = new Thickness(0, 0, 0, 2);
-        var stack = Ui.V(4, top, title, Field(L.T("Stack_Branch", "branch"), node.HeadRefName), Field(L.T("Stack_Base", "base"), node.BaseRefName));
+        title.Margin = new Thickness(0, 0, 0, 1);
+        var stack = Ui.V(3, top, title, Field(L.T("Stack_Branch", "branch"), node.HeadRefName), Field(L.T("Stack_Base", "base"), node.BaseRefName));
         if (sessions.TryGetValue(node.Number, out var session))
         {
             var link = new HyperlinkButton { Content = StackUi.Fixed(session.Title, 12, "accent"), Padding = new Thickness(0), MinHeight = 0 };
@@ -494,16 +494,16 @@ public sealed class StackGraphView : Grid
             {
                 Background = Palette.Brush("sunken"),
                 CornerRadius = new CornerRadius(5),
-                Padding = new Thickness(6, 3, 6, 3),
-                Margin = new Thickness(0, 2, 0, 0),
-                Child = StackUi.Fixed($"› {oid} {node.CommitHeadline}", 11.5, "muted", mono: true)
+                Padding = new Thickness(6, 2, 6, 2),
+                Margin = new Thickness(0, 1, 0, 0),
+                Child = StackUi.Fixed($"› {oid} {node.CommitHeadline}", 11, "muted", mono: true)
             });
         }
         var card = new Border
         {
             Width = StackMetrics.CardWidth,
             Height = StackMetrics.CardHeight,
-            Padding = new Thickness(10),
+            Padding = new Thickness(10, 7, 10, 6),
             CornerRadius = new CornerRadius(10),
             Background = Palette.Brush("raised"),
             BorderBrush = current ? Palette.Brush("indigo") : Palette.Brush("text", 0.16),
@@ -534,9 +534,9 @@ public sealed class StackGraphView : Grid
 
     private static FrameworkElement Field(string label, string value)
     {
-        var l = StackUi.Fixed(label, 12, "dim");
+        var l = StackUi.Fixed(label, 11.5, "dim");
         l.Width = 48;
-        var v = StackUi.Fixed(value, 12, "text", mono: true);
+        var v = StackUi.Fixed(value, 11.5, "text", mono: true);
         v.TextTrimming = TextTrimming.CharacterEllipsis;
         var row = Ui.Columns((l, Ui.Auto), (v, Ui.Star));
         row.ColumnSpacing = 6;
