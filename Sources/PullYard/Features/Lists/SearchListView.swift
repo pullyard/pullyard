@@ -239,7 +239,7 @@ struct SearchListView: View {
             Divider()
             List(selection: Binding(get: { app.detailRoot }, set: { app.select($0) })) {
                 if let e = model.error, model.items.isEmpty {
-                    Text(e).foregroundStyle(.red).font(.caption)
+                    Text(e).foregroundStyle(.red).font(.syCaption)
                 }
                 if grouped {
                     ForEach(model.groups) { group in
@@ -258,7 +258,7 @@ struct SearchListView: View {
                     ForEach(model.items) { row($0) }
                 }
                 if model.items.isEmpty, !model.loading, model.error == nil {
-                    Text("Nothing here").foregroundStyle(Color.syMuted)
+                    Text("Nothing here").font(.syBody).foregroundStyle(Color.syMuted)
                 }
             }
             .opacity(model.loading && !model.showingCached && !model.items.isEmpty ? 0.55 : 1)
@@ -310,15 +310,15 @@ struct RepoGroupHeader: View {
     var body: some View {
         let color = ProjectPalette.color(for: group.id)
         HStack(spacing: 7) {
-            Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(Color.syDim).frame(width: 10)
+            Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.syCaption2.weight(.bold)).foregroundStyle(Color.syDim).frame(width: 10)
             IconTile(systemImage: "book.closed.fill", color: color, size: 24)
             VStack(alignment: .leading, spacing: 0) {
-                Text(group.name).font(.callout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
-                Text(group.owner).font(.caption2).foregroundStyle(Color.syDim).lineLimit(1)
+                Text(group.name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
+                Text(group.owner).font(.syCaption2).foregroundStyle(Color.syDim).lineLimit(1)
             }
             Spacer()
             Text("\(group.items.count)")
-                .font(.caption2.weight(.semibold).monospacedDigit())
+                .font(.syCaption2.weight(.semibold).monospacedDigit())
                 .foregroundStyle(color)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 1)
@@ -355,29 +355,29 @@ struct ItemRow: View {
         HStack(alignment: .top, spacing: 10) {
             StateBadge(state: item.visualState, compact: true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.title).lineLimit(2).fontWeight(.semibold)
+                Text(item.title).font(.syBody).lineLimit(2).fontWeight(.semibold)
                 HStack(spacing: 5) {
                     Text(showRepo ? "\(item.repository.nameWithOwner)\(numberPrefix)\(item.number)" : "\(numberPrefix)\(item.number)").lineLimit(1)
                     Text("·")
                     Text(Fmt.rel(item.updatedAt)).lineLimit(1)
                 }
-                .font(.caption)
+                .font(.syCaption)
                 .foregroundStyle(Color.syMuted)
                 HStack(spacing: 6) {
                     Avatar(url: item.author?.avatarUrl, size: 14)
-                    Text(item.author?.login ?? "").font(.caption).foregroundStyle(Color.syMuted)
+                    Text(item.author?.login ?? "").font(.syCaption).lineLimit(1).foregroundStyle(Color.syMuted)
                     if item.isPR {
-                        CIIcon(state: item.ciState).font(.caption)
+                        CIIcon(state: item.ciState).font(.syCaption)
                         reviewBadge
                         if let a = item.additions, let d = item.deletions { DiffStat(additions: a, deletions: d) }
                     }
                     if let comments = item.comments?.totalCount, comments > 0 {
-                        Label("\(comments)", systemImage: "bubble.left").font(.caption).foregroundStyle(Color.syMuted).labelStyle(.titleAndIcon)
+                        Label("\(comments)", systemImage: "bubble.left").font(.syCaption).foregroundStyle(Color.syMuted).labelStyle(.titleAndIcon)
                     }
                 }
                 if let base = item.stackedOn {
                     Label("stacked on \(base)", systemImage: "square.stack.3d.up")
-                        .font(.caption)
+                        .font(.syCaption)
                         .foregroundStyle(Color.syIndigo)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -394,9 +394,9 @@ struct ItemRow: View {
     @ViewBuilder
     private var reviewBadge: some View {
         switch item.reviewDecision {
-        case "APPROVED": Image(systemName: "checkmark.seal.fill").foregroundStyle(Color.ghGreen).font(.caption).help("Approved")
-        case "CHANGES_REQUESTED": Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(Color.ghRed).font(.caption).help("Changes requested")
-        case "REVIEW_REQUIRED": Image(systemName: "eye").foregroundStyle(Color.syMuted).font(.caption).help("Review required")
+        case "APPROVED": Image(systemName: "checkmark.seal.fill").foregroundStyle(Color.ghGreen).font(.syCaption).help("Approved")
+        case "CHANGES_REQUESTED": Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(Color.ghRed).font(.syCaption).help("Changes requested")
+        case "REVIEW_REQUIRED": Image(systemName: "eye").foregroundStyle(Color.syMuted).font(.syCaption).help("Review required")
         default: EmptyView()
         }
     }

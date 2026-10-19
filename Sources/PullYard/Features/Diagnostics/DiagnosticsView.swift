@@ -114,7 +114,7 @@ struct DiagnosticsView: View {
         VStack(alignment: .leading, spacing: 12) {
             if !enabled {
                 Label("Recording is off. Turn on “Record network diagnostics” in Settings.", systemImage: "pause.circle")
-                    .font(.callout)
+                    .font(.syCallout)
                     .foregroundStyle(Color.syAmber)
             }
             summary(stats)
@@ -176,10 +176,10 @@ struct DiagnosticsView: View {
 
     private func metric(_ title: String, _ value: String, detail: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption).foregroundStyle(Color.syMuted)
-            Text(value).font(.system(.title3, design: .monospaced).weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
+            Text(title).font(.syCaption).foregroundStyle(Color.syMuted)
+            Text(value).font(.syTitle3.monospaced().weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
             if let detail {
-                Text(detail).font(.caption2).foregroundStyle(Color.syDim).lineLimit(1)
+                Text(detail).font(.syCaption2).foregroundStyle(Color.syDim).lineLimit(1)
             }
         }
     }

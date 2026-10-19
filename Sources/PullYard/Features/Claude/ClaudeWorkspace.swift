@@ -116,7 +116,7 @@ final class ClaudeTab: Identifiable {
     var terminal: ClaudeTerminalView {
         if let t = _terminal { return t }
         let t = ClaudeTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 500))
-        t.font = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
+        t.font = NSFont.monospacedSystemFont(ofSize: TextZoom.shared.size(12.5), weight: .regular)
         t.optionAsMetaKey = false
         t.applyAppearance()
         _terminal = t

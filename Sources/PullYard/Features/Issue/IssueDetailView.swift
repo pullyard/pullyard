@@ -109,8 +109,8 @@ struct IssueDetailView: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(issue.title).font(.title2.weight(.bold)).foregroundStyle(Color.syText).textSelection(.enabled)
-                    Text("#\(issue.number)").font(.title2).foregroundStyle(Color.syDim)
+                    Text(issue.title).font(.syTitle2.weight(.bold)).foregroundStyle(Color.syText).textSelection(.enabled)
+                    Text("#\(issue.number)").font(.syTitle2).foregroundStyle(Color.syDim)
                     ShortLinkButton(ref: ShortLink.ref(url: issue.url) ?? ref)
                 }
                 HStack(spacing: 8) {
@@ -122,13 +122,13 @@ struct IssueDetailView: View {
                     Spacer(minLength: 0)
                     Text(Fmt.rel(issue.createdAt)).foregroundStyle(Color.syMuted).help(Fmt.full.string(from: issue.createdAt))
                 }
-                .font(.callout)
+                .font(.syCallout)
                 .lineLimit(1)
                 if !issue.labels.nodes.isEmpty || !issue.assignees.nodes.isEmpty {
                     HStack(spacing: 6) {
                         ForEach(issue.labels.nodes, id: \.name) { LabelChip(label: $0) }
                         if !issue.assignees.nodes.isEmpty {
-                            Text("Assignees:").font(.caption).foregroundStyle(Color.syMuted).padding(.leading, issue.labels.nodes.isEmpty ? 0 : 6)
+                            Text("Assignees:").font(.syCaption).foregroundStyle(Color.syMuted).padding(.leading, issue.labels.nodes.isEmpty ? 0 : 6)
                             ForEach(issue.assignees.nodes, id: \.login) { Avatar(url: $0.avatarUrl, size: 18).help($0.login) }
                         }
                     }

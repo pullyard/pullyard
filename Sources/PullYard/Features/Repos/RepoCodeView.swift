@@ -42,7 +42,7 @@ struct RepoCodeView: View {
                     }
                 } label: {
                     Label(model.ref.isEmpty ? "…" : model.refLabel, systemImage: "arrow.branch")
-                        .font(.callout.monospaced().weight(.medium))
+                        .font(.syCallout.monospaced().weight(.medium))
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -63,11 +63,11 @@ struct RepoCodeView: View {
                     Button {
                         Task { await model.openDir((model.dir as NSString).deletingLastPathComponent) }
                     } label: {
-                        Label("..", systemImage: "arrow.turn.left.up").foregroundStyle(Color.syMuted)
+                        Label("..", systemImage: "arrow.turn.left.up").font(.syBody).foregroundStyle(Color.syMuted)
                     }
                     .buttonStyle(.plain)
                 }
-                if let e = model.dirError { Text(e).font(.caption).foregroundStyle(Color.syRed) }
+                if let e = model.dirError { Text(e).font(.syCaption).foregroundStyle(Color.syRed) }
                 ForEach(model.entries) { entry in
                     EntryRow(entry: entry)
                         .tag(entry.path)
@@ -101,7 +101,7 @@ struct RepoCodeView: View {
                     .fontWeight(i == 0 ? .semibold : .regular)
                 }
             }
-            .font(.callout)
+            .font(.syCallout)
         }
     }
 
@@ -137,7 +137,7 @@ struct RepoCodeView: View {
     private func fileHeader(_ path: String) -> some View {
         HStack(spacing: 10) {
             IconTile(systemImage: "doc.text.fill", color: .sySky, size: 20)
-            Text(path).font(.system(.callout, design: .monospaced).weight(.medium)).foregroundStyle(Color.syText).lineLimit(1).truncationMode(.head).textSelection(.enabled)
+            Text(path).font(.syCallout.monospaced().weight(.medium)).foregroundStyle(Color.syText).lineLimit(1).truncationMode(.head).textSelection(.enabled)
             if let size = model.fileSize {
                 ChipView(text: ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
             }
@@ -187,13 +187,13 @@ struct RepoCodeView: View {
                     ProgressView().controlSize(.mini)
                 } else if let e = model.blameError {
                     Label(e, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
+                        .font(.syCaption)
                         .foregroundStyle(Color.syAmber)
                         .lineLimit(1)
                     if model.canRetryBlame {
                         Button("Retry") { Task { await model.retryBlame() } }
                             .buttonStyle(.link)
-                            .font(.caption)
+                            .font(.syCaption)
                     }
                 }
             }
@@ -220,7 +220,7 @@ struct RepoCodeView: View {
             VStack(spacing: 0) {
                 if truncated {
                     Label("File is too large — showing only part of it", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(Color.syAmber).padding(6)
+                        .font(.syCaption).foregroundStyle(Color.syAmber).padding(6)
                 }
                 CodeTextView(text: s, ext: ext, wrap: wrap, blame: visibleBlame, onOpenCommit: openCommit)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -290,10 +290,10 @@ struct EntryRow: View {
             Image(systemName: icon)
                 .foregroundStyle(iconColor)
                 .frame(width: 16)
-            Text(entry.name).fontWeight(entry.isDir ? .medium : .regular).foregroundStyle(Color.syText).lineLimit(1)
+            Text(entry.name).font(.syBody).fontWeight(entry.isDir ? .medium : .regular).foregroundStyle(Color.syText).lineLimit(1)
             Spacer()
             if let size = entry.object?.byteSize, !entry.isDir {
-                Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)).font(.caption2).foregroundStyle(Color.syDim)
+                Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)).font(.syCaption2).foregroundStyle(Color.syDim)
             }
         }
     }
@@ -330,7 +330,7 @@ struct QuickOpenSheet: View {
         VStack(spacing: 0) {
             TextField("Go to file…", text: $query)
                 .textFieldStyle(.plain)
-                .font(.title3)
+                .font(.syTitle3)
                 .padding(14)
                 .onSubmit { open(selection ?? results.first) }
             Rectangle().fill(Color.syLine).frame(height: 1)
@@ -339,8 +339,8 @@ struct QuickOpenSheet: View {
             } else {
                 List(results, id: \.self, selection: $selection) { p in
                     VStack(alignment: .leading, spacing: 1) {
-                        Text((p as NSString).lastPathComponent).foregroundStyle(Color.syText)
-                        Text(p).font(.caption.monospaced()).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.head)
+                        Text((p as NSString).lastPathComponent).font(.syBody).foregroundStyle(Color.syText)
+                        Text(p).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.head)
                     }
                     .tag(p)
                     .contentShape(Rectangle())
@@ -349,11 +349,11 @@ struct QuickOpenSheet: View {
                 .frame(height: 380)
                 if model.pathsTruncated {
                     Text("Large repository — file list is incomplete")
-                        .font(.caption).foregroundStyle(Color.syAmber).padding(6)
+                        .font(.syCaption).foregroundStyle(Color.syAmber).padding(6)
                 }
             }
             HStack {
-                Text("↩ open · Esc close").font(.caption).foregroundStyle(Color.syDim)
+                Text("↩ open · Esc close").font(.syCaption).foregroundStyle(Color.syDim)
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Open") { open(selection ?? results.first) }.keyboardShortcut(.defaultAction)

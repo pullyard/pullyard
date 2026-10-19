@@ -14,6 +14,8 @@ struct PRDetailView: View {
                     PRDetailContent(model: model, pr: pr)
                 } else if let e = model.error {
                     ErrorStateView(message: e) { Task { await model.load() } }
+                } else if model.tab == .stack, let tree = model.stackTree, let node = model.preview {
+                    StackPreviewContent(model: model, node: node, tree: tree)
                 } else {
                     LoadingView()
                 }
@@ -21,7 +23,7 @@ struct PRDetailView: View {
                 LoadingView()
             }
         }
-        .task(id: ref) {
+        .task(id: "\(ref.repo.full)#\(ref.number)|\(app.account?.id ?? app.user?.login ?? "")") {
             let m = app.prModel(ref)
             model = m
             await m?.load(live: m?.pr != nil)
@@ -56,17 +58,12 @@ struct PRDetailContent: View {
             ReReviewBanner(model: model, pr: pr) { showReviewers = true }
             ClaudeFixBanner(pr: pr) { showFix = true }
             CIFailureBanner(model: model, pr: pr, onFix: { ciFix = CIFixRequest() }, onRerun: { confirm = .rerunFailed })
-            TabStrip(items: [
-                TabItem(id: PRTab.conversation, title: "Conversation", icon: "bubble.left.and.bubble.right", badge: commentsBadge),
-                TabItem(id: PRTab.commits, title: "Commits", icon: "point.3.connected.trianglepath.dotted", badge: "\(pr.allCommits.totalCount ?? pr.allCommits.nodes.count)"),
-                TabItem(id: PRTab.checks, title: "Checks", icon: "checklist", badge: checksSummary, badgeColor: checksColor),
-                TabItem(id: PRTab.files, title: "Files changed", icon: "doc.text", badge: "\(pr.changedFiles)")
-            ], selection: $model.tab, shortcuts: true)
+            TabStrip(items: tabItems, selection: $model.tab, shortcuts: true)
             .padding(.top, 6)
             Divider()
             ZStack {
                 ForEach(PRTab.allCases) { tab in
-                    if model.visitedTabs.contains(tab) {
+                    if model.visitedTabs.contains(tab), tab != .stack || model.tab == .stack {
                         tabContent(tab)
                             .opacity(model.tab == tab ? 1 : 0)
                             .offset(y: model.tab == tab || Motion.reduced ? 0 : 4)
@@ -109,7 +106,26 @@ struct PRDetailContent: View {
         case .commits: CommitsTab(model: model, pr: pr)
         case .checks: ChecksTab(model: model, pr: pr, onFix: { ciFix = $0 }, onRerun: { confirm = .rerunFailed })
         case .files: FilesTab(model: model)
+        case .stack:
+            if let tree = model.stackTree {
+                StackTab(model: model, tree: tree)
+            } else {
+                LoadingView()
+            }
         }
+    }
+
+    private var tabItems: [TabItem<PRTab>] {
+        var items = [
+            TabItem(id: PRTab.conversation, title: "Conversation", icon: "bubble.left.and.bubble.right", badge: commentsBadge),
+            TabItem(id: PRTab.commits, title: "Commits", icon: "point.3.connected.trianglepath.dotted", badge: "\(pr.allCommits.totalCount ?? pr.allCommits.nodes.count)"),
+            TabItem(id: PRTab.checks, title: "Checks", icon: "checklist", badge: checksSummary, badgeColor: checksColor),
+            TabItem(id: PRTab.files, title: "Files changed", icon: "doc.text", badge: "\(pr.changedFiles)")
+        ]
+        if let tree = model.stackTree {
+            items.append(TabItem(id: PRTab.stack, title: "Stack", icon: "square.stack.3d.up", badge: "\(tree.count)"))
+        }
+        return items
     }
 
     private var commentsBadge: String? {
@@ -256,6 +272,52 @@ struct PRDetailContent: View {
     }
 }
 
+struct StackPreviewContent: View {
+    let model: PRDetailModel
+    let node: StackNode
+    let tree: StackTree
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(node.title).font(.syTitle2.weight(.bold)).lineLimit(1)
+                    Text("#\(node.number)").font(.syTitle2).foregroundStyle(Color.syDim)
+                    ProgressView().controlSize(.small)
+                }
+                HStack(spacing: 8) {
+                    StateBadge(state: node.visualState)
+                    Text(node.author ?? "").fontWeight(.semibold)
+                    BranchChip(name: node.baseRefName)
+                    Image(systemName: "arrow.left").font(.syCaption).foregroundStyle(Color.syDim)
+                    BranchChip(name: node.headRefName, color: .syViolet)
+                    Spacer(minLength: 0)
+                    ShimmerBar(width: 70, height: 12)
+                }
+                .font(.syCallout)
+                .lineLimit(1)
+                StackStrip(tree: tree, repo: model.ref.repo) {}
+                ShimmerBar(height: 30, radius: 9)
+                ShimmerBar(height: 30, radius: 9)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            HStack(spacing: 14) {
+                ForEach([96, 80, 70, 110], id: \.self) { ShimmerBar(width: CGFloat($0), height: 14) }
+                Label("Stack", systemImage: "square.stack.3d.up").font(.syCallout.weight(.semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .padding(.top, 6)
+            Divider()
+            StackTab(model: model, tree: tree)
+        }
+        .navigationTitle(node.title)
+        .navigationSubtitle("\(model.ref.repo.full) #\(node.number)")
+    }
+}
+
 struct PRHeaderView: View {
     let model: PRDetailModel
     let pr: PullRequestDetail
@@ -264,8 +326,8 @@ struct PRHeaderView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(pr.title).font(.title2.weight(.bold)).textSelection(.enabled)
-                Text("#\(pr.number)").font(.title2).foregroundStyle(Color.syDim)
+                Text(pr.title).font(.syTitle2.weight(.bold)).textSelection(.enabled)
+                Text("#\(pr.number)").font(.syTitle2).foregroundStyle(Color.syDim)
                 ShortLinkButton(ref: ShortLink.ref(url: pr.url) ?? model.ref)
             }
             HStack(spacing: 8) {
@@ -273,119 +335,109 @@ struct PRHeaderView: View {
                 Avatar(url: pr.author?.avatarUrl, size: 18)
                 Text(pr.author?.login ?? "ghost").fontWeight(.semibold)
                 BranchChip(name: pr.baseRefName)
-                Image(systemName: "arrow.left").font(.caption).foregroundStyle(Color.syDim)
+                Image(systemName: "arrow.left").font(.syCaption).foregroundStyle(Color.syDim)
                 BranchChip(name: pr.headRefName, color: .syViolet)
                 DiffStat(additions: pr.additions, deletions: pr.deletions)
                 Spacer(minLength: 0)
                 Text(Fmt.rel(pr.createdAt)).foregroundStyle(Color.syMuted).help(Fmt.full.string(from: pr.createdAt))
             }
-            .font(.callout)
+            .font(.syCallout)
             .lineLimit(1)
             if !pr.labels.nodes.isEmpty || !model.reviewers.isEmpty || !pr.assignees.nodes.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(pr.labels.nodes, id: \.name) { LabelChip(label: $0) }
                     if !model.reviewers.isEmpty {
-                        Text("Reviewers:").font(.caption).foregroundStyle(Color.syMuted).padding(.leading, pr.labels.nodes.isEmpty ? 0 : 6)
+                        Text("Reviewers:").font(.syCaption).foregroundStyle(Color.syMuted).padding(.leading, pr.labels.nodes.isEmpty ? 0 : 6)
                         ForEach(model.reviewers, id: \.login) { r in
                             ReviewerBadge(login: r.login, avatar: r.avatar, state: r.state)
                         }
                     }
                     if !pr.assignees.nodes.isEmpty {
-                        Text("Assignees:").font(.caption).foregroundStyle(Color.syMuted).padding(.leading, 6)
+                        Text("Assignees:").font(.syCaption).foregroundStyle(Color.syMuted).padding(.leading, 6)
                         ForEach(pr.assignees.nodes, id: \.login) { a in
                             Avatar(url: a.avatarUrl, size: 18).help(a.login)
                         }
                     }
                 }
             }
-            if model.stack.count > 1 {
-                StackStrip(stack: model.stack, current: pr.number, repo: model.ref.repo)
+            if let tree = model.stackTree {
+                StackStrip(tree: tree, repo: model.ref.repo) { model.tab = .stack }
                     .transition(.opacity)
             }
             MergeStatusBar(model: model, pr: pr, onMerge: onMerge)
         }
-        .animation(Motion.smooth, value: model.stack)
+        .animation(Motion.smooth, value: model.stackTree)
         .padding(.horizontal, 16)
         .padding(.top, 12)
     }
 }
 
 struct StackStrip: View {
-    let stack: [StackPR]
-    let current: Int
+    let tree: StackTree
     let repo: RepoRef
+    let onShow: () -> Void
     @Environment(AppModel.self) private var app
-    @State private var expanded = false
 
     var body: some View {
-        let index = stack.firstIndex { $0.number == current } ?? 0
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(Motion.quick) { expanded.toggle() }
-            } label: {
+        let line = tree.line
+        let index = line.firstIndex { $0.number == tree.current } ?? 0
+        let ups = (tree.children[tree.current] ?? []).compactMap { tree.nodes[$0] }
+        HStack(spacing: 8) {
+            Button(action: onShow) {
                 HStack(spacing: 8) {
                     Image(systemName: "square.stack.3d.up.fill").foregroundStyle(Color.syIndigo)
                     Text("Stack").fontWeight(.semibold)
-                    Text("\(index + 1) of \(stack.count)").foregroundStyle(Color.syMuted)
+                    Text("\(index + 1) of \(line.count)").foregroundStyle(Color.syMuted)
                     HStack(spacing: 3) {
-                        ForEach(stack) { s in
+                        ForEach(line) { s in
                             Capsule()
-                                .fill(s.number == current ? Color.syIndigo : s.visualState.color.opacity(0.55))
-                                .frame(width: s.number == current ? 18 : 10, height: 5)
+                                .fill(s.number == tree.current ? Color.syIndigo : s.visualState.color.opacity(0.55))
+                                .frame(width: s.number == tree.current ? 18 : 10, height: 5)
                         }
                     }
+                    if tree.count > line.count {
+                        Text("+\(tree.count - line.count)").font(.syCaption).foregroundStyle(Color.syMuted)
+                            .help(plural(tree.count - line.count, "more pull request on another branch of the stack", "more pull requests on other branches of the stack"))
+                    }
                     Spacer(minLength: 0)
-                    if index > 0 { navButton(stack[index - 1], icon: "chevron.down", help: "Down the stack") }
-                    if index < stack.count - 1 { navButton(stack[index + 1], icon: "chevron.up", help: "Up the stack") }
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(Color.syDim)
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
                 }
-                .font(.callout)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if expanded {
-                Rectangle().fill(Color.syLine).frame(height: 1)
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(stack.enumerated().reversed()), id: \.element.id) { i, s in
-                        Button {
-                            if s.number != current { app.open(.pr(ItemRef(repo: repo, number: s.number))) }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Text("\(i + 1)").font(.caption.monospacedDigit()).foregroundStyle(Color.syDim).frame(width: 14)
-                                StateBadge(state: s.visualState, compact: true).scaleEffect(0.85)
-                                Text("#\(s.number)").foregroundStyle(Color.syMuted)
-                                Text(s.title).lineLimit(1).fontWeight(s.number == current ? .semibold : .regular)
-                                Spacer(minLength: 6)
-                                BranchChip(name: s.headRefName, color: s.number == current ? .syViolet : .sySlate)
-                            }
-                            .font(.callout)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(s.number == current ? Color.syIndigo.opacity(0.12) : .clear)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(s.number == current)
-                    }
-                }
-                .padding(.vertical, 4)
-                .transition(.opacity)
+            .help("Show the whole stack")
+            if let down = tree.parent[tree.current].flatMap({ tree.nodes[$0] }) {
+                navButton(down, icon: "chevron.down", help: "Down the stack")
             }
+            if ups.count == 1, let up = ups.first {
+                navButton(up, icon: "chevron.up", help: "Up the stack")
+            } else if ups.count > 1 {
+                Menu {
+                    ForEach(ups) { s in
+                        Button("#\(s.number) \(s.title)") { app.open(.pr(ItemRef(repo: repo, number: s.number))) }
+                    }
+                } label: {
+                    Label("\(ups.count)", systemImage: "chevron.up").labelStyle(.titleAndIcon).font(.syCaption.weight(.medium))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Up the stack: \(ups.count) pull requests are stacked on this one")
+            }
+            Button(action: onShow) {
+                Image(systemName: "chevron.right").font(.syCaption2).foregroundStyle(Color.syDim)
+            }
+            .buttonStyle(.plain)
         }
+        .font(.syCallout)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 9).fill(Color.syIndigo.opacity(0.06)))
-        .clipShape(RoundedRectangle(cornerRadius: 9))
     }
 
-    private func navButton(_ s: StackPR, icon: String, help: String) -> some View {
+    private func navButton(_ s: StackNode, icon: String, help: String) -> some View {
         Button {
             app.open(.pr(ItemRef(repo: repo, number: s.number)))
         } label: {
-            Label("#\(s.number)", systemImage: icon).labelStyle(.titleAndIcon).font(.caption.weight(.medium))
+            Label("#\(s.number)", systemImage: icon).labelStyle(.titleAndIcon).font(.syCaption.weight(.medium))
         }
         .buttonStyle(.borderless)
         .help("\(help): #\(s.number) \(s.title)")
@@ -398,7 +450,7 @@ struct BranchChip: View {
 
     var body: some View {
         Text(name)
-            .font(.system(.caption, design: .monospaced))
+            .font(.syCaption.monospaced())
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .background(Capsule().fill(color.opacity(0.12)))
@@ -424,7 +476,7 @@ struct ReviewerBadge: View {
                 default: Image(systemName: "circle.fill").font(.system(size: 6)).foregroundStyle(Color.ghYellow)
                 }
             }
-            .font(.caption.weight(.bold))
+            .font(.syCaption.weight(.bold))
         }
         .help("\(login): \(stateTitle)")
     }
@@ -450,10 +502,10 @@ struct MergeStatusBar: View {
             let s = status
             HStack(spacing: 8) {
                 Image(systemName: s.icon).foregroundStyle(s.color)
-                Text(s.text).font(.callout)
+                Text(s.text).font(.syCallout)
                 if let auto = pr.autoMergeRequest {
                     Text("· auto-merge enabled" + (auto.mergeMethod.map { " (\(MergeMethod(rawValue: $0)?.title ?? $0))" } ?? ""))
-                        .font(.callout).foregroundStyle(Color.ghGreen)
+                        .font(.syCallout).foregroundStyle(Color.ghGreen)
                 }
                 checksBadge
                 Spacer()
@@ -496,7 +548,7 @@ struct MergeStatusBar: View {
                     if pending > 0 { Label("\(pending)", systemImage: "clock.fill").foregroundStyle(Color.ghYellow) }
                     Label("\(ok)", systemImage: "checkmark.circle.fill").foregroundStyle(Color.ghGreen)
                 }
-                .font(.caption)
+                .font(.syCaption)
             }
             .buttonStyle(.plain)
             .help("Checks")
@@ -614,13 +666,13 @@ struct CommitsTab: View {
                     HStack(spacing: 10) {
                         Avatar(url: c.author?.avatarUrl, size: 22)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(c.messageHeadline).lineLimit(2)
+                            Text(c.messageHeadline).font(.syBody).lineLimit(2)
                             Text("\(c.author?.user?.login ?? c.author?.name ?? "") · \(Fmt.rel(c.committedDate))")
-                                .font(.caption).foregroundStyle(Color.syMuted)
+                                .font(.syCaption).foregroundStyle(Color.syMuted)
                         }
                         Spacer()
                         CIIcon(state: c.statusCheckRollup?.state)
-                        Text(c.abbreviatedOid).font(.system(.caption, design: .monospaced)).foregroundStyle(Color.syMuted)
+                        Text(c.abbreviatedOid).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
                     }
                     .padding(.vertical, 2)
                     .rowAppear(c.oid, model.commitRows)
@@ -651,7 +703,7 @@ struct ChecksTab: View {
         let failedRuns = Set(checks.filter { $0.outcome == .failure }.compactMap(\.runId))
         List {
             if checks.isEmpty {
-                Text("No checks for the latest commit").foregroundStyle(Color.syMuted)
+                Text("No checks for the latest commit").font(.syBody).foregroundStyle(Color.syMuted)
             }
             if !failedRuns.isEmpty, model.canWrite {
                 Button(action: onRerun) {
@@ -663,8 +715,8 @@ struct ChecksTab: View {
                 HStack(spacing: 10) {
                     OutcomeIcon(outcome: c.outcome)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(c.workflowName.map { "\($0) / \(c.title)" } ?? c.title).lineLimit(1)
-                        Text(subtitle(c)).font(.caption).foregroundStyle(Color.syMuted).lineLimit(1)
+                        Text(c.workflowName.map { "\($0) / \(c.title)" } ?? c.title).font(.syBody).lineLimit(1)
+                        Text(subtitle(c)).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
                     }
                     Spacer()
                     if CIFailureCollector.isFixable(c), pr.isOpen {

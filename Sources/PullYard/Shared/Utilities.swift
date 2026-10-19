@@ -177,7 +177,7 @@ struct StateBadge: View {
                 .background(Circle().fill(state.color.opacity(0.15)))
         } else {
             Label(state.title, systemImage: state.icon)
-                .font(.callout.weight(.semibold))
+                .font(.syCallout.weight(.semibold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 3)
@@ -192,7 +192,7 @@ struct LabelChip: View {
     var body: some View {
         let c = Color(hex: label.color)
         Text(label.name)
-            .font(.caption2.weight(.medium))
+            .font(.syCaption2.weight(.medium))
             .lineLimit(1)
             .padding(.horizontal, 7)
             .padding(.vertical, 1.5)
@@ -237,7 +237,8 @@ struct DiffStat: View {
             Text("+\(additions)").foregroundStyle(Color.ghGreen)
             Text("−\(deletions)").foregroundStyle(Color.ghRed)
         }
-        .font(.caption.monospacedDigit())
+        .font(.syCaption.monospacedDigit())
+        .fixedSize()
     }
 }
 
@@ -291,7 +292,7 @@ struct ComposerBox: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             TextEditor(text: $text)
-                .font(.body)
+                .font(.syBody)
                 .scrollContentBackground(.hidden)
                 .padding(4)
             if text.isEmpty {

@@ -78,6 +78,7 @@ enum SidebarSection: Hashable {
     case notifications
     case prs(PRFilter)
     case myPRsByRepo
+    case stacks
     case issues(IssueFilter)
     case repos
     case projects
@@ -205,6 +206,10 @@ final class AppModel {
         let cached = account.flatMap { $0.login.isEmpty ? nil : $0.user } ?? ListCache.account(for: token)
         if !Demo.isOn, let cached {
             let api = makeAPI(token, host: host)
+            if self.account?.id != account?.id || self.user?.login != cached.login {
+                SearchListModel.resetCache()
+                resetStacks()
+            }
             self.account = account
             self.forge = nil
             self.api = api
@@ -317,6 +322,7 @@ final class AppModel {
 
     private func enterGitHub(_ account: GitAccount?, api: GitHubAPI, user: RESTUser, scopes: [String], token: String) {
         if self.account?.id != account?.id || self.user?.login != user.login { SearchListModel.resetCache() }
+        resetStacks()
         if let account {
             GitAccounts.shared.update(account)
             bindClaude(to: account)
@@ -333,14 +339,20 @@ final class AppModel {
                 ListCache.activate(account.cacheKey)
             }
         }
-        prModels = [:]
-        prOrder = []
         phase = .loggedIn
         startPolling()
     }
 
+    private func resetStacks() {
+        prModels = [:]
+        prOrder = []
+        StackStore.reset()
+        StacksModel.reset()
+    }
+
     private func enterForge(_ account: GitAccount, client: ForgeClient) {
         if self.account?.id != account.id { ForgeListModel.resetCache() }
+        resetStacks()
         bindClaude(to: account)
         self.account = account
         forge = client
@@ -486,8 +498,7 @@ final class AppModel {
         detailRoot = nil
         detailPath = []
         forgeSelection = nil
-        prModels = [:]
-        prOrder = []
+        resetStacks()
         reviewRequests = []
         myPRs = []
         reviewRequestCount = 0
@@ -535,6 +546,7 @@ final class AppModel {
             case ("projects", _): section = .projects
             case ("claude", _): section = .claude
             case ("prs", "byProject"): section = .myPRsByRepo
+            case ("stacks", _): section = .stacks
             case ("prs", let f): section = .prs(f.flatMap(PRFilter.init(rawValue:)) ?? .reviewRequested)
             case ("issues", let f): section = .issues(f.flatMap(IssueFilter.init(rawValue:)) ?? .assigned)
             default: break
@@ -588,6 +600,7 @@ final class AppModel {
             return m
         }
         let m = PRDetailModel(ref: ref, api: api)
+        m.cacheAccount = cacheAccount
         prModels[ref] = m
         prOrder.append(ref)
         if prOrder.count > 15 {

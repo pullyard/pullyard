@@ -14,7 +14,7 @@ struct ProjectsListView: View {
             if !app.hasProjectScope || (error?.contains("scope") ?? false) {
                 ScopeHint()
             } else if let error {
-                Text(error).foregroundStyle(Color.syRed).font(.caption)
+                Text(error).foregroundStyle(Color.syRed).font(.syCaption)
             }
             ForEach(projects.filter { showClosed || !$0.closed }) { p in
                 HStack(alignment: .top, spacing: 9) {
@@ -22,10 +22,10 @@ struct ProjectsListView: View {
                         .padding(.top, 1)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 5) {
-                            Text(p.title).fontWeight(.semibold).foregroundStyle(Color.syText).lineLimit(1)
+                            Text(p.title).font(.syBody).fontWeight(.semibold).foregroundStyle(Color.syText).lineLimit(1)
                             if p.closed { ChipView(text: "closed", color: .sySlate) }
                         }
-                        if let d = p.shortDescription, !d.isEmpty { Text(d).font(.caption).foregroundStyle(Color.syMuted).lineLimit(2) }
+                        if let d = p.shortDescription, !d.isEmpty { Text(d).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(2) }
                         HStack(spacing: 6) {
                             Text("\(p.owner?.login ?? "") · #\(p.number)").foregroundStyle(Color.syMuted)
                             Text("·").foregroundStyle(Color.syDim)
@@ -33,7 +33,7 @@ struct ProjectsListView: View {
                             Spacer()
                             Text(Fmt.rel(p.updatedAt)).foregroundStyle(Color.syDim)
                         }
-                        .font(.caption)
+                        .font(.syCaption)
                     }
                 }
                 .padding(.vertical, 4)
@@ -42,7 +42,7 @@ struct ProjectsListView: View {
                 .contextMenu { Button("Open in Browser") { openInBrowser(p.url) } }
             }
             if projects.isEmpty, !loading, error == nil {
-                Text("No projects").foregroundStyle(Color.syMuted)
+                Text("No projects").font(.syBody).foregroundStyle(Color.syMuted)
             }
         }
         .overlay { if loading && projects.isEmpty { ProgressView().controlSize(.small) } }
@@ -84,11 +84,11 @@ struct ScopeHint: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 IconTile(systemImage: "key.fill", color: .syAmber, size: 22)
-                Text("Token is missing Projects scopes").font(.callout.weight(.semibold)).foregroundStyle(Color.syText)
+                Text("Token is missing Projects scopes").font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText)
             }
-            Text("Run this in Terminal, then click “Refresh Token”:").font(.caption).foregroundStyle(Color.syMuted)
+            Text("Run this in Terminal, then click “Refresh Token”:").font(.syCaption).foregroundStyle(Color.syMuted)
             Text("gh auth refresh -s read:project,project")
-                .font(.system(.caption, design: .monospaced))
+                .font(.syCaption.monospaced())
                 .foregroundStyle(Color.syText)
                 .textSelection(.enabled)
                 .padding(.horizontal, 8)
@@ -326,7 +326,7 @@ struct ProjectColumn: View {
             HStack(spacing: 6) {
                 Circle().stroke(projectColor(column.color), lineWidth: 2).frame(width: 10, height: 10)
                 Text(column.name).fontWeight(.semibold).foregroundStyle(Color.syText).lineLimit(1)
-                Text("\(items.count)").font(.caption.weight(.medium)).foregroundStyle(projectColor(column.color))
+                Text("\(items.count)").font(.syCaption.weight(.medium)).foregroundStyle(projectColor(column.color))
                     .padding(.horizontal, 6).background(Capsule().fill(projectColor(column.color).opacity(0.14)))
                 Spacer()
             }
@@ -384,16 +384,16 @@ struct ProjectCard: View {
         let content = VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 5) {
                 if let s = c?.visualState {
-                    Image(systemName: s.icon).foregroundStyle(s.color).font(.caption)
+                    Image(systemName: s.icon).foregroundStyle(s.color).font(.syCaption)
                 } else {
-                    Image(systemName: "doc.text").foregroundStyle(Color.syDim).font(.caption)
+                    Image(systemName: "doc.text").foregroundStyle(Color.syDim).font(.syCaption)
                 }
                 Text(c?.repository.map { "\($0.nameWithOwner)\(c?.number.map { "#\($0)" } ?? "")" } ?? "Draft")
-                    .font(.caption).foregroundStyle(Color.syMuted).lineLimit(1)
+                    .font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
                 Spacer()
                 ForEach(c?.assignees?.nodes ?? [], id: \.login) { Avatar(url: $0.avatarUrl, size: 16).help($0.login) }
             }
-            Text(c?.title ?? "—").font(.callout.weight(.medium)).foregroundStyle(Color.syText).lineLimit(3).multilineTextAlignment(.leading)
+            Text(c?.title ?? "—").font(.syCallout.weight(.medium)).foregroundStyle(Color.syText).lineLimit(3).multilineTextAlignment(.leading)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -228,7 +228,7 @@ struct ClaudeProfileSwitcher: View {
                 ProfileBadge(profile: active, size: 18)
                 Text(active.label).lineLimit(1)
                 if ClaudeProfiles.shared.visible.count > 1 {
-                    Text("\(ClaudeProfiles.shared.visible.count)").font(.caption2).foregroundStyle(Color.syMuted)
+                    Text("\(ClaudeProfiles.shared.visible.count)").font(.syCaption2).foregroundStyle(Color.syMuted)
                 }
             }
         }
@@ -281,9 +281,9 @@ struct AddClaudeProfileSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("New Claude account").font(.headline)
+            Text("New Claude account").font(.syHeadline)
             Text("The account gets its own sign-in, session history and limits. Sign-in opens right after.")
-                .font(.callout)
+                .font(.syCallout)
                 .foregroundStyle(Color.syMuted)
             TextField("Name, e.g. “Personal” or “Work”", text: $label)
                 .textFieldStyle(.roundedBorder)
@@ -292,7 +292,7 @@ struct AddClaudeProfileSheet: View {
                 Toggle("Use my settings, CLAUDE.md, skills and plugins from the main account", isOn: $share)
                     .toggleStyle(.checkbox)
             }
-            if let error { Text(error).font(.caption).foregroundStyle(Color.syRed) }
+            if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)

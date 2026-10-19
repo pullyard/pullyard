@@ -35,20 +35,20 @@ struct UpdateView: View {
                 .frame(width: 64, height: 64)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.title3.weight(.semibold))
+                    .font(.syTitle3.weight(.semibold))
                     .foregroundStyle(Color.syText)
                 Text("You have \(updater.currentVersion)")
                     .foregroundStyle(Color.syMuted)
                 if let release = updater.release, let date = release.publishedAt, showsRelease {
                     Text(Fmt.full.string(from: date))
-                        .font(.caption)
+                        .font(.syCaption)
                         .foregroundStyle(Color.syDim)
                 }
                 Button("What's new in all versions") {
                     openInBrowser(Updater.changelogURL(showsRelease ? updater.release?.version ?? updater.currentVersion : updater.currentVersion))
                 }
                 .buttonStyle(.link)
-                .font(.caption)
+                .font(.syCaption)
             }
             Spacer(minLength: 0)
             if updater.state == .checking || updater.state == .installing {
@@ -83,7 +83,7 @@ struct UpdateView: View {
             Group {
                 if showsRelease, let release = updater.release {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(release.name).font(.headline).foregroundStyle(Color.syText)
+                        Text(release.name).font(.syHeadline).foregroundStyle(Color.syText)
                         if release.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text("No release notes.").foregroundStyle(Color.syMuted)
                         } else {
@@ -116,7 +116,7 @@ struct UpdateView: View {
                         .monospacedDigit()
                 }
             }
-            .font(.caption)
+            .font(.syCaption)
             .foregroundStyle(Color.syMuted)
         }
     }
@@ -131,7 +131,7 @@ struct UpdateView: View {
             Button("View on GitHub") { openInBrowser(updater.pageURL) }
                 .buttonStyle(.link)
         }
-        .font(.callout)
+        .font(.syCallout)
         .foregroundStyle(Color.syRed)
     }
 

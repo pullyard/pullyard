@@ -70,7 +70,7 @@ struct ChatView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "moon.zzz.fill").foregroundStyle(Color.syIndigo)
                     Text("Session is sleeping — process stopped, memory freed. A new message resumes it.")
-                        .font(.callout)
+                        .font(.syCallout)
                         .foregroundStyle(Color.syMuted)
                     Spacer()
                     Button("Wake up") { chat.wake() }.controlSize(.small)
@@ -154,7 +154,7 @@ struct ChatWelcome: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 IconTile(systemImage: "sparkles", color: .syCoral, size: 24)
-                Text("Claude Code").font(.title3.weight(.semibold)).foregroundStyle(Color.syText)
+                Text("Claude Code").font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText)
             }
             Text("Describe a task — Claude will read the code, propose changes and ask before acting.")
                 .foregroundStyle(Color.syMuted)
@@ -166,7 +166,7 @@ struct ChatWelcome: View {
                 }
             }
             Text("/ commands · @ files · ⇧↩ new line · paste a screenshot ⌘V")
-                .font(.caption)
+                .font(.syCaption)
                 .foregroundStyle(Color.syDim)
         }
         .padding(16)
@@ -191,14 +191,14 @@ struct WorkingIndicator: View {
                 Text(chat.status ?? (chat.pendingCount > 0 ? "Waiting for you" : "Working…"))
                     .foregroundStyle(Color.syMuted)
                 if let start = chat.turnStartedAt {
-                    Text("\(Int(ctx.date.timeIntervalSince(start)))s").font(.caption.monospacedDigit()).foregroundStyle(Color.syDim)
+                    Text("\(Int(ctx.date.timeIntervalSince(start)))s").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
                 }
                 Spacer()
                 Button("Stop") { chat.interrupt() }
                     .controlSize(.small)
                     .keyboardShortcut(.escape, modifiers: [])
             }
-            .font(.callout)
+            .font(.syCallout)
         }
     }
 }
@@ -253,7 +253,7 @@ struct ChatItemView: View {
         case .notice(_, let text, let isError):
             HStack(spacing: 6) {
                 Rectangle().fill(Color.syLine).frame(height: 1)
-                Text(text).font(.caption).foregroundStyle(isError ? Color.syRed : Color.syDim).fixedSize()
+                Text(text).font(.syCaption).foregroundStyle(isError ? Color.syRed : Color.syDim).fixedSize()
                 Rectangle().fill(Color.syLine).frame(height: 1)
             }
         }
@@ -285,7 +285,7 @@ struct UserBubble: View {
                 if text.split(separator: "\n").count > 12 {
                     Button(expanded ? "Collapse" : "Show all") { expanded.toggle() }
                         .buttonStyle(.link)
-                        .font(.caption)
+                        .font(.syCaption)
                 }
             }
         }
@@ -315,16 +315,16 @@ struct ThinkingView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Button { withAnimation(Motion.quick) { open.toggle() } } label: {
                     HStack(spacing: 5) {
-                        Image(systemName: "chevron.right").font(.caption2).rotationEffect(.degrees(open ? 90 : 0))
+                        Image(systemName: "chevron.right").font(.syCaption2).rotationEffect(.degrees(open ? 90 : 0))
                         Image(systemName: "brain").foregroundStyle(Color.syViolet)
                         Text("Thinking")
                     }
-                    .font(.caption)
+                    .font(.syCaption)
                     .foregroundStyle(Color.syMuted)
                 }
                 .buttonStyle(.plain)
                 if open {
-                    Text(text.text).font(.callout).foregroundStyle(Color.syMuted).textSelection(.enabled).padding(.leading, 18)
+                    Text(text.text).font(.syCallout).foregroundStyle(Color.syMuted).textSelection(.enabled).padding(.leading, 18)
                         .transition(.opacity)
                 }
             }
@@ -412,9 +412,9 @@ struct ToolCallView: View {
                         .truncationMode(.middle)
                     Spacer(minLength: 4)
                     if let stat = diffStat { stat }
-                    Image(systemName: "chevron.down").font(.caption2).foregroundStyle(Color.syDim).rotationEffect(.degrees(isOpen ? 180 : 0))
+                    Image(systemName: "chevron.down").font(.syCaption2).foregroundStyle(Color.syDim).rotationEffect(.degrees(isOpen ? 180 : 0))
                 }
-                .font(.callout)
+                .font(.syCallout)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .contentShape(Rectangle())
@@ -484,16 +484,16 @@ struct ToolDetails: View {
             case "Edit", "MultiEdit", "Write":
                 if let path = call.string("file_path") {
                     HStack {
-                        Text(ToolPresentation.relative(path, folder)).font(.caption.monospaced()).foregroundStyle(Color.syMuted)
+                        Text(ToolPresentation.relative(path, folder)).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
                         Spacer()
                         Button("Open") { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
-                            .buttonStyle(.link).font(.caption)
+                            .buttonStyle(.link).font(.syCaption)
                     }
                 }
                 InlineDiff(lines: diffLines)
             case "Bash":
                 if let cmd = call.string("command") {
-                    Text("$ " + cmd).font(.system(size: 12, design: .monospaced)).foregroundStyle(Color.syText).textSelection(.enabled)
+                    Text("$ " + cmd).font(.sy(size: 12, design: .monospaced)).foregroundStyle(Color.syText).textSelection(.enabled)
                         .padding(8).frame(maxWidth: .infinity, alignment: .leading)
                         .card(radius: 8, fill: .sySunken)
                 }
@@ -504,9 +504,9 @@ struct ToolDetails: View {
                 MarkdownView(text: call.string("plan") ?? "")
             case "AskUserQuestion":
                 ForEach(Array((call.input["questions"] as? [[String: Any]] ?? []).enumerated()), id: \.offset) { _, q in
-                    Text(q["question"] as? String ?? "").font(.callout.weight(.medium))
+                    Text(q["question"] as? String ?? "").font(.syCallout.weight(.medium))
                 }
-                if let r = call.resultText { Text(r).font(.callout).foregroundStyle(Color.syMuted).textSelection(.enabled) }
+                if let r = call.resultText { Text(r).font(.syCallout).foregroundStyle(Color.syMuted).textSelection(.enabled) }
             case "Read":
                 if let content = (call.structured?["file"] as? [String: Any])?["content"] as? String {
                     outputView(content)
@@ -534,10 +534,10 @@ struct ToolDetails: View {
     private func outputView(_ text: String?, title: String? = nil) -> some View {
         if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                if let title { Text(title).font(.caption.weight(.semibold)).foregroundStyle(Color.syMuted) }
+                if let title { Text(title).font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted) }
                 ScrollView([.vertical, .horizontal]) {
                     Text(String(text.prefix(20_000)))
-                        .font(.system(size: 11.5, design: .monospaced))
+                        .font(.sy(size: 11.5, design: .monospaced))
                         .textSelection(.enabled)
                         .fixedSize()
                         .padding(8)
@@ -597,7 +597,7 @@ struct InlineDiff: View {
             ForEach(shown) { DiffLineView(line: $0).equatable() }
             if lines.count > 60 && !showAll {
                 Button("Show \(lines.count - 60) more lines") { showAll = true }
-                    .buttonStyle(.link).font(.caption).padding(6)
+                    .buttonStyle(.link).font(.syCaption).padding(6)
             }
         }
         .background(Color.sySunken)
@@ -619,7 +619,7 @@ struct TodoListView: View {
                         .strikethrough(status == "completed")
                         .foregroundStyle(status == "completed" ? Color.syMuted : Color.syText)
                 }
-                .font(.callout)
+                .font(.syCallout)
             }
         }
     }
@@ -638,7 +638,7 @@ struct PermissionCard: View {
             case "AskUserQuestion":
                 questionView
             case "ExitPlanMode":
-                Text("Claude has a plan. Start implementing?").font(.callout.weight(.semibold))
+                Text("Claude has a plan. Start implementing?").font(.syCallout.weight(.semibold))
                 HStack {
                     Button("Yes, auto-accept edits") {
                         chat.respond(request, allow: true)
@@ -653,10 +653,10 @@ struct PermissionCard: View {
                 }
                 denyRow(placeholder: "What to change in the plan…")
             default:
-                Text(question).font(.caption).foregroundStyle(Color.syAmber)
-                if let d = request.description, !d.isEmpty { Text(d).font(.callout).foregroundStyle(Color.syMuted) }
+                Text(question).font(.syCaption).foregroundStyle(Color.syAmber)
+                if let d = request.description, !d.isEmpty { Text(d).font(.syCallout).foregroundStyle(Color.syMuted) }
                 if let path = request.blockedPath {
-                    Text(ToolPresentation.relative(path, folder)).font(.caption.monospaced()).foregroundStyle(Color.syMuted)
+                    Text(ToolPresentation.relative(path, folder)).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -664,7 +664,7 @@ struct PermissionCard: View {
                             .buttonStyle(.borderedProminent)
                             .keyboardShortcut(.return, modifiers: [.command])
                         Spacer()
-                        Text("⌘↩").font(.caption).foregroundStyle(Color.syDim)
+                        Text("⌘↩").font(.syCaption).foregroundStyle(Color.syDim)
                     }
                     ForEach(Array(request.suggestions.enumerated()), id: \.offset) { _, s in
                         Button { chat.respond(request, allow: true, always: s) } label: {
@@ -711,7 +711,7 @@ struct PermissionCard: View {
             let text = q["question"] as? String ?? ""
             let options = q["options"] as? [[String: Any]] ?? []
             VStack(alignment: .leading, spacing: 6) {
-                Text(text).font(.callout.weight(.semibold))
+                Text(text).font(.syCallout.weight(.semibold))
                 ForEach(Array(options.enumerated()), id: \.offset) { _, o in
                     let label = o["label"] as? String ?? ""
                     Button {
@@ -722,7 +722,7 @@ struct PermissionCard: View {
                                 .foregroundStyle(answers[text] == label ? Color.syAccent : Color.syDim)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(label)
-                                if let d = o["description"] as? String { Text(d).font(.caption).foregroundStyle(Color.syMuted) }
+                                if let d = o["description"] as? String { Text(d).font(.syCaption).foregroundStyle(Color.syMuted) }
                             }
                             Spacer()
                         }

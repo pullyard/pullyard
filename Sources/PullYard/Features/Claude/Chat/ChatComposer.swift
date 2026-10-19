@@ -46,6 +46,7 @@ struct ChatInputView: NSViewRepresentable {
     var onSubmit: () -> Void
     var onKey: (NSEvent) -> Bool
     var onPasteImage: (Data, String) -> Void
+    var zoom = TextZoom.shared.scale
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -57,7 +58,7 @@ struct ChatInputView: NSViewRepresentable {
         let tv = ChatTextView()
         tv.isRichText = false
         tv.allowsUndo = true
-        tv.font = .systemFont(ofSize: 13)
+        tv.font = .systemFont(ofSize: TextZoom.shared.size(13))
         tv.drawsBackground = false
         tv.textContainerInset = NSSize(width: 4, height: 6)
         tv.isAutomaticQuoteSubstitutionEnabled = false
@@ -83,6 +84,11 @@ struct ChatInputView: NSViewRepresentable {
             tv.string = text
             let pos = min(caret, (text as NSString).length)
             tv.setSelectedRange(NSRange(location: pos, length: 0))
+            context.coordinator.recalcHeight()
+        }
+        let size = TextZoom.shared.size(13)
+        if tv.font?.pointSize != size {
+            tv.font = .systemFont(ofSize: size)
             context.coordinator.recalcHeight()
         }
         if context.coordinator.focusToken != focusToken {
@@ -152,10 +158,10 @@ struct ChatComposer: View {
                 HStack(spacing: 6) {
                     Image(systemName: "hand.raised.fill").foregroundStyle(Color.syAmber)
                     if pending.toolName == "AskUserQuestion" || pending.toolName == "ExitPlanMode" {
-                        Text(pending.toolName == "AskUserQuestion" ? "Claude asked a question — answer above" : "Claude is waiting for plan approval above").font(.callout)
+                        Text(pending.toolName == "AskUserQuestion" ? "Claude asked a question — answer above" : "Claude is waiting for plan approval above").font(.syCallout)
                         Spacer()
                     } else {
-                        Text("Claude needs permission: \(pending.toolName)").font(.callout)
+                        Text("Claude needs permission: \(pending.toolName)").font(.syCallout)
                         Spacer()
                         Button("Allow") { chat.respond(pending, allow: true) }.controlSize(.small).buttonStyle(.borderedProminent)
                         Button("Deny") { chat.respond(pending, allow: false) }.controlSize(.small)
@@ -275,7 +281,7 @@ struct ChatComposer: View {
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty)
                 .help("Send (↩)")
         }
-        .font(.caption)
+        .font(.syCaption)
         .controlSize(.small)
     }
 
@@ -391,8 +397,8 @@ struct ChatComposer: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(completionItems.enumerated()), id: \.element.id) { i, item in
                 HStack(spacing: 8) {
-                    Text(item.title).font(.callout.weight(.medium)).foregroundStyle(Color.syText).lineLimit(1)
-                    Text(item.detail).font(.caption).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.tail)
+                    Text(item.title).font(.syCallout.weight(.medium)).foregroundStyle(Color.syText).lineLimit(1)
+                    Text(item.detail).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.tail)
                     Spacer()
                 }
                 .padding(.horizontal, 8)

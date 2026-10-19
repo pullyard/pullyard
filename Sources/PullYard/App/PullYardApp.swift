@@ -53,6 +53,8 @@ struct PullYardApp: App {
                 Divider()
                 Button("Back") { if !app.detailPath.isEmpty { app.detailPath.removeLast() } }
                     .keyboardShortcut("[")
+                Divider()
+                TextZoomCommands()
             }
         }
 
@@ -77,6 +79,22 @@ struct PullYardApp: App {
         Settings {
             ThemedRoot { SettingsView().environment(app) }
         }
+    }
+}
+
+struct TextZoomCommands: View {
+    private let zoom = TextZoom.shared
+
+    var body: some View {
+        Button("Actual Size") { zoom.reset() }
+            .keyboardShortcut("0")
+            .disabled(zoom.isDefault)
+        Button("Zoom In") { zoom.zoomIn() }
+            .keyboardShortcut("+")
+            .disabled(!zoom.canZoomIn)
+        Button("Zoom Out") { zoom.zoomOut() }
+            .keyboardShortcut("-")
+            .disabled(!zoom.canZoomOut)
     }
 }
 

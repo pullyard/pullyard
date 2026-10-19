@@ -36,11 +36,11 @@ struct SettingsView: View {
                     HStack(spacing: 10) {
                         Avatar(url: u.avatarUrl, size: 36)
                         VStack(alignment: .leading) {
-                            Text(u.name ?? u.login).font(.headline).foregroundStyle(Color.syText)
+                            Text(u.name ?? u.login).font(.syHeadline).foregroundStyle(Color.syText)
                             Text(app.accountSubtitle ?? "").foregroundStyle(Color.syMuted)
                         }
                         Spacer()
-                        Text(app.provider.title).font(.caption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                        Text(app.provider.title).font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
                     }
                     if let account = app.account {
                         AccountLockSettings(account: account).environment(app)
@@ -128,7 +128,7 @@ struct SettingsView: View {
                         Text("1 hour").tag(60)
                     }
                     Text("A sleeping session uses no memory: the claude process stops, the conversation stays, and the next message resumes it.")
-                        .font(.caption)
+                        .font(.syCaption)
                         .foregroundStyle(Color.syMuted)
                 } header: {
                     SettingsHeader(title: "Claude Code", icon: "sparkles", color: .syCoral)
@@ -154,7 +154,7 @@ struct SettingsView: View {
                     .onChange(of: diagnosticsEnabled) { Diagnostics.shared.setEnabled(diagnosticsEnabled) }
                 HStack {
                     Text("Keeps the last 1000 GitHub requests in memory: timing, size, status and rate limit. No tokens or request bodies.")
-                        .font(.caption)
+                        .font(.syCaption)
                         .foregroundStyle(Color.syMuted)
                     Spacer()
                     Button("Open Diagnostics") { openWindow(id: "diagnostics") }
@@ -172,7 +172,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Buy me a pizza 🍕").foregroundStyle(Color.syText)
                         Text("Pay what you want, from $3. PullYard stays free and open source.")
-                            .font(.caption)
+                            .font(.syCaption)
                             .foregroundStyle(Color.syMuted)
                     }
                     Spacer()
@@ -213,7 +213,7 @@ struct SettingsHeader: View {
     var body: some View {
         HStack(spacing: 6) {
             IconTile(systemImage: icon, color: color, size: 16)
-            Text(title).foregroundStyle(Color.syText)
+            Text(title).font(.syBody.weight(.semibold)).foregroundStyle(Color.syText)
         }
     }
 }

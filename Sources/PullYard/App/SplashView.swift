@@ -16,7 +16,7 @@ struct SplashView: View {
                     .scaleEffect(appeared ? (breathing ? 1.025 : 1) : 0.84)
                 VStack(spacing: 6) {
                     Text("PullYard")
-                        .font(.system(size: 32, weight: .bold))
+                        .font(.sy(size: 32, weight: .bold))
                         .foregroundStyle(Color.syText)
                     Text("Pull requests, without the browser")
                         .foregroundStyle(Color.syMuted)

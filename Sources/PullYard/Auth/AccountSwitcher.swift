@@ -69,8 +69,8 @@ struct AccountSwitcherFooter: View {
             HStack(spacing: 8) {
                 Avatar(url: user.avatarUrl, size: 24)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(user.name ?? user.login).font(.callout.weight(.medium)).lineLimit(1)
-                    Text(app.accountSubtitle ?? "").font(.caption).foregroundStyle(Color.syMuted).lineLimit(1)
+                    Text(user.name ?? user.login).font(.syCallout.weight(.medium)).lineLimit(1)
+                    Text(app.accountSubtitle ?? "").font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
                 }
                 Spacer()
                 Menu {
@@ -95,7 +95,7 @@ struct AddAccountSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Add account").font(.headline)
+                Text("Add account").font(.syHeadline)
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
             }

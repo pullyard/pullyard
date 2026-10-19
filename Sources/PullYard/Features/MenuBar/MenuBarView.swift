@@ -26,7 +26,7 @@ struct MenuBarView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 20, height: 20)
-                Text("PullYard").font(.headline).foregroundStyle(Color.syText)
+                Text("PullYard").font(.syHeadline).foregroundStyle(Color.syText)
                 if let u = app.user { Text("@\(u.login)").foregroundStyle(Color.syMuted) }
                 Spacer()
                 Button { Task { await app.refreshBadges() } } label: { Image(systemName: "arrow.clockwise").foregroundStyle(Color.syMuted) }
@@ -38,7 +38,7 @@ struct MenuBarView: View {
             Rectangle().fill(Color.syLine).frame(height: 1)
             if let until = app.rateLimitedUntil {
                 Label("GitHub rate limit — live updates paused until \(until.formatted(date: .omitted, time: .shortened))", systemImage: "hourglass")
-                    .font(.caption)
+                    .font(.syCaption)
                     .foregroundStyle(Color.syMuted)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
@@ -120,15 +120,15 @@ struct MenuBarView: View {
         } label: {
             HStack(spacing: 6) {
                 IconTile(systemImage: filter.tileIcon, color: filter.tint, size: 16)
-                Text(title.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                Text(title.uppercased()).font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
                 Spacer()
-                Text("\(count)").font(.caption.weight(.semibold)).foregroundStyle(count > 0 ? filter.tint : Color.syDim)
+                Text("\(count)").font(.syCaption.weight(.semibold)).foregroundStyle(count > 0 ? filter.tint : Color.syDim)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(MenuRowStyle())
         if items.isEmpty {
-            Text("Nothing here").font(.callout).foregroundStyle(Color.syDim).padding(.horizontal, 8).padding(.bottom, 6)
+            Text("Nothing here").font(.syCallout).foregroundStyle(Color.syDim).padding(.horizontal, 8).padding(.bottom, 6)
         }
         ForEach(items) { item in
             Button { open(item) } label: {
@@ -137,10 +137,10 @@ struct MenuBarView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(item.title).fontWeight(.medium).foregroundStyle(Color.syText).lineLimit(1)
                         Text("\(item.repository.nameWithOwner)\(app.provider.numberPrefix)\(item.number) · \(item.author?.login ?? "") · \(Fmt.rel(item.updatedAt))")
-                            .font(.caption).foregroundStyle(Color.syMuted).lineLimit(1)
+                            .font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
                     }
                     Spacer(minLength: 4)
-                    CIIcon(state: item.ciState).font(.caption)
+                    CIIcon(state: item.ciState).font(.syCaption)
                 }
                 .contentShape(Rectangle())
             }

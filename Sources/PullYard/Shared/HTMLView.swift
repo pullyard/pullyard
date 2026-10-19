@@ -6,6 +6,7 @@ struct HTMLView: NSViewRepresentable {
     var scrollToBottomToken = 0
     var onAction: (String, String) -> Void = { _, _ in }
     var onLink: (URL) -> Void = { LinkBrowser.open($0) }
+    var zoom = TextZoom.shared.scale
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -24,12 +25,14 @@ struct HTMLView: NSViewRepresentable {
         view.uiDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
         view.allowsMagnification = true
+        view.pageZoom = zoom
         context.coordinator.render(in: view, html: html, token: scrollToBottomToken)
         return view
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
         context.coordinator.parent = self
+        if view.pageZoom != zoom { view.pageZoom = zoom }
         context.coordinator.render(in: view, html: html, token: scrollToBottomToken)
     }
 

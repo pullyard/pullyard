@@ -29,23 +29,23 @@ struct ClaudeFolderRow: View {
             Image(systemName: "folder.fill").foregroundStyle(Color.syTeal)
             if detecting {
                 ProgressView().controlSize(.small)
-                Text("Looking for a local clone of \(repo.full)…").font(.callout).foregroundStyle(Color.syMuted)
+                Text("Looking for a local clone of \(repo.full)…").font(.syCallout).foregroundStyle(Color.syMuted)
             } else if let folder {
                 Text(folder.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
-                    .font(.system(.callout, design: .monospaced))
+                    .font(.syCallout.monospaced())
                     .foregroundStyle(Color.syText)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if !folderMatches {
                     Label("remote doesn't match \(repo.full)", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
+                        .font(.syCaption)
                         .foregroundStyle(Color.syAmber)
                 }
             } else {
-                Text("No local clone found").font(.callout).foregroundStyle(Color.syAmber)
+                Text("No local clone found").font(.syCallout).foregroundStyle(Color.syAmber)
                 Button("Copy “gh repo clone”") { copyToPasteboard("gh repo clone \(repo.full)") }
                     .buttonStyle(.link)
-                    .font(.caption)
+                    .font(.syCaption)
             }
             Spacer()
             Button("Choose folder…") {
@@ -88,7 +88,7 @@ struct ClaudeLaunchRow: View {
         .overlay(alignment: .topLeading) {
             if target == .desktop {
                 Text("Prompt will be copied — paste it into the new session (⌘V)")
-                    .font(.caption)
+                    .font(.syCaption)
                     .foregroundStyle(Color.syMuted)
                     .offset(y: -18)
             }

@@ -21,13 +21,13 @@ struct UnlockView: View {
         VStack(spacing: 14) {
             Avatar(url: Demo.isOn ? nil : account.avatarUrl, size: 56)
             VStack(spacing: 2) {
-                Text(Demo.isOn ? Demo.user.name ?? Demo.user.login : account.name ?? account.login).font(.title3.weight(.semibold)).foregroundStyle(Color.syText)
-                Text("\(account.provider.title) · \(Demo.isOn ? "@\(Demo.user.login)" : account.subtitle)").font(.callout).foregroundStyle(Color.syMuted)
+                Text(Demo.isOn ? Demo.user.name ?? Demo.user.login : account.name ?? account.login).font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText)
+                Text("\(account.provider.title) · \(Demo.isOn ? "@\(Demo.user.login)" : account.subtitle)").font(.syCallout).foregroundStyle(Color.syMuted)
             }
-            Text(title).font(.headline).foregroundStyle(Color.syText).padding(.top, 4)
+            Text(title).font(.syHeadline).foregroundStyle(Color.syText).padding(.top, 4)
             if blocked {
                 Text("Too many wrong PINs. Reset the PIN with your Mac password to continue. This also signs out the Claude Code accounts linked to this account.")
-                    .font(.callout)
+                    .font(.syCallout)
                     .foregroundStyle(Color.syRed)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 340)
@@ -35,7 +35,7 @@ struct UnlockView: View {
                 HStack {
                     SecureField("PIN", text: $pin)
                         .textFieldStyle(.roundedBorder)
-                        .font(.title3.monospacedDigit())
+                        .font(.syTitle3.monospacedDigit())
                         .frame(width: 160)
                         .focused($focused)
                         .onSubmit(submit)
@@ -55,12 +55,12 @@ struct UnlockView: View {
                 }
             }
             if let message {
-                Text(message).font(.callout).foregroundStyle(Color.syAmber).multilineTextAlignment(.center)
+                Text(message).font(.syCallout).foregroundStyle(Color.syAmber).multilineTextAlignment(.center)
             }
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 if let waitUntil, waitUntil > context.date {
                     Text("Try again in \(Int(waitUntil.timeIntervalSince(context.date).rounded(.up))) s")
-                        .font(.callout.monospacedDigit())
+                        .font(.syCallout.monospacedDigit())
                         .foregroundStyle(Color.syMuted)
                 }
             }
@@ -151,9 +151,9 @@ struct SetPINSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Protect \(account.subtitle) with a PIN").font(.headline)
+            Text("Protect \(account.subtitle) with a PIN").font(.syHeadline)
             Text("PullYard asks for the PIN when it starts with this account and when someone switches to it. Use 4 to 6 digits.")
-                .font(.callout)
+                .font(.syCallout)
                 .foregroundStyle(Color.syMuted)
             SecureField("New PIN", text: $pin)
                 .textFieldStyle(.roundedBorder)
@@ -162,7 +162,7 @@ struct SetPINSheet: View {
                 .textFieldStyle(.roundedBorder)
                 .onChange(of: confirm) { confirm = String(confirm.filter(\.isNumber).prefix(AccountLock.pinLength.upperBound)) }
                 .onSubmit(save)
-            if let error { Text(error).font(.caption).foregroundStyle(Color.syRed) }
+            if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -225,7 +225,7 @@ struct AccountLockSettings: View {
                 }
             }))
             Text("Touch ID accepts any fingerprint added on this Mac. If someone else's finger is added later, Touch ID turns off for this account until the PIN is entered.")
-                .font(.caption)
+                .font(.syCaption)
                 .foregroundStyle(Color.syMuted)
         }
     }

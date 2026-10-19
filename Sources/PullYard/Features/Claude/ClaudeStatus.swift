@@ -90,7 +90,7 @@ struct BranchTag: View {
             Image(systemName: "arrow.branch").imageScale(.small)
             Text(name).lineLimit(1).truncationMode(.middle)
         }
-        .font(.caption)
+        .font(.syCaption)
         .foregroundStyle(c)
         .padding(.horizontal, 6)
         .padding(.vertical, 1)
@@ -106,7 +106,7 @@ struct PRTag: View {
             Image(systemName: "arrow.triangle.pull").imageScale(.small)
             Text("#\(number)")
         }
-        .font(.caption.weight(.medium))
+        .font(.syCaption.weight(.medium))
         .foregroundStyle(Color.syViolet)
         .padding(.horizontal, 6)
         .padding(.vertical, 1)
@@ -175,7 +175,7 @@ struct TabStateBadge: View {
                 }
             }
         }
-        .font(.caption)
+        .font(.syCaption)
         .foregroundStyle(state.color)
         .help(state.help + (memory.map { $0 > 0 ? " — " + ProcessMemory.format($0) : "" } ?? ""))
     }

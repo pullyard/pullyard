@@ -40,7 +40,11 @@ GitHub in a browser tab can take up a gigabyte of memory to show a single diff. 
 - Conversation, review threads, commits, checks and changed files
 - Comment, approve, request changes and merge
 - A diff viewer built on `NSTableView`, with file headers that stay pinned as you scroll
-- Stacked pull requests: the PR header shows the whole stack, you can jump between PRs in it, and lists mark what each PR is stacked on
+- Stacked pull requests: the PR header shows where the PR sits in its stack, and lists mark what each PR is stacked on
+- A **Stack** tab shows the whole stack as an indented list or, with the Graph switch, as a tree from the base branch down, branches included (`dev ← #1 ← #2`, with `#3` also on `#1`). Each card shows the branch, base, status (ready, in review, checks running, CI failed, changes requested, draft), the Jira key from the branch name, the last commit and the Claude Code session for that branch. Click a card to open that PR; zoom with the buttons or a pinch
+- Notes on a stack: add a note, question or decision to any card; it shows as a sticky under the card. Notes stay on your Mac and are never sent to GitHub
+- **Stacks** in the sidebar lists every stack your open pull requests are part of, across repositories
+- The stack is built from one request per repository and cached on disk, so it shows up instantly and refreshes in the background
 - Lists and the open PR refresh every 30 seconds (you can set 15 s to 15 min in Settings) and again when you switch back to the app. New pull requests show up at the top, briefly highlighted
 - Pull to refresh on lists, boards and PR tabs: drag down with two fingers on the trackpad. `⌘R` does the same. The footer says when the list was last updated, and shows a Retry link if a refresh fails
 - Re-request review in one click after you push. PullYard compares the reviewed commit with the branch head, so it notices rebases and force pushes too ("You pushed 3 commits after @sofia reviewed"). Outdated review threads don't count as unresolved
