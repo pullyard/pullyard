@@ -2,12 +2,13 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using PullYard.Core.Api;
 using PullYard.Core.Claude;
 using PullYard.Core.Html;
+using PullYard.Core.Stacks;
 using PullYard.Core.Util;
 using PullYard.Services;
 
 namespace PullYard.ViewModels;
 
-public enum PRTab { Conversation, Commits, Checks, Files }
+public enum PRTab { Conversation, Commits, Checks, Files, Stack }
 
 public sealed record ReviewerInfo(string Login, string? Avatar, string State);
 
@@ -31,7 +32,8 @@ public sealed partial class PRDetailViewModel : ObservableObject
     [ObservableProperty] private string? actionError;
     [ObservableProperty] private bool busy;
     [ObservableProperty] private PRTab tab = PRTab.Conversation;
-    [ObservableProperty] private List<StackPR> stack = new();
+    [ObservableProperty] private StackTree? stackTree;
+    [ObservableProperty] private StackNode? preview;
     [ObservableProperty] private string html = "";
     [ObservableProperty] private int scrollToBottomToken;
     [ObservableProperty] private List<DiffFile> files = new();
@@ -54,6 +56,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
     private bool reloadFiles;
     private string? forcedReason;
     private bool reloadStack;
+    private string? stackKey;
     private string? filesOid;
     private bool filesOutdated;
     private string? signature;
@@ -67,11 +70,14 @@ public sealed partial class PRDetailViewModel : ObservableObject
     private Dictionary<string, List<ReviewThread>> outdatedByPath = new();
     private readonly Dictionary<string, CiFailure> ciFailures = new();
 
-    public PRDetailViewModel(ItemRef r, GitHubApi api)
+    public PRDetailViewModel(ItemRef r, GitHubApi api, string? cacheAccount)
     {
         Ref = r;
         Api = api;
+        CacheAccount = cacheAccount;
     }
+
+    public string? CacheAccount { get; }
 
     public bool CanWrite => Repo?.CanWrite ?? false;
 
@@ -169,7 +175,6 @@ public sealed partial class PRDetailViewModel : ObservableObject
     {
         var forced = forcedReason;
         forcedReason = null;
-        var live = forced is null;
         string reason;
         if (Pr is null) reason = "first";
         else if (forced is not null) reason = forced;
@@ -207,9 +212,15 @@ public sealed partial class PRDetailViewModel : ObservableObject
             RefreshError = null;
             LastUpdated = DateTimeOffset.Now;
             NotifyDerived();
-            var forceStack = reloadStack;
-            reloadStack = false;
-            LoadStack(pr, live, forceStack).Forget();
+            if (reloadStack)
+            {
+                reloadStack = false;
+                LoadStack(true).Forget();
+            }
+            else if (stackKey != StackCacheKey(pr) || Tab == PRTab.Stack)
+            {
+                LoadStack().Forget();
+            }
             ScheduleMergeRecheck(pr);
             if (FilesVisible && (filesOutdated || !FilesLoaded)) LoadFiles(filesOutdated).Forget();
             else if (FilesLoaded) DiffVersion++;
@@ -292,17 +303,45 @@ public sealed partial class PRDetailViewModel : ObservableObject
         await Load(live: true);
     }
 
-    private async Task LoadStack(PullRequestDetail pr, bool live, bool force)
+    private static string StackCacheKey(PullRequestDetail pr) =>
+        $"{pr.Number}|{pr.State}|{pr.IsDraft}|{pr.HeadRepository?.NameWithOwner}|{pr.HeadRefName}|{pr.BaseRefName}";
+
+    private void InvalidateStack()
     {
-        try
+        StackStore.Shared.Invalidate(CacheAccount, Api.Host, Ref.Repo);
+        reloadStack = true;
+    }
+
+    public async Task LoadStack(bool force = false)
+    {
+        if (Pr is not { } pr) return;
+        stackKey = StackCacheKey(pr);
+        if (await StackStore.Shared.Cached(CacheAccount, Api.Host, Ref.Repo) is { } hit)
         {
-            var s = await Api.PullRequestStack(Ref, pr.HeadRefName, pr.BaseRefName, live, force);
-            if (s.Select(x => x.Number).SequenceEqual(Stack.Select(x => x.Number)) && s.Select(x => x.State).SequenceEqual(Stack.Select(x => x.State))) return;
-            Stack = s;
+            ApplyStack(hit.Nodes);
+            if (!force && hit.Fresh) return;
         }
-        catch
-        {
-        }
+        if (await StackStore.Shared.Fetch(Api, Ref.Repo, CacheAccount) is { } nodes) ApplyStack(nodes);
+    }
+
+    public void SeedStack(StackNode node, IReadOnlyList<StackNode> nodes)
+    {
+        if (Pr is not null) return;
+        Preview = node;
+        StackTree = StackTree.Build(node, nodes, Ref.Repo.Full);
+        Tab = PRTab.Stack;
+    }
+
+    public StackNode? CurrentNode => Pr is { } pr
+        ? new StackNode(pr.Number, pr.Title, pr.State, pr.IsDraft, pr.HeadRefName, pr.BaseRefName, pr.HeadRepository?.NameWithOwner, pr.Author?.Login, null, null, null, null, null)
+        : null;
+
+    private void ApplyStack(List<StackNode> nodes)
+    {
+        if (CurrentNode is not { } current) return;
+        var tree = StackTree.Build(current, nodes, Ref.Repo.Full);
+        if (tree is null ? StackTree is not null : !tree.SameAs(StackTree)) StackTree = tree;
+        if (tree is null && Tab == PRTab.Stack) Tab = PRTab.Conversation;
     }
 
     public async Task LoadFiles(bool force = false)
@@ -383,15 +422,15 @@ public sealed partial class PRDetailViewModel : ObservableObject
         ScrollTarget = path;
     }
 
-    private async Task<bool> Run(Func<Task> op, bool reload = true)
+    private async Task<bool> Run(Func<Task> op, bool reload = true, bool stack = false)
     {
         Busy = true;
         try
         {
+            if (stack) InvalidateStack();
             await op();
             if (reload)
             {
-                reloadStack = true;
                 forcedReason = "mutation";
                 await Load();
             }
@@ -469,7 +508,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
     public Task<bool> Merge(string method, string? title, string? body, bool deleteBranch)
     {
         if (Pr is not { } pr) return Task.FromResult(false);
-        return Run(async () =>
+        return Run(stack: true, op: async () =>
         {
             await Api.Mutate(Q.Merge, GitHubApiVars.Of(("id", pr.Id), ("m", method), ("t", title), ("b", body)));
             if (deleteBranch && pr.HeadRepository?.NameWithOwner is { } head)
@@ -489,10 +528,10 @@ public sealed partial class PRDetailViewModel : ObservableObject
         Pr is { } pr ? Run(() => Api.Mutate(Q.EnableAutoMerge, GitHubApiVars.Of(("id", pr.Id), ("m", method)))) : Task.FromResult(false);
 
     public Task<bool> Simple(string mutation) =>
-        Pr is { } pr ? Run(() => Api.Mutate(mutation, GitHubApiVars.Of(("id", pr.Id)))) : Task.FromResult(false);
+        Pr is { } pr ? Run(() => Api.Mutate(mutation, GitHubApiVars.Of(("id", pr.Id))), stack: true) : Task.FromResult(false);
 
     public Task<bool> Edit(string title, string body) =>
-        Pr is { } pr ? Run(() => Api.Mutate(Q.EditPR, GitHubApiVars.Of(("id", pr.Id), ("t", title), ("b", body)))) : Task.FromResult(false);
+        Pr is { } pr ? Run(() => Api.Mutate(Q.EditPR, GitHubApiVars.Of(("id", pr.Id), ("t", title), ("b", body))), stack: true) : Task.FromResult(false);
 
     public Task<bool> RequestReviewers(List<string> logins) => Run(() => Api.RequestReviewers(Ref, logins));
 

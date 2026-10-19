@@ -55,17 +55,6 @@ public sealed class RepoName
     public BranchName? DefaultBranchRef { get; set; }
 }
 
-public sealed class StackPR
-{
-    public int Number { get; set; }
-    public string Title { get; set; } = "";
-    public string State { get; set; } = "OPEN";
-    public bool IsDraft { get; set; }
-    public string HeadRefName { get; set; } = "";
-    public string BaseRefName { get; set; } = "";
-    public VisualState VisualState => VisualStates.Pr(State, IsDraft);
-}
-
 public sealed class Viewer
 {
     public string Login { get; set; } = "";

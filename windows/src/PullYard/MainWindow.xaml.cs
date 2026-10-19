@@ -47,6 +47,8 @@ public sealed partial class MainWindow : Window
         ThemeService.Changed += ApplyBackground;
         ApplyBackground();
         AddAccelerators();
+        TextZoom.Changed += OnTextZoom;
+        RootGrid.Loaded += (_, _) => TextZoom.Apply(RootGrid);
         model.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(AppViewModel.Phase)) UpdateContent();
@@ -84,6 +86,7 @@ public sealed partial class MainWindow : Window
             _ => new LoginView()
         };
         next.Transitions = new TransitionCollection { new EntranceThemeTransition { FromVerticalOffset = 12 } };
+        if (next is FrameworkElement fe) TextZoom.ApplyWhenLoaded(fe);
         Host.Content = next;
         SubtitleText.Text = "";
     }
@@ -156,5 +159,18 @@ public sealed partial class MainWindow : Window
         Add(VirtualKey.Number6, VirtualKeyModifiers.Control, () => model.Section = Section.Claude);
         Add(VirtualKey.Left, VirtualKeyModifiers.Menu, () => ShellView.Current?.GoBack());
         Add(VirtualKey.Q, VirtualKeyModifiers.Control, App.Quit);
+        Add((VirtualKey)187, VirtualKeyModifiers.Control, TextZoom.ZoomIn);
+        Add((VirtualKey)187, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, TextZoom.ZoomIn);
+        Add(VirtualKey.Add, VirtualKeyModifiers.Control, TextZoom.ZoomIn);
+        Add((VirtualKey)189, VirtualKeyModifiers.Control, TextZoom.ZoomOut);
+        Add(VirtualKey.Subtract, VirtualKeyModifiers.Control, TextZoom.ZoomOut);
+        Add(VirtualKey.Number0, VirtualKeyModifiers.Control, TextZoom.Reset);
+        Add(VirtualKey.NumberPad0, VirtualKeyModifiers.Control, TextZoom.Reset);
+    }
+
+    private void OnTextZoom()
+    {
+        TextZoom.ApplyToWindow(RootGrid.XamlRoot, RootGrid);
+        ShellView.Toast(L.F("Zoom_Toast", "Text size {0}%", (int)Math.Round(TextZoom.Scale * 100)));
     }
 }

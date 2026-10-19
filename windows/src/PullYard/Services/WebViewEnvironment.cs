@@ -34,7 +34,7 @@ public static class WebViewEnvironment
         core.Settings.AreDevToolsEnabled = Environment.GetEnvironmentVariable($"{AppInfo.EnvPrefix}_DEVTOOLS") == "1";
         core.Settings.AreDefaultContextMenusEnabled = true;
         core.Settings.IsStatusBarEnabled = false;
-        core.Settings.IsZoomControlEnabled = true;
+        core.Settings.IsZoomControlEnabled = false;
         core.Settings.AreBrowserAcceleratorKeysEnabled = false;
         core.Settings.IsGeneralAutofillEnabled = false;
         core.Settings.IsPasswordAutosaveEnabled = false;

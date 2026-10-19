@@ -5,6 +5,7 @@ using PullYard.Core.Api;
 using PullYard.Core.Auth;
 using PullYard.Core.Claude;
 using PullYard.Core.Forges;
+using PullYard.Core.Stacks;
 using PullYard.Core.Util;
 using PullYard.Services;
 
@@ -271,6 +272,7 @@ public sealed partial class AppViewModel : ObservableObject
             var stale = Account;
             Task.Run(() => ListSnapshotStore.Shared.Clear(stale)).Forget();
             Account = key;
+            ResetStacks();
             Refresh();
         }
         if (updated is null || updated.Provider == GitProvider.GitHub) Remember(token, user.Login);
@@ -291,8 +293,7 @@ public sealed partial class AppViewModel : ObservableObject
         Api = api;
         User = Demo.IsOn ? Demo.User : user;
         Scopes = scopes;
-        prModels.Clear();
-        prOrder.Clear();
+        ResetStacks();
         Phase = Phase.LoggedIn;
         StartPolling();
         if (account is null || account.Provider == GitProvider.GitHub) Remember(token, user.Login);
@@ -301,6 +302,7 @@ public sealed partial class AppViewModel : ObservableObject
     private void EnterForge(GitAccount account, IForgeClient client)
     {
         if (GitAccount?.Id != account.Id) ForgeListViewModel.ClearCache();
+        ResetStacks();
         BindClaude(account);
         GitAccount = account;
         Forge = client;
@@ -493,6 +495,8 @@ public sealed partial class AppViewModel : ObservableObject
         {
             if (Provider == GitProvider.GitHub) ListSnapshotStore.Shared.ForgetAccount();
             ListSnapshotStore.Shared.Clear(Account);
+            var stale = Account;
+            Task.Run(() => StackStore.Shared.Clear(stale)).Forget();
         }
         SearchListViewModel.ClearCache();
         ForgeListViewModel.ClearCache();
@@ -505,14 +509,37 @@ public sealed partial class AppViewModel : ObservableObject
         Scopes = new();
         DetailRoot = null;
         ForgeSelection = null;
-        prModels.Clear();
-        prOrder.Clear();
+        ResetStacks();
         ReviewRequests = new();
         MyPRs = new();
         ReviewRequestCount = 0;
         MyPRCount = 0;
         UnreadCount = 0;
         Phase = next;
+    }
+
+    private void ResetStacks()
+    {
+        prModels.Clear();
+        prOrder.Clear();
+        StackStore.Shared.Reset();
+        StacksViewModel.Reset();
+    }
+
+    public bool QuietRoute { get; private set; }
+
+    public bool TakeQuietRoute()
+    {
+        var quiet = QuietRoute;
+        QuietRoute = false;
+        return quiet;
+    }
+
+    public void OpenQuietly(Route route)
+    {
+        QuietRoute = true;
+        Open(route);
+        QuietRoute = false;
     }
 
     public void Refresh()
@@ -646,7 +673,7 @@ public sealed partial class AppViewModel : ObservableObject
             prOrder.Add(r);
             return m;
         }
-        m = new PRDetailViewModel(r, Api);
+        m = new PRDetailViewModel(r, Api, Account);
         prModels[r] = m;
         prOrder.Add(r);
         if (prOrder.Count > 15)

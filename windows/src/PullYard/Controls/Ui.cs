@@ -22,7 +22,6 @@ public static class Ui
         var t = new TextBlock
         {
             Text = text ?? "",
-            FontSize = size,
             Foreground = Palette.Brush(color),
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextWrapping = wrap || maxLines > 1 ? TextWrapping.WrapWholeWords : TextWrapping.NoWrap,
@@ -32,19 +31,18 @@ public static class Ui
         if (maxLines > 0) t.MaxLines = maxLines;
         if (weight is { } w) t.FontWeight = w;
         if (mono) t.FontFamily = Mono;
-        return t;
+        return TextZoom.Track(t, size);
     }
 
     public static TextBlock Caption(string? text, string color = "muted") => Text(text, 12, color);
 
-    public static FontIcon Glyph(string glyph, double size = 13, string color = "muted") => new()
+    public static FontIcon Glyph(string glyph, double size = 13, string color = "muted") => TextZoom.Track(new FontIcon
     {
         Glyph = glyph,
         FontFamily = Icons,
-        FontSize = size,
         Foreground = Palette.Brush(color),
         VerticalAlignment = VerticalAlignment.Center
-    };
+    }, size);
 
     public static StackPanel H(double spacing, params UIElement?[] children)
     {
@@ -68,7 +66,7 @@ public static class Ui
         Height = size,
         CornerRadius = new CornerRadius(size * 0.28),
         Background = Palette.Brush(color, 0.14),
-        Child = new FontIcon { Glyph = glyph, FontFamily = Icons, FontSize = size * 0.55, Foreground = Palette.Brush(color), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
+        Child = TextZoom.Track(new FontIcon { Glyph = glyph, FontFamily = Icons, Foreground = Palette.Brush(color), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }, size * 0.55),
         VerticalAlignment = VerticalAlignment.Center
     };
 
@@ -116,7 +114,7 @@ public static class Ui
                 Height = 22,
                 CornerRadius = new CornerRadius(11),
                 Background = Palette.Brush(key, 0.15),
-                Child = new FontIcon { Glyph = state.Glyph(), FontFamily = Icons, FontSize = 11, Foreground = Palette.Brush(key), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
+                Child = TextZoom.Track(new FontIcon { Glyph = state.Glyph(), FontFamily = Icons, Foreground = Palette.Brush(key), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }, 11),
                 VerticalAlignment = VerticalAlignment.Top
             };
         }
@@ -128,8 +126,8 @@ public static class Ui
             Padding = new Thickness(9, 2, 10, 3),
             VerticalAlignment = VerticalAlignment.Center,
             Child = H(5,
-                new FontIcon { Glyph = state.Glyph(), FontFamily = Icons, FontSize = 11, Foreground = white },
-                new TextBlock { Text = state.Title(), FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = white })
+                TextZoom.Track(new FontIcon { Glyph = state.Glyph(), FontFamily = Icons, Foreground = white }, 11),
+                TextZoom.Track(new TextBlock { Text = state.Title(), FontWeight = FontWeights.SemiBold, Foreground = white }, 12.5))
         };
     }
 
@@ -176,7 +174,7 @@ public static class Ui
         if (accent) b.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
         b.Click += (_, _) => onClick();
         if (tooltip is not null) ToolTipService.SetToolTip(b, tooltip);
-        return b;
+        return TextZoom.Track(b, 14);
     }
 
     public static Button IconButton(string glyph, string tooltip, Action onClick, string color = "muted")
@@ -195,9 +193,9 @@ public static class Ui
 
     public static HyperlinkButton Link(string text, Action onClick, double size = 12)
     {
-        var b = new HyperlinkButton { Content = text, Padding = new Thickness(0), FontSize = size };
+        var b = new HyperlinkButton { Content = text, Padding = new Thickness(0) };
         b.Click += (_, _) => onClick();
-        return b;
+        return TextZoom.Track(b, size);
     }
 
     public static Microsoft.UI.Xaml.Shapes.Rectangle Line(bool vertical = false)

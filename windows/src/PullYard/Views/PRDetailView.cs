@@ -66,7 +66,7 @@ public sealed class PRDetailView : Grid
 
     private void OnModel(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(PRDetailViewModel.Pr) or nameof(PRDetailViewModel.Error) or nameof(PRDetailViewModel.NotPR)) Update();
+        if (e.PropertyName is nameof(PRDetailViewModel.Pr) or nameof(PRDetailViewModel.Error) or nameof(PRDetailViewModel.NotPR) or nameof(PRDetailViewModel.StackTree) or nameof(PRDetailViewModel.Preview) or nameof(PRDetailViewModel.Tab)) Update();
     }
 
     private void Update()
@@ -86,6 +86,12 @@ public sealed class PRDetailView : Grid
             }
             return;
         }
+        if (model.Error is null && model.Tab == PRTab.Stack && model.StackTree is not null && model.Preview is { } node)
+        {
+            if (root.Content is not StackPreviewContent) root.Content = new StackPreviewContent(model, node);
+            return;
+        }
+        if (model.Error is null && root.Content is StackPreviewContent) return;
         root.Content = model.Error is { } e ? Ui.Error(e, () => model.Load().Forget()) : Ui.Loading();
     }
 }
@@ -103,7 +109,6 @@ public sealed class PRContent : Grid, IShortcutHost
     private readonly RefreshFooter status = new(compact: true);
     private readonly ProgressRing busy = Ui.Spinner(16);
     private readonly Dictionary<PRTab, FrameworkElement> tabViews = new();
-    private bool stackExpanded;
     private HtmlView? conversation;
     private HtmlView? diff;
     private ListView? fileList;
@@ -178,7 +183,7 @@ public sealed class PRContent : Grid, IShortcutHost
             acc.Invoked += (_, e) =>
             {
                 e.Handled = true;
-                model.Tab = t;
+                if (t != PRTab.Stack || model.StackTree is not null) model.Tab = t;
             };
             KeyboardAccelerators.Add(acc);
             index++;
@@ -192,7 +197,11 @@ public sealed class PRContent : Grid, IShortcutHost
             case nameof(PRDetailViewModel.Pr):
                 RenderAll();
                 break;
-            case nameof(PRDetailViewModel.Stack):
+            case nameof(PRDetailViewModel.StackTree):
+                RenderHeader();
+                RenderTabs();
+                ShowTab();
+                break;
             case nameof(PRDetailViewModel.Repo):
                 RenderHeader();
                 RenderBanners();
@@ -298,7 +307,7 @@ public sealed class PRContent : Grid, IShortcutHost
             }
             header.Children.Add(row);
         }
-        if (model.Stack.Count > 1) header.Children.Add(StackStrip());
+        if (model.StackTree is { } tree) header.Children.Add(StackUi.Strip(tree, model.Ref.Repo, () => model.Tab = PRTab.Stack));
         if (MergeStatusBar(model, app, () => Dialogs.Merge(XamlRoot, model).Forget()) is { } bar) header.Children.Add(bar);
     }
 
@@ -323,72 +332,6 @@ public sealed class PRContent : Grid, IShortcutHost
         var p = Ui.H(3, Ui.Avatar(r.Avatar, 18), Ui.Glyph(glyph, r.State is "APPROVED" or "CHANGES_REQUESTED" or "COMMENTED" ? 11 : 6, color));
         Ui.Tip(p, $"{r.Login}: {title}");
         return p;
-    }
-
-    private FrameworkElement StackStrip()
-    {
-        var stack = model.Stack;
-        var current = Pr.Number;
-        var index = Math.Max(0, stack.FindIndex(s => s.Number == current));
-        var dots = Ui.H(3);
-        foreach (var s in stack)
-        {
-            dots.Children.Add(new Border
-            {
-                Width = s.Number == current ? 18 : 10,
-                Height = 5,
-                CornerRadius = new CornerRadius(2.5),
-                Background = s.Number == current ? Palette.Brush("indigo") : Palette.Brush(Palette.StateKey(s.VisualState), 0.55),
-                VerticalAlignment = VerticalAlignment.Center
-            });
-        }
-        var head = Ui.H(8, Ui.Glyph("", 13, "indigo"), Ui.Text(L.T("PR_Stack", "Stack"), 13, "text", FontWeights.SemiBold), Ui.Caption(L.F("PR_StackPosition", "{0} of {1}", index + 1, stack.Count)), dots);
-        var nav = Ui.H(4);
-        if (index > 0) nav.Children.Add(StackNav(stack[index - 1], "", L.T("PR_DownStack", "Down the stack")));
-        if (index < stack.Count - 1) nav.Children.Add(StackNav(stack[index + 1], "", L.T("PR_UpStack", "Up the stack")));
-        nav.Children.Add(Ui.IconButton(stackExpanded ? "" : "", L.T("PR_ShowStack", "Show stack"), () =>
-        {
-            stackExpanded = !stackExpanded;
-            RenderHeader();
-        }));
-        var panel = Ui.V(0, Ui.Columns((head, Ui.Star), (nav, Ui.Auto)));
-        ((FrameworkElement)panel.Children[0]).Margin = new Thickness(10, 4, 4, 4);
-        if (stackExpanded)
-        {
-            panel.Children.Add(Ui.Line());
-            for (var i = stack.Count - 1; i >= 0; i--)
-            {
-                var s = stack[i];
-                var isCurrent = s.Number == current;
-                var row = Ui.Columns(
-                    (Ui.Text((i + 1).ToString(), 12, "dim"), new GridLength(18)),
-                    (Ui.StateBadge(s.VisualState, true), Ui.Auto),
-                    (Ui.Caption($"#{s.Number}"), Ui.Auto),
-                    (Ui.Text(s.Title, 13, "text", isCurrent ? FontWeights.SemiBold : FontWeights.Normal), Ui.Star),
-                    (BranchChip(s.HeadRefName, isCurrent ? "violet" : "slate"), Ui.Auto));
-                var button = new Button
-                {
-                    Content = row,
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                    Background = isCurrent ? Palette.Brush("indigo", 0.12) : new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-                    BorderThickness = new Thickness(0),
-                    IsEnabled = !isCurrent
-                };
-                var number = s.Number;
-                button.Click += (_, _) => app.Open(Route.Pr(new ItemRef(model.Ref.Repo, number)));
-                panel.Children.Add(button);
-            }
-        }
-        return new Border { Background = Palette.Brush("indigo", 0.06), CornerRadius = new CornerRadius(9), Child = panel };
-    }
-
-    private Button StackNav(StackPR s, string glyph, string help)
-    {
-        var b = new Button { Content = Ui.H(4, Ui.Glyph(glyph, 10), Ui.Text($"#{s.Number}", 12, "text", FontWeights.Medium)), Padding = new Thickness(8, 2, 8, 2), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
-        Ui.Tip(b, $"{help}: #{s.Number} {s.Title}");
-        b.Click += (_, _) => app.Open(Route.Pr(new ItemRef(model.Ref.Repo, s.Number)));
-        return b;
     }
 
     public static FrameworkElement? MergeStatusBar(PRDetailViewModel model, AppViewModel app, Action onMerge)
@@ -684,19 +627,20 @@ public sealed class PRContent : Grid, IShortcutHost
         var pending = checks.Count(c => c.Outcome == CheckOutcome.Pending);
         var summary = checks.Count == 0 ? "0" : failed > 0 ? $"✕{failed}" : pending > 0 ? $"…{pending}" : $"✓{checks.Count}";
         var color = failed > 0 ? "red" : pending > 0 ? "amber" : checks.Count == 0 ? "muted" : "green";
-        tabs.SetTabs(new[]
+        tabs.SetTabs(new TabSpec[]
         {
             new TabSpec(nameof(PRTab.Conversation), L.T("PR_TabConversation", "Conversation"), "", unresolved > 0 ? unresolved.ToString() : null),
             new TabSpec(nameof(PRTab.Commits), L.T("PR_TabCommits", "Commits"), "", (pr.AllCommits.TotalCount ?? pr.AllCommits.Items.Count).ToString()),
             new TabSpec(nameof(PRTab.Checks), L.T("PR_TabChecks", "Checks"), "", summary, color),
             new TabSpec(nameof(PRTab.Files), L.T("PR_TabFiles", "Files changed"), "", pr.ChangedFiles.ToString())
-        });
+        }.Concat(model.StackTree is { } tree ? new[] { new TabSpec(nameof(PRTab.Stack), L.T("PR_TabStack", "Stack"), StackUi.StackGlyph, tree.Count.ToString()) } : Array.Empty<TabSpec>()));
         tabs.Selected = model.Tab.ToString();
     }
 
     private void ShowTab()
     {
         tabs.Selected = model.Tab.ToString();
+        if (model.Tab != PRTab.Stack && tabViews.Remove(PRTab.Stack, out var stackView)) tabArea.Children.Remove(stackView);
         if (!tabViews.ContainsKey(model.Tab))
         {
             var view = model.Tab switch
@@ -704,6 +648,7 @@ public sealed class PRContent : Grid, IShortcutHost
                 PRTab.Conversation => BuildConversation(),
                 PRTab.Commits => BuildCommits(null),
                 PRTab.Checks => BuildChecks(null),
+                PRTab.Stack => new StackTab(model),
                 _ => BuildFiles()
             };
             tabViews[model.Tab] = view;

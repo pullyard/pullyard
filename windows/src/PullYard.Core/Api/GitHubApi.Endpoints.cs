@@ -1,6 +1,6 @@
-using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
+using PullYard.Core.Stacks;
 using PullYard.Core.Util;
 
 namespace PullYard.Core.Api;
@@ -58,126 +58,67 @@ public sealed partial class GitHubApi
         return res.Repository?.PullRequest;
     }
 
-    private sealed class StackResponse
+    private sealed class RepoStackResponse
     {
-        public sealed class Entry
+        public sealed class Commit
         {
-            public int Position { get; set; }
-            public StackPR PullRequest { get; set; } = new();
+            public string AbbreviatedOid { get; set; } = "";
+            public string MessageHeadline { get; set; } = "";
+            public RollupState? StatusCheckRollup { get; set; }
         }
 
-        public sealed class StackInfo
+        public sealed class CommitNode
         {
-            public Nodes<Entry> Entries { get; set; } = new();
+            public Commit Commit { get; set; } = new();
         }
 
         public sealed class PR
         {
             public int Number { get; set; }
             public string Title { get; set; } = "";
-            public string State { get; set; } = "";
+            public string State { get; set; } = "OPEN";
             public bool IsDraft { get; set; }
             public string HeadRefName { get; set; } = "";
             public string BaseRefName { get; set; } = "";
-            public StackInfo? Stack { get; set; }
+            public DateTimeOffset? UpdatedAt { get; set; }
+            public string? ReviewDecision { get; set; }
+            public UserLogin? Author { get; set; }
+            public RepoName? HeadRepository { get; set; }
+            public Nodes<CommitNode> Commits { get; set; } = new();
+        }
+
+        public sealed class Page
+        {
+            public PageInfo PageInfo { get; set; } = new();
+            public List<PR> Nodes { get; set; } = new();
         }
 
         public sealed class Repo
         {
-            public BranchName? DefaultBranchRef { get; set; }
-            public PR? PullRequest { get; set; }
+            public Page? PullRequests { get; set; }
         }
 
         public Repo? Repository { get; set; }
     }
 
-    private sealed class NeighborsResponse
+    public async Task<List<StackNode>> OpenStackNodes(RepoRef repo, int pages = 3, CancellationToken ct = default)
     {
-        public sealed class Repo
+        var output = new List<StackNode>();
+        string? after = null;
+        for (var i = 0; i < pages; i++)
         {
-            public Nodes<StackPR> Parents { get; set; } = new();
-            public Nodes<StackPR> Children { get; set; } = new();
-        }
-
-        public Repo? Repository { get; set; }
-    }
-
-    public static readonly TimeSpan StackTtl = TimeSpan.FromMinutes(10);
-
-    private sealed record CachedStack(DateTimeOffset At, List<StackPR> Stack);
-
-    private readonly ConcurrentDictionary<string, CachedStack> stackCache = new();
-    private volatile bool stackFieldUnsupported;
-
-    private static string StackKey(ItemRef r, string? head, string? @base) => $"{r.Repo.Full}#{r.Number}|{head}|{@base}";
-
-    public List<StackPR>? CachedPullRequestStack(ItemRef r, string? head, string? @base, bool live)
-    {
-        if (!stackCache.TryGetValue(StackKey(r, head, @base), out var hit)) return null;
-        return live || DateTimeOffset.Now - hit.At < StackTtl ? hit.Stack : null;
-    }
-
-    public async Task<List<StackPR>> PullRequestStack(ItemRef r, string? head = null, string? @base = null, bool live = false, bool force = false, CancellationToken ct = default)
-    {
-        if (!force && CachedPullRequestStack(r, head, @base, live) is { } cached) return cached;
-        var stack = await LookupStack(r, ct).ConfigureAwait(false);
-        stackCache[StackKey(r, head, @base)] = new CachedStack(DateTimeOffset.Now, stack);
-        return stack;
-    }
-
-    private async Task<List<StackPR>> LookupStack(ItemRef r, CancellationToken ct)
-    {
-        var plainQuery = Q.PrStack.Replace(" stack { entries(first: 30) { nodes { position pullRequest { ...StackPR } } } }", "");
-        StackResponse res;
-        if (stackFieldUnsupported)
-        {
-            res = await GraphQL<StackResponse>(plainQuery, V(("o", r.Repo.Owner), ("n", r.Repo.Name), ("num", r.Number)), ct: ct).ConfigureAwait(false);
-        }
-        else
-        {
-            try
+            var r = await GraphQL<RepoStackResponse>(Q.RepoStack, V(("o", repo.Owner), ("n", repo.Name), ("after", after)), ct: ct).ConfigureAwait(false);
+            if (r.Repository?.PullRequests is not { } page) break;
+            foreach (var pr in page.Nodes)
             {
-                res = await GraphQL<StackResponse>(Q.PrStack, V(("o", r.Repo.Owner), ("n", r.Repo.Name), ("num", r.Number)), ct: ct).ConfigureAwait(false);
+                var c = pr.Commits.Items.FirstOrDefault()?.Commit;
+                output.Add(new StackNode(pr.Number, pr.Title, pr.State, pr.IsDraft, pr.HeadRefName, pr.BaseRefName, pr.HeadRepository?.NameWithOwner,
+                    pr.Author?.Login, pr.UpdatedAt, pr.ReviewDecision, c?.StatusCheckRollup?.State, c?.AbbreviatedOid, c?.MessageHeadline));
             }
-            catch (ApiException e) when (e.SchemaError)
-            {
-                stackFieldUnsupported = true;
-                res = await GraphQL<StackResponse>(plainQuery, V(("o", r.Repo.Owner), ("n", r.Repo.Name), ("num", r.Number)), ct: ct).ConfigureAwait(false);
-            }
+            if (!page.PageInfo.HasNextPage || page.PageInfo.EndCursor is not { } cursor) break;
+            after = cursor;
         }
-        if (res.Repository?.PullRequest is not { } pr) return new();
-        if (pr.Stack?.Entries.Items is { Count: > 1 } entries) return entries.OrderBy(e => e.Position).Select(e => e.PullRequest).ToList();
-        var main = res.Repository.DefaultBranchRef?.Name;
-        var current = new StackPR { Number = pr.Number, Title = pr.Title, State = pr.State, IsDraft = pr.IsDraft, HeadRefName = pr.HeadRefName, BaseRefName = pr.BaseRefName };
-        var below = new List<StackPR>();
-        var above = new List<StackPR>();
-        var seen = new HashSet<int> { current.Number };
-        var node = current;
-        for (var i = 0; i < 8 && node.BaseRefName != main; i++)
-        {
-            var (parents, _) = await StackNeighbors(r.Repo, node, ct).ConfigureAwait(false);
-            var parent = parents.FirstOrDefault(p => p.State == "OPEN") ?? parents.FirstOrDefault();
-            if (parent is null || !seen.Add(parent.Number)) break;
-            below.Insert(0, parent);
-            node = parent;
-        }
-        node = current;
-        for (var i = 0; i < 8; i++)
-        {
-            var (_, children) = await StackNeighbors(r.Repo, node, ct).ConfigureAwait(false);
-            var child = children.FirstOrDefault(p => p.State == "OPEN") ?? children.FirstOrDefault();
-            if (child is null || !seen.Add(child.Number)) break;
-            above.Add(child);
-            node = child;
-        }
-        var chain = below.Append(current).Concat(above).ToList();
-        return chain.Count > 1 ? chain : new();
-    }
-
-    private async Task<(List<StackPR> Parents, List<StackPR> Children)> StackNeighbors(RepoRef repo, StackPR pr, CancellationToken ct)
-    {
-        var r = await GraphQL<NeighborsResponse>(Q.PrStackNeighbors, V(("o", repo.Owner), ("n", repo.Name), ("head", pr.HeadRefName), ("base", pr.BaseRefName)), ct: ct).ConfigureAwait(false);
-        return (r.Repository?.Parents.Items ?? new(), r.Repository?.Children.Items ?? new());
+        return output;
     }
 
     public Task<BadgeResponse> Badges(CancellationToken ct = default) => GraphQL<BadgeResponse>(Q.Badges, ct: ct);

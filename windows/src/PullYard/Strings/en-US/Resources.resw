@@ -395,6 +395,19 @@
   <data name="Nav_Inbox" xml:space="preserve"><value>Inbox</value></data>
   <data name="Nav_Issues" xml:space="preserve"><value>Issues</value></data>
   <data name="Nav_PullRequests" xml:space="preserve"><value>Pull requests</value></data>
+  <data name="Notes_Add" xml:space="preserve"><value>Add note</value></data>
+  <data name="Notes_ClickToEdit" xml:space="preserve"><value>Click to read and edit all notes</value></data>
+  <data name="Notes_Close" xml:space="preserve"><value>Close (Esc)</value></data>
+  <data name="Notes_Decision" xml:space="preserve"><value>Decision</value></data>
+  <data name="Notes_Delete" xml:space="preserve"><value>Delete note</value></data>
+  <data name="Notes_Local" xml:space="preserve"><value>Only on this PC</value></data>
+  <data name="Notes_Many" xml:space="preserve"><value>{0} notes</value></data>
+  <data name="Notes_More" xml:space="preserve"><value>+{0} more</value></data>
+  <data name="Notes_Note" xml:space="preserve"><value>Note</value></data>
+  <data name="Notes_One" xml:space="preserve"><value>1 note</value></data>
+  <data name="Notes_Placeholder" xml:space="preserve"><value>Write a note</value></data>
+  <data name="Notes_Question" xml:space="preserve"><value>Question</value></data>
+  <data name="Notes_Title" xml:space="preserve"><value>Notes on #{0}</value></data>
   <data name="Notifications_CaughtUp" xml:space="preserve"><value>All caught up</value></data>
   <data name="Notifications_Done" xml:space="preserve"><value>Done (remove from inbox)</value></data>
   <data name="Notifications_MarkAllRead" xml:space="preserve"><value>Mark all as read</value></data>
@@ -435,7 +448,6 @@
   <data name="PR_Review" xml:space="preserve"><value>Review</value></data>
   <data name="PR_ReviewN" xml:space="preserve"><value>Review ({0})</value></data>
   <data name="PR_Reviewers" xml:space="preserve"><value>Reviewers:</value></data>
-  <data name="PR_ShowStack" xml:space="preserve"><value>Show stack</value></data>
   <data name="PR_Stack" xml:space="preserve"><value>Stack</value></data>
   <data name="PR_StackPosition" xml:space="preserve"><value>{0} of {1}</value></data>
   <data name="PR_SubmitReview" xml:space="preserve"><value>Submit review</value></data>
@@ -443,6 +455,7 @@
   <data name="PR_TabCommits" xml:space="preserve"><value>Commits</value></data>
   <data name="PR_TabConversation" xml:space="preserve"><value>Conversation</value></data>
   <data name="PR_TabFiles" xml:space="preserve"><value>Files changed</value></data>
+  <data name="PR_TabStack" xml:space="preserve"><value>Stack</value></data>
   <data name="PR_UpStack" xml:space="preserve"><value>Up the stack</value></data>
   <data name="PR_UpdateBranchFrom" xml:space="preserve"><value>Update branch from {0}</value></data>
   <data name="PR_WriteReview" xml:space="preserve"><value>Write review…</value></data>
@@ -509,6 +522,7 @@
   <data name="Section_Notifications" xml:space="preserve"><value>Notifications</value></data>
   <data name="Section_Projects" xml:space="preserve"><value>Projects</value></data>
   <data name="Section_Repositories" xml:space="preserve"><value>Repositories</value></data>
+  <data name="Section_Stacks" xml:space="preserve"><value>Stacks</value></data>
   <data name="Settings_Account" xml:space="preserve"><value>Account</value></data>
   <data name="Settings_Appearance" xml:space="preserve"><value>Appearance</value></data>
   <data name="Settings_AutoRefresh" xml:space="preserve"><value>Auto-refresh pull requests</value></data>
@@ -543,6 +557,51 @@
   <data name="Settings_SystemDefault" xml:space="preserve"><value>System default</value></data>
   <data name="Settings_Theme" xml:space="preserve"><value>Theme</value></data>
   <data name="Settings_Updates" xml:space="preserve"><value>Updates</value></data>
+  <data name="Stack_ActualSize" xml:space="preserve"><value>Actual size</value></data>
+  <data name="Stack_AddNote" xml:space="preserve"><value>Add a note</value></data>
+  <data name="Stack_AddNoteMenu" xml:space="preserve"><value>Add note…</value></data>
+  <data name="Stack_AttentionMany" xml:space="preserve"><value>{0} pull requests need attention</value></data>
+  <data name="Stack_AttentionOne" xml:space="preserve"><value>1 pull request needs attention</value></data>
+  <data name="Stack_Base" xml:space="preserve"><value>base</value></data>
+  <data name="Stack_Branch" xml:space="preserve"><value>branch</value></data>
+  <data name="Stack_ClickCenter" xml:space="preserve"><value>click to center</value></data>
+  <data name="Stack_ClickOpen" xml:space="preserve"><value>click to open</value></data>
+  <data name="Stack_Fit" xml:space="preserve"><value>Fit to window</value></data>
+  <data name="Stack_Graph" xml:space="preserve"><value>Graph</value></data>
+  <data name="Stack_HasSession" xml:space="preserve"><value>Has a Claude Code session</value></data>
+  <data name="Stack_List" xml:space="preserve"><value>List</value></data>
+  <data name="Stack_ManyPRs" xml:space="preserve"><value>{0} pull requests</value></data>
+  <data name="Stack_ManyPRsShort" xml:space="preserve"><value>{0} PRs</value></data>
+  <data name="Stack_MoreMany" xml:space="preserve"><value>{0} more pull requests on other branches of the stack</value></data>
+  <data name="Stack_MoreOne" xml:space="preserve"><value>1 more pull request on another branch of the stack</value></data>
+  <data name="Stack_NotesMenu" xml:space="preserve"><value>Notes…</value></data>
+  <data name="Stack_NotesOpen" xml:space="preserve"><value>{0} notes — click to open</value></data>
+  <data name="Stack_OnBase" xml:space="preserve"><value>on {0}</value></data>
+  <data name="Stack_OneNoteOpen" xml:space="preserve"><value>1 note — click to open</value></data>
+  <data name="Stack_OnePR" xml:space="preserve"><value>1 pull request</value></data>
+  <data name="Stack_OnePRShort" xml:space="preserve"><value>1 PR</value></data>
+  <data name="Stack_OpenN" xml:space="preserve"><value>Open #{0}</value></data>
+  <data name="Stack_Resume" xml:space="preserve"><value>Resume Claude Code session</value></data>
+  <data name="Stack_Session" xml:space="preserve"><value>session</value></data>
+  <data name="Stack_ShowCurrent" xml:space="preserve"><value>Show this pull request</value></data>
+  <data name="Stack_ShowWhole" xml:space="preserve"><value>Show the whole stack</value></data>
+  <data name="Stack_StackedOn" xml:space="preserve"><value>stacked on</value></data>
+  <data name="Stack_StatusChanges" xml:space="preserve"><value>Changes requested</value></data>
+  <data name="Stack_StatusChecking" xml:space="preserve"><value>Checks running</value></data>
+  <data name="Stack_StatusCiFailed" xml:space="preserve"><value>CI failed</value></data>
+  <data name="Stack_StatusClosed" xml:space="preserve"><value>Closed</value></data>
+  <data name="Stack_StatusDraft" xml:space="preserve"><value>Draft</value></data>
+  <data name="Stack_StatusMerged" xml:space="preserve"><value>Merged</value></data>
+  <data name="Stack_StatusReady" xml:space="preserve"><value>Ready</value></data>
+  <data name="Stack_StatusReview" xml:space="preserve"><value>In review</value></data>
+  <data name="Stack_SupportBody" xml:space="preserve"><value>PullYard is free and built by one developer. If it saves you time, you can be part of it by buying a pizza that keeps it going. We only ask once.</value></data>
+  <data name="Stack_SupportPizza" xml:space="preserve"><value>Buy a Pizza 🍕</value></data>
+  <data name="Stack_SupportTitle" xml:space="preserve"><value>Like the stack graph?</value></data>
+  <data name="Stack_UpMany" xml:space="preserve"><value>Up the stack: {0} pull requests are stacked on this one</value></data>
+  <data name="Stack_Yours" xml:space="preserve"><value>· {0} yours</value></data>
+  <data name="Stack_ZoomIn" xml:space="preserve"><value>Zoom in</value></data>
+  <data name="Stack_ZoomOut" xml:space="preserve"><value>Zoom out (Ctrl+wheel or pinch works too)</value></data>
+  <data name="Stacks_Empty" xml:space="preserve"><value>No stacked pull requests. Open a pull request on another pull request's branch and it shows up here.</value></data>
   <data name="State_All" xml:space="preserve"><value>All</value></data>
   <data name="State_Closed" xml:space="preserve"><value>Closed</value></data>
   <data name="State_Merged" xml:space="preserve"><value>Merged</value></data>
@@ -595,4 +654,5 @@
   <data name="Usage_SessionCost" xml:space="preserve"><value>Session: ${0:0.00}</value></data>
   <data name="Usage_Sleeping" xml:space="preserve"><value>session is sleeping</value></data>
   <data name="Usage_UntilCompact" xml:space="preserve"><value>{0} until auto-compact</value></data>
+  <data name="Zoom_Toast" xml:space="preserve"><value>Text size {0}%</value></data>
 </root>

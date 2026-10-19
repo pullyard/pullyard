@@ -29,12 +29,37 @@ public sealed class HtmlView : Grid
         Children.Add(web);
         Loaded += (_, _) => EnsureInitialized().Forget();
         ThemeService.Changed += OnTheme;
-        Unloaded += (_, _) => ThemeService.Changed -= OnTheme;
+        TextZoom.Changed += ApplyZoom;
+        Unloaded += (_, _) =>
+        {
+            ThemeService.Changed -= OnTheme;
+            TextZoom.Changed -= ApplyZoom;
+        };
         Loaded += (_, _) =>
         {
             ThemeService.Changed -= OnTheme;
             ThemeService.Changed += OnTheme;
+            TextZoom.Changed -= ApplyZoom;
+            TextZoom.Changed += ApplyZoom;
+            ApplyZoom();
         };
+    }
+
+    private double appliedZoom = 1;
+
+    private void ApplyZoom()
+    {
+        if (!ready || web.CoreWebView2 is not { } core || Math.Abs(appliedZoom - TextZoom.Scale) < 0.001) return;
+        appliedZoom = TextZoom.Scale;
+        var value = TextZoom.Scale.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        try
+        {
+            if (page == "terminal.html") core.PostWebMessageAsJson(new JsonObject { ["op"] = "fontSize", ["size"] = 13 * TextZoom.Scale }.ToJsonString());
+            else core.ExecuteScriptAsync($"document.documentElement.style.zoom = '{value}';").AsTask().Forget();
+        }
+        catch
+        {
+        }
     }
 
     public WebView2 WebView => web;
@@ -90,6 +115,13 @@ public sealed class HtmlView : Grid
                 WebViewEnvironment.ApplyScheme(web);
                 foreach (var q in queue) sender.PostWebMessageAsJson(q);
                 queue.Clear();
+                appliedZoom = 1;
+                ApplyZoom();
+                break;
+            case "zoom":
+                if (id == "in") TextZoom.ZoomIn();
+                else if (id == "out") TextZoom.ZoomOut();
+                else TextZoom.Reset();
                 break;
             case "link":
                 LinkClicked?.Invoke(id);
