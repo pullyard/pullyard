@@ -17,6 +17,8 @@ namespace PullYard.Views;
 public sealed class StackGraphView : Grid
 {
     private static readonly Dictionary<string, double> Zooms = new();
+    private static readonly Dictionary<double, (double Card, double Note)> Heights = new();
+    private static readonly Thickness CardPadding = new(10, 7, 10, 6);
 
     private readonly StackTab owner;
     private readonly Canvas edgeLayer = new() { IsHitTestVisible = false };
@@ -83,7 +85,21 @@ public sealed class StackGraphView : Grid
             clip.Rect = new Rect(0, 0, size.Width, size.Height);
             Render();
         };
-        Unloaded += (_, _) => StopAnimation();
+        Loaded += (_, _) =>
+        {
+            TextZoom.Changed -= OnTextZoom;
+            TextZoom.Changed += OnTextZoom;
+        };
+        Unloaded += (_, _) =>
+        {
+            StopAnimation();
+            TextZoom.Changed -= OnTextZoom;
+        };
+    }
+
+    private void OnTextZoom()
+    {
+        if (tree is not null) Show(tree, sessions, noteKey);
     }
 
     private StackSize View => new(size.Width, size.Height);
@@ -98,7 +114,8 @@ public sealed class StackGraphView : Grid
         sessions = matched;
         noteKey = keyFor;
         var noted = next.Nodes.Keys.Where(n => StackNotes.Shared.HasNotes(keyFor(n))).ToHashSet();
-        geometry = new StackGeometry(new Core.Stacks.StackLayout(next), noted);
+        var (cardHeight, noteHeight) = Measured();
+        geometry = new StackGeometry(new Core.Stacks.StackLayout(next), noted, cardHeight, noteHeight);
         if (moved) placed = false;
         else if (previous is not null && geometry.Size != previous.Size) vp = vp.Clamped(geometry.Size, View);
         BuildEdges();
@@ -465,27 +482,48 @@ public sealed class StackGraphView : Grid
         return border;
     }
 
-    private FrameworkElement Card(StackNode node)
+    private (double Card, double Note) Measured()
     {
-        var current = node.Number == tree!.Current;
-        var onPath = tree.OnPath(node.Number);
-        var key = noteKey(node.Number);
-        var noteCount = StackNotes.Shared.Count(key);
+        var scale = TextZoom.Scale;
+        if (Heights.TryGetValue(scale, out var known)) return known;
+        var sample = new StackNode(1, "Sample", "OPEN", false, "branch", "base", null, null, null, null, "SUCCESS", "abc1234", "Headline");
+        var card = HeightOf(CardBody(sample, 1, new ClaudeSessionInfo { Title = "Session" }, () => { }), StackMetrics.CardWidth - CardPadding.Left - CardPadding.Right) + CardPadding.Top + CardPadding.Bottom + 4;
+        var compact = HeightOf(CompactBody(sample, true), StackMetrics.CardWidth - 14) + 16;
+        var notes = new List<StackNote>
+        {
+            new(Guid.NewGuid(), StackNoteKind.Decision, "Sample", DateTimeOffset.Now),
+            new(Guid.NewGuid(), StackNoteKind.Question, "Sample", DateTimeOffset.Now),
+            new(Guid.NewGuid(), StackNoteKind.Note, "Sample", DateTimeOffset.Now)
+        };
+        var note = HeightOf(StickyBody(notes), StackMetrics.CardWidth - 20) + 14;
+        var result = (Math.Ceiling(Math.Max(StackMetrics.CardHeight, Math.Max(card, compact))), Math.Ceiling(Math.Max(StackMetrics.NoteHeight, note)));
+        Heights[scale] = result;
+        return result;
+    }
+
+    private static double HeightOf(FrameworkElement element, double width)
+    {
+        element.Measure(new Size(width, double.PositiveInfinity));
+        return element.DesiredSize.Height;
+    }
+
+    private StackPanel CardBody(StackNode node, int noteCount, ClaudeSessionInfo? session, Action onNote)
+    {
         var head = Ui.H(6, StackUi.Fixed($"#{node.Number}", 13, "text", FontWeights.SemiBold));
         if (node.JiraKey is { } jira) head.Children.Add(StackUi.Fixed(jira, 12, "muted", mono: true));
-        var right = Ui.H(4, StackListRow.NoteButton(noteCount, () => owner.ShowNotes(node.Number), false), StackUi.StatusPill(node.Status, false));
+        var right = Ui.H(4, StackListRow.NoteButton(noteCount, onNote, false), StackUi.StatusPill(node.Status, false));
         var top = Ui.Columns((head, Ui.Star), (right, Ui.Auto));
         top.ColumnSpacing = 4;
         var title = StackUi.Fixed(node.Title, 13, "text", FontWeights.SemiBold);
         title.Margin = new Thickness(0, 0, 0, 1);
         var stack = Ui.V(3, top, title, Field(L.T("Stack_Branch", "branch"), node.HeadRefName), Field(L.T("Stack_Base", "base"), node.BaseRefName));
-        if (sessions.TryGetValue(node.Number, out var session))
+        if (session is not null)
         {
             var link = new HyperlinkButton { Content = StackUi.Fixed(session.Title, 12, "accent"), Padding = new Thickness(0), MinHeight = 0 };
             Ui.Tip(link, L.T("Stack_Resume", "Resume Claude Code session"));
             link.Click += (_, _) => owner.Resume(session);
             var label = StackUi.Fixed(L.T("Stack_Session", "session"), 12, "dim");
-            label.Width = 48;
+            label.Width = 48 * TextZoom.Scale;
             stack.Children.Add(Ui.Columns((label, Ui.Auto), (link, Ui.Star)));
         }
         if (node.CommitOid is { } oid)
@@ -499,11 +537,21 @@ public sealed class StackGraphView : Grid
                 Child = StackUi.Fixed($"› {oid} {node.CommitHeadline}", 11, "muted", mono: true)
             });
         }
+        return stack;
+    }
+
+    private FrameworkElement Card(StackNode node)
+    {
+        var current = node.Number == tree!.Current;
+        var onPath = tree.OnPath(node.Number);
+        var key = noteKey(node.Number);
+        var noteCount = StackNotes.Shared.Count(key);
+        var stack = CardBody(node, noteCount, sessions.TryGetValue(node.Number, out var session) ? session : null, () => owner.ShowNotes(node.Number));
         var card = new Border
         {
             Width = StackMetrics.CardWidth,
-            Height = StackMetrics.CardHeight,
-            Padding = new Thickness(10, 7, 10, 6),
+            Height = geometry!.CardHeight,
+            Padding = CardPadding,
             CornerRadius = new CornerRadius(10),
             Background = Palette.Brush("raised"),
             BorderBrush = current ? Palette.Brush("indigo") : Palette.Brush("text", 0.16),
@@ -535,7 +583,7 @@ public sealed class StackGraphView : Grid
     private static FrameworkElement Field(string label, string value)
     {
         var l = StackUi.Fixed(label, 11.5, "dim");
-        l.Width = 48;
+        l.Width = 48 * TextZoom.Scale;
         var v = StackUi.Fixed(value, 11.5, "text", mono: true);
         v.TextTrimming = TextTrimming.CharacterEllipsis;
         var row = Ui.Columns((l, Ui.Auto), (v, Ui.Star));
@@ -543,7 +591,7 @@ public sealed class StackGraphView : Grid
         return row;
     }
 
-    private FrameworkElement Sticky(List<StackNote> notes, int number)
+    private static StackPanel StickyBody(List<StackNote> notes)
     {
         var sorted = notes.OrderByDescending(n => n.Updated).ToList();
         var header = Ui.Columns(
@@ -561,9 +609,15 @@ public sealed class StackGraphView : Grid
             stack.Children.Add(line);
         }
         if (sorted.Count > 2) stack.Children.Add(StackUi.Fixed(L.F("Notes_More", "+{0} more", sorted.Count - 2), 11, "muted"));
+        return stack;
+    }
+
+    private FrameworkElement Sticky(List<StackNote> notes, int number)
+    {
+        var stack = StickyBody(notes);
         var border = new Border
         {
-            Height = StackMetrics.NoteHeight,
+            Height = geometry!.NoteHeight,
             Padding = new Thickness(9, 6, 9, 6),
             CornerRadius = new CornerRadius(5),
             Background = Palette.Brush("amber", 0.16),
@@ -587,22 +641,28 @@ public sealed class StackGraphView : Grid
         return border;
     }
 
-    private FrameworkElement CompactCard(StackNode node)
+    private static Grid CompactBody(StackNode node, bool noted)
     {
-        var current = node.Number == tree!.Current;
         var status = node.Status;
         var color = status.ColorKey();
         var head = Ui.H(10, StackUi.Fixed($"#{node.Number}", 40, "text", FontWeights.Bold));
-        if (geometry!.Noted.Contains(node.Number)) head.Children.Add(StackUi.FixedGlyph("", 30, "amber"));
+        if (noted) head.Children.Add(StackUi.FixedGlyph("", 30, "amber"));
         var text = Ui.V(6, head, StackUi.Fixed(status.Title(), 26, color, FontWeights.SemiBold));
         text.Margin = new Thickness(20, 0, 20, 0);
         text.VerticalAlignment = VerticalAlignment.Center;
         var grid = Ui.Columns((new Border { Width = 14, Background = Palette.Brush(color) }, Ui.Auto), (text, Ui.Star));
         grid.ColumnSpacing = 0;
+        return grid;
+    }
+
+    private FrameworkElement CompactCard(StackNode node)
+    {
+        var current = node.Number == tree!.Current;
+        var grid = CompactBody(node, geometry!.Noted.Contains(node.Number));
         var card = new Border
         {
             Width = StackMetrics.CardWidth,
-            Height = StackMetrics.CardHeight,
+            Height = geometry.CardHeight,
             CornerRadius = new CornerRadius(12),
             Background = Palette.Brush("raised"),
             BorderBrush = current ? Palette.Brush("indigo") : Palette.Brush("text", 0.16),

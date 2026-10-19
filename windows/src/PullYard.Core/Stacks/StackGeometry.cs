@@ -34,18 +34,22 @@ public sealed class StackGeometry
     public StackLayout Layout { get; }
     public IReadOnlySet<int> Noted { get; }
     public StackSize Size { get; }
+    public double CardHeight { get; }
+    public double NoteHeight { get; }
     private readonly Dictionary<int, double> tops = new();
 
-    public StackGeometry(StackLayout layout, IReadOnlySet<int> noted)
+    public StackGeometry(StackLayout layout, IReadOnlySet<int> noted, double cardHeight = StackMetrics.CardHeight, double noteHeight = StackMetrics.NoteHeight)
     {
         Layout = layout;
         Noted = noted;
+        CardHeight = cardHeight;
+        NoteHeight = noteHeight;
         var notedLevels = noted.Where(layout.Slots.ContainsKey).Select(n => layout.Slots[n].Level).ToHashSet();
         var y = StackMetrics.Pad + StackMetrics.PillHeight + StackMetrics.GapY;
         for (var level = 1; level <= Math.Max(layout.Levels, 1); level++)
         {
             tops[level] = y;
-            y += StackMetrics.CardHeight + (notedLevels.Contains(level) ? StackMetrics.NoteGap + StackMetrics.NoteHeight : 0) + StackMetrics.GapY;
+            y += cardHeight + (notedLevels.Contains(level) ? StackMetrics.NoteGap + noteHeight : 0) + StackMetrics.GapY;
         }
         Size = new StackSize(StackMetrics.Pad * 2 + layout.Columns * (StackMetrics.CardWidth + StackMetrics.GapX) - StackMetrics.GapX, y - StackMetrics.GapY + StackMetrics.Pad);
     }
@@ -59,10 +63,10 @@ public sealed class StackGeometry
     public double? Bottom(int number)
     {
         if (Origin(number) is not { } o) return null;
-        return o.Y + StackMetrics.CardHeight + (Noted.Contains(number) ? StackMetrics.NoteGap + StackMetrics.NoteHeight : 0);
+        return o.Y + CardHeight + (Noted.Contains(number) ? StackMetrics.NoteGap + NoteHeight : 0);
     }
 
-    public StackPoint? Center(int number) => Origin(number) is { } o ? new StackPoint(o.X + StackMetrics.CardWidth / 2, o.Y + StackMetrics.CardHeight / 2) : null;
+    public StackPoint? Center(int number) => Origin(number) is { } o ? new StackPoint(o.X + StackMetrics.CardWidth / 2, o.Y + CardHeight / 2) : null;
 
     public HashSet<int> Visible(IEnumerable<int> numbers, StackViewport vp, StackSize viewport)
     {

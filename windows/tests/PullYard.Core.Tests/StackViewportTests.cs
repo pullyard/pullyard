@@ -91,6 +91,23 @@ public class StackViewportTests
     }
 
     [Fact]
+    public void MeasuredCardHeightMovesLevelsAndEdges()
+    {
+        var a = Node(1, "a", "dev");
+        var b = Node(2, "b", "a");
+        var tree = StackTree.Build(a, new[] { a, b }, "acme/app")!;
+        var layout = new StackLayout(tree);
+        var plain = new StackGeometry(layout, new HashSet<int> { 1 });
+        var tall = new StackGeometry(layout, new HashSet<int> { 1 }, 150, 90);
+        Assert.Equal(plain.Origin(2)!.Value.Y + 30 + 14, tall.Origin(2)!.Value.Y);
+        Assert.Equal(tall.Origin(1)!.Value.Y + 150 + StackMetrics.NoteGap + 90, tall.Bottom(1));
+        Assert.Equal(tall.Origin(1)!.Value.Y + 75, tall.Center(1)!.Value.Y);
+        var edge = StackEdges.Build(tree, tall).Single(e => e.Kind == StackEdgeKind.Curve);
+        Assert.Equal(tall.Bottom(1), edge.From.Y);
+        Assert.Equal(tall.Origin(2)!.Value.Y, edge.To.Y);
+    }
+
+    [Fact]
     public void TextZoomLevels()
     {
         Assert.Equal(1.0, ZoomLevels.Nearest(0));

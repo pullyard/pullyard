@@ -54,7 +54,7 @@ public static class StackUi
         var t = new TextBlock
         {
             Text = text ?? "",
-            FontSize = size,
+            FontSize = size * TextZoom.Scale,
             Foreground = Palette.Brush(color),
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextWrapping = TextWrapping.NoWrap,
@@ -69,7 +69,7 @@ public static class StackUi
     {
         Glyph = glyph,
         FontFamily = Ui.Icons,
-        FontSize = size,
+        FontSize = size * TextZoom.Scale,
         Foreground = Palette.Brush(color),
         VerticalAlignment = VerticalAlignment.Center
     };

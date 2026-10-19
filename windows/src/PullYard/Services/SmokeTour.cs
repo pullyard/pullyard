@@ -222,6 +222,14 @@ public static class SmokeTour
         TextZoom.ZoomIn();
         await Step("text zoom", 1500);
         await Shot("06g-text-zoom-120");
+        TextZoom.Set(1.5);
+        model.Tab = PRTab.Stack;
+        await Step("stack zoomed", 1500);
+        StackTab.Last?.SetGraph(true);
+        await Step("stack graph zoomed", 2500);
+        await Shot("06h-pr-stack-graph-zoom-150");
+        StackTab.Last?.SetGraph(false);
+        model.Tab = PRTab.Conversation;
         TextZoom.Reset();
         await Step("text zoom reset", 800);
     }
