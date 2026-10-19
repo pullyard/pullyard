@@ -137,6 +137,32 @@ public class StackTreeTests
     }
 
     [Fact]
+    public void ListDepthsMatchLayoutLevels()
+    {
+        var open = new List<StackNode>
+        {
+            Pr(9000, "main", "release"),
+            Pr(753, "snapshot", "main", headRepo: "fork/app"),
+            Pr(9001, "search-api", "main"),
+            Pr(9002, "search-ui", "main"),
+            Pr(9003, "search-cancel", "search-api"),
+            Pr(9004, "search-debounce", "search-cancel")
+        };
+        for (var i = 1; i <= 8; i++) open.Add(Pr(9009 + i, $"search-ui-{i}", "search-ui"));
+        var tree = StackTree.Build(open[1], open, Repo)!;
+        var layout = new StackLayout(tree);
+        var rows = StackRows.Ordered(tree);
+        Assert.Equal(14, rows.Count);
+        Assert.All(rows, r => Assert.Equal(layout.Slots[r.Node.Number].Level - 1, r.Depth));
+        Assert.Equal(new[] { 753, 9001, 9002 }, tree.ChildrenOf(9000));
+        Assert.Equal(9001, tree.Parent[9003]);
+        Assert.Equal(1, rows.Single(r => r.Node.Number == 9001).Depth);
+        Assert.Equal(layout.Slots[753].Level, layout.Slots[9001].Level);
+        var kids = tree.ChildrenOf(9002).Select(c => layout.Slots[c].Column).ToList();
+        Assert.Equal((kids.Min() + kids.Max()) / 2, layout.Slots[9002].Column);
+    }
+
+    [Fact]
     public void SameAsComparesContent()
     {
         var p1 = Pr(1, "p1", "dev");
