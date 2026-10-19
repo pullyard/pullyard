@@ -98,7 +98,7 @@ public sealed class StackGraphView : Grid
         sessions = matched;
         noteKey = keyFor;
         var noted = next.Nodes.Keys.Where(n => StackNotes.Shared.HasNotes(keyFor(n))).ToHashSet();
-        geometry = new StackGeometry(new StackLayout(next), noted);
+        geometry = new StackGeometry(new Core.Stacks.StackLayout(next), noted);
         if (moved) placed = false;
         else if (previous is not null && geometry.Size != previous.Size) vp = vp.Clamped(geometry.Size, View);
         BuildEdges();
