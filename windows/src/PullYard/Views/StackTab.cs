@@ -102,6 +102,8 @@ public sealed class StackTab : Grid
 
     public void FitGraph() => graph?.Fit();
 
+    public void FocusGraph() => graph?.FocusCurrent();
+
     private static bool IsGraph => Settings.Shared.GetString(Keys.StackView) == "graph";
 
     private StackTree? Tree => model.StackTree;

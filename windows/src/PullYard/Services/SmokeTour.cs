@@ -226,7 +226,9 @@ public static class SmokeTour
         model.Tab = PRTab.Stack;
         await Step("stack zoomed", 1500);
         StackTab.Last?.SetGraph(true);
-        await Step("stack graph zoomed", 2500);
+        await Step("stack graph zoomed", 1000);
+        StackTab.Last?.FocusGraph();
+        await Step("stack graph zoomed focus", 2000);
         await Shot("06h-pr-stack-graph-zoom-150");
         StackTab.Last?.SetGraph(false);
         model.Tab = PRTab.Conversation;
