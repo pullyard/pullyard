@@ -502,7 +502,7 @@ impl StackTab {
             let w = Rc::downgrade(self);
             m.item(&format!("Open #{number}"), move || {
                 if let Some(me) = w.upgrade() {
-                    me.open(number, graph_mode());
+                    me.open(number, !graph_mode());
                 }
             });
         }
