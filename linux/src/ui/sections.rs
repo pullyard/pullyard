@@ -8,6 +8,7 @@ pub fn build(section: Section) -> gtk::Widget {
         Section::Notifications => super::notifications::build(),
         Section::Prs(f) => super::lists::SearchList::build(f.title(), "pr", f.query(), false),
         Section::MyPrsByRepo => super::lists::SearchList::build("My PRs by project", "pr", PrFilter::Mine.query(), true),
+        Section::Stacks => super::stacks::build(),
         Section::Issues(f) => super::lists::SearchList::build(&format!("Issues: {}", f.title()), "issue", f.query(), false),
         Section::Repos => super::repos::list(),
         Section::Projects => super::projects::list(),
@@ -24,6 +25,6 @@ fn forge(section: Section) -> gtk::Widget {
         Section::Notifications => super::forge_inbox::inbox(),
         Section::Repos => super::forge_inbox::repos(),
         Section::Claude => super::claude::column::build(),
-        Section::Projects => super::forge_inbox::unavailable(),
+        Section::Projects | Section::Stacks => super::forge_inbox::unavailable(),
     }
 }

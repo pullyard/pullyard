@@ -184,6 +184,65 @@ pub fn run(_app: Rc<App>) {
     let m = model.clone();
     p.act(move || {
         if let Some(m) = m() {
+            crate::settings::update(|s| {
+                s.stack_view = "list".into();
+                s.stack_support_asked = false;
+            });
+            crate::smoke::inject_stack(&m, 8);
+            m.set_tab(PrTab::Stack);
+        }
+    })
+    .wait(2500)
+    .shot("06b-pr-stack-list");
+    p.act(|| {
+        if let Some(t) = crate::ui::pr::stack_tab::last() {
+            t.set_graph(true);
+        }
+    })
+    .wait(2000)
+    .shot("06c-stack-support")
+    .act(close_dialog)
+    .wait(1200)
+    .shot("06d-pr-stack-graph");
+    let m = model.clone();
+    p.act(move || {
+        let (Some(m), Some(t)) = (m(), crate::ui::pr::stack_tab::last()) else { return };
+        let n = t.current();
+        crate::stack::notes::commit(
+            &m.stack_note_key(n),
+            &[
+                crate::stack::notes::StackNote::new(crate::stack::notes::NoteKind::Decision, "Merge the API client first, then rebase the screens."),
+                crate::stack::notes::StackNote::new(crate::stack::notes::NoteKind::Question, "Do we still need the debounce once stale requests are cancelled?"),
+            ],
+        );
+        t.show_notes(Some(n));
+    })
+    .wait(1500)
+    .shot("06e-pr-stack-notes");
+    p.act(|| {
+        if let Some(t) = crate::ui::pr::stack_tab::last() {
+            t.show_notes(None);
+            if let Some(c) = t.canvas() {
+                c.fit();
+            }
+        }
+    })
+    .wait(1500)
+    .shot("06f-pr-stack-fit");
+    p.act(|| {
+        if let Some(t) = crate::ui::pr::stack_tab::last() {
+            t.set_graph(false);
+        }
+        crate::text_zoom::zoom_in();
+        crate::text_zoom::zoom_in();
+    })
+    .wait(1500)
+    .shot("06g-text-zoom-120")
+    .act(crate::text_zoom::reset)
+    .wait(800);
+    let m = model.clone();
+    p.act(move || {
+        if let Some(m) = m() {
             m.set_tab(PrTab::Conversation);
             crate::ui::pr::sheets::review(m);
         }
@@ -252,6 +311,7 @@ pub fn run(_app: Rc<App>) {
     p.act(move || app::select(Some(Route::Repo(rp)))).wait(8000).shot("14-repo");
     p.act(|| crate::ui::repos::show_blame(crate::brand::env_var("TOUR_BLAME_PATH").unwrap_or_else(|| "Package.swift".into()), None)).wait(7000).shot("14-repo-blame");
     p.act(|| app::set_section(Section::Projects)).wait(5000).shot("15-projects");
+    p.act(|| app::set_section(Section::Stacks)).wait(5000).shot("15b-stacks");
     p.act(|| app::set_section(Section::Claude)).wait(4000).shot("16-claude");
     p.act(|| {
         let ws = app::get().claude.clone();

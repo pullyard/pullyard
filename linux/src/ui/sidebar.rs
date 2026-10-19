@@ -64,6 +64,10 @@ impl Sidebar {
         menu.item("Refresh", || ui_activate("refresh"));
         let mut menu = menu;
         menu.section(None);
+        menu.item("Zoom In", || ui_activate("zoom-in"));
+        menu.item("Zoom Out", || ui_activate("zoom-out"));
+        menu.item("Actual Size", || ui_activate("zoom-reset"));
+        menu.section(None);
         menu.item("Preferences", || ui_activate("preferences"));
         menu.item("Check for Updates…", || ui_activate("check-updates"));
         menu.item("Buy Me a Pizza…", || ui_activate("donate"));
@@ -250,6 +254,7 @@ fn groups() -> Vec<Group> {
                     .iter()
                     .map(|f| (Section::Prs(*f), f.title().to_string(), f.icon(), f.tint()))
                     .chain(std::iter::once((Section::MyPrsByRepo, "My PRs by project".to_string(), "sy-folder-symbolic", "coral")))
+                    .chain(std::iter::once((Section::Stacks, "Stacks".to_string(), "sy-stack-symbolic", "indigo")))
                     .collect(),
             ),
             ("Issues".into(), IssueFilter::ALL.iter().map(|f| (Section::Issues(*f), f.title().to_string(), f.icon(), f.tint())).collect()),

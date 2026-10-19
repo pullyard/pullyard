@@ -25,6 +25,15 @@ impl HtmlView {
             settings.set_enable_developer_extras(crate::brand::env_var("DEBUG").is_some());
             settings.set_enable_back_forward_navigation_gestures(false);
         }
+        view.set_zoom_level(crate::text_zoom::scale());
+        let weak = view.downgrade();
+        crate::text_zoom::on_change(move |z| match weak.upgrade() {
+            Some(v) => {
+                v.set_zoom_level(*z);
+                true
+            }
+            None => false,
+        });
         let me = Rc::new(HtmlView {
             view,
             html: RefCell::new(String::new()),

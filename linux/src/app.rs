@@ -147,6 +147,7 @@ pub enum Section {
     Notifications,
     Prs(PrFilter),
     MyPrsByRepo,
+    Stacks,
     Issues(IssueFilter),
     Repos,
     Projects,
@@ -159,6 +160,7 @@ impl Section {
             Section::Notifications => "notifications".into(),
             Section::Prs(f) => format!("prs/{}", f.key()),
             Section::MyPrsByRepo => "prs/byProject".into(),
+            Section::Stacks => "stacks".into(),
             Section::Issues(f) => format!("issues/{}", f.key()),
             Section::Repos => "repos".into(),
             Section::Projects => "projects".into(),
@@ -171,6 +173,7 @@ impl Section {
             Section::Notifications => "Notifications".into(),
             Section::Prs(f) => f.title().into(),
             Section::MyPrsByRepo => "My PRs by project".into(),
+            Section::Stacks => "Stacks".into(),
             Section::Issues(f) => format!("Issues: {}", f.title()),
             Section::Repos => "Repositories".into(),
             Section::Projects => "Projects".into(),
@@ -288,7 +291,7 @@ pub fn caps_allow(caps: &ForgeCapabilities, s: Section) -> bool {
         Section::Notifications => caps.has_inbox(),
         Section::Repos => caps.repositories,
         Section::Claude => true,
-        Section::Projects => false,
+        Section::Projects | Section::Stacks => false,
     }
 }
 
@@ -498,7 +501,8 @@ fn forget_account(account: Option<&GitAccount>) {
 
 fn reset_session_caches() {
     crate::api::reset_rate_limit();
-    crate::api::endpoints::reset_caches();
+    crate::stack::store::reset();
+    ui::stacks::reset();
     ui::lists::reset_cache();
     ui::forge_list::reset_cache();
 }
@@ -1259,6 +1263,7 @@ impl App {
                 (Some("notifications"), _) => Some(Section::Notifications),
                 (Some("repos"), _) => Some(Section::Repos),
                 (Some("projects"), _) => Some(Section::Projects),
+                (Some("stacks"), _) => Some(Section::Stacks),
                 (Some("claude"), _) => Some(Section::Claude),
                 (Some("prs"), Some("byProject")) => Some(Section::MyPrsByRepo),
                 (Some("prs"), f) => Some(Section::Prs(f.and_then(PrFilter::from_key).unwrap_or(PrFilter::ReviewRequested))),
@@ -1323,6 +1328,9 @@ impl App {
         add("about", &[], Box::new(|| ui::main_view::about()));
         add("donate", &[], Box::new(|| util::open_in_default_browser(brand::DONATE_URL)));
         add("quit", &["<Control>q"], Box::new(quit));
+        add("zoom-in", &["<Control>equal", "<Control>plus", "<Control>KP_Add"], Box::new(crate::text_zoom::zoom_in));
+        add("zoom-out", &["<Control>minus", "<Control>KP_Subtract"], Box::new(crate::text_zoom::zoom_out));
+        add("zoom-reset", &["<Control>0", "<Control>KP_0"], Box::new(crate::text_zoom::reset));
         add(
             "copy-short-link",
             &["<Control><Shift>c"],
@@ -1473,6 +1481,7 @@ pub fn run(smoke: bool) -> glib::ExitCode {
         crate::diagnostics::set_enabled(settings::read(|s| s.diagnostics_enabled));
         crate::icons::install();
         crate::theme::install();
+        crate::text_zoom::install();
         a.install_actions();
     });
     let a = app.clone();

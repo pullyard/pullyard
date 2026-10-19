@@ -1,7 +1,4 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{LazyLock, Mutex};
-use std::time::{Duration, Instant};
+use std::collections::HashSet;
 
 use reqwest::Method;
 use serde::Deserialize;
@@ -9,28 +6,7 @@ use serde_json::{json, Value};
 
 use super::models::*;
 use super::queries as q;
-use super::{ApiError, ApiResult, ErrorKind, GitHubApi};
-
-const STACK_TTL: Duration = Duration::from_secs(600);
-const STACK_CACHE_LIMIT: usize = 200;
-
-static STACK_CACHE: LazyLock<Mutex<HashMap<String, (Instant, Vec<StackPr>)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-static STACK_FIELD_MISSING: AtomicBool = AtomicBool::new(false);
-
-pub struct StackRefs {
-    pub head_owner: String,
-    pub head: String,
-    pub base: String,
-}
-
-fn stack_key(r: &ItemRef, refs: &StackRefs) -> String {
-    format!("{}#{}|{}:{}|{}", r.repo.full(), r.number, refs.head_owner, refs.head, refs.base)
-}
-
-pub fn reset_caches() {
-    STACK_CACHE.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    STACK_FIELD_MISSING.store(false, Ordering::Relaxed);
-}
+use super::{ApiError, ApiResult, GitHubApi};
 
 const PATH_SET: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
 
@@ -96,16 +72,31 @@ impl GitHubApi {
         Ok(r.repository.and_then(|r| r.pull_request))
     }
 
-    pub async fn pull_request_stack(&self, r: &ItemRef) -> ApiResult<Vec<StackPr>> {
+    pub async fn open_stack_nodes(&self, repo: &RepoRef, pages: usize) -> ApiResult<Vec<crate::stack::StackNode>> {
         #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Entry {
-            position: i64,
-            pull_request: StackPr,
+        struct Rollup {
+            state: String,
         }
         #[derive(Deserialize)]
-        struct Stack {
-            entries: Nodes<Entry>,
+        #[serde(rename_all = "camelCase")]
+        struct Commit {
+            abbreviated_oid: String,
+            message_headline: String,
+            #[serde(default)]
+            status_check_rollup: Option<Rollup>,
+        }
+        #[derive(Deserialize)]
+        struct CommitNode {
+            commit: Commit,
+        }
+        #[derive(Deserialize)]
+        struct Login {
+            login: String,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct HeadRepo {
+            name_with_owner: String,
         }
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
@@ -117,116 +108,67 @@ impl GitHubApi {
             head_ref_name: String,
             base_ref_name: String,
             #[serde(default)]
-            stack: Option<Stack>,
+            updated_at: Option<Date>,
+            #[serde(default)]
+            review_decision: Option<String>,
+            #[serde(default)]
+            author: Option<Login>,
+            #[serde(default)]
+            head_repository: Option<HeadRepo>,
+            #[serde(default)]
+            commits: Option<Nodes<CommitNode>>,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PageInfo {
+            has_next_page: bool,
+            #[serde(default)]
+            end_cursor: Option<String>,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Page {
+            page_info: PageInfo,
+            nodes: Vec<Pr>,
         }
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Repo {
-            #[serde(default)]
-            default_branch_ref: Option<Branch>,
-            #[serde(default)]
-            pull_request: Option<Pr>,
+            pull_requests: Page,
         }
         #[derive(Deserialize)]
         struct R {
             repository: Option<Repo>,
         }
-        let vars = json!({ "o": r.repo.owner, "n": r.repo.name, "num": r.number });
-        let resp: R = if STACK_FIELD_MISSING.load(Ordering::Relaxed) {
-            self.graphql("pullRequestStackFallback", &q::pr_stack_fallback(), vars, false).await?
-        } else {
-            match self.graphql("pullRequestStack", &q::pr_stack(), vars.clone(), false).await {
-                Ok(v) => v,
-                Err(e) if e.kind == ErrorKind::Schema => {
-                    STACK_FIELD_MISSING.store(true, Ordering::Relaxed);
-                    self.graphql("pullRequestStackFallback", &q::pr_stack_fallback(), vars, false).await?
-                }
-                Err(e) => return Err(e),
+        let mut out = vec![];
+        let mut after: Option<String> = None;
+        for _ in 0..pages {
+            let r: R = self.graphql("repoStack", q::REPO_STACK, json!({ "o": repo.owner, "n": repo.name, "after": after }), false).await?;
+            let Some(page) = r.repository.map(|r| r.pull_requests) else { break };
+            for pr in page.nodes {
+                let c = pr.commits.and_then(|c| c.nodes.into_iter().next()).map(|n| n.commit);
+                out.push(crate::stack::StackNode {
+                    number: pr.number,
+                    title: pr.title,
+                    state: pr.state,
+                    is_draft: pr.is_draft,
+                    head_ref_name: pr.head_ref_name,
+                    base_ref_name: pr.base_ref_name,
+                    head_repo: pr.head_repository.map(|h| h.name_with_owner),
+                    author: pr.author.map(|a| a.login),
+                    updated_at: pr.updated_at,
+                    review_decision: pr.review_decision,
+                    ci: c.as_ref().and_then(|c| c.status_check_rollup.as_ref().map(|s| s.state.clone())),
+                    commit_oid: c.as_ref().map(|c| c.abbreviated_oid.clone()),
+                    commit_headline: c.map(|c| c.message_headline),
+                });
             }
-        };
-        let Some(repo) = resp.repository else { return Ok(vec![]) };
-        let Some(pr) = repo.pull_request else { return Ok(vec![]) };
-        if let Some(stack) = &pr.stack {
-            if stack.entries.nodes.len() > 1 {
-                let mut entries: Vec<&Entry> = stack.entries.nodes.iter().collect();
-                entries.sort_by_key(|e| e.position);
-                return Ok(entries.into_iter().map(|e| e.pull_request.clone()).collect());
-            }
-        }
-        let main = repo.default_branch_ref.map(|b| b.name);
-        let current = StackPr { number: pr.number, title: pr.title, state: pr.state, is_draft: pr.is_draft, head_ref_name: pr.head_ref_name, base_ref_name: pr.base_ref_name };
-        let mut below: Vec<StackPr> = vec![];
-        let mut above: Vec<StackPr> = vec![];
-        let mut seen: HashSet<i64> = HashSet::from([current.number]);
-        let mut node = current.clone();
-        for _ in 0..8 {
-            if Some(&node.base_ref_name) == main.as_ref() {
-                break;
-            }
-            let (parents, _) = self.stack_neighbors(&r.repo, &node).await?;
-            let parent = parents.iter().find(|p| p.state == "OPEN").or_else(|| parents.first()).cloned();
-            let Some(parent) = parent else { break };
-            if !seen.insert(parent.number) {
-                break;
-            }
-            below.insert(0, parent.clone());
-            node = parent;
-        }
-        node = current.clone();
-        for _ in 0..8 {
-            let (_, children) = self.stack_neighbors(&r.repo, &node).await?;
-            let child = children.iter().find(|p| p.state == "OPEN").or_else(|| children.first()).cloned();
-            let Some(child) = child else { break };
-            if !seen.insert(child.number) {
-                break;
-            }
-            above.push(child.clone());
-            node = child;
-        }
-        let mut chain = below;
-        chain.push(current);
-        chain.extend(above);
-        Ok(if chain.len() > 1 { chain } else { vec![] })
-    }
-
-    fn cached_stack(r: &ItemRef, refs: &StackRefs) -> Option<Vec<StackPr>> {
-        let cache = STACK_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        let (at, stack) = cache.get(&stack_key(r, refs))?;
-        if at.elapsed() >= STACK_TTL {
-            return None;
-        }
-        Some(stack.clone())
-    }
-
-    pub async fn pull_request_stack_cached(&self, r: &ItemRef, refs: &StackRefs, fresh: bool) -> ApiResult<Vec<StackPr>> {
-        if !fresh {
-            if let Some(stack) = Self::cached_stack(r, refs) {
-                return Ok(stack);
+            match page.page_info.end_cursor.filter(|_| page.page_info.has_next_page) {
+                Some(cursor) => after = Some(cursor),
+                None => break,
             }
         }
-        let stack = self.pull_request_stack(r).await?;
-        let mut cache = STACK_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        if cache.len() >= STACK_CACHE_LIMIT {
-            cache.retain(|_, (at, _)| at.elapsed() < STACK_TTL);
-        }
-        cache.insert(stack_key(r, refs), (Instant::now(), stack.clone()));
-        Ok(stack)
-    }
-
-    async fn stack_neighbors(&self, repo: &RepoRef, pr: &StackPr) -> ApiResult<(Vec<StackPr>, Vec<StackPr>)> {
-        #[derive(Deserialize)]
-        struct Repo {
-            parents: Nodes<StackPr>,
-            children: Nodes<StackPr>,
-        }
-        #[derive(Deserialize)]
-        struct R {
-            repository: Option<Repo>,
-        }
-        let r: R = self
-            .graphql("pullRequestStackNeighbors", &q::pr_stack_neighbors(), json!({ "o": repo.owner, "n": repo.name, "head": pr.head_ref_name, "base": pr.base_ref_name }), false)
-            .await?;
-        Ok(r.repository.map(|r| (r.parents.nodes, r.children.nodes)).unwrap_or_default())
+        Ok(out)
     }
 
     pub async fn badges(&self) -> ApiResult<BadgeResponse> {

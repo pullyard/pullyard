@@ -76,6 +76,9 @@ pub struct Settings {
     pub window_width: i32,
     pub window_height: i32,
     pub window_maximized: bool,
+    pub stack_view: String,
+    pub stack_support_asked: bool,
+    pub text_zoom: f64,
 }
 
 impl Default for Settings {
@@ -112,6 +115,9 @@ impl Default for Settings {
             window_width: 1380,
             window_height: 860,
             window_maximized: false,
+            stack_view: "list".into(),
+            stack_support_asked: false,
+            text_zoom: 1.0,
         }
     }
 }

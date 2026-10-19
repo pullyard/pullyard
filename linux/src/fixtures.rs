@@ -157,3 +157,40 @@ pub const CI_LOG_GO: &str = "2026-10-16T08:00:01.0000000Z ##[group]Run actions/s
 2026-10-16T08:00:15.1000000Z ##[error]Process completed with exit code 1.
 2026-10-16T08:00:16.0000000Z Post job cleanup.
 ";
+
+pub fn stack_around(current: &crate::stack::StackNode, repo: &str, extra: usize) -> Vec<crate::stack::StackNode> {
+    use crate::stack::StackNode;
+    let now = chrono::Utc::now();
+    let repo = Some(repo.to_string());
+    let node = |number: i64, title: &str, head: &str, base: &str, ci: Option<&str>, review: Option<&str>, draft: bool| StackNode {
+        number,
+        title: title.to_string(),
+        state: "OPEN".into(),
+        is_draft: draft,
+        head_ref_name: head.to_string(),
+        base_ref_name: base.to_string(),
+        head_repo: repo.clone(),
+        author: Some("octocat".into()),
+        updated_at: Some(now - chrono::Duration::minutes(number)),
+        review_decision: review.map(|r| r.to_string()),
+        ci: ci.map(|c| c.to_string()),
+        commit_oid: Some(format!("{:07x}", 0xa1b2c3 + number)),
+        commit_headline: Some(format!("Update {title}")),
+    };
+    let head = current.head_ref_name.clone();
+    let base = current.base_ref_name.clone();
+    let start = 9000;
+    let mut out = vec![
+        node(start, "COM-1640 Shared API client", &base, "main", Some("SUCCESS"), Some("APPROVED"), false),
+        StackNode { updated_at: Some(now), head_repo: repo.clone(), ..current.clone() },
+        node(start + 1, "Search endpoint", &format!("{head}-api"), &head, Some("PENDING"), None, false),
+        node(start + 2, "PAY-7 Search screen", &format!("{head}-ui"), &head, Some("FAILURE"), None, false),
+        node(start + 3, "Cancel stale searches", &format!("{head}-cancel"), &format!("{head}-api"), Some("SUCCESS"), Some("CHANGES_REQUESTED"), false),
+        node(start + 4, "Debounce typing", &format!("{head}-debounce"), &format!("{head}-cancel"), None, None, true),
+    ];
+    for i in 0..extra {
+        let n = start + 10 + i as i64;
+        out.push(node(n, &format!("Search screen part {}", i + 1), &format!("{head}-ui-{}", i + 1), &format!("{head}-ui"), if i % 3 == 0 { Some("SUCCESS") } else { None }, None, false));
+    }
+    out
+}

@@ -4,6 +4,7 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::api::models::SearchItem;
@@ -27,6 +28,14 @@ pub struct Entry {
     pub cursor: Option<String>,
     pub has_more: bool,
     pub items: Vec<SearchItem>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ValueEntry<T> {
+    key: String,
+    saved_at: DateTime<Utc>,
+    value: T,
 }
 
 fn enabled() -> bool {
@@ -91,6 +100,47 @@ pub fn clear(login: &str) {
     });
 }
 
+fn values_dir(dir: &Path) -> PathBuf {
+    dir.join("values")
+}
+
+pub async fn load_value<T: DeserializeOwned + Send + 'static>(login: &str, key: &str) -> Option<(T, DateTime<Utc>)> {
+    if !enabled() {
+        return None;
+    }
+    let dir = values_dir(&account_dir(login)?);
+    let key = key.to_string();
+    crate::rt::blocking(move || read_value(&dir, &key, Utc::now())).await
+}
+
+pub fn store_value<T: Serialize + Send + 'static>(login: &str, key: &str, value: T) {
+    if !enabled() {
+        return;
+    }
+    let Some(account) = account_key(login) else { return };
+    let dir = values_dir(&root().join(&account));
+    let epoch = epochs().get(&account).copied().unwrap_or(0);
+    let entry = ValueEntry { key: key.to_string(), saved_at: Utc::now(), value };
+    crate::rt::runtime().spawn_blocking(move || {
+        let guard = epochs();
+        if guard.get(&account).copied().unwrap_or(0) != epoch {
+            return;
+        }
+        let Ok(data) = serde_json::to_vec(&entry) else { return };
+        if write_atomic(&dir, &file_name(&entry.key), &data).is_ok() {
+            prune(&dir, SystemTime::now());
+        }
+        drop(guard);
+    });
+}
+
+fn read_value<T: DeserializeOwned>(dir: &Path, key: &str, now: DateTime<Utc>) -> Option<(T, DateTime<Utc>)> {
+    let data = std::fs::read(dir.join(file_name(key))).ok()?;
+    let entry: ValueEntry<T> = serde_json::from_slice(&data).ok()?;
+    let age = now.signed_duration_since(entry.saved_at).to_std().unwrap_or_default();
+    (entry.key == key && age <= MAX_AGE).then_some((entry.value, entry.saved_at))
+}
+
 fn store_in(dir: &Path, key: &str, epoch: u64, entry: &Entry) {
     let guard = epochs();
     if guard.get(key).copied().unwrap_or(0) != epoch || !should_write(dir, entry, Utc::now()) {
@@ -117,12 +167,15 @@ fn read_entry(dir: &Path, query: &str, now: DateTime<Utc>) -> Option<Entry> {
 }
 
 fn write_entry(dir: &Path, entry: &Entry) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
     let data = serde_json::to_vec(entry).map_err(std::io::Error::other)?;
-    let name = file_name(&entry.query);
+    write_atomic(dir, &file_name(&entry.query), &data)
+}
+
+fn write_atomic(dir: &Path, name: &str, data: &[u8]) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
     let tmp = dir.join(format!(".{name}.{}.tmp", uuid::Uuid::new_v4().simple()));
     let written = std::fs::File::create(&tmp).and_then(|mut f| {
-        std::io::Write::write_all(&mut f, &data)?;
+        std::io::Write::write_all(&mut f, data)?;
         f.sync_all()
     });
     match written.and_then(|_| std::fs::rename(&tmp, dir.join(name))) {
@@ -254,6 +307,20 @@ mod tests {
         assert!(read_entry(&dir, "q", Utc::now()).is_none());
         store_in(&dir, &key, before + 1, &entry("q", Utc::now()));
         assert!(read_entry(&dir, "q", Utc::now()).is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn values_round_trip() {
+        let dir = temp_dir();
+        let now = Utc::now();
+        let entry = ValueEntry { key: "stack|github.com|o/r".to_string(), saved_at: now, value: vec![1, 2, 3] };
+        write_atomic(&dir, &file_name(&entry.key), &serde_json::to_vec(&entry).unwrap()).unwrap();
+        let (back, saved): (Vec<i32>, _) = read_value(&dir, "stack|github.com|o/r", now).unwrap();
+        assert_eq!(back, vec![1, 2, 3]);
+        assert_eq!(saved, now);
+        assert!(read_value::<Vec<i32>>(&dir, "stack|github.com|o/other", now).is_none());
+        assert!(read_value::<Vec<i32>>(&dir, "stack|github.com|o/r", now + chrono::Duration::days(8)).is_none());
         let _ = std::fs::remove_dir_all(dir);
     }
 

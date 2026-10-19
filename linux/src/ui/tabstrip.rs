@@ -82,6 +82,14 @@ impl TabStrip {
         self.listeners.borrow_mut().push(Rc::new(f));
     }
 
+    pub fn set_visible(&self, id: &str, visible: bool) {
+        for (i, b, _) in &self.buttons {
+            if *i == id {
+                b.set_visible(visible);
+            }
+        }
+    }
+
     pub fn set_badge(&self, id: &str, text: Option<&str>, color: Option<&str>) {
         for (i, _, badge) in &self.buttons {
             if *i == id {

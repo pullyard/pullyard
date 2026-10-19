@@ -8,7 +8,8 @@ use crate::api::GitHubApi;
 use crate::app::{self, App, IssueFilter, PrFilter, Section};
 use crate::forge::ForgeCapabilities;
 use crate::git_accounts::GitProvider;
-use crate::ui::pr::model::{Change, PrModel};
+use crate::ui::pr::model::{Change, PrModel, PrTab};
+use crate::ui::pr::stack_tab;
 
 fn step(delay_ms: u64, name: &'static str, f: impl FnOnce() + 'static) {
     glib::timeout_add_local_once(Duration::from_millis(delay_ms), move || {
@@ -18,6 +19,26 @@ fn step(delay_ms: u64, name: &'static str, f: impl FnOnce() + 'static) {
 }
 
 const DIFF_ROUNDS: usize = 12;
+
+pub fn rss_kb() -> i64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| s.lines().find(|l| l.starts_with("VmRSS:")).and_then(|l| l.split_whitespace().nth(1).and_then(|v| v.parse().ok())))
+        .unwrap_or(-1)
+}
+
+pub fn inject_stack(m: &PrModel, extra: usize) -> usize {
+    let Some(mut current) = m.current_stack_node() else { return 0 };
+    let repo = m.r.repo.full();
+    let nodes = crate::fixtures::stack_around(&current, &repo, extra);
+    current.head_repo = Some(repo.clone());
+    crate::stack::store::seed(&m.api, &m.r.repo, nodes.clone());
+    let tree = crate::stack::StackTree::build(&current, &nodes, &repo, crate::stack::NODE_LIMIT);
+    let count = tree.as_ref().map(|t| t.count()).unwrap_or(0);
+    *m.stack.borrow_mut() = tree;
+    m.emit(Change::Stack);
+    count
+}
 
 fn diff_round(m: Rc<PrModel>, middle: String, i: usize, mut sync: Vec<f64>, mut frame: Vec<f64>) {
     if i == DIFF_ROUNDS {
@@ -74,6 +95,7 @@ pub fn run(_app: Rc<App>) {
         Section::Prs(PrFilter::Mentioned),
         Section::Prs(PrFilter::Reviewed),
         Section::MyPrsByRepo,
+        Section::Stacks,
         Section::Issues(IssueFilter::Assigned),
         Section::Issues(IssueFilter::Mine),
         Section::Issues(IssueFilter::Mentioned),
@@ -140,6 +162,90 @@ pub fn run(_app: Rc<App>) {
     step(next(400), "commits tab", move || pr().set_tab(crate::ui::pr::model::PrTab::Commits));
     step(next(300), "checks tab", move || pr().set_tab(crate::ui::pr::model::PrTab::Checks));
     step(next(300), "conversation tab", move || pr().set_tab(crate::ui::pr::model::PrTab::Conversation));
+    step(next(300), "stack fixture", move || {
+        let n = inject_stack(&pr(), 40);
+        println!("smoke: stack tree {n} nodes, rss before stack tab {} kB", rss_kb());
+    });
+    step(next(300), "stack tab list", move || {
+        crate::settings::update(|s| {
+            s.stack_view = "list".into();
+            s.stack_support_asked = true;
+        });
+        pr().set_tab(PrTab::Stack);
+    });
+    step(next(700), "stack list rss", || println!("smoke: stack list open, rss {} kB", rss_kb()));
+    step(next(200), "stack notes", move || {
+        let Some(t) = stack_tab::last() else { return };
+        let n = t.current();
+        crate::stack::notes::commit(&pr().stack_note_key(n), &[crate::stack::notes::StackNote::new(crate::stack::notes::NoteKind::Decision, "Merge the API first")]);
+        t.show_notes(Some(n));
+    });
+    step(next(400), "stack notes close", || {
+        if let Some(t) = stack_tab::last() {
+            t.show_notes(None);
+        }
+    });
+    step(next(300), "stack graph", || {
+        if let Some(t) = stack_tab::last() {
+            t.set_graph(true);
+        }
+    });
+    step(next(800), "stack graph rss", || {
+        let cards = stack_tab::last().and_then(|t| t.canvas()).map(|c| c.card_count()).unwrap_or(0);
+        println!("smoke: stack graph open, {cards} cards built, rss {} kB", rss_kb());
+    });
+    step(next(200), "stack zoom out", || {
+        if let Some(c) = stack_tab::last().and_then(|t| t.canvas()) {
+            c.zoom_by(-0.3);
+        }
+    });
+    step(next(400), "stack fit", || {
+        if let Some(c) = stack_tab::last().and_then(|t| t.canvas()) {
+            c.fit();
+        }
+    });
+    step(next(500), "stack compact cards", || {
+        let cards = stack_tab::last().and_then(|t| t.canvas()).map(|c| c.card_count()).unwrap_or(0);
+        println!("smoke: stack graph fitted, {cards} cards built, rss {} kB", rss_kb());
+    });
+    step(next(200), "stack focus current", || {
+        if let Some(c) = stack_tab::last().and_then(|t| t.canvas()) {
+            c.focus_current();
+            c.actual_size();
+        }
+    });
+    step(next(500), "stack open from graph", || {
+        if let Some(t) = stack_tab::last() {
+            t.open(9001, false);
+        }
+    });
+    step(next(800), "stack list again", move || {
+        app::select(Some(Route::Pr(ItemRef { repo: RepoRef::new("octocat", "Hello-World"), number: 1 })));
+        pr().set_tab(PrTab::Stack);
+        if let Some(t) = stack_tab::last() {
+            t.set_graph(false);
+        }
+    });
+    step(next(500), "stack open in place", || {
+        if let Some(t) = stack_tab::last() {
+            t.open(9002, true);
+        }
+    });
+    step(next(1500), "stack unload", move || {
+        app::select(Some(Route::Pr(ItemRef { repo: RepoRef::new("octocat", "Hello-World"), number: 1 })));
+        pr().set_tab(PrTab::Conversation);
+    });
+    step(next(500), "stack unloaded rss", || println!("smoke: stack tab closed, rss {} kB", rss_kb()));
+    step(next(200), "stack support dialog", crate::ui::pr::stack_tab::ask_support);
+    step(next(300), "text zoom", || {
+        crate::text_zoom::zoom_in();
+        crate::text_zoom::zoom_in();
+        println!("smoke: text zoom {:.1}", crate::text_zoom::scale());
+        crate::text_zoom::zoom_out();
+        crate::text_zoom::reset();
+    });
+    step(next(300), "stacks section", || app::set_section(Section::Stacks));
+    step(next(400), "back to my prs", || app::set_section(Section::Prs(PrFilter::Mine)));
     step(next(300), "review sheet", move || crate::ui::pr::sheets::review(pr()));
     step(next(300), "merge sheet", move || crate::ui::pr::sheets::merge(pr()));
     step(next(300), "edit sheet", move || crate::ui::pr::sheets::edit(pr()));

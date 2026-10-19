@@ -1,6 +1,9 @@
 pub mod files;
 pub mod model;
 pub mod sheets;
+pub mod stack_graph;
+pub mod stack_notes;
+pub mod stack_tab;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -17,6 +20,7 @@ use super::tabstrip::{TabItem, TabStrip};
 use super::widgets::*;
 use crate::api::models::*;
 use crate::api::queries as q;
+use crate::stack::{StackNode, StackTree};
 use crate::{app, util};
 
 pub struct PrPage {
@@ -29,13 +33,14 @@ pub struct PrPage {
     header_box: gtk::Box,
     banners: gtk::Box,
     tabs: Rc<TabStrip>,
+    tabs_area: gtk::Stack,
     tab_stack: gtk::Stack,
     body: gtk::Stack,
     conversation: RefCell<Option<Rc<Conversation>>>,
     commits: RefCell<Option<gtk::ListBox>>,
     checks: RefCell<Option<gtk::ListBox>>,
     files: RefCell<Option<Rc<files::FilesTab>>>,
-    stack_expanded: Cell<bool>,
+    stack_tab: RefCell<Option<Rc<stack_tab::StackTab>>>,
     rerequested: RefCell<Option<Vec<String>>>,
     sending_rerequest: Cell<bool>,
     replaced: Cell<bool>,
@@ -67,7 +72,9 @@ impl PrPage {
             TabItem { id: "commits", title: "Commits".into(), icon: "sy-commit-symbolic" },
             TabItem { id: "checks", title: "Checks".into(), icon: "sy-checklist-symbolic" },
             TabItem { id: "files", title: "Files changed".into(), icon: "sy-file-symbolic" },
+            TabItem { id: "stack", title: "Stack".into(), icon: "sy-stack-symbolic" },
         ]);
+        tabs.set_visible("stack", false);
         let tab_stack = gtk::Stack::new();
         tab_stack.set_transition_type(gtk::StackTransitionType::Crossfade);
         tab_stack.set_transition_duration(120);
@@ -76,7 +83,11 @@ impl PrPage {
         main.append(&header_box);
         main.append(&banners);
         tabs.widget.set_margin_top(6);
-        main.append(&tabs.widget);
+        let tabs_area = gtk::Stack::new();
+        tabs_area.set_vhomogeneous(false);
+        tabs_area.add_named(&tabs.widget, Some("tabs"));
+        tabs_area.add_named(&tab_placeholder(), Some("placeholder"));
+        main.append(&tabs_area);
         main.append(&line());
         main.append(&tab_stack);
         let body = gtk::Stack::new();
@@ -109,13 +120,14 @@ impl PrPage {
             header_box,
             banners,
             tabs,
+            tabs_area,
             tab_stack,
             body,
             conversation: RefCell::new(None),
             commits: RefCell::new(None),
             checks: RefCell::new(None),
             files: RefCell::new(None),
-            stack_expanded: Cell::new(false),
+            stack_tab: RefCell::new(None),
             rerequested: RefCell::new(None),
             sending_rerequest: Cell::new(false),
             replaced: Cell::new(false),
@@ -194,7 +206,7 @@ impl PrPage {
                 self.busy.set_visible(self.model.busy.get());
                 self.status.update(self.model.last_updated.get(), self.model.loading.get(), self.model.refresh_error.borrow().clone());
             }
-            Change::Stack => self.render_header(),
+            Change::Stack => self.on_stack(),
             Change::Tab => self.show_tab(),
             Change::ScrollBottom => {
                 if let Some(c) = self.conversation.borrow().as_ref() {
@@ -262,14 +274,59 @@ impl PrPage {
                     *self.files.borrow_mut() = Some(f);
                     w
                 }
+                PrTab::Stack => {
+                    let tree = self.model.stack.borrow().clone();
+                    match tree {
+                        Some(tree) => {
+                            let t = stack_tab::StackTab::new(self.model.clone(), tree);
+                            let w = t.widget.clone().upcast();
+                            *self.stack_tab.borrow_mut() = Some(t);
+                            w
+                        }
+                        None => loading(),
+                    }
+                }
             };
             self.tab_stack.add_named(&w, Some(tab.id()));
             self.render_tabs();
         }
         self.tab_stack.set_visible_child_name(tab.id());
+        if tab != PrTab::Stack {
+            self.unload_stack();
+        }
         if tab == PrTab::Files {
             self.model.ensure_files();
         }
+    }
+
+    fn unload_stack(&self) {
+        if let Some(t) = self.stack_tab.borrow_mut().take() {
+            t.close();
+        }
+        if let Some(w) = self.tab_stack.child_by_name(PrTab::Stack.id()) {
+            self.tab_stack.remove(&w);
+        }
+    }
+
+    fn on_stack(self: &Rc<Self>) {
+        self.render_header();
+        self.render_stack_badge();
+        let tree = self.model.stack.borrow().clone();
+        let tab = self.stack_tab.borrow().clone();
+        match (tab, tree) {
+            (Some(t), Some(tree)) => t.update(tree),
+            (None, Some(_)) if self.model.tab.get() == PrTab::Stack => {
+                self.unload_stack();
+                self.show_tab();
+            }
+            _ => {}
+        }
+    }
+
+    fn render_stack_badge(&self) {
+        let count = self.model.stack.borrow().as_ref().map(|t| t.count());
+        self.tabs.set_visible("stack", count.is_some());
+        self.tabs.set_badge("stack", count.map(|c| c.to_string()).as_deref(), None);
     }
 
     fn build_conversation(self: &Rc<Self>) -> Rc<Conversation> {
@@ -375,12 +432,15 @@ impl PrPage {
                 }
                 self.body.add_named(&err, Some("error"));
                 self.body.set_visible_child_name("error");
+            } else if let Some(node) = self.model.preview.borrow().clone().filter(|_| self.model.tab.get() == PrTab::Stack && self.model.stack.borrow().is_some()) {
+                self.render_preview(&node);
             } else {
                 self.body.set_visible_child_name("loading");
             }
             return;
         };
         self.body.set_visible_child_name("main");
+        self.tabs_area.set_visible_child_name("tabs");
         self.title.set_title(&pr.title);
         self.title.set_subtitle(&format!("{} #{}", self.model.r.repo.full(), pr.number));
         if let Some(page) = self.page.upgrade() {
@@ -394,6 +454,7 @@ impl PrPage {
 
     fn render_tabs(self: &Rc<Self>) {
         let _span = crate::diagnostics::ui_span("pr.tabs");
+        self.render_stack_badge();
         let pr = self.model.pr.borrow().clone();
         let Some(pr) = pr else { return };
         let unresolved = pr.review_threads.nodes.iter().filter(|t| !t.is_resolved && !t.is_outdated).count();
@@ -628,9 +689,9 @@ impl PrPage {
             }
             self.header_box.append(&row);
         }
-        let stack = self.model.stack.borrow().clone();
-        if stack.len() > 1 {
-            self.header_box.append(&self.stack_strip(&stack, pr.number));
+        let tree = self.model.stack.borrow().clone();
+        if let Some(tree) = tree {
+            self.header_box.append(&stack_strip(&self.model, &tree, true));
         }
         if let Some(bar) = merge_status_bar(&self.model, &pr, Rc::new({
             let m = self.model.clone();
@@ -640,84 +701,46 @@ impl PrPage {
         }
     }
 
-    fn stack_strip(self: &Rc<Self>, stack: &[StackPr], current: i64) -> gtk::Box {
-        let index = stack.iter().position(|s| s.number == current).unwrap_or(0);
-        let b = vbox(0);
-        b.add_css_class("stack-strip");
-        let head = hbox(8);
-        margins(&head, 6, 10, 6, 10);
-        head.append(&colored_icon("sy-stack-symbolic", 14, "indigo"));
-        head.append(&label_with("Stack", &["sy-bold", "sy-text"]));
-        head.append(&label_with(&format!("{} of {}", index + 1, stack.len()), &["sy-muted"]));
-        let pills = hbox(3);
-        for s in stack {
-            let p = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-            p.set_size_request(if s.number == current { 18 } else { 10 }, 5);
-            p.set_valign(gtk::Align::Center);
-            p.add_css_class(&format!("edge-{}", if s.number == current { "indigo" } else { s.visual_state().css() }));
-            if s.number != current {
-                p.set_opacity(0.55);
-            }
-            pills.append(&p);
+    fn render_preview(self: &Rc<Self>, node: &StackNode) {
+        self.body.set_visible_child_name("main");
+        self.tabs_area.set_visible_child_name("placeholder");
+        self.title.set_title(&node.title);
+        self.title.set_subtitle(&format!("{} #{}", self.model.r.repo.full(), node.number));
+        if let Some(page) = self.page.upgrade() {
+            page.set_title(&node.title);
         }
-        head.append(&pills);
-        head.append(&spacer());
-        let repo = self.model.r.repo.clone();
-        let nav = |s: &StackPr, icon_name: &str, help: &str| {
-            let btn = gtk::Button::new();
-            btn.add_css_class("flat");
-            btn.set_child(Some(&icon_label_content(icon_name, &format!("#{}", s.number))));
-            btn.set_tooltip_text(Some(&format!("{help}: #{} {}", s.number, s.title)));
-            let r = ItemRef { repo: repo.clone(), number: s.number };
-            btn.connect_clicked(move |_| app::open(Route::Pr(r.clone()), false));
-            btn
-        };
-        if index > 0 {
-            head.append(&nav(&stack[index - 1], "sy-down-symbolic", "Down the stack"));
+        clear(&self.header_box);
+        clear(&self.banners);
+        let top = hbox(8);
+        top.append(&wrap_label(&node.title, &["sy-title", "sy-text"]));
+        top.append(&label_with(&format!("#{}", node.number), &["sy-title-num"]));
+        let spin = spinner(16);
+        spin.set_valign(gtk::Align::Center);
+        top.append(&spin);
+        self.header_box.append(&top);
+        let meta = hbox(8);
+        meta.append(&state_badge(node.visual_state(), false));
+        meta.append(&label_with(node.author.as_deref().unwrap_or(""), &["sy-bold", "sy-text"]));
+        meta.append(&branch_chip(&node.base_ref_name, "sky"));
+        meta.append(&label_with("←", &["sy-dim"]));
+        meta.append(&branch_chip(&node.head_ref_name, "violet"));
+        meta.append(&spacer());
+        meta.append(&shimmer(70, 12));
+        self.header_box.append(&meta);
+        let tree = self.model.stack.borrow().clone();
+        if let Some(tree) = tree {
+            self.header_box.append(&stack_strip(&self.model, &tree, false));
         }
-        if index + 1 < stack.len() {
-            head.append(&nav(&stack[index + 1], "sy-up-symbolic", "Up the stack"));
+        for _ in 0..2 {
+            let bar = shimmer(-1, 30);
+            bar.set_hexpand(true);
+            bar.add_css_class("wide");
+            self.header_box.append(&bar);
         }
-        let expand = gtk::ToggleButton::new();
-        expand.set_icon_name("pan-down-symbolic");
-        expand.add_css_class("flat");
-        expand.set_active(self.stack_expanded.get());
-        head.append(&expand);
-        b.append(&head);
-        let list = vbox(0);
-        list.set_visible(self.stack_expanded.get());
-        for (i, s) in stack.iter().enumerate().rev() {
-            let row = hbox(8);
-            margins(&row, 4, 10, 4, 10);
-            if s.number == current {
-                row.add_css_class("bg-indigo");
-            }
-            row.append(&label_with(&(i + 1).to_string(), &["sy-dim", "sy-small"]));
-            row.append(&state_badge(s.visual_state(), true));
-            row.append(&label_with(&format!("#{}", s.number), &["sy-muted"]));
-            let t = ellipsized(&s.title, &["sy-text"]);
-            if s.number == current {
-                t.add_css_class("sy-bold");
-            }
-            t.set_hexpand(true);
-            row.append(&t);
-            row.append(&chip(&s.head_ref_name, if s.number == current { "violet" } else { "slate" }, Some("sy-branch-symbolic"), true));
-            if s.number != current {
-                let r = ItemRef { repo: repo.clone(), number: s.number };
-                on_click_widget(&row, move || app::open(Route::Pr(r.clone()), false));
-            }
-            list.append(&row);
+        self.render_stack_badge();
+        if self.tab_stack.child_by_name(PrTab::Stack.id()).is_none() {
+            self.show_tab();
         }
-        b.append(&list);
-        let w = Rc::downgrade(self);
-        let l = list.clone();
-        expand.connect_toggled(move |t| {
-            l.set_visible(t.is_active());
-            if let Some(me) = w.upgrade() {
-                me.stack_expanded.set(t.is_active());
-            }
-        });
-        b
     }
 
     fn render_banners(self: &Rc<Self>, pr: &PullRequestDetail) {
@@ -1091,4 +1114,107 @@ pub fn rereview_banner(model: &Rc<PrModel>, pr: &PullRequestDetail, inset: bool,
     btn.connect_clicked(move |_| send(logins.clone()));
     b.append(&btn);
     Some(b)
+}
+
+fn shimmer(width: i32, height: i32) -> gtk::Box {
+    let b = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    b.add_css_class("shimmer");
+    b.set_size_request(width, height);
+    b.set_valign(gtk::Align::Center);
+    b
+}
+
+fn tab_placeholder() -> gtk::Box {
+    let b = hbox(14);
+    margins(&b, 10, 20, 10, 20);
+    for w in [96, 80, 70, 110] {
+        b.append(&shimmer(w, 14));
+    }
+    let stack = hbox(6);
+    stack.append(&icon("sy-stack-symbolic", 14));
+    stack.append(&label_with("Stack", &["sy-bold", "sy-text"]));
+    b.append(&stack);
+    b
+}
+
+pub fn stack_strip(model: &Rc<PrModel>, tree: &StackTree, interactive: bool) -> gtk::Box {
+    let line = tree.line();
+    let index = line.iter().position(|n| n.number == tree.current).unwrap_or(0);
+    let ups: Vec<StackNode> = tree.kids(tree.current).iter().filter_map(|n| tree.nodes.get(n).cloned()).collect();
+    let b = hbox(6);
+    b.add_css_class("stack-strip");
+    let show = gtk::Button::new();
+    show.add_css_class("flat");
+    show.set_hexpand(true);
+    let c = hbox(8);
+    c.append(&colored_icon("sy-stack-symbolic", 14, "indigo"));
+    c.append(&label_with("Stack", &["sy-bold", "sy-text"]));
+    c.append(&label_with(&format!("{} of {}", index + 1, line.len()), &["sy-muted"]));
+    let pills = hbox(3);
+    for s in &line {
+        let p = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        let current = s.number == tree.current;
+        p.set_size_request(if current { 18 } else { 10 }, 5);
+        p.set_valign(gtk::Align::Center);
+        p.add_css_class(&format!("edge-{}", if current { "indigo" } else { s.visual_state().css() }));
+        if !current {
+            p.set_opacity(0.55);
+        }
+        p.set_tooltip_text(Some(&format!("#{} {}", s.number, s.title)));
+        pills.append(&p);
+    }
+    c.append(&pills);
+    if tree.count() > line.len() {
+        let extra = tree.count() - line.len();
+        let l = label_with(&format!("+{extra}"), &["sy-muted", "sy-small"]);
+        l.set_tooltip_text(Some(&util::plural(extra as i64, "more pull request on another branch of the stack", "more pull requests on other branches of the stack")));
+        c.append(&l);
+    }
+    c.append(&spacer());
+    show.set_child(Some(&c));
+    show.set_tooltip_text(Some("Show the whole stack"));
+    let m = model.clone();
+    show.connect_clicked(move |_| {
+        if interactive {
+            m.set_tab(PrTab::Stack);
+        }
+    });
+    b.append(&show);
+    let repo = model.r.repo.clone();
+    let nav = |s: &StackNode, icon_name: &str, help: &str| {
+        let btn = gtk::Button::new();
+        btn.add_css_class("flat");
+        btn.set_child(Some(&icon_label_content(icon_name, &format!("#{}", s.number))));
+        btn.set_tooltip_text(Some(&format!("{help}: #{} {}", s.number, s.title)));
+        let r = ItemRef { repo: repo.clone(), number: s.number };
+        btn.connect_clicked(move |_| app::open(Route::Pr(r.clone()), false));
+        btn
+    };
+    if let Some(down) = tree.parent.get(&tree.current).and_then(|p| tree.nodes.get(p)) {
+        b.append(&nav(down, "sy-down-symbolic", "Down the stack"));
+    }
+    if ups.len() == 1 {
+        b.append(&nav(&ups[0], "sy-up-symbolic", "Up the stack"));
+    } else if ups.len() > 1 {
+        let menu = Menu::new();
+        for s in &ups {
+            let r = ItemRef { repo: repo.clone(), number: s.number };
+            menu.item(&format!("#{} {}", s.number, s.title), move || app::open(Route::Pr(r.clone()), false));
+        }
+        let mb = gtk::MenuButton::new();
+        mb.add_css_class("flat");
+        mb.set_child(Some(&icon_label_content("sy-up-symbolic", &ups.len().to_string())));
+        mb.set_tooltip_text(Some(&format!("Up the stack: {} pull requests are stacked on this one", ups.len())));
+        menu.apply_to(&mb);
+        b.append(&mb);
+    }
+    let more = icon_button("go-next-symbolic", "Show the whole stack");
+    let m = model.clone();
+    more.connect_clicked(move |_| {
+        if interactive {
+            m.set_tab(PrTab::Stack);
+        }
+    });
+    b.append(&more);
+    b
 }
