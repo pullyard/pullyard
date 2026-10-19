@@ -427,7 +427,7 @@ public sealed class StackListPane : Grid
     }
 }
 
-public sealed class StackNotesPanel : Border
+public sealed class StackNotesPanel : Grid
 {
     private readonly string key;
     private readonly StackNotes store;
@@ -468,7 +468,7 @@ public sealed class StackNotesPanel : Border
         ((FrameworkElement)foot.Children[1]).HorizontalAlignment = HorizontalAlignment.Right;
         foot.ColumnDefinitions[1].Width = Ui.Star;
 
-        Child = Ui.V(10, head, scroll, foot);
+        Children.Add(Ui.V(10, head, scroll, foot));
         Width = 340;
         Padding = new Thickness(14);
         CornerRadius = new CornerRadius(10);

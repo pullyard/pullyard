@@ -63,7 +63,7 @@ public sealed class StackGraphView : Grid
         content.RenderTransform = contentTransform;
         TextZoom.Exclude(content);
         Children.Add(content);
-        var controls = Controls();
+        var controls = ZoomControls();
         controls.HorizontalAlignment = HorizontalAlignment.Right;
         controls.VerticalAlignment = VerticalAlignment.Bottom;
         controls.Margin = new Thickness(12);
@@ -417,7 +417,7 @@ public sealed class StackGraphView : Grid
         owner.Open(number, false);
     }
 
-    private FrameworkElement Controls()
+    private FrameworkElement ZoomControls()
     {
         Button Icon(string glyph, string tip, Action action)
         {
