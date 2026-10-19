@@ -18,6 +18,10 @@ namespace PullYard.Views;
 
 public sealed class StackTab : Grid
 {
+    private static WeakReference<StackTab>? last;
+
+    public static StackTab? Last => last is not null && last.TryGetTarget(out var t) ? t : null;
+
     private readonly AppViewModel app = AppViewModel.Shared;
     private readonly PRDetailViewModel model;
     private readonly StackNotes notes = StackNotes.Shared;
@@ -76,6 +80,7 @@ public sealed class StackTab : Grid
 
         Loaded += (_, _) =>
         {
+            last = new WeakReference<StackTab>(this);
             if (subscribed) return;
             subscribed = true;
             model.PropertyChanged += OnModel;
@@ -90,6 +95,12 @@ public sealed class StackTab : Grid
         };
         Render();
     }
+
+    public int? CurrentNumber => Tree?.Current;
+
+    public void SetGraph(bool on) => modes.SelectedItem = on ? graphItem : listItem;
+
+    public void FitGraph() => graph?.Fit();
 
     private static bool IsGraph => Settings.Shared.GetString(Keys.StackView) == "graph";
 

@@ -290,6 +290,11 @@ public sealed class StackGraphView : Grid
 
     private StackPoint Middle => new(size.Width / 2, size.Height / 2);
 
+    public void Fit()
+    {
+        if (geometry is not null) Set(StackViewport.Fit(geometry.Size, View), true);
+    }
+
     public void FocusCurrent()
     {
         if (tree is null || geometry?.Center(tree.Current) is not { } c) return;

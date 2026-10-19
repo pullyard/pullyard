@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Media;
 using PullYard.Core;
 using PullYard.Core.Api;
 using PullYard.Core.Claude;
+using PullYard.Core.Stacks;
 using PullYard.Core.Util;
 using PullYard.ViewModels;
 using PullYard.Views;
@@ -71,6 +72,7 @@ public static class SmokeTour
                 model.Tab = PRTab.Checks;
                 await Step("pr checks", 4000);
                 await Shot("06-pr-checks");
+                await StackScreens(model, item, root);
                 model.Tab = PRTab.Conversation;
                 await Step("pr conversation again", 2000);
                 Dialogs.Review(root, model).Forget();
@@ -132,6 +134,16 @@ public static class SmokeTour
                     await Shot("14b-repo-blame");
                 }
             }
+            if (pr is { Kind: RouteKind.PullRequest, Item: { } stacked } && app.PrModel(stacked) is { CurrentNode: { } node } stackModel)
+            {
+                StackStore.Shared.Seed(stackModel.CacheAccount, stackModel.Api.Host, stacked.Repo, TourStack(node, stacked.Repo.Full));
+                app.Section = Section.Stacks;
+                await Step("stacks", 7000);
+                stackModel.Tab = PRTab.Stack;
+                app.Select(Route.Pr(stacked));
+                await Step("stacks pr", 4000);
+                await Shot("15b-stacks");
+            }
             app.Section = Section.Projects;
             await Step("projects", 3000);
             await Shot("15-projects");
@@ -159,6 +171,82 @@ public static class SmokeTour
             Log("error " + e);
             Finish(5);
         }
+    }
+
+    private static async Task StackScreens(PRDetailViewModel model, ItemRef item, XamlRoot root)
+    {
+        if (model.CurrentNode is not { } current) return;
+        Settings.Shared.Set(Keys.StackView, "list");
+        Settings.Shared.Set(Keys.StackSupportAsked, false);
+        var nodes = TourStack(current, item.Repo.Full);
+        StackStore.Shared.Seed(model.CacheAccount, model.Api.Host, item.Repo, nodes);
+        StackNotes.Shared.Replace(NoteKey(model, 9003), new[] { new StackNote(Guid.NewGuid(), StackNoteKind.Note, "Rebase after the API client lands.", DateTimeOffset.Now) });
+        Memory("before stack tab");
+        await model.LoadStack();
+        Log($"stack {model.StackTree?.Count ?? 0} nodes");
+        model.Tab = PRTab.Stack;
+        await Step("stack list", 3000);
+        Memory("stack list");
+        await Shot("06b-pr-stack-list");
+        StackTab.Last?.SetGraph(true);
+        await Step("stack support", 2000);
+        await Shot("06c-stack-support");
+        CloseDialogs(root);
+        await Step("stack graph", 1500);
+        Memory("stack graph");
+        await Shot("06d-pr-stack-graph");
+        if (StackTab.Last is { CurrentNumber: { } n } tab)
+        {
+            StackNotes.Shared.Replace(NoteKey(model, n), new[]
+            {
+                new StackNote(Guid.NewGuid(), StackNoteKind.Decision, "Merge the API client first, then rebase the screens.", DateTimeOffset.Now),
+                new StackNote(Guid.NewGuid(), StackNoteKind.Question, "Do we still need the debounce once stale requests are cancelled?", DateTimeOffset.Now.AddMinutes(-5))
+            });
+            tab.ShowNotes(n);
+            await Step("stack notes", 1500);
+            await Shot("06e-pr-stack-notes");
+            tab.ShowNotes(null);
+            tab.FitGraph();
+            await Step("stack fit", 1500);
+            Memory("stack fit");
+            await Shot("06f-pr-stack-fit");
+            tab.SetGraph(false);
+        }
+        model.Tab = PRTab.Conversation;
+        await Step("stack closed", 1500);
+        Memory("stack tab closed");
+        TextZoom.ZoomIn();
+        TextZoom.ZoomIn();
+        await Step("text zoom", 1500);
+        await Shot("06g-text-zoom-120");
+        TextZoom.Reset();
+        await Step("text zoom reset", 800);
+    }
+
+    private static string NoteKey(PRDetailViewModel model, int number) => StackNotes.Key(model.CacheAccount, model.Api.Host, model.Ref.Repo, number);
+
+    private static void Memory(string label)
+    {
+        using var p = System.Diagnostics.Process.GetCurrentProcess();
+        Log($"memory {label}: working set {p.WorkingSet64 / 1024 / 1024} MB, private {p.PrivateMemorySize64 / 1024 / 1024} MB");
+    }
+
+    private static List<StackNode> TourStack(StackNode current, string repo)
+    {
+        var now = DateTimeOffset.Now;
+        StackNode Node(int number, string title, string head, string @base, string? ci = null, string? review = null, bool draft = false) =>
+            new(number, title, "OPEN", draft, head, @base, repo, "octocat", now.AddMinutes(-(number - 8990)), review, ci, (0xa1b2c3 + number).ToString("x7"), $"Update {title}");
+        var nodes = new List<StackNode>
+        {
+            Node(9000, "COM-1640 Shared API client", current.BaseRefName, "release", "SUCCESS", "APPROVED"),
+            current with { UpdatedAt = now },
+            Node(9001, "Search endpoint", "search-api", current.BaseRefName, "PENDING"),
+            Node(9002, "PAY-7 Search screen", "search-ui", current.BaseRefName, "FAILURE"),
+            Node(9003, "Cancel stale searches", "search-cancel", "search-api", "SUCCESS", "CHANGES_REQUESTED"),
+            Node(9004, "Debounce typing", "search-debounce", "search-cancel", draft: true)
+        };
+        for (var i = 1; i <= 8; i++) nodes.Add(Node(9009 + i, $"Search screen part {i}", $"search-ui-{i}", "search-ui", i % 3 == 1 ? "SUCCESS" : null));
+        return nodes;
     }
 
     private static void Place(MainWindow window)

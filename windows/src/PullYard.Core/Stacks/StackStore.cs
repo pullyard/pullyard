@@ -131,6 +131,11 @@ public sealed class StackStore
         }
     }
 
+    public void Seed(string? account, string host, RepoRef repo, List<StackNode> nodes)
+    {
+        lock (gate) memory[Key(account, host, repo)] = (nodes, now());
+    }
+
     public void Invalidate(string? account, string host, RepoRef repo)
     {
         lock (gate) memory.Remove(Key(account, host, repo));
