@@ -10,7 +10,7 @@ public sealed record StackNote(Guid Id, StackNoteKind Kind, string Text, DateTim
 {
     public static StackNote Blank() => new(Guid.NewGuid(), StackNoteKind.Note, "", DateTimeOffset.Now);
 
-    public bool IsEmpty => Text.Trim().Length == 0;
+    public bool IsEmpty => string.IsNullOrWhiteSpace(Text);
 }
 
 public static class StackNoteKinds
@@ -37,13 +37,36 @@ public sealed class StackNotes
 
     public event Action<string>? Changed;
 
+    private sealed class Stored
+    {
+        public Guid Id { get; set; }
+        public string Kind { get; set; } = "note";
+        public string Text { get; set; } = "";
+        public DateTimeOffset Updated { get; set; }
+    }
+
+    private static StackNote? FromStored(Stored s)
+    {
+        if (string.IsNullOrWhiteSpace(s.Text)) return null;
+        var kind = Enum.TryParse<StackNoteKind>(s.Kind, true, out var k) ? k : StackNoteKind.Note;
+        return new StackNote(s.Id == Guid.Empty ? Guid.NewGuid() : s.Id, kind, s.Text, s.Updated);
+    }
+
+    private static Stored ToStored(StackNote n) => new() { Id = n.Id, Kind = n.Kind.ToString().ToLowerInvariant(), Text = n.Text ?? "", Updated = n.Updated };
+
     public StackNotes(string file)
     {
         this.file = file;
         try
         {
-            if (File.Exists(file) && JsonSerializer.Deserialize<Dictionary<string, List<StackNote>>>(File.ReadAllBytes(file), Options) is { } decoded)
-                byPR = decoded.Where(kv => kv.Value.Count > 0).ToDictionary(kv => kv.Key, kv => kv.Value);
+            if (File.Exists(file) && JsonSerializer.Deserialize<Dictionary<string, List<Stored>>>(File.ReadAllBytes(file), Options) is { } decoded)
+            {
+                foreach (var (key, list) in decoded)
+                {
+                    var notes = (list ?? new()).Where(n => n is not null).Select(FromStored).OfType<StackNote>().ToList();
+                    if (notes.Count > 0) byPR[key] = notes;
+                }
+            }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
         {
@@ -128,12 +151,13 @@ public sealed class StackNotes
         }).Forget();
     }
 
-    private void Write(Dictionary<string, List<StackNote>> value)
+    private void Write(Dictionary<string, List<StackNote>> notes)
     {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(file)!);
             var tmp = $"{file}.{Guid.NewGuid():N}.tmp";
+            var value = notes.ToDictionary(kv => kv.Key, kv => kv.Value.Select(ToStored).ToList());
             File.WriteAllBytes(tmp, JsonSerializer.SerializeToUtf8Bytes(value, Options));
             File.Move(tmp, file, true);
         }

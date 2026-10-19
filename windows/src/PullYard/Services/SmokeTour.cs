@@ -176,6 +176,8 @@ public static class SmokeTour
     private static async Task StackScreens(PRDetailViewModel model, ItemRef item, XamlRoot root)
     {
         if (model.CurrentNode is not { } current) return;
+        var notesFile = Path.Combine(AppInfo.DataDirectory, "stack-notes.json");
+        if (File.Exists(notesFile) && File.ReadAllText(notesFile) is { } saved) Log("notes file " + saved[..Math.Min(400, saved.Length)]);
         Settings.Shared.Set(Keys.StackView, "list");
         Settings.Shared.Set(Keys.StackSupportAsked, false);
         var nodes = TourStack(current, item.Repo.Full);
@@ -227,8 +229,11 @@ public static class SmokeTour
 
     private static void Memory(string label)
     {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
         using var p = System.Diagnostics.Process.GetCurrentProcess();
-        Log($"memory {label}: working set {p.WorkingSet64 / 1024 / 1024} MB, private {p.PrivateMemorySize64 / 1024 / 1024} MB");
+        Log($"memory {label}: working set {p.WorkingSet64 / 1024 / 1024} MB, private {p.PrivateMemorySize64 / 1024 / 1024} MB, managed {GC.GetTotalMemory(false) / 1024 / 1024} MB");
     }
 
     private static List<StackNode> TourStack(StackNode current, string repo)
