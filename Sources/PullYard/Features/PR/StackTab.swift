@@ -3,7 +3,7 @@ import SwiftUI
 enum StackMetrics {
     static let pad: CGFloat = 28
     static let cardWidth: CGFloat = 256
-    static let cardHeight: CGFloat = 158
+    static let cardHeight: CGFloat = 120
     static let gapX: CGFloat = 28
     static let gapY: CGFloat = 58
     static let pillHeight: CGFloat = 30
@@ -116,10 +116,10 @@ struct StackTab: View {
                             }
                             .onEnded { _ in dragStart = nil }
                     )
-                if vp.zoom >= 0.5 { StackGrid(viewport: vp) }
                 StackEdgeLayer(drawing: StackEdgeDrawing(tree: tree, geometry: geometry, path: tree.pathSet), viewport: vp)
                 StackCanvas(tree: tree, geometry: geometry, sessions: sessions, notes: notes, noteKey: noteKey,
-                            visible: visibleCards(geometry, vp, geo.size), onOpen: open, onSession: resume, onNote: showNotes)
+                            visible: Self.visibleCards(tree: tree, geometry: geometry, viewport: vp, size: geo.size),
+                            compact: vp.zoom < Self.compactBelow, onOpen: open, onSession: resume, onNote: showNotes)
                     .equatable()
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .scaleEffect(vp.zoom, anchor: .topLeading)
@@ -148,9 +148,12 @@ struct StackTab: View {
         .task(id: tree.nodes.values.map { "\($0.number):\($0.headRefName)" }.sorted()) { matchSessions() }
     }
 
-    private func visibleCards(_ geometry: StackGeometry, _ vp: StackViewport, _ viewport: CGSize) -> Set<Int> {
-        let margin: CGFloat = 320
-        let rect = CGRect(x: -vp.pan.x / vp.zoom, y: -vp.pan.y / vp.zoom, width: viewport.width / vp.zoom, height: viewport.height / vp.zoom)
+    static let cullMargin: CGFloat = 60
+    static let compactBelow: CGFloat = 0.45
+
+    static func visibleCards(tree: StackTree, geometry: StackGeometry, viewport vp: StackViewport, size: CGSize) -> Set<Int> {
+        let margin = cullMargin / max(vp.zoom, 0.25)
+        let rect = CGRect(x: -vp.pan.x / vp.zoom, y: -vp.pan.y / vp.zoom, width: size.width / vp.zoom, height: size.height / vp.zoom)
             .insetBy(dx: -margin, dy: -margin)
         return Set(tree.nodes.keys.filter { n in
             guard let o = geometry.origin(n), let bottom = geometry.bottom(n) else { return false }
@@ -380,13 +383,14 @@ struct StackCanvas: View, Equatable {
     let notes: StackNotes
     let noteKey: (Int) -> String
     var visible: Set<Int>?
+    var compact = false
     let onOpen: (Int) -> Void
     let onSession: (ClaudeSessionInfo) -> Void
     var onNote: (Int) -> Void = { _ in }
     @State private var opening: Int?
 
     static func == (a: StackCanvas, b: StackCanvas) -> Bool {
-        a.tree == b.tree && a.geometry == b.geometry && a.sessions == b.sessions && a.visible == b.visible
+        a.tree == b.tree && a.geometry == b.geometry && a.sessions == b.sessions && a.visible == b.visible && a.compact == b.compact
     }
 
     var body: some View {
@@ -399,7 +403,17 @@ struct StackCanvas: View, Equatable {
                     .offset(x: o.x + (StackMetrics.cardWidth - StackMetrics.pillWidth) / 2, y: StackMetrics.pad)
             }
             ForEach(tree.nodes.values.filter { visible?.contains($0.number) ?? true }.sorted { $0.number < $1.number }) { node in
-                if let o = geometry.origin(node.number) {
+                if let o = geometry.origin(node.number), compact {
+                    CompactStackCard(node: node, current: node.number == tree.current, onPath: path.contains(node.number),
+                                     hasNotes: geometry.noted.contains(node.number)) {
+                        if node.number != tree.current { opening = node.number }
+                        onOpen(node.number)
+                    }
+                    .equatable()
+                    .frame(width: StackMetrics.cardWidth, height: StackMetrics.cardHeight)
+                    .id(node.number)
+                    .offset(x: o.x, y: o.y)
+                } else if let o = geometry.origin(node.number) {
                     let onPath = path.contains(node.number)
                     VStack(spacing: StackMetrics.noteGap) {
                         StackCard(node: node, current: node.number == tree.current, onPath: onPath, session: sessions[node.number],
@@ -426,37 +440,6 @@ struct StackCanvas: View, Equatable {
         }
         .animation(Motion.smooth, value: tree)
         .onChange(of: tree.current) { opening = nil }
-    }
-}
-
-struct StackGrid: View {
-    let viewport: StackViewport
-
-    var body: some View {
-        GeometryReader { geo in
-            dots(in: geo.size).fill(Color.syLineStrong)
-        }
-        .allowsHitTesting(false)
-    }
-
-    private func dots(in size: CGSize) -> Path {
-        var step = 18 * viewport.zoom
-        while step < 18 { step *= 2 }
-        func start(_ pan: CGFloat) -> CGFloat {
-            let r = pan.truncatingRemainder(dividingBy: step)
-            return r < 0 ? r + step : r
-        }
-        var path = Path()
-        var y = start(viewport.pan.y)
-        while y < size.height {
-            var x = start(viewport.pan.x)
-            while x < size.width {
-                path.addEllipse(in: CGRect(x: x - 0.9, y: y - 0.9, width: 1.8, height: 1.8))
-                x += step
-            }
-            y += step
-        }
-        return path
     }
 }
 
@@ -605,7 +588,6 @@ private struct StackCard: View, Equatable {
     let onOpen: () -> Void
     let onSession: (ClaudeSessionInfo) -> Void
     let onNote: () -> Void
-    @State private var hovered = false
 
     static func == (a: StackCard, b: StackCard) -> Bool {
         a.node == b.node && a.current == b.current && a.onPath == b.onPath && a.session == b.session && a.noteCount == b.noteCount && a.opening == b.opening
@@ -619,15 +601,16 @@ private struct StackCard: View, Equatable {
                     Text(key).font(.caption.monospaced()).foregroundStyle(Color.syMuted)
                 }
                 Spacer(minLength: 4)
-                if noteCount > 0 {
-                    Button(action: onNote) {
-                        Label("\(noteCount)", systemImage: "note.text").labelStyle(.titleAndIcon)
+                Button(action: onNote) {
+                    if noteCount > 0 {
+                        Label("\(noteCount)", systemImage: "note.text").labelStyle(.titleAndIcon).foregroundStyle(Color.syAmber)
+                    } else {
+                        Image(systemName: "note.text.badge.plus").foregroundStyle(Color.syDim)
                     }
-                    .buttonStyle(.plain)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.syAmber)
-                    .help(plural(noteCount, "note", "notes") + " — click to open")
                 }
+                .buttonStyle(.plain)
+                .font(.caption.weight(.semibold))
+                .help(noteCount > 0 ? plural(noteCount, "note", "notes") + " — click to open" : "Add a note")
                 if opening {
                     ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
                 }
@@ -665,32 +648,16 @@ private struct StackCard: View, Equatable {
                     .padding(.top, 2)
             }
             Spacer(minLength: 0)
-            HStack(spacing: 6) {
-                Text(node.author.map { "@\($0)" } ?? "")
-                Spacer()
-                if hovered {
-                    Button(action: onNote) {
-                        Image(systemName: "note.text.badge.plus")
-                    }
-                    .buttonStyle(.borderless)
-                    .help(noteCount > 0 ? "Open notes" : "Add a note")
-                    .transition(.opacity)
-                }
-                if let updated = node.updatedAt { Text(Fmt.rel(updated)) }
-            }
-            .font(.caption)
-            .foregroundStyle(Color.syDim)
         }
         .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.syRaised))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(current || opening ? Color.syIndigo : (hovered ? Color.syMuted : Color.syLineStrong), lineWidth: current || opening ? 2 : 1)
+                .stroke(current || opening ? Color.syIndigo : Color.syLineStrong, lineWidth: current || opening ? 2 : 1)
         )
-        .opacity(onPath || hovered || opening ? 1 : 0.6)
+        .opacity(onPath || opening ? 1 : 0.6)
         .contentShape(RoundedRectangle(cornerRadius: 10))
-        .onHover { h in withAnimation(Motion.fade) { hovered = h } }
         .onTapGesture(perform: onOpen)
         .contextMenu {
             Button("Open #\(node.number)", action: onOpen).disabled(current)
@@ -698,7 +665,7 @@ private struct StackCard: View, Equatable {
             Divider()
             Button("Copy branch name") { copyToPasteboard(node.headRefName) }
         }
-        .help(current ? "#\(node.number) \(node.title) — click to center" : "#\(node.number) \(node.title) — click to open")
+        .help(current ? "#\(node.number) \(node.title) · \(node.author.map { "@\($0)" } ?? "") — click to center" : "#\(node.number) \(node.title) · \(node.author.map { "@\($0)" } ?? "") — click to open")
     }
 
     private func field(_ label: String, _ value: String) -> some View {
@@ -707,6 +674,44 @@ private struct StackCard: View, Equatable {
             Text(value).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
         }
         .font(.caption)
+    }
+}
+
+private struct CompactStackCard: View, Equatable {
+    let node: StackNode
+    let current: Bool
+    let onPath: Bool
+    let hasNotes: Bool
+    let onOpen: () -> Void
+
+    static func == (a: CompactStackCard, b: CompactStackCard) -> Bool {
+        a.node == b.node && a.current == b.current && a.onPath == b.onPath && a.hasNotes == b.hasNotes
+    }
+
+    var body: some View {
+        let status = node.status
+        HStack(spacing: 0) {
+            Rectangle().fill(status.color).frame(width: 14)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 10) {
+                    Text("#\(node.number)").font(.system(size: 40, weight: .bold))
+                    if hasNotes {
+                        Image(systemName: "note.text").font(.system(size: 30)).foregroundStyle(Color.syAmber)
+                    }
+                }
+                Text(status.title).font(.system(size: 26, weight: .semibold)).foregroundStyle(status.color)
+            }
+            .lineLimit(1)
+            .padding(.horizontal, 20)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.syRaised)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(current ? Color.syIndigo : Color.syLineStrong, lineWidth: current ? 8 : 3))
+        .opacity(onPath ? 1 : 0.6)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onOpen)
     }
 }
 

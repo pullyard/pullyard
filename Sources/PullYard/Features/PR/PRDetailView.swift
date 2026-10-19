@@ -63,7 +63,7 @@ struct PRDetailContent: View {
             Divider()
             ZStack {
                 ForEach(PRTab.allCases) { tab in
-                    if model.visitedTabs.contains(tab) {
+                    if model.visitedTabs.contains(tab), tab != .stack || model.tab == .stack {
                         tabContent(tab)
                             .opacity(model.tab == tab ? 1 : 0)
                             .offset(y: model.tab == tab || Motion.reduced ? 0 : 4)
