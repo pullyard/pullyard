@@ -84,10 +84,21 @@ struct StackViewport: Equatable {
     }
 }
 
+enum StackViewMode: String {
+    case list, graph
+}
+
 struct StackTab: View {
+    static let modeKey = "stack.view"
+    static let supportAskedKey = "stack.graphSupportAsked"
+
     let model: PRDetailModel
     let tree: StackTree
     @Environment(AppModel.self) private var app
+    @AppStorage(StackTab.modeKey) private var mode = StackViewMode.list.rawValue
+    @AppStorage(StackTab.supportAskedKey) private var supportAsked = false
+    @State private var askSupport = false
+    @State private var loading: Int?
     @State private var view: StackViewport?
     @State private var size: CGSize = .zero
     @State private var dragStart: StackViewport?
@@ -100,9 +111,64 @@ struct StackTab: View {
         StackGeometry(StackLayout(tree), noted: Set(tree.nodes.keys.filter { notes.hasNotes(noteKey($0)) }))
     }
 
+    private var isGraph: Bool { mode == StackViewMode.graph.rawValue }
+
     var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Picker("View", selection: Binding(get: { isGraph ? StackViewMode.graph : .list }, set: switchMode)) {
+                    Label("List", systemImage: "list.bullet.indent").tag(StackViewMode.list)
+                    Label("Graph", systemImage: "point.3.connected.trianglepath.dotted").tag(StackViewMode.graph)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                Text(plural(tree.count, "pull request", "pull requests") + " on " + tree.base)
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+                    .lineLimit(1)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            Divider()
+            Group {
+                if isGraph {
+                    graph
+                } else {
+                    StackListView(tree: tree, sessions: sessions, notes: notes, noteKey: noteKey, busy: loading, onOpen: { open($0, inPlace: true) }, onNote: showNotes)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if let n = notesFor, let node = tree.nodes[n] {
+                    StackNotesEditor(key: noteKey(n), number: n, title: node.title, store: notes) { showNotes(nil) }
+                        .id(n)
+                        .padding(12)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
+        }
+        .alert("Like the stack graph?", isPresented: $askSupport) {
+            Button("Buy a Pizza 🍕") { openInBrowser(Support.pizzaURL) }
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("PullYard is free and built by one developer. If it saves you time, you can be part of it by buying a pizza that keeps it going. We only ask once.")
+        }
+        .onChange(of: tree) { bindInput() }
+        .onChange(of: notesFor) { bindInput() }
+        .task(id: tree.nodes.values.map { "\($0.number):\($0.headRefName)" }.sorted()) { matchSessions() }
+    }
+
+    private func switchMode(_ next: StackViewMode) {
+        mode = next.rawValue
+        guard next == .graph, !supportAsked else { return }
+        supportAsked = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { askSupport = true }
+    }
+
+    private var graph: some View {
         let geometry = geometry
-        GeometryReader { geo in
+        return GeometryReader { geo in
             let vp = current(geometry, geo.size)
             ZStack(alignment: .topLeading) {
                 Color.sySunken
@@ -129,23 +195,12 @@ struct StackTab: View {
             .clipped()
             .background(StackInputProbe(input: input))
             .overlay(alignment: .bottomTrailing) { zoomControls(vp, geometry).padding(12) }
-            .overlay(alignment: .topTrailing) {
-                if let n = notesFor, let node = tree.nodes[n] {
-                    StackNotesEditor(key: noteKey(n), number: n, title: node.title, store: notes) { showNotes(nil) }
-                        .id(n)
-                        .padding(12)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
-            }
             .onAppear {
                 size = geo.size
                 bindInput()
             }
             .onChange(of: geo.size) { size = geo.size }
         }
-        .onChange(of: tree) { bindInput() }
-        .onChange(of: notesFor) { bindInput() }
-        .task(id: tree.nodes.values.map { "\($0.number):\($0.headRefName)" }.sorted()) { matchSessions() }
     }
 
     static let cullMargin: CGFloat = 60
@@ -183,7 +238,7 @@ struct StackTab: View {
 
     private func bindInput() {
         let panelOpen = notesFor != nil
-        input.isActive = { [model] in model.tab == .stack }
+        input.isActive = { [model] in model.tab == .stack && UserDefaults.standard.string(forKey: StackTab.modeKey) == StackViewMode.graph.rawValue }
         input.excluded = { p in panelOpen && p.x > size.width - 372 }
         input.onScroll = { delta in
             update { v, g in v.panned(by: delta, content: g.size, viewport: size) }
@@ -214,19 +269,43 @@ struct StackTab: View {
     }
 
     private func open(_ number: Int) {
+        open(number, inPlace: false)
+    }
+
+    private func open(_ number: Int, inPlace: Bool) {
+        guard loading == nil else { return }
         guard number != tree.current else {
-            focusOnCurrent()
+            if !inPlace { focusOnCurrent() }
             return
         }
         let ref = ItemRef(repo: model.ref.repo, number: number)
-        if let next = app.prModel(ref) {
-            next.tab = .stack
-            if let node = tree.nodes[number] {
-                let nodes = StackStore.memoryNodes(api: model.api, repo: model.ref.repo, account: model.cacheAccount) ?? Array(tree.nodes.values)
-                next.seedStack(node, nodes: nodes)
-            }
+        guard let next = app.prModel(ref) else {
+            switchTo(ref)
+            return
         }
-        app.open(.pr(ref))
+        next.tab = .stack
+        if let node = tree.nodes[number] {
+            let nodes = StackStore.memoryNodes(api: model.api, repo: model.ref.repo, account: model.cacheAccount) ?? Array(tree.nodes.values)
+            next.seedStack(node, nodes: nodes)
+        }
+        guard inPlace, next.pr == nil else {
+            switchTo(ref)
+            return
+        }
+        let here = Route.pr(model.ref)
+        loading = number
+        Task {
+            await next.load()
+            loading = nil
+            guard app.detailRoot == here, app.detailPath.isEmpty else { return }
+            switchTo(ref)
+        }
+    }
+
+    private func switchTo(_ ref: ItemRef) {
+        var quiet = Transaction()
+        quiet.disablesAnimations = true
+        withTransaction(quiet) { app.open(.pr(ref)) }
     }
 
     private func resume(_ session: ClaudeSessionInfo) {
@@ -559,6 +638,149 @@ struct StackEdgeLayer: View {
             if area.contains(s) { out.append(Label(id: 100_000 + i, point: s, fromRight: drawing.litFromRight[i], lit: true)) }
         }
         return out
+    }
+}
+
+struct StackListView: View {
+    let tree: StackTree
+    let sessions: [Int: ClaudeSessionInfo]
+    let notes: StackNotes
+    let noteKey: (Int) -> String
+    var busy: Int?
+    let onOpen: (Int) -> Void
+    let onNote: (Int) -> Void
+    @State private var position: Int?
+
+    nonisolated(unsafe) private static var anchors: [String: Int] = [:]
+
+    init(tree: StackTree, sessions: [Int: ClaudeSessionInfo], notes: StackNotes, noteKey: @escaping (Int) -> String,
+         busy: Int? = nil, onOpen: @escaping (Int) -> Void, onNote: @escaping (Int) -> Void) {
+        self.tree = tree
+        self.sessions = sessions
+        self.notes = notes
+        self.noteKey = noteKey
+        self.busy = busy
+        self.onOpen = onOpen
+        self.onNote = onNote
+        let saved = Self.anchors[Self.anchorKey(tree)]
+        _position = State(initialValue: saved.flatMap { tree.nodes[$0] == nil ? nil : $0 } ?? tree.current)
+    }
+
+    private static func anchorKey(_ tree: StackTree) -> String { "\(tree.root)|\(tree.base)" }
+
+    struct Row: Identifiable {
+        let node: StackNode
+        let depth: Int
+        var id: Int { node.number }
+    }
+
+    static func rows(_ tree: StackTree) -> [Row] {
+        var out: [Row] = []
+        var stack: [(Int, Int)] = [(tree.root, 0)]
+        while let (n, depth) = stack.popLast() {
+            if let node = tree.nodes[n] { out.append(Row(node: node, depth: depth)) }
+            for c in (tree.children[n] ?? []).reversed() { stack.append((c, depth + 1)) }
+        }
+        return out
+    }
+
+    var body: some View {
+        let path = tree.pathSet
+        let rows = Self.rows(tree)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                Label(tree.base, systemImage: "arrow.triangle.branch")
+                    .font(.syCallout.monospaced())
+                    .foregroundStyle(Color.syMuted)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(rows) { row in
+                        StackListRow(node: row.node, depth: row.depth, current: row.node.number == tree.current, onPath: path.contains(row.node.number),
+                                     noteCount: notes.notes(noteKey(row.node.number)).count, hasSession: sessions[row.node.number] != nil,
+                                     opening: busy == row.node.number,
+                                     onOpen: { onOpen(row.node.number) },
+                                     onNote: { onNote(row.node.number) })
+                            .opacity(busy == nil || busy == row.node.number ? 1 : 0.55)
+                            .id(row.node.number)
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .padding(12)
+            .allowsHitTesting(busy == nil)
+            .animation(Motion.fade, value: busy)
+        }
+        .scrollPosition(id: $position)
+        .onChange(of: position) {
+            if let position { Self.anchors[Self.anchorKey(tree)] = position }
+        }
+    }
+}
+
+private struct StackListRow: View {
+    let node: StackNode
+    let depth: Int
+    let current: Bool
+    let onPath: Bool
+    let noteCount: Int
+    let hasSession: Bool
+    let opening: Bool
+    let onOpen: () -> Void
+    let onNote: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Color.clear.frame(width: CGFloat(depth) * 22, height: 1)
+            Image(systemName: depth == 0 ? "circle.fill" : "arrow.turn.down.right")
+                .font(.syCaption2)
+                .foregroundStyle(onPath ? Color.syIndigo : Color.syDim)
+                .frame(width: 14)
+            StateBadge(state: node.visualState, compact: true)
+            Text("#\(node.number)").font(.syCallout.weight(.semibold)).foregroundStyle(Color.syMuted)
+            Text(node.title)
+                .font(.syCallout.weight(current ? .semibold : .regular))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            if let key = node.jiraKey, !node.headRefName.contains(key) {
+                Text(key).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
+            }
+            if hasSession {
+                Image(systemName: "sparkles").font(.syCaption).foregroundStyle(Color.syCoral).help("Has a Claude Code session")
+            }
+            BranchChip(name: node.headRefName, color: current ? .syViolet : .sySlate)
+            Button(action: onNote) {
+                if noteCount > 0 {
+                    Label("\(noteCount)", systemImage: "note.text").labelStyle(.titleAndIcon).foregroundStyle(Color.syAmber)
+                } else {
+                    Image(systemName: "note.text.badge.plus").foregroundStyle(hovered ? Color.syMuted : Color.syDim)
+                }
+            }
+            .buttonStyle(.plain)
+            .font(.syCaption.weight(.semibold))
+            .help(noteCount > 0 ? plural(noteCount, "note", "notes") + " — click to open" : "Add a note")
+            if opening {
+                ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
+            }
+            StatusPill(status: node.status)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(current ? Color.syIndigo.opacity(0.12) : (hovered ? Color.syLine : Color.clear))
+        )
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(current || opening ? Color.syIndigo.opacity(0.5) : Color.clear))
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .onTapGesture(perform: onOpen)
+        .contextMenu {
+            Button("Open #\(node.number)", action: onOpen).disabled(current)
+            Button(noteCount > 0 ? "Notes…" : "Add note…", action: onNote)
+            Divider()
+            Button("Copy branch name") { copyToPasteboard(node.headRefName) }
+        }
     }
 }
 
