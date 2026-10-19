@@ -96,17 +96,6 @@ struct RepoName: Codable {
     var defaultBranchRef: Branch?
 }
 
-struct StackPR: Decodable, Identifiable, Hashable {
-    let number: Int
-    let title: String
-    let state: String
-    let isDraft: Bool
-    let headRefName: String
-    let baseRefName: String
-    var id: Int { number }
-    var visualState: VisualState { .pr(state: state, draft: isDraft) }
-}
-
 struct Viewer: Decodable {
     let login: String
 }

@@ -206,6 +206,7 @@ struct SidebarView: View {
                 SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0))
             }
             SidebarRow(section: .myPRsByRepo, title: "My PRs by project", icon: "folder.fill", color: .syCoral)
+            SidebarRow(section: .stacks, title: "Stacks", icon: "square.stack.3d.up.fill", color: .syIndigo)
         }
         Section("Issues") {
             ForEach(IssueFilter.allCases) { f in
@@ -402,6 +403,8 @@ struct ContentColumn: View {
             SearchListView(title: f.title, kind: "pr", baseQuery: f.query).id("pr-\(f.rawValue)")
         case .myPRsByRepo:
             SearchListView(title: "My PRs by project", kind: "pr", baseQuery: PRFilter.mine.query, grouped: true).id("pr-mine-by-repo")
+        case .stacks:
+            StacksListView()
         case .issues(let f):
             SearchListView(title: "Issues: \(f.title)", kind: "issue", baseQuery: f.query).id("issue-\(f.rawValue)")
         case .repos:

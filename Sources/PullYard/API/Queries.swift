@@ -13,18 +13,9 @@ enum Q {
     query RepoPullRequests($o: String!, $n: String!, $b: String, $states: [PullRequestState!], $first: Int!) { repository(owner: $o, name: $n) { pullRequests(headRefName: $b, states: $states, first: $first, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { __typename ...PRItem } } } }
     """ + prItemFragment
 
-    static let stackNode = "fragment StackPR on PullRequest { number title state isDraft headRefName baseRefName }"
-
-    static let prStack = """
-    query PrStack($o: String!, $n: String!, $num: Int!) { repository(owner: $o, name: $n) { defaultBranchRef { name } pullRequest(number: $num) { ...StackPR stack { entries(first: 30) { nodes { position pullRequest { ...StackPR } } } } } } }
-    """ + stackNode
-
-    static let prStackNeighbors = """
-    query PrStackNeighbors($o: String!, $n: String!, $head: String!, $base: String!) { repository(owner: $o, name: $n) {
-      parents: pullRequests(headRefName: $base, states: [OPEN, MERGED], first: 3, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { ...StackPR } }
-      children: pullRequests(baseRefName: $head, states: [OPEN, MERGED], first: 5, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { ...StackPR } }
-    } }
-    """ + stackNode
+    static let repoStack = """
+    query RepoStack($o: String!, $n: String!, $after: String) { repository(owner: $o, name: $n) { pullRequests(states: OPEN, first: 100, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) { pageInfo { hasNextPage endCursor } nodes { number title state isDraft headRefName baseRefName updatedAt reviewDecision author { login } headRepository { nameWithOwner } commits(last: 1) { nodes { commit { abbreviatedOid messageHeadline statusCheckRollup { state } } } } } } } }
+    """
 
     static let itemFragments = """
     fragment PRItem on PullRequest { number title url prState: state isDraft createdAt updatedAt baseRefName author { login avatarUrl } repository { nameWithOwner defaultBranchRef { name } } reviewDecision additions deletions comments { totalCount } labels(first: 6) { nodes { name color } } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }

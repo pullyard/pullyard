@@ -45,10 +45,17 @@ extension GitHubAPI {
         return r.repository?.pullRequest
     }
 
-    func pullRequestStack(_ ref: ItemRef, current: StackPR) async throws -> [StackPR] {
+    func openStackNodes(_ repo: RepoRef, pages: Int = 3) async throws -> [StackNode] {
         struct R: Decodable {
-            struct Entry: Decodable { let position: Int; let pullRequest: StackPR }
-            struct Stack: Decodable { let entries: Nodes<Entry> }
+            struct Commit: Decodable {
+                struct Rollup: Decodable { let state: String }
+                let abbreviatedOid: String
+                let messageHeadline: String
+                let statusCheckRollup: Rollup?
+            }
+            struct CommitNode: Decodable { let commit: Commit }
+            struct Login: Decodable { let login: String }
+            struct HeadRepo: Decodable { let nameWithOwner: String }
             struct PR: Decodable {
                 let number: Int
                 let title: String
@@ -56,61 +63,33 @@ extension GitHubAPI {
                 let isDraft: Bool
                 let headRefName: String
                 let baseRefName: String
-                let stack: Stack?
+                let updatedAt: Date?
+                let reviewDecision: String?
+                let author: Login?
+                let headRepository: HeadRepo?
+                let commits: Nodes<CommitNode>
             }
-            struct Repo: Decodable {
-                let defaultBranchRef: RepoName.Branch?
-                let pullRequest: PR?
-            }
+            struct PageInfo: Decodable { let hasNextPage: Bool; let endCursor: String? }
+            struct Page: Decodable { let pageInfo: PageInfo; let nodes: [PR] }
+            struct Repo: Decodable { let pullRequests: Page }
             let repository: Repo?
         }
-        let r: R
-        do {
-            r = try await graphQL(Q.prStack, ["o": ref.repo.owner, "n": ref.repo.name, "num": ref.number])
-        } catch let e as APIError where e.schemaError {
-            let main = try? await repoInfo(ref.repo)?.defaultBranchRef?.name
-            return try await stackWalk(ref.repo, current, main: main)
-        }
-        guard let pr = r.repository?.pullRequest else { return [] }
-        if let entries = pr.stack?.entries.nodes, entries.count > 1 {
-            return entries.sorted { $0.position < $1.position }.map(\.pullRequest)
-        }
-        let node = StackPR(number: pr.number, title: pr.title, state: pr.state, isDraft: pr.isDraft, headRefName: pr.headRefName, baseRefName: pr.baseRefName)
-        return try await stackWalk(ref.repo, node, main: r.repository?.defaultBranchRef?.name)
-    }
-
-    private func stackWalk(_ repo: RepoRef, _ current: StackPR, main: String?) async throws -> [StackPR] {
-        var below: [StackPR] = []
-        var above: [StackPR] = []
-        var seen: Set<Int> = [current.number]
-        var node = current
-        for _ in 0..<8 where node.baseRefName != main {
-            let n = try await stackNeighbors(repo, node)
-            guard let parent = (n.parents.first { $0.state == "OPEN" } ?? n.parents.first), seen.insert(parent.number).inserted else { break }
-            below.insert(parent, at: 0)
-            node = parent
-        }
-        node = current
-        for _ in 0..<8 {
-            let n = try await stackNeighbors(repo, node)
-            guard let child = (n.children.first { $0.state == "OPEN" } ?? n.children.first), seen.insert(child.number).inserted else { break }
-            above.append(child)
-            node = child
-        }
-        let chain = below + [current] + above
-        return chain.count > 1 ? chain : []
-    }
-
-    private func stackNeighbors(_ repo: RepoRef, _ pr: StackPR) async throws -> (parents: [StackPR], children: [StackPR]) {
-        struct R: Decodable {
-            struct Repo: Decodable {
-                let parents: Nodes<StackPR>
-                let children: Nodes<StackPR>
+        var out: [StackNode] = []
+        var after: String?
+        for _ in 0..<pages {
+            let r: R = try await graphQL(Q.repoStack, ["o": repo.owner, "n": repo.name, "after": after])
+            guard let page = r.repository?.pullRequests else { break }
+            out += page.nodes.map { pr in
+                let c = pr.commits.nodes.first?.commit
+                return StackNode(number: pr.number, title: pr.title, state: pr.state, isDraft: pr.isDraft,
+                                 headRefName: pr.headRefName, baseRefName: pr.baseRefName, headRepo: pr.headRepository?.nameWithOwner,
+                                 author: pr.author?.login, updatedAt: pr.updatedAt, reviewDecision: pr.reviewDecision,
+                                 ci: c?.statusCheckRollup?.state, commitOid: c?.abbreviatedOid, commitHeadline: c?.messageHeadline)
             }
-            let repository: Repo?
+            guard page.pageInfo.hasNextPage, let cursor = page.pageInfo.endCursor else { break }
+            after = cursor
         }
-        let r: R = try await graphQL(Q.prStackNeighbors, ["o": repo.owner, "n": repo.name, "head": pr.headRefName, "base": pr.baseRefName])
-        return (r.repository?.parents.nodes ?? [], r.repository?.children.nodes ?? [])
+        return out
     }
 
     func badges() async throws -> BadgeResponse {

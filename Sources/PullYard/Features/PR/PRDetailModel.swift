@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 enum PRTab: String, CaseIterable, Identifiable {
-    case conversation, commits, checks, files
+    case conversation, commits, checks, files, stack
     var id: String { rawValue }
 }
 
@@ -62,14 +62,14 @@ final class PRDetailModel {
     let commitRows = RowAppearTracker()
     let checkRows = RowAppearTracker()
     let fileRows = RowAppearTracker()
-    var stack: [StackPR] = []
+    var stackTree: StackTree?
+    var preview: StackNode?
+    @ObservationIgnored var cacheAccount: String?
     @ObservationIgnored private var activeLoad: Task<Void, Never>?
     @ObservationIgnored private var queuedLoad: Task<Void, Never>?
     @ObservationIgnored private var reloadFiles = false
     @ObservationIgnored private var stackRequest: Bool?
     @ObservationIgnored private var stackKey: String?
-    private static var stackCache: [String: (stack: [StackPR], at: Date)] = [:]
-    private static let stackTTL: TimeInterval = 600
     @ObservationIgnored private(set) var filesOid: String?
     @ObservationIgnored private var filesStale = false
     @ObservationIgnored private var filesStaleMark = 0
@@ -321,35 +321,41 @@ final class PRDetailModel {
         }
     }
 
-    private var stackRepoPrefix: String {
-        "\(viewerLogin)|\(ref.repo.full)|"
-    }
-
     private func stackCacheKey(_ pr: PullRequestDetail) -> String {
-        stackRepoPrefix + "\(pr.number)|\(pr.headRepository?.nameWithOwner ?? "")|\(pr.headRefName)|\(pr.baseRefName)"
+        "\(pr.number)|\(pr.state)|\(pr.isDraft)|\(pr.headRepository?.nameWithOwner ?? "")|\(pr.headRefName)|\(pr.baseRefName)"
     }
 
     private func invalidateStack() {
-        let prefix = stackRepoPrefix
-        Self.stackCache = Self.stackCache.filter { !$0.key.hasPrefix(prefix) }
+        StackStore.invalidate(api: api, repo: ref.repo, account: cacheAccount)
         stackRequest = true
     }
 
     func loadStack(force: Bool = false) async {
         guard let pr else { return }
-        let key = stackCacheKey(pr)
-        let now = Date()
-        if !force, let hit = Self.stackCache[key], now.timeIntervalSince(hit.at) < Self.stackTTL {
-            stackKey = key
-            if hit.stack != stack { stack = hit.stack }
-            return
+        stackKey = stackCacheKey(pr)
+        if let hit = await StackStore.cached(api: api, repo: ref.repo, account: cacheAccount) {
+            applyStack(hit.nodes)
+            if !force, hit.fresh { return }
         }
-        let current = StackPR(number: pr.number, title: pr.title, state: pr.state, isDraft: pr.isDraft, headRefName: pr.headRefName, baseRefName: pr.baseRefName)
-        guard let s = try? await api.pullRequestStack(ref, current: current) else { return }
-        Self.stackCache = Self.stackCache.filter { now.timeIntervalSince($0.value.at) < Self.stackTTL }
-        Self.stackCache[key] = (s, Date())
-        stackKey = key
-        if s != stack { stack = s }
+        guard let nodes = await StackStore.fetch(api: api, repo: ref.repo, account: cacheAccount) else { return }
+        applyStack(nodes)
+    }
+
+    func seedStack(_ node: StackNode, nodes: [StackNode]) {
+        guard pr == nil else { return }
+        preview = node
+        stackTree = StackTree.build(current: node, open: nodes, repo: ref.repo.full)
+        tab = .stack
+    }
+
+    private func applyStack(_ nodes: [StackNode]) {
+        guard let pr else { return }
+        let current = StackNode(number: pr.number, title: pr.title, state: pr.state, isDraft: pr.isDraft,
+                                headRefName: pr.headRefName, baseRefName: pr.baseRefName, headRepo: pr.headRepository?.nameWithOwner,
+                                author: pr.author?.login, updatedAt: nil, reviewDecision: nil, ci: nil, commitOid: nil, commitHeadline: nil)
+        let tree = StackTree.build(current: current, open: nodes, repo: ref.repo.full)
+        if tree != stackTree { stackTree = tree }
+        if tree == nil, tab == .stack { tab = .conversation }
     }
 
     private var filesVisible: Bool {
