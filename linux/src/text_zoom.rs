@@ -1,7 +1,5 @@
 use std::cell::Cell;
 
-use gtk::prelude::*;
-
 use crate::settings;
 use crate::signal::Signal;
 

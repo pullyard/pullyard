@@ -68,7 +68,7 @@ mod imp {
             if self.size.get() != (width, height) {
                 self.size.set((width, height));
                 if let Some(v) = self.view.get() {
-                    self.view.set(Some(obj.clamp(v)));
+                    self.view.set(Some(obj.clamp_view(v)));
                 }
                 obj.schedule_sync();
             }
@@ -250,7 +250,7 @@ impl StackCanvas {
         }
         self.drop_cards();
         if let Some(v) = imp.view.get() {
-            imp.view.set(Some(self.clamp(v)));
+            imp.view.set(Some(self.clamp_view(v)));
         }
         self.sync_cards();
         self.queue_allocate();
@@ -288,7 +288,7 @@ impl StackCanvas {
         (w > 0 && h > 0).then(|| Vec2::new(w as f64, h as f64))
     }
 
-    fn clamp(&self, v: StackViewport) -> StackViewport {
+    fn clamp_view(&self, v: StackViewport) -> StackViewport {
         match self.size_vec() {
             Some(size) => v.clamped(self.content(), size),
             None => v,
