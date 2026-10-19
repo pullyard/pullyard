@@ -54,7 +54,7 @@ struct CIFailureBanner: View {
                     .buttonStyle(.borderedProminent)
                     .tint(Color.syCoral)
             }
-            .font(.callout)
+            .font(.syCallout)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.syRed.opacity(0.07)))

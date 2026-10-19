@@ -30,7 +30,7 @@ struct ShortLinkButton: View {
 
     var body: some View {
         Button { app.copyShortLink(ref) } label: {
-            Image(systemName: "link").font(.callout.weight(.semibold)).foregroundStyle(Color.syMuted)
+            Image(systemName: "link").font(.syCallout.weight(.semibold)).foregroundStyle(Color.syMuted)
         }
         .buttonStyle(.borderless)
         .help("Copy short link \(ShortLink.make(ref)) (⇧⌘C)")
@@ -48,7 +48,7 @@ struct ToastBanner: View {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.syGreen)
                 Text(text).foregroundStyle(Color.syText).lineLimit(1)
             }
-            .font(.callout)
+            .font(.syCallout)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(.regularMaterial, in: Capsule())

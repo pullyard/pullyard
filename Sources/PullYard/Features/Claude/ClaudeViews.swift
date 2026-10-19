@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ClaudeTerminalHost: NSViewRepresentable {
     let tab: ClaudeTab
+    var zoom = TextZoom.shared.scale
 
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
@@ -14,6 +15,10 @@ struct ClaudeTerminalHost: NSViewRepresentable {
         if tab.terminal.superview !== container {
             container.subviews.forEach { $0.removeFromSuperview() }
             attach(to: container)
+        }
+        let size = TextZoom.shared.size(12.5)
+        if tab.terminal.font.pointSize != size {
+            tab.terminal.font = .monospacedSystemFont(ofSize: size, weight: .regular)
         }
     }
 
@@ -73,9 +78,9 @@ struct ClaudeProjectsColumn: View {
                 HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
             } else {
                 VStack(alignment: .leading, spacing: 6) {
-                    Image(systemName: "lock.fill").font(.title3).foregroundStyle(Color.syDim)
+                    Image(systemName: "lock.fill").font(.syTitle3).foregroundStyle(Color.syDim)
                     Text("Session history and projects appear after you sign in to Claude.")
-                        .font(.callout)
+                        .font(.syCallout)
                         .foregroundStyle(Color.syMuted)
                 }
                 .padding(.vertical, 8)
@@ -135,10 +140,10 @@ struct ClaudeProjectsColumn: View {
                     }
                 } header: {
                     HStack(spacing: 6) {
-                        Text("Open")
+                        Text("Open").font(.sySubheadline.weight(.semibold))
                         Spacer()
                         Image(systemName: "memorychip").imageScale(.small)
-                        Text(ws.totalMemory > 0 ? ProcessMemory.format(ws.totalMemory) : "0 " + "MB")
+                        Text(ws.totalMemory > 0 ? ProcessMemory.format(ws.totalMemory) : "0 " + "MB").font(.sySubheadline.weight(.semibold))
                             .monospacedDigit()
                         if ws.awakeCount > 0 {
                             Button("Sleep all") { ws.sleepAll() }
@@ -146,7 +151,7 @@ struct ClaudeProjectsColumn: View {
                                 .help("Stop idle processes and free memory")
                         }
                     }
-                    .font(.caption)
+                    .font(.syCaption)
                     .foregroundStyle(Color.syMuted)
                     .textCase(nil)
                     .help("Memory used by running Claude processes")
@@ -172,7 +177,7 @@ struct ClaudeProjectsColumn: View {
                 }
             }
             if ws.projects.isEmpty, !ws.loadingProjects {
-                Text("No Claude Code sessions yet").foregroundStyle(Color.syMuted)
+                Text("No Claude Code sessions yet").font(.syBody).foregroundStyle(Color.syMuted)
             }
     }
 
@@ -207,16 +212,16 @@ struct ProjectHeader: View {
     var body: some View {
         let color = ProjectPalette.color(for: project.path)
         HStack(spacing: 7) {
-            Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(Color.syDim).frame(width: 10)
+            Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.syCaption2.weight(.bold)).foregroundStyle(Color.syDim).frame(width: 10)
             IconTile(systemImage: project.exists ? "folder.fill" : "folder.badge.questionmark", color: project.exists ? color : .sySlate, size: 24)
             VStack(alignment: .leading, spacing: 0) {
-                Text(project.name).font(.callout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
+                Text(project.name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
                 Text(project.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
-                    .font(.caption2).foregroundStyle(Color.syDim).lineLimit(1).truncationMode(.middle)
+                    .font(.syCaption2).foregroundStyle(Color.syDim).lineLimit(1).truncationMode(.middle)
             }
             Spacer()
             Text("\(project.sessions.count)")
-                .font(.caption2.weight(.semibold).monospacedDigit())
+                .font(.syCaption2.weight(.semibold).monospacedDigit())
                 .foregroundStyle(color)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 1)
@@ -247,21 +252,21 @@ struct SessionRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     if open {
-                        Image(systemName: "bubble.left.fill").font(.caption2).foregroundStyle(Color.ghGreen).help("Open")
+                        Image(systemName: "bubble.left.fill").font(.syCaption2).foregroundStyle(Color.ghGreen).help("Open")
                     }
-                    Text(session.title).lineLimit(2).fontWeight(open ? .semibold : .regular).foregroundStyle(Color.syText)
+                    Text(session.title).font(.syBody).lineLimit(2).fontWeight(open ? .semibold : .regular).foregroundStyle(Color.syText)
                 }
                 HStack(spacing: 5) {
                     if let b = session.branch { BranchTag(name: b) }
                     if let w = session.worktreeName {
-                        Label(w, systemImage: "square.stack.3d.up").labelStyle(CompactLabelStyle()).font(.caption).foregroundStyle(Color.syTeal).lineLimit(1)
+                        Label(w, systemImage: "square.stack.3d.up").labelStyle(CompactLabelStyle()).font(.syCaption).foregroundStyle(Color.syTeal).lineLimit(1)
                     }
                     if let n = session.prNumber { PRTag(number: n) }
                     Spacer(minLength: 4)
                     if let a = session.linesAdded, let r = session.linesRemoved, a + r > 0 {
                         DiffStat(additions: a, deletions: r)
                     }
-                    Text(Fmt.rel(session.modified)).font(.caption).foregroundStyle(Color.syDim).fixedSize()
+                    Text(Fmt.rel(session.modified)).font(.syCaption).foregroundStyle(Color.syDim).fixedSize()
                 }
             }
         }
@@ -278,13 +283,13 @@ struct OpenTabRow: View {
             RoundedRectangle(cornerRadius: 1.5).fill(ProjectPalette.color(for: tab.folder)).frame(width: 3)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Image(systemName: tab.kind == .chat ? "bubble.left.and.text.bubble.right" : "terminal").font(.caption2).foregroundStyle(Color.syMuted)
-                    Text(tab.title).lineLimit(1).fontWeight(selected ? .semibold : .regular).foregroundStyle(Color.syText)
+                    Image(systemName: tab.kind == .chat ? "bubble.left.and.text.bubble.right" : "terminal").font(.syCaption2).foregroundStyle(Color.syMuted)
+                    Text(tab.title).font(.syBody).lineLimit(1).fontWeight(selected ? .semibold : .regular).foregroundStyle(Color.syText)
                 }
                 HStack(spacing: 6) {
                     TabStateBadge(state: tab.state, memory: tab.memoryBytes)
                     Spacer(minLength: 4)
-                    Text(tab.projectName).font(.caption).foregroundStyle(ProjectPalette.color(for: tab.folder)).lineLimit(1)
+                    Text(tab.projectName).font(.syCaption).foregroundStyle(ProjectPalette.color(for: tab.folder)).lineLimit(1)
                 }
             }
         }
@@ -414,7 +419,7 @@ struct ClaudeEmptyState: View {
         let ws = app.claude
         VStack(spacing: 16) {
             IconTile(systemImage: "sparkles", color: .syCoral, size: 56)
-            Text("Claude Code").font(.title2.weight(.semibold)).foregroundStyle(Color.syText)
+            Text("Claude Code").font(.syTitle2.weight(.semibold)).foregroundStyle(Color.syText)
             Text("Start a new session in a project or resume one from the history on the left.")
                 .foregroundStyle(Color.syMuted)
                 .multilineTextAlignment(.center)
@@ -428,7 +433,7 @@ struct ClaudeEmptyState: View {
                             IconTile(systemImage: "folder.fill", color: ProjectPalette.color(for: p.path), size: 22)
                             Text(p.name).fontWeight(.medium).foregroundStyle(Color.syText)
                             Spacer()
-                            Text(Fmt.rel(p.lastActivity)).font(.caption).foregroundStyle(Color.syDim)
+                            Text(Fmt.rel(p.lastActivity)).font(.syCaption).foregroundStyle(Color.syDim)
                             Image(systemName: "plus.circle.fill").foregroundStyle(Color.syCoral)
                         }
                         .padding(.horizontal, 12)
@@ -458,15 +463,15 @@ struct ClaudeTabBar: View {
                     HStack(spacing: 6) {
                         RoundedRectangle(cornerRadius: 2).fill(ProjectPalette.color(for: tab.folder)).frame(width: 3, height: 14)
                         TabStateBadge(state: tab.state, compact: true)
-                        Image(systemName: tab.kind == .chat ? "bubble.left.and.text.bubble.right" : "terminal").font(.caption2).foregroundStyle(Color.syMuted)
+                        Image(systemName: tab.kind == .chat ? "bubble.left.and.text.bubble.right" : "terminal").font(.syCaption2).foregroundStyle(Color.syMuted)
                         Text(tab.title).lineLimit(1).frame(maxWidth: 180, alignment: .leading).foregroundStyle(selected ? Color.syText : Color.syMuted)
-                        Text(tab.projectName).font(.caption).foregroundStyle(Color.syDim).lineLimit(1)
-                        Button { ws.close(tab) } label: { Image(systemName: "xmark").font(.caption2.weight(.bold)) }
+                        Text(tab.projectName).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
+                        Button { ws.close(tab) } label: { Image(systemName: "xmark").font(.syCaption2.weight(.bold)) }
                             .buttonStyle(.borderless)
                             .foregroundStyle(Color.syDim)
                             .help("Close")
                     }
-                    .font(.callout)
+                    .font(.syCallout)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
                     .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.syAccent.opacity(0.14) : Color.syText.opacity(0.04)))
@@ -535,7 +540,7 @@ struct ClaudeControlBar: View {
                 }
             }
             } else if let chat = tab.chat, chat.totalCost > 0 || chat.sessionId != nil {
-                Text(chat.model.replacingOccurrences(of: "claude-", with: "")).font(.caption).foregroundStyle(Color.syMuted)
+                Text(chat.model.replacingOccurrences(of: "claude-", with: "")).font(.syCaption).foregroundStyle(Color.syMuted)
             }
             Picker("", selection: Binding(get: { tab.kind }, set: { k in
                 if k == .terminal && tab.kind == .chat { ws.openInTerminal(tab) }
@@ -578,7 +583,7 @@ struct ClaudeControlBar: View {
             .menuIndicator(.hidden)
             .fixedSize()
         }
-        .font(.callout)
+        .font(.syCallout)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .modifier(ClaudeBarBackground())
@@ -653,7 +658,7 @@ struct ChangesPanel: View {
             HStack(spacing: 8) {
                 if git.loading { ProgressView().controlSize(.mini) }
                 Text(git.changes.isEmpty ? "No uncommitted changes" : plural(git.changes.count, "file changed", "files changed"))
-                    .font(.caption).foregroundStyle(Color.syMuted)
+                    .font(.syCaption).foregroundStyle(Color.syMuted)
                 if !git.changes.isEmpty {
                     DiffStat(additions: git.changes.reduce(0) { $0 + $1.additions }, deletions: git.changes.reduce(0) { $0 + $1.deletions })
                 }
@@ -666,11 +671,11 @@ struct ChangesPanel: View {
             .padding(.vertical, 6)
             if !git.unpushed.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Unpushed commits" + " · \(git.unpushed.count)").font(.caption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                    Text("Unpushed commits" + " · \(git.unpushed.count)").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
                     ForEach(git.unpushed.prefix(6)) { c in
                         HStack(spacing: 6) {
-                            Text(c.short).font(.system(.caption, design: .monospaced)).foregroundStyle(Color.syMuted)
-                            Text(c.subject).font(.caption).lineLimit(1)
+                            Text(c.short).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
+                            Text(c.subject).font(.syCaption).lineLimit(1)
                         }
                     }
                 }
@@ -681,9 +686,9 @@ struct ChangesPanel: View {
             ClaudeHairline()
             if git.changes.isEmpty {
                 VStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle").font(.largeTitle).foregroundStyle(Color.syGreen.opacity(0.6))
+                    Image(systemName: "checkmark.circle").font(.syLargeTitle).foregroundStyle(Color.syGreen.opacity(0.6))
                     Text("Changes Claude makes will show up here automatically")
-                        .font(.callout).foregroundStyle(Color.syMuted).multilineTextAlignment(.center)
+                        .font(.syCallout).foregroundStyle(Color.syMuted).multilineTextAlignment(.center)
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -711,7 +716,7 @@ struct LocalFilesPanel: View {
                     Button { if !dir.isEmpty { dir = (dir as NSString).deletingLastPathComponent } } label: { Image(systemName: "chevron.left") }
                         .buttonStyle(.borderless)
                         .disabled(dir.isEmpty)
-                    Text(dir.isEmpty ? (root as NSString).lastPathComponent : dir).font(.caption.monospaced()).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.head)
+                    Text(dir.isEmpty ? (root as NSString).lastPathComponent : dir).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.head)
                     Spacer()
                 }
                 .padding(.horizontal, 8)
@@ -803,7 +808,7 @@ struct BranchPRPanel: View {
                 InspectorPRDetail(tab: tab, ref: selected) { self.selected = nil }
             } else if repo == nil {
                 VStack(spacing: 8) {
-                    Image(systemName: "link.badge.plus").font(.title2).foregroundStyle(Color.syDim)
+                    Image(systemName: "link.badge.plus").font(.syTitle2).foregroundStyle(Color.syDim)
                     Text("Folder isn't linked to a GitHub repository").foregroundStyle(Color.syMuted)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -823,11 +828,11 @@ struct BranchPRPanel: View {
         List {
             Section {
                 if let branchError, branchPRs.isEmpty {
-                    Text(branchError).font(.caption).foregroundStyle(Color.syRed)
+                    Text(branchError).font(.syCaption).foregroundStyle(Color.syRed)
                 } else if branchPRs.isEmpty && linked == nil && !branchLoading {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("No PR for branch \(tab.git.branch ?? "?")")
-                            .font(.callout).foregroundStyle(Color.syMuted)
+                            .font(.syCallout).foregroundStyle(Color.syMuted)
                         if let repo, let b = tab.git.branch, b != "HEAD" {
                             Button("Create PR in browser") { openInBrowser("https://github.com/\(repo.full)/pull/new/\(b)") }
                                 .controlSize(.small)
@@ -841,7 +846,7 @@ struct BranchPRPanel: View {
                 }
             } header: {
                 HStack(spacing: 6) {
-                    Text("This branch")
+                    Text("This branch").font(.sySubheadline.weight(.semibold))
                     if let b = tab.git.branch { BranchTag(name: b) }
                 }
                 .textCase(nil)
@@ -853,14 +858,14 @@ struct BranchPRPanel: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .listRowSeparator(.hidden)
-                if let error { Text(error).font(.caption).foregroundStyle(Color.syRed) }
+                if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
                 if list.isEmpty, !listLoading, error == nil {
-                    Text("Nothing here").font(.callout).foregroundStyle(Color.syDim)
+                    Text("Nothing here").font(.syCallout).foregroundStyle(Color.syDim)
                 }
                 ForEach(list) { item in row(item) }
             } header: {
                 HStack {
-                    Text(repo?.full ?? "")
+                    Text(repo?.full ?? "").font(.sySubheadline.weight(.semibold))
                     Spacer()
                     RefreshStatus(updated: lastUpdated, refreshing: branchLoading || listLoading, error: branchError ?? error, compact: true) {
                         Task { await load() }
@@ -878,7 +883,7 @@ struct BranchPRPanel: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .top, spacing: 6) {
                 StateBadge(state: item.visualState, compact: true)
-                Text(item.title).lineLimit(2).fontWeight(.medium).foregroundStyle(Color.syText)
+                Text(item.title).font(.syBody).lineLimit(2).fontWeight(.medium).foregroundStyle(Color.syText)
             }
             HStack(spacing: 6) {
                 Text("#\(item.number)").foregroundStyle(Color.syMuted)
@@ -889,7 +894,7 @@ struct BranchPRPanel: View {
                 Spacer()
                 Text(Fmt.rel(item.updatedAt)).foregroundStyle(Color.syDim)
             }
-            .font(.caption)
+            .font(.syCaption)
         }
         .padding(.vertical, 2)
         .rowAppear(item.id, rows)
@@ -1020,7 +1025,7 @@ struct InspectorPRDetail: View {
         let fix = FixPromptExtractor.latest(in: pr)
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(pr.title).font(.headline).textSelection(.enabled)
+                Text(pr.title).font(.syHeadline).textSelection(.enabled)
                 HStack(spacing: 6) {
                     StateBadge(state: pr.visualState)
                     Text("#\(pr.number)").foregroundStyle(Color.syMuted)
@@ -1028,7 +1033,7 @@ struct InspectorPRDetail: View {
                 }
                 HStack(spacing: 4) {
                     BranchTag(name: pr.baseRefName)
-                    Image(systemName: "arrow.left").font(.caption2).foregroundStyle(Color.syMuted)
+                    Image(systemName: "arrow.left").font(.syCaption2).foregroundStyle(Color.syMuted)
                     BranchTag(name: pr.headRefName)
                 }
             }
@@ -1049,10 +1054,10 @@ struct InspectorPRDetail: View {
                     }
                 }
             }
-            .font(.caption)
+            .font(.syCaption)
             if tab.chat != nil || tab.running {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Send to this session").font(.caption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                    Text("Send to this session").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
                     if let fix {
                         Button {
                             app.claude.send(FixPromptExtractor.wrap(fix, pr: pr, options: FixOptions()), to: tab)
@@ -1080,15 +1085,15 @@ struct InspectorPRDetail: View {
             }
             if !unresolved.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Unresolved comments").font(.caption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                    Text("Unresolved comments").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
                     ForEach(unresolved) { th in
                         VStack(alignment: .leading, spacing: 3) {
                             Text("\(th.path)\((th.line ?? th.originalLine).map { ":\($0)" } ?? "")")
-                                .font(.caption.monospaced()).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.head)
+                                .font(.syCaption.monospaced()).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.head)
                             if let c = th.comments.nodes.first {
                                 HStack(alignment: .top, spacing: 5) {
                                     Avatar(url: c.author?.avatarUrl, size: 14)
-                                    MarkdownText(text: c.body).font(.callout).lineLimit(4)
+                                    MarkdownText(text: c.body).font(.syCallout).lineLimit(4)
                                 }
                             }
                         }
@@ -1103,8 +1108,8 @@ struct InspectorPRDetail: View {
                     if let m = model, m.filesLoaded {
                         ForEach(m.files) { f in
                             HStack(spacing: 6) {
-                                Text(f.statusLetter).font(.caption2.weight(.bold).monospaced()).foregroundStyle(Color.syMuted)
-                                Text(f.id).font(.caption.monospaced()).lineLimit(1).truncationMode(.head)
+                                Text(f.statusLetter).font(.syCaption2.weight(.bold).monospaced()).foregroundStyle(Color.syMuted)
+                                Text(f.id).font(.syCaption.monospaced()).lineLimit(1).truncationMode(.head)
                                 Spacer()
                                 DiffStat(additions: f.additions, deletions: f.deletions)
                             }
@@ -1115,7 +1120,7 @@ struct InspectorPRDetail: View {
                 }
                 .padding(.top, 4)
             } label: {
-                Text("Files changed · \(pr.changedFiles)").font(.caption.weight(.semibold))
+                Text("Files changed · \(pr.changedFiles)").font(.syCaption.weight(.semibold))
             }
             .onChange(of: showFiles) { _, open in model?.inspectorFilesVisible = open }
             .onDisappear { model?.inspectorFilesVisible = false }

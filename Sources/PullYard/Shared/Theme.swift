@@ -133,6 +133,96 @@ extension Color {
     static let syDelBG = Color(nsColor: .syDelBG)
 }
 
+@Observable
+final class TextZoom {
+    static let shared = TextZoom()
+    static let key = "text.zoom"
+    static let levels: [CGFloat] = [0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5]
+
+    private(set) var scale: CGFloat
+    @ObservationIgnored private var fonts: [Font.TextStyle: Font] = [:]
+    @ObservationIgnored private var keyMonitor: Any?
+
+    private init() {
+        let saved = UserDefaults.standard.double(forKey: Self.key)
+        scale = saved == 0 ? 1 : Self.levels.min { abs($0 - saved) < abs($1 - saved) } ?? 1
+    }
+
+    var canZoomIn: Bool { scale < Self.levels[Self.levels.count - 1] - 0.001 }
+    var canZoomOut: Bool { scale > Self.levels[0] + 0.001 }
+    var isDefault: Bool { abs(scale - 1) < 0.001 }
+
+    func zoomIn() { set(Self.levels.first { $0 > scale + 0.001 } ?? scale) }
+    func zoomOut() { set(Self.levels.last { $0 < scale - 0.001 } ?? scale) }
+    func reset() { set(1) }
+
+    func installEqualsShortcut() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command, event.charactersIgnoringModifiers == "=" else { return event }
+            zoomIn()
+            return nil
+        }
+    }
+
+    private func set(_ value: CGFloat) {
+        guard abs(value - scale) > 0.001 else { return }
+        fonts.removeAll()
+        scale = value
+        UserDefaults.standard.set(Double(value), forKey: Self.key)
+    }
+
+    func font(_ style: Font.TextStyle) -> Font {
+        let current = scale
+        if let f = fonts[style] { return f }
+        let d = NSFontDescriptor.preferredFontDescriptor(forTextStyle: style.nsStyle)
+        let size = Self.size(d.pointSize, at: current)
+        let f = Font(NSFont(descriptor: d, size: size) ?? .systemFont(ofSize: size))
+        fonts[style] = f
+        return f
+    }
+
+    func size(_ base: CGFloat) -> CGFloat { Self.size(base, at: scale) }
+
+    static func size(_ base: CGFloat, at scale: CGFloat) -> CGFloat { (base * scale * 2).rounded() / 2 }
+}
+
+private extension Font.TextStyle {
+    var nsStyle: NSFont.TextStyle {
+        switch self {
+        case .largeTitle: return .largeTitle
+        case .title: return .title1
+        case .title2: return .title2
+        case .title3: return .title3
+        case .headline: return .headline
+        case .subheadline: return .subheadline
+        case .callout: return .callout
+        case .footnote: return .footnote
+        case .caption: return .caption1
+        case .caption2: return .caption2
+        default: return .body
+        }
+    }
+}
+
+extension Font {
+    static var syLargeTitle: Font { TextZoom.shared.font(.largeTitle) }
+    static var syTitle: Font { TextZoom.shared.font(.title) }
+    static var syTitle2: Font { TextZoom.shared.font(.title2) }
+    static var syTitle3: Font { TextZoom.shared.font(.title3) }
+    static var syHeadline: Font { TextZoom.shared.font(.headline) }
+    static var sySubheadline: Font { TextZoom.shared.font(.subheadline) }
+    static var syBody: Font { TextZoom.shared.font(.body) }
+    static var syCallout: Font { TextZoom.shared.font(.callout) }
+    static var syFootnote: Font { TextZoom.shared.font(.footnote) }
+    static var syCaption: Font { TextZoom.shared.font(.caption) }
+    static var syCaption2: Font { TextZoom.shared.font(.caption2) }
+
+    static func sy(size: CGFloat, weight: Font.Weight? = nil, design: Font.Design? = nil) -> Font {
+        .system(size: TextZoom.shared.size(size), weight: weight, design: design)
+    }
+}
+
 enum Surface {
     case sidebar, list, panel, raised, sunken, bar
 
@@ -200,7 +290,7 @@ struct ChipView: View {
             if let icon { Image(systemName: icon).imageScale(.small) }
             Text(text).lineLimit(1).truncationMode(.middle)
         }
-        .font(mono ? .caption.monospaced() : .caption.weight(.medium))
+        .font(mono ? .syCaption.monospaced() : .syCaption.weight(.medium))
         .foregroundStyle(color)
         .padding(.horizontal, 7)
         .padding(.vertical, 2)

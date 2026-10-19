@@ -105,7 +105,7 @@ struct UsageOverlay: View {
                 Spacer()
                 if chat.totalCost > 0 {
                     Text("Session: " + String(format: "$%.2f", chat.totalCost))
-                        .font(.caption.monospacedDigit())
+                        .font(.syCaption.monospacedDigit())
                         .foregroundStyle(Color.syMuted)
                 }
             }
@@ -130,7 +130,7 @@ struct UsageOverlay: View {
                         .monospacedDigit()
                         .foregroundStyle(Color.syMuted)
                 }
-                .font(.callout)
+                .font(.syCallout)
                 ContextBar(ctx: ctx)
                 HStack {
                     if ctx.autoCompactEnabled, let threshold = ctx.autoCompactThreshold, threshold > ctx.total {
@@ -143,7 +143,7 @@ struct UsageOverlay: View {
                         .controlSize(.small)
                         .disabled(!chat.running || chat.busy)
                 }
-                .font(.callout)
+                .font(.syCallout)
             }
         } else {
             HStack {
@@ -151,7 +151,7 @@ struct UsageOverlay: View {
                 Spacer()
                 Text(chat.running ? "loading…" : "session is sleeping").foregroundStyle(Color.syDim)
             }
-            .font(.callout)
+            .font(.syCallout)
         }
     }
 
@@ -165,9 +165,9 @@ struct UsageOverlay: View {
                     .buttonStyle(.borderless)
                     .help("Open usage page")
             }
-            .font(.callout)
+            .font(.syCallout)
             if usage.windows.isEmpty {
-                Text("Shows up after Claude's first reply").font(.caption).foregroundStyle(Color.syDim)
+                Text("Shows up after Claude's first reply").font(.syCaption).foregroundStyle(Color.syDim)
             }
             ForEach(usage.windows) { w in
                 VStack(alignment: .leading, spacing: 4) {
@@ -177,12 +177,12 @@ struct UsageOverlay: View {
                         Text(TokenFormat.resets(w.resetsAt)).foregroundStyle(Color.syMuted)
                         Text("\(Int((w.utilization * 100).rounded()))%").monospacedDigit().frame(minWidth: 34, alignment: .trailing)
                     }
-                    .font(.callout)
+                    .font(.syCallout)
                     ProgressBar(value: w.utilization, color: w.utilization >= 0.9 ? .syRed : w.utilization >= 0.7 ? .syAmber : .sySky)
                 }
             }
             if let note = usage.overageNote {
-                Label(note, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(Color.syAmber)
+                Label(note, systemImage: "exclamationmark.triangle.fill").font(.syCaption).foregroundStyle(Color.syAmber)
             }
         }
     }
@@ -201,7 +201,7 @@ struct UsageOverlay: View {
                         Spacer()
                         Text(TokenFormat.short(c.tokens)).monospacedDigit().foregroundStyle(Color.syMuted)
                     }
-                    .font(.caption)
+                    .font(.syCaption)
                 }
             }
         }

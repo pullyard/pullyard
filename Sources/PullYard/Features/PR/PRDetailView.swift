@@ -281,20 +281,20 @@ struct StackPreviewContent: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(node.title).font(.title2.weight(.bold)).lineLimit(1)
-                    Text("#\(node.number)").font(.title2).foregroundStyle(Color.syDim)
+                    Text(node.title).font(.syTitle2.weight(.bold)).lineLimit(1)
+                    Text("#\(node.number)").font(.syTitle2).foregroundStyle(Color.syDim)
                     ProgressView().controlSize(.small)
                 }
                 HStack(spacing: 8) {
                     StateBadge(state: node.visualState)
                     Text(node.author ?? "").fontWeight(.semibold)
                     BranchChip(name: node.baseRefName)
-                    Image(systemName: "arrow.left").font(.caption).foregroundStyle(Color.syDim)
+                    Image(systemName: "arrow.left").font(.syCaption).foregroundStyle(Color.syDim)
                     BranchChip(name: node.headRefName, color: .syViolet)
                     Spacer(minLength: 0)
                     ShimmerBar(width: 70, height: 12)
                 }
-                .font(.callout)
+                .font(.syCallout)
                 .lineLimit(1)
                 StackStrip(tree: tree, repo: model.ref.repo) {}
                 ShimmerBar(height: 30, radius: 9)
@@ -304,7 +304,7 @@ struct StackPreviewContent: View {
             .padding(.top, 12)
             HStack(spacing: 14) {
                 ForEach([96, 80, 70, 110], id: \.self) { ShimmerBar(width: CGFloat($0), height: 14) }
-                Label("Stack", systemImage: "square.stack.3d.up").font(.callout.weight(.semibold))
+                Label("Stack", systemImage: "square.stack.3d.up").font(.syCallout.weight(.semibold))
                 Spacer()
             }
             .padding(.horizontal, 20)
@@ -326,8 +326,8 @@ struct PRHeaderView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(pr.title).font(.title2.weight(.bold)).textSelection(.enabled)
-                Text("#\(pr.number)").font(.title2).foregroundStyle(Color.syDim)
+                Text(pr.title).font(.syTitle2.weight(.bold)).textSelection(.enabled)
+                Text("#\(pr.number)").font(.syTitle2).foregroundStyle(Color.syDim)
                 ShortLinkButton(ref: ShortLink.ref(url: pr.url) ?? model.ref)
             }
             HStack(spacing: 8) {
@@ -335,25 +335,25 @@ struct PRHeaderView: View {
                 Avatar(url: pr.author?.avatarUrl, size: 18)
                 Text(pr.author?.login ?? "ghost").fontWeight(.semibold)
                 BranchChip(name: pr.baseRefName)
-                Image(systemName: "arrow.left").font(.caption).foregroundStyle(Color.syDim)
+                Image(systemName: "arrow.left").font(.syCaption).foregroundStyle(Color.syDim)
                 BranchChip(name: pr.headRefName, color: .syViolet)
                 DiffStat(additions: pr.additions, deletions: pr.deletions)
                 Spacer(minLength: 0)
                 Text(Fmt.rel(pr.createdAt)).foregroundStyle(Color.syMuted).help(Fmt.full.string(from: pr.createdAt))
             }
-            .font(.callout)
+            .font(.syCallout)
             .lineLimit(1)
             if !pr.labels.nodes.isEmpty || !model.reviewers.isEmpty || !pr.assignees.nodes.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(pr.labels.nodes, id: \.name) { LabelChip(label: $0) }
                     if !model.reviewers.isEmpty {
-                        Text("Reviewers:").font(.caption).foregroundStyle(Color.syMuted).padding(.leading, pr.labels.nodes.isEmpty ? 0 : 6)
+                        Text("Reviewers:").font(.syCaption).foregroundStyle(Color.syMuted).padding(.leading, pr.labels.nodes.isEmpty ? 0 : 6)
                         ForEach(model.reviewers, id: \.login) { r in
                             ReviewerBadge(login: r.login, avatar: r.avatar, state: r.state)
                         }
                     }
                     if !pr.assignees.nodes.isEmpty {
-                        Text("Assignees:").font(.caption).foregroundStyle(Color.syMuted).padding(.leading, 6)
+                        Text("Assignees:").font(.syCaption).foregroundStyle(Color.syMuted).padding(.leading, 6)
                         ForEach(pr.assignees.nodes, id: \.login) { a in
                             Avatar(url: a.avatarUrl, size: 18).help(a.login)
                         }
@@ -396,7 +396,7 @@ struct StackStrip: View {
                         }
                     }
                     if tree.count > line.count {
-                        Text("+\(tree.count - line.count)").font(.caption).foregroundStyle(Color.syMuted)
+                        Text("+\(tree.count - line.count)").font(.syCaption).foregroundStyle(Color.syMuted)
                             .help(plural(tree.count - line.count, "more pull request on another branch of the stack", "more pull requests on other branches of the stack"))
                     }
                     Spacer(minLength: 0)
@@ -416,18 +416,18 @@ struct StackStrip: View {
                         Button("#\(s.number) \(s.title)") { app.open(.pr(ItemRef(repo: repo, number: s.number))) }
                     }
                 } label: {
-                    Label("\(ups.count)", systemImage: "chevron.up").labelStyle(.titleAndIcon).font(.caption.weight(.medium))
+                    Label("\(ups.count)", systemImage: "chevron.up").labelStyle(.titleAndIcon).font(.syCaption.weight(.medium))
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
                 .help("Up the stack: \(ups.count) pull requests are stacked on this one")
             }
             Button(action: onShow) {
-                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(Color.syDim)
+                Image(systemName: "chevron.right").font(.syCaption2).foregroundStyle(Color.syDim)
             }
             .buttonStyle(.plain)
         }
-        .font(.callout)
+        .font(.syCallout)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 9).fill(Color.syIndigo.opacity(0.06)))
@@ -437,7 +437,7 @@ struct StackStrip: View {
         Button {
             app.open(.pr(ItemRef(repo: repo, number: s.number)))
         } label: {
-            Label("#\(s.number)", systemImage: icon).labelStyle(.titleAndIcon).font(.caption.weight(.medium))
+            Label("#\(s.number)", systemImage: icon).labelStyle(.titleAndIcon).font(.syCaption.weight(.medium))
         }
         .buttonStyle(.borderless)
         .help("\(help): #\(s.number) \(s.title)")
@@ -450,7 +450,7 @@ struct BranchChip: View {
 
     var body: some View {
         Text(name)
-            .font(.system(.caption, design: .monospaced))
+            .font(.syCaption.monospaced())
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .background(Capsule().fill(color.opacity(0.12)))
@@ -476,7 +476,7 @@ struct ReviewerBadge: View {
                 default: Image(systemName: "circle.fill").font(.system(size: 6)).foregroundStyle(Color.ghYellow)
                 }
             }
-            .font(.caption.weight(.bold))
+            .font(.syCaption.weight(.bold))
         }
         .help("\(login): \(stateTitle)")
     }
@@ -502,10 +502,10 @@ struct MergeStatusBar: View {
             let s = status
             HStack(spacing: 8) {
                 Image(systemName: s.icon).foregroundStyle(s.color)
-                Text(s.text).font(.callout)
+                Text(s.text).font(.syCallout)
                 if let auto = pr.autoMergeRequest {
                     Text("· auto-merge enabled" + (auto.mergeMethod.map { " (\(MergeMethod(rawValue: $0)?.title ?? $0))" } ?? ""))
-                        .font(.callout).foregroundStyle(Color.ghGreen)
+                        .font(.syCallout).foregroundStyle(Color.ghGreen)
                 }
                 checksBadge
                 Spacer()
@@ -548,7 +548,7 @@ struct MergeStatusBar: View {
                     if pending > 0 { Label("\(pending)", systemImage: "clock.fill").foregroundStyle(Color.ghYellow) }
                     Label("\(ok)", systemImage: "checkmark.circle.fill").foregroundStyle(Color.ghGreen)
                 }
-                .font(.caption)
+                .font(.syCaption)
             }
             .buttonStyle(.plain)
             .help("Checks")
@@ -666,13 +666,13 @@ struct CommitsTab: View {
                     HStack(spacing: 10) {
                         Avatar(url: c.author?.avatarUrl, size: 22)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(c.messageHeadline).lineLimit(2)
+                            Text(c.messageHeadline).font(.syBody).lineLimit(2)
                             Text("\(c.author?.user?.login ?? c.author?.name ?? "") · \(Fmt.rel(c.committedDate))")
-                                .font(.caption).foregroundStyle(Color.syMuted)
+                                .font(.syCaption).foregroundStyle(Color.syMuted)
                         }
                         Spacer()
                         CIIcon(state: c.statusCheckRollup?.state)
-                        Text(c.abbreviatedOid).font(.system(.caption, design: .monospaced)).foregroundStyle(Color.syMuted)
+                        Text(c.abbreviatedOid).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
                     }
                     .padding(.vertical, 2)
                     .rowAppear(c.oid, model.commitRows)
@@ -703,7 +703,7 @@ struct ChecksTab: View {
         let failedRuns = Set(checks.filter { $0.outcome == .failure }.compactMap(\.runId))
         List {
             if checks.isEmpty {
-                Text("No checks for the latest commit").foregroundStyle(Color.syMuted)
+                Text("No checks for the latest commit").font(.syBody).foregroundStyle(Color.syMuted)
             }
             if !failedRuns.isEmpty, model.canWrite {
                 Button(action: onRerun) {
@@ -715,8 +715,8 @@ struct ChecksTab: View {
                 HStack(spacing: 10) {
                     OutcomeIcon(outcome: c.outcome)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(c.workflowName.map { "\($0) / \(c.title)" } ?? c.title).lineLimit(1)
-                        Text(subtitle(c)).font(.caption).foregroundStyle(Color.syMuted).lineLimit(1)
+                        Text(c.workflowName.map { "\($0) / \(c.title)" } ?? c.title).font(.syBody).lineLimit(1)
+                        Text(subtitle(c)).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
                     }
                     Spacer()
                     if CIFailureCollector.isFixable(c), pr.isOpen {

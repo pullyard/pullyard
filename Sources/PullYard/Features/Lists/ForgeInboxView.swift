@@ -11,7 +11,7 @@ struct ForgeInboxView: View {
     var body: some View {
         List {
             if let error, items.isEmpty {
-                Text(error).foregroundStyle(.red).font(.caption).textSelection(.enabled)
+                Text(error).foregroundStyle(.red).font(.syCaption).textSelection(.enabled)
             }
             ForEach(items) { n in
                 ForgeNotificationRow(notification: n) {
@@ -28,7 +28,7 @@ struct ForgeInboxView: View {
                 .listRowSeparatorTint(Color.syLine)
             }
             if items.isEmpty, !loading, error == nil {
-                Text("All done").foregroundStyle(Color.syMuted)
+                Text("All done").font(.syBody).foregroundStyle(Color.syMuted)
             }
         }
         .overlay {
@@ -85,7 +85,7 @@ struct ForgeNotificationRow: View {
         HStack(alignment: .top, spacing: 10) {
             Avatar(url: notification.author?.avatarUrl, size: 22)
             VStack(alignment: .leading, spacing: 3) {
-                Text(notification.title).fontWeight(.semibold).lineLimit(2).foregroundStyle(Color.syText)
+                Text(notification.title).font(.syBody).fontWeight(.semibold).lineLimit(2).foregroundStyle(Color.syText)
                 HStack(spacing: 5) {
                     Text(notification.reason).foregroundStyle(Color.syAccent)
                     if !notification.repo.isEmpty {
@@ -95,10 +95,10 @@ struct ForgeNotificationRow: View {
                     Text("·")
                     Text(Fmt.rel(notification.updatedAt))
                 }
-                .font(.caption)
+                .font(.syCaption)
                 .foregroundStyle(Color.syMuted)
                 if let author = notification.author {
-                    Text("\(notification.kind) · @\(author.login)").font(.caption).foregroundStyle(Color.syDim)
+                    Text("\(notification.kind) · @\(author.login)").font(.syCaption).foregroundStyle(Color.syDim)
                 }
             }
             Spacer(minLength: 4)
@@ -131,7 +131,7 @@ struct ForgeReposView: View {
     var body: some View {
         List {
             if let error, repos.isEmpty {
-                Text(error).foregroundStyle(.red).font(.caption).textSelection(.enabled)
+                Text(error).foregroundStyle(.red).font(.syCaption).textSelection(.enabled)
             }
             ForEach(visible) { repo in
                 ForgeRepoRow(repo: repo)
@@ -146,7 +146,7 @@ struct ForgeReposView: View {
                     .listRowSeparatorTint(Color.syLine)
             }
             if visible.isEmpty, !loading, error == nil {
-                Text("Nothing here").foregroundStyle(Color.syMuted)
+                Text("Nothing here").font(.syBody).foregroundStyle(Color.syMuted)
             }
         }
         .overlay {
@@ -185,9 +185,9 @@ struct ForgeRepoRow: View {
         HStack(alignment: .top, spacing: 10) {
             IconTile(systemImage: repo.isPrivate ? "lock.fill" : "book.closed.fill", color: ProjectPalette.color(for: repo.fullName), size: 24)
             VStack(alignment: .leading, spacing: 3) {
-                Text(repo.fullName).fontWeight(.semibold).lineLimit(1).foregroundStyle(Color.syText)
+                Text(repo.fullName).font(.syBody).fontWeight(.semibold).lineLimit(1).foregroundStyle(Color.syText)
                 if let d = repo.description, !d.isEmpty {
-                    Text(d).font(.caption).foregroundStyle(Color.syMuted).lineLimit(2)
+                    Text(d).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(2)
                 }
                 HStack(spacing: 8) {
                     if let branch = repo.defaultBranch {
@@ -200,7 +200,7 @@ struct ForgeRepoRow: View {
                         Text("updated \(Fmt.rel(updated))")
                     }
                 }
-                .font(.caption)
+                .font(.syCaption)
                 .foregroundStyle(Color.syDim)
             }
         }

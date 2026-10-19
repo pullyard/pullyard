@@ -24,7 +24,7 @@ struct NotificationsView: View {
             .padding(.vertical, 8)
             Rectangle().fill(Color.syLine).frame(height: 1)
             List(selection: $selection) {
-                if let error { Text(error).foregroundStyle(Color.syRed).font(.caption) }
+                if let error { Text(error).foregroundStyle(Color.syRed).font(.syCaption) }
                 ForEach(items) { n in
                     NotificationRow(item: n)
                         .rowAppear(n.id, rows)
@@ -41,7 +41,7 @@ struct NotificationsView: View {
                 if items.isEmpty, !loading, error == nil {
                     VStack(spacing: 8) {
                         IconTile(systemImage: showAll ? "tray.fill" : "checkmark", color: showAll ? .sySlate : .syGreen, size: 40)
-                        Text(showAll ? "No notifications" : "All caught up").foregroundStyle(Color.syMuted)
+                        Text(showAll ? "No notifications" : "All caught up").font(.syBody).foregroundStyle(Color.syMuted)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.top, 30)
@@ -154,7 +154,7 @@ struct NotificationRow: View {
                 .frame(width: 22, height: 22)
                 .background(RoundedRectangle(cornerRadius: 6).fill(color.opacity(0.14)))
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.subject.title)
+                Text(item.subject.title).font(.syBody)
                     .lineLimit(2)
                     .fontWeight(item.unread ? .semibold : .regular)
                     .foregroundStyle(item.unread ? Color.syText : Color.syMuted)
@@ -166,7 +166,7 @@ struct NotificationRow: View {
                     Text("·").foregroundStyle(Color.syDim)
                     Text(Fmt.rel(item.updatedAt)).lineLimit(1).foregroundStyle(Color.syDim)
                 }
-                .font(.caption)
+                .font(.syCaption)
             }
         }
         .padding(.vertical, 4)

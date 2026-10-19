@@ -22,17 +22,17 @@ struct ResolveConflictsSheet: View {
             HStack(spacing: 10) {
                 IconTile(systemImage: "arrow.triangle.merge", color: .syCoral, size: 30)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Resolve Conflicts with Claude Code").font(.headline).foregroundStyle(Color.syText)
+                    Text("Resolve Conflicts with Claude Code").font(.syHeadline).foregroundStyle(Color.syText)
                     HStack(spacing: 6) {
                         Text("#\(pr.number)").foregroundStyle(Color.syViolet).fontWeight(.semibold)
                         Text(pr.title).foregroundStyle(Color.syMuted).lineLimit(1)
                     }
-                    .font(.callout)
+                    .font(.syCallout)
                 }
                 Spacer()
                 HStack(spacing: 6) {
                     BranchChip(name: pr.baseRefName)
-                    Image(systemName: "arrow.left").font(.caption).foregroundStyle(Color.syDim)
+                    Image(systemName: "arrow.left").font(.syCaption).foregroundStyle(Color.syDim)
                     BranchChip(name: pr.headRefName, color: .syViolet)
                 }
             }
@@ -40,7 +40,7 @@ struct ResolveConflictsSheet: View {
             Toggle("Push when done", isOn: $push).toggleStyle(.checkbox)
             promptEditor
             ClaudeFolderRow(repo: model.ref.repo, folder: $folder, detecting: detecting)
-            if let error { Text(error).font(.caption).foregroundStyle(Color.syRed) }
+            if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
             ClaudeLaunchRow(target: $target, mode: $mode, canLaunch: !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (target == .copy || folder != nil), onLaunch: launch)
         }
         .padding(20)
@@ -58,7 +58,7 @@ struct ResolveConflictsSheet: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(files.isEmpty ? "Conflicting files" : "Conflicting files (\(files.count))")
-                    .font(.caption.weight(.semibold))
+                    .font(.syCaption.weight(.semibold))
                     .foregroundStyle(Color.syMuted)
                 Spacer()
                 if model.conflicts == .checking { ProgressView().controlSize(.mini) }
@@ -67,14 +67,14 @@ struct ResolveConflictsSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     if files.isEmpty {
                         Text(model.conflicts == .checking ? "Checking which files conflict…" : "File list unavailable — Claude will find the conflicts while merging")
-                            .font(.callout)
+                            .font(.syCallout)
                             .foregroundStyle(Color.syDim)
                     }
                     ForEach(files, id: \.self) { f in
                         HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(Color.syRed)
+                            Image(systemName: "exclamationmark.triangle.fill").font(.syCaption2).foregroundStyle(Color.syRed)
                             Text(f)
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.syCaption.monospaced())
                                 .foregroundStyle(Color.sySky)
                                 .lineLimit(1)
                                 .truncationMode(.head)
@@ -92,16 +92,16 @@ struct ResolveConflictsSheet: View {
     private var promptEditor: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Prompt").font(.caption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                Text("Prompt").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
                 if custom != nil {
                     ChipView(text: "edited", color: .syAmber)
-                    Button("Reset") { custom = nil }.buttonStyle(.link).font(.caption)
+                    Button("Reset") { custom = nil }.buttonStyle(.link).font(.syCaption)
                 }
                 Spacer()
-                Text("\(prompt.count)").font(.caption2.monospacedDigit()).foregroundStyle(Color.syDim)
+                Text("\(prompt.count)").font(.syCaption2.monospacedDigit()).foregroundStyle(Color.syDim)
             }
             TextEditor(text: Binding(get: { prompt }, set: { custom = $0 }))
-                .font(.system(size: 11.5, design: .monospaced))
+                .font(.sy(size: 11.5, design: .monospaced))
                 .foregroundStyle(Color.syText)
                 .scrollContentBackground(.hidden)
                 .padding(8)

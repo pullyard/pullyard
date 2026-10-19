@@ -42,25 +42,25 @@ struct FilesTab: View {
             HStack(spacing: 6) {
                 TextField("Filter files", text: $filter).textFieldStyle(.roundedBorder).controlSize(.small)
                 Text("\(model.viewedPaths.intersection(model.files.map(\.id)).count)/\(model.files.count)")
-                    .font(.caption.monospacedDigit()).foregroundStyle(Color.syMuted).help("Viewed")
+                    .font(.syCaption.monospacedDigit()).foregroundStyle(Color.syMuted).help("Viewed")
             }
             .padding(8)
             List(visibleFiles, selection: Binding(get: { model.scrollTarget }, set: { p in if let p { model.revealFile(p) } })) { f in
                 HStack(spacing: 6) {
                     Text(f.statusLetter)
-                        .font(.caption2.weight(.bold).monospaced())
+                        .font(.syCaption2.weight(.bold).monospaced())
                         .foregroundStyle(statusColor(f.status))
                         .frame(width: 12)
                     VStack(alignment: .leading, spacing: 0) {
-                        Text((f.id as NSString).lastPathComponent).lineLimit(1)
-                        Text((f.id as NSString).deletingLastPathComponent).font(.caption2).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.head)
+                        Text((f.id as NSString).lastPathComponent).font(.syBody).lineLimit(1)
+                        Text((f.id as NSString).deletingLastPathComponent).font(.syCaption2).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.head)
                     }
                     Spacer(minLength: 2)
                     if model.threadCount(f.id) > 0 {
-                        Image(systemName: "text.bubble").font(.caption2).foregroundStyle(Color.syMuted)
+                        Image(systemName: "text.bubble").font(.syCaption2).foregroundStyle(Color.syMuted)
                     }
                     if model.viewedPaths.contains(f.id) {
-                        Image(systemName: "checkmark.circle.fill").font(.caption).foregroundStyle(Color.ghGreen)
+                        Image(systemName: "checkmark.circle.fill").font(.syCaption).foregroundStyle(Color.ghGreen)
                     }
                 }
                 .rowAppear(f.id, model.fileRows)
@@ -108,7 +108,7 @@ struct FilesTab: View {
         case .composer(let anchor):
             InlineComposer(model: model, anchor: anchor)
         case .note(let text):
-            Text(text).font(.caption).foregroundStyle(Color.syMuted).padding(.horizontal, 12).padding(.vertical, 8)
+            Text(text).font(.syCaption).foregroundStyle(Color.syMuted).padding(.horizontal, 12).padding(.vertical, 8)
         }
     }
 
@@ -144,7 +144,7 @@ struct FileHeader: View {
                     Text(file.id)
                 }
             }
-            .font(.system(.callout, design: .monospaced).weight(.medium))
+            .font(.syCallout.monospaced().weight(.medium))
             .lineLimit(1)
             .truncationMode(.head)
             .textSelection(.enabled)
@@ -181,7 +181,7 @@ struct DiffLineView: View, Equatable {
     let line: DiffLine
     var onComment: (() -> Void)?
 
-    private static let font = Font.system(size: 12, design: .monospaced)
+    private static var font: Font { .sy(size: 12, design: .monospaced) }
     private static let addBG = Color.syAddBG
     private static let delBG = Color.syDelBG
     private static let hunkBG = Color(nsColor: .syHunkBG)
@@ -195,7 +195,7 @@ struct DiffLineView: View, Equatable {
             Text(line.text)
                 .font(Self.font)
                 .foregroundStyle(Color.syMuted)
-                .padding(.leading, 104)
+                .padding(.leading, TextZoom.shared.size(104))
                 .padding(.vertical, 3)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Self.hunkBG)
@@ -203,7 +203,7 @@ struct DiffLineView: View, Equatable {
             HStack(alignment: .top, spacing: 0) {
                 Text(gutterText)
                     .foregroundStyle(Color.syDim)
-                    .frame(width: 108, alignment: .trailing)
+                    .frame(width: TextZoom.shared.size(108), alignment: .trailing)
                     .onTapGesture { if line.commentable { onComment?() } }
                 Text(sign + line.text)
                     .foregroundStyle(line.kind == .meta ? .secondary : .primary)
@@ -256,9 +256,9 @@ struct InlineThreadView: View {
                 }
                 .buttonStyle(.plain)
                 Image(systemName: "text.bubble")
-                Text(plural(thread.comments.nodes.count, "comment", "comments")).font(.caption)
-                if thread.isOutdated { Text("outdated").font(.caption2).foregroundStyle(Color.syMuted) }
-                if thread.isResolved { Text("resolved").font(.caption2).foregroundStyle(Color.ghGreen) }
+                Text(plural(thread.comments.nodes.count, "comment", "comments")).font(.syCaption)
+                if thread.isOutdated { Text("outdated").font(.syCaption2).foregroundStyle(Color.syMuted) }
+                if thread.isResolved { Text("resolved").font(.syCaption2).foregroundStyle(Color.ghGreen) }
                 Spacer()
                 if thread.isResolved, thread.viewerCanUnresolve {
                     Button("Unresolve") { Task { await model.setResolved(thread.id, false) } }.controlSize(.small)
@@ -278,8 +278,8 @@ struct InlineThreadView: View {
                                 Text(c.author?.login ?? "ghost").fontWeight(.semibold)
                                 Text("· \(Fmt.rel(c.createdAt))").foregroundStyle(Color.syMuted)
                             }
-                            .font(.caption)
-                            MarkdownText(text: c.body).font(.callout)
+                            .font(.syCaption)
+                            MarkdownText(text: c.body).font(.syCallout)
                         }
                         Spacer(minLength: 0)
                     }
@@ -313,7 +313,7 @@ struct InlineThreadView: View {
                 }
             }
         }
-        .font(.callout)
+        .font(.syCallout)
         .card(radius: 10)
         .padding(.horizontal, 12)
         .padding(.leading, 96)
@@ -328,9 +328,9 @@ struct PendingCommentView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Text("pending").font(.caption2.weight(.semibold)).padding(.horizontal, 6).padding(.vertical, 1)
+            Text("pending").font(.syCaption2.weight(.semibold)).padding(.horizontal, 6).padding(.vertical, 1)
                 .background(Capsule().fill(Color.ghYellow.opacity(0.25)))
-            MarkdownText(text: comment.body).font(.callout)
+            MarkdownText(text: comment.body).font(.syCallout)
             Spacer()
             Button {
                 model.pending.removeAll { $0.id == comment.id }

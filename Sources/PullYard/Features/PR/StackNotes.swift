@@ -120,20 +120,20 @@ struct StickyNote: View {
                 Text(hovered ? "Open" : "").foregroundStyle(Color.syMuted)
                 Image(systemName: "square.and.pencil").foregroundStyle(hovered ? Color.syText : Color.syMuted)
             }
-            .font(.caption2)
+            .font(.syCaption2)
             .foregroundStyle(Color.syAmber)
             ForEach(sorted.prefix(2)) { n in
                 HStack(spacing: 5) {
                     Circle().fill(n.kind.color).frame(width: 6, height: 6)
-                    Text(n.kind.title).font(.caption2.weight(.semibold)).foregroundStyle(n.kind.color)
+                    Text(n.kind.title).font(.syCaption2.weight(.semibold)).foregroundStyle(n.kind.color)
                     Text(n.text.replacingOccurrences(of: "\n", with: " "))
-                        .font(.caption)
+                        .font(.syCaption)
                         .foregroundStyle(Color.syText)
                         .lineLimit(1)
                 }
             }
             if sorted.count > 2 {
-                Text("+\(sorted.count - 2) more").font(.caption2).foregroundStyle(Color.syMuted)
+                Text("+\(sorted.count - 2) more").font(.syCaption2).foregroundStyle(Color.syMuted)
             }
             Spacer(minLength: 0)
         }
@@ -161,12 +161,12 @@ struct StackNotesEditor: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: "note.text").foregroundStyle(Color.syAmber)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Notes on #\(number)").font(.headline)
-                    Text(title).font(.caption).foregroundStyle(Color.syMuted).lineLimit(1)
+                    Text("Notes on #\(number)").font(.syHeadline)
+                    Text(title).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
                 }
                 Spacer()
                 Button(action: onClose) {
-                    Image(systemName: "xmark").font(.callout.weight(.semibold)).frame(width: 22, height: 22)
+                    Image(systemName: "xmark").font(.syCallout.weight(.semibold)).frame(width: 22, height: 22)
                 }
                 .buttonStyle(.borderless)
                 .keyboardShortcut(.cancelAction)
@@ -192,7 +192,7 @@ struct StackNotesEditor: View {
                 }
                 .buttonStyle(.borderless)
                 Spacer()
-                Text("Only on this Mac").font(.caption).foregroundStyle(Color.syDim)
+                Text("Only on this Mac").font(.syCaption).foregroundStyle(Color.syDim)
             }
         }
         .padding(14)
@@ -248,7 +248,7 @@ private struct NoteEditorRow: View {
                 .help("Delete note")
             }
             TextEditor(text: $note.text)
-                .font(.callout)
+                .font(.syCallout)
                 .scrollContentBackground(.hidden)
                 .padding(6)
                 .frame(height: 64)

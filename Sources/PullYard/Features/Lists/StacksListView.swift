@@ -114,7 +114,7 @@ struct StacksListView: View {
     var body: some View {
         List(selection: Binding(get: { app.detailRoot }, set: select)) {
             if let e = model.error, model.entries.isEmpty {
-                Text(e).foregroundStyle(.red).font(.caption)
+                Text(e).foregroundStyle(.red).font(.syCaption)
             }
             ForEach(model.entries) { entry in
                 StackRow(entry: entry)
@@ -124,9 +124,9 @@ struct StacksListView: View {
             }
             if model.entries.isEmpty, !model.loading, model.error == nil, loaded {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("No stacked pull requests").foregroundStyle(Color.syMuted)
+                    Text("No stacked pull requests").font(.syBody).foregroundStyle(Color.syMuted)
                     Text("Open a pull request on another pull request's branch and it shows up here.")
-                        .font(.caption)
+                        .font(.syCaption)
                         .foregroundStyle(Color.syDim)
                 }
                 .padding(.vertical, 6)
@@ -164,7 +164,7 @@ private struct StackRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Image(systemName: "square.stack.3d.up.fill").foregroundStyle(Color.syIndigo)
-                Text(root.map { "#\($0.number) \($0.title)" } ?? "").fontWeight(.semibold).lineLimit(1)
+                Text(root.map { "#\($0.number) \($0.title)" } ?? "").font(.syBody).fontWeight(.semibold).lineLimit(1)
             }
             HStack(spacing: 5) {
                 Text(entry.repo.full).lineLimit(1)
@@ -173,7 +173,7 @@ private struct StackRow: View {
                 Text("·")
                 Text(Fmt.rel(entry.updated)).lineLimit(1)
             }
-            .font(.caption)
+            .font(.syCaption)
             .foregroundStyle(Color.syMuted)
             HStack(spacing: 6) {
                 HStack(spacing: 3) {
@@ -184,15 +184,15 @@ private struct StackRow: View {
                             .help("#\(n.number) \(n.title) — \(n.status.title)")
                     }
                 }
-                Text(plural(nodes.count, "PR", "PRs")).font(.caption).foregroundStyle(Color.syMuted)
+                Text(plural(nodes.count, "PR", "PRs")).font(.syCaption).foregroundStyle(Color.syMuted)
                 if entry.mine.count < nodes.count {
-                    Text("· \(entry.mine.count) yours").font(.caption).foregroundStyle(Color.syDim)
+                    Text("· \(entry.mine.count) yours").font(.syCaption).foregroundStyle(Color.syDim)
                 }
                 let failing = nodes.filter { $0.status == .ciFailed || $0.status == .changesRequested }.count
                 if failing > 0 {
                     Label("\(failing)", systemImage: "exclamationmark.triangle.fill")
                         .labelStyle(.titleAndIcon)
-                        .font(.caption)
+                        .font(.syCaption)
                         .foregroundStyle(Color.syRed)
                         .help(plural(failing, "pull request needs attention", "pull requests need attention"))
                 }

@@ -42,9 +42,13 @@ struct ThemedRoot<Content: View>: View {
         let current = ThemeStyle(rawValue: style) ?? .pullyard
         let _ = Theme.style = current
         content
+            .font(.syBody)
             .tint(Color.syAccent)
             .id(current)
-            .onAppear { Theme.applyAppearance() }
+            .onAppear {
+                Theme.applyAppearance()
+                TextZoom.shared.installEqualsShortcut()
+            }
             .onChange(of: style) { Theme.applyAppearance() }
             .onChange(of: appearance) { Theme.applyAppearance() }
     }
@@ -88,7 +92,7 @@ struct MainView: View {
                                     IconTile(systemImage: "arrow.triangle.pull", color: .syViolet, size: 56)
                                         .opacity(0.9)
                                     Text("Select a pull request, issue or project").foregroundStyle(Color.syMuted)
-                                    Text("⌘L — open by link").font(.caption).foregroundStyle(Color.syDim)
+                                    Text("⌘L — open by link").font(.syCaption).foregroundStyle(Color.syDim)
                                 }
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .transition(.opacity)
@@ -151,7 +155,7 @@ struct SidebarView: View {
             } else {
                 gitHubSections
             }
-            Section("AI") {
+            SidebarGroup("AI") {
                 SidebarRow(section: .claude, title: "Claude Code", icon: "sparkles", color: .syCoral, count: app.claude.attentionCount > 0 ? app.claude.attentionCount : app.claude.tabs.filter(\.running).count)
             }
         }
@@ -170,11 +174,11 @@ struct SidebarView: View {
     private var forgeSections: some View {
         let caps = app.forgeCaps
         if let inbox = caps.inboxTitle {
-            Section("Inbox") {
+            SidebarGroup("Inbox") {
                 SidebarRow(section: .notifications, title: inbox, icon: "bell.fill", color: .syAmber, count: app.unreadCount)
             }
         }
-        Section(app.provider.requestsTitle) {
+        SidebarGroup(app.provider.requestsTitle) {
             ForEach(caps.pullFilters) { f in
                 SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0))
             }
@@ -183,14 +187,14 @@ struct SidebarView: View {
             }
         }
         if !caps.issueFilters.isEmpty {
-            Section("Issues") {
+            SidebarGroup("Issues") {
                 ForEach(caps.issueFilters) { f in
                     SidebarRow(section: .issues(f), title: f.title, icon: f.tileIcon, color: f.tint)
                 }
             }
         }
         if caps.repositories {
-            Section("Code") {
+            SidebarGroup("Code") {
                 SidebarRow(section: .repos, title: app.provider.repositoriesTitle, icon: "book.closed.fill", color: .syTeal)
             }
         }
@@ -198,22 +202,22 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var gitHubSections: some View {
-        Section("Inbox") {
+        SidebarGroup("Inbox") {
             SidebarRow(section: .notifications, title: "Notifications", icon: "bell.fill", color: .syAmber, count: app.unreadCount)
         }
-        Section("Pull requests") {
+        SidebarGroup("Pull requests") {
             ForEach(PRFilter.allCases) { f in
                 SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0))
             }
             SidebarRow(section: .myPRsByRepo, title: "My PRs by project", icon: "folder.fill", color: .syCoral)
             SidebarRow(section: .stacks, title: "Stacks", icon: "square.stack.3d.up.fill", color: .syIndigo)
         }
-        Section("Issues") {
+        SidebarGroup("Issues") {
             ForEach(IssueFilter.allCases) { f in
                 SidebarRow(section: .issues(f), title: f.title, icon: f.tileIcon, color: f.tint)
             }
         }
-        Section("Code") {
+        SidebarGroup("Code") {
             SidebarRow(section: .repos, title: "Repositories", icon: "book.closed.fill", color: .syTeal)
             SidebarRow(section: .projects, title: "Projects", icon: "rectangle.split.3x1.fill", color: .syIndigo)
         }
@@ -239,9 +243,9 @@ struct UpdateAvailableRow: View {
                 Image(systemName: "arrow.down.circle.fill").foregroundStyle(Color.sySky)
                 Text("Update to \(version)").foregroundStyle(Color.syText)
                 Spacer()
-                Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(Color.syDim)
+                Image(systemName: "chevron.right").font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syDim)
             }
-            .font(.callout.weight(.medium))
+            .font(.syCallout.weight(.medium))
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.sySky.opacity(0.12)))
@@ -251,6 +255,30 @@ struct UpdateAvailableRow: View {
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
         .help("A new version of PullYard is available")
+    }
+}
+
+struct SidebarGroup<Content: View>: View {
+    let title: Text
+    @ViewBuilder let content: Content
+
+    init(_ title: LocalizedStringKey, @ViewBuilder content: () -> Content) {
+        self.title = Text(title)
+        self.content = content()
+    }
+
+    @_disfavoredOverload
+    init<S: StringProtocol>(_ title: S, @ViewBuilder content: () -> Content) {
+        self.title = Text(title)
+        self.content = content()
+    }
+
+    var body: some View {
+        Section {
+            content
+        } header: {
+            title.font(.sySubheadline.weight(.semibold))
+        }
     }
 }
 
@@ -268,12 +296,13 @@ struct SidebarRow: View {
         HStack(spacing: 8) {
             SidebarIcon(systemImage: icon, color: color)
             Text(title)
+                .font(.syBody)
                 .foregroundStyle(Color.syText)
                 .fontWeight(selected ? .medium : .regular)
                 .lineLimit(1)
             Spacer(minLength: 4)
             if count > 0 {
-                Text("\(count)").font(.callout.monospacedDigit()).foregroundStyle(Color.syMuted)
+                Text("\(count)").font(.syCallout.monospacedDigit()).foregroundStyle(Color.syMuted)
             }
         }
         .padding(.leading, 9)
@@ -430,7 +459,7 @@ struct OpenLinkSheet: View {
             TextField("https://github.com/org/repo/pull/123 or org/repo#123", text: $text)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(open)
-            if invalid { Text("Couldn't recognize the link").font(.caption).foregroundStyle(.red) }
+            if invalid { Text("Couldn't recognize the link").font(.syCaption).foregroundStyle(.red) }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -463,7 +492,7 @@ struct RateLimitBanner: View {
                     .foregroundStyle(Color.syMuted)
                     .lineLimit(1)
             }
-            .font(.caption)
+            .font(.syCaption)
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
             .background(.regularMaterial, in: Capsule())

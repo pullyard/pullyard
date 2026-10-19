@@ -19,7 +19,7 @@ struct SheetFrame<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.title3.weight(.semibold))
+            Text(title).font(.syTitle3.weight(.semibold))
             content
         }
         .padding(20)
@@ -195,16 +195,16 @@ struct ReviewersSheet: View {
         SheetFrame(title: "Request review") {
             if !candidates.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Reviewers on this pull request").font(.caption).foregroundStyle(Color.syMuted)
+                    Text("Reviewers on this pull request").font(.syCaption).foregroundStyle(Color.syMuted)
                     ForEach(candidates, id: \.login) { r in
                         Toggle(isOn: Binding(get: { selected.contains(r.login) }, set: { if $0 { selected.insert(r.login) } else { selected.remove(r.login) } })) {
                             HStack(spacing: 6) {
                                 ReviewerBadge(login: r.login, avatar: r.avatar, state: r.state)
                                 Text(r.login)
                                 if model.reviewersToReRequest.contains(r.login) {
-                                    Text("reviewed before latest push").font(.caption).foregroundStyle(Color.syAmber)
+                                    Text("reviewed before latest push").font(.syCaption).foregroundStyle(Color.syAmber)
                                 } else if r.state == "PENDING" {
-                                    Text("already requested").font(.caption).foregroundStyle(Color.syMuted)
+                                    Text("already requested").font(.syCaption).foregroundStyle(Color.syMuted)
                                 }
                             }
                         }
@@ -237,11 +237,11 @@ struct ReplySheet: View {
 
     var body: some View {
         SheetFrame(title: "Reply to thread") {
-            Text("\(thread.path)\(thread.line.map { ":\($0)" } ?? "")").font(.system(.caption, design: .monospaced)).foregroundStyle(Color.syMuted)
+            Text("\(thread.path)\(thread.line.map { ":\($0)" } ?? "")").font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
             if let last = thread.comments.nodes.last {
                 HStack(alignment: .top, spacing: 8) {
                     Avatar(url: last.author?.avatarUrl, size: 18)
-                    MarkdownText(text: last.body).lineLimit(6).font(.callout)
+                    MarkdownText(text: last.body).lineLimit(6).font(.syCallout)
                 }
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.5)))
@@ -288,7 +288,7 @@ struct JobLogSheet: View {
         VStack(spacing: 0) {
             HStack {
                 OutcomeIcon(outcome: check.outcome)
-                Text(check.workflowName.map { "\($0) / \(check.title)" } ?? check.title).font(.headline).lineLimit(1)
+                Text(check.workflowName.map { "\($0) / \(check.title)" } ?? check.title).font(.syHeadline).lineLimit(1)
                 Spacer()
                 Toggle("Errors only", isOn: $errorsOnly).toggleStyle(.checkbox)
                 if let log { Button("Copy") { copyToPasteboard(log) } }
@@ -341,13 +341,14 @@ struct JobLogSheet: View {
 
 struct LogTextView: NSViewRepresentable {
     let text: String
+    var zoom = TextZoom.shared.scale
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
         let tv = scroll.documentView as! NSTextView
         tv.isEditable = false
         tv.isSelectable = true
-        tv.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        tv.font = font
         tv.textContainerInset = NSSize(width: 8, height: 8)
         tv.isAutomaticSpellingCorrectionEnabled = false
         set(tv)
@@ -355,12 +356,15 @@ struct LogTextView: NSViewRepresentable {
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let tv = scroll.documentView as? NSTextView, tv.string != text else { return }
+        guard let tv = scroll.documentView as? NSTextView, tv.string != text || tv.font?.pointSize != font.pointSize else { return }
+        tv.font = font
         set(tv)
     }
 
+    private var font: NSFont { .monospacedSystemFont(ofSize: TextZoom.size(11, at: zoom), weight: .regular) }
+
     private func set(_ tv: NSTextView) {
-        let attr = NSMutableAttributedString(string: text, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular), .foregroundColor: NSColor.textColor])
+        let attr = NSMutableAttributedString(string: text, attributes: [.font: font, .foregroundColor: NSColor.textColor])
         let ns = text as NSString
         ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: .byLines) { sub, range, _, _ in
             guard let sub else { return }

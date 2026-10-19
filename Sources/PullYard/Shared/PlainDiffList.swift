@@ -42,7 +42,7 @@ struct PlainDiffList: View {
             case .line(_, let l): return .line(id: row.id, line: l, commentable: false)
             case .note(_, let text):
                 return .view(id: row.id, group: false) {
-                    AnyView(Text(text).font(.caption).foregroundStyle(Color.syMuted).padding(.horizontal, 12).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading))
+                    AnyView(Text(text).font(.syCaption).foregroundStyle(Color.syMuted).padding(.horizontal, 12).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading))
                 }
             }
         }
@@ -54,10 +54,10 @@ struct PlainDiffList: View {
         return HStack(spacing: 8) {
             Image(systemName: isCollapsed ? "chevron.right" : "chevron.down").frame(width: 12).foregroundStyle(Color.syMuted)
             Text(f.statusLetter)
-                .font(.caption2.weight(.bold).monospaced())
+                .font(.syCaption2.weight(.bold).monospaced())
                 .foregroundStyle(statusColor(f.status))
             Text(f.previousFilename.map { "\($0) → \(f.id)" } ?? f.id)
-                .font(.system(.callout, design: .monospaced).weight(.medium))
+                .font(.syCallout.monospaced().weight(.medium))
                 .lineLimit(1)
                 .truncationMode(.head)
             DiffStat(additions: f.additions, deletions: f.deletions)

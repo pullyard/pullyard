@@ -55,9 +55,10 @@ final class LineNumberRuler: NSRulerView, NSViewToolTipOwner {
 
     private weak var textView: NSTextView?
     private var lineStarts: [Int] = [0]
-    private let font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .regular)
-    private let blameFont = NSFont.systemFont(ofSize: 10.5, weight: .medium)
-    private let blameDateFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+    private var font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .regular)
+    private var blameFont = NSFont.systemFont(ofSize: 10.5, weight: .medium)
+    private var blameDateFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+    private var scale: CGFloat = 1
     private var numberWidth: CGFloat = 44
     private(set) var blame: BlameMap?
     private var hoverOid: String?
@@ -76,13 +77,22 @@ final class LineNumberRuler: NSRulerView, NSViewToolTipOwner {
 
     required init(coder: NSCoder) { fatalError() }
 
-    private var blameWidth: CGFloat { blame == nil ? 0 : Self.blameColumnWidth }
+    private var blameWidth: CGFloat { blame == nil ? 0 : (Self.blameColumnWidth * scale).rounded() }
+
+    func setScale(_ value: CGFloat) {
+        guard value != scale else { return }
+        scale = value
+        font = .monospacedDigitSystemFont(ofSize: TextZoom.size(10.5, at: value), weight: .regular)
+        blameFont = .systemFont(ofSize: TextZoom.size(10.5, at: value), weight: .medium)
+        blameDateFont = .monospacedDigitSystemFont(ofSize: TextZoom.size(10, at: value), weight: .regular)
+        reindex()
+    }
 
     func reindex() {
         guard let text = textView?.string else { return }
         lineStarts = Self.lineStarts(text)
         let digits = max(3, String(lineStarts.count).count)
-        numberWidth = CGFloat(digits) * 7.5 + 14
+        numberWidth = CGFloat(digits) * 7.5 * scale + 14
         updateThickness()
     }
 
@@ -292,6 +302,7 @@ struct CodeTextView: NSViewRepresentable {
     var wrap = false
     var blame: BlameMap?
     var onOpenCommit: ((BlameCommit) -> Void)?
+    var zoom = TextZoom.shared.scale
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
@@ -313,8 +324,10 @@ struct CodeTextView: NSViewRepresentable {
         scroll.verticalRulerView = ruler
         scroll.hasVerticalRuler = true
         scroll.rulersVisible = true
+        ruler.setScale(zoom)
         apply(scroll, tv)
         context.coordinator.wrap = wrap
+        context.coordinator.zoom = zoom
         ruler.onOpenCommit = onOpenCommit
         ruler.setBlame(blame)
         DispatchQueue.main.async { scroll.alignContentLeading(top: true) }
@@ -327,6 +340,13 @@ struct CodeTextView: NSViewRepresentable {
             apply(scroll, tv)
             context.coordinator.wrap = wrap
         }
+        if context.coordinator.zoom != zoom {
+            context.coordinator.zoom = zoom
+            (scroll.verticalRulerView as? LineNumberRuler)?.setScale(zoom)
+            if let storage = tv.textStorage {
+                storage.addAttribute(.font, value: font, range: NSRange(location: 0, length: storage.length))
+            }
+        }
         if let ruler = scroll.verticalRulerView as? LineNumberRuler {
             ruler.onOpenCommit = onOpenCommit
             if ruler.blame?.id != blame?.id { ruler.setBlame(blame) }
@@ -337,10 +357,12 @@ struct CodeTextView: NSViewRepresentable {
 
     final class Coordinator {
         var wrap: Bool?
+        var zoom: CGFloat = 1
     }
 
+    private var font: NSFont { .monospacedSystemFont(ofSize: TextZoom.size(12, at: zoom), weight: .regular) }
+
     private func apply(_ scroll: NSScrollView, _ tv: NSTextView) {
-        let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         if wrap {
             tv.isHorizontallyResizable = false
             tv.textContainer?.widthTracksTextView = true

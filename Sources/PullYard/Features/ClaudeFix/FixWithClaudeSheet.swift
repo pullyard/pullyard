@@ -53,12 +53,12 @@ struct FixWithClaudeSheet: View {
             HStack(spacing: 10) {
                 IconTile(systemImage: "sparkles", color: .syCoral, size: 30)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Fix with Claude Code").font(.headline).foregroundStyle(Color.syText)
+                    Text("Fix with Claude Code").font(.syHeadline).foregroundStyle(Color.syText)
                     HStack(spacing: 6) {
                         Text("#\(pr.number)").foregroundStyle(Color.syViolet).fontWeight(.semibold)
                         Text(pr.title).foregroundStyle(Color.syMuted).lineLimit(1)
                     }
-                    .font(.callout)
+                    .font(.syCallout)
                 }
             }
             sourcePicker
@@ -76,7 +76,7 @@ struct FixWithClaudeSheet: View {
             .onChange(of: options.push) { _, push in if !push { options.replyAndResolve = false } }
             promptEditor
             ClaudeFolderRow(repo: model.ref.repo, folder: $folder, detecting: detecting)
-            if let error { Text(error).font(.caption).foregroundStyle(Color.syRed) }
+            if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
             ClaudeLaunchRow(target: $target, mode: $mode, canLaunch: !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (target == .copy || folder != nil) && !(source == .ci && (ciLoading || ciSelected.isEmpty)), onLaunch: launch)
         }
         .padding(20)
@@ -135,7 +135,7 @@ struct FixWithClaudeSheet: View {
             .labelsHidden()
         } else {
             Label("No Fix prompt in this PR — built from unresolved comments", systemImage: "info.circle")
-                .font(.callout)
+                .font(.syCallout)
                 .foregroundStyle(Color.syMuted)
         }
     }
@@ -143,27 +143,27 @@ struct FixWithClaudeSheet: View {
     private var composedOptions: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Unresolved comments").font(.caption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                Text("Unresolved comments").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
                 Spacer()
-                Button("All") { selected = Set(threads.map(\.id)) }.buttonStyle(.link).font(.caption)
-                Button("None") { selected = [] }.buttonStyle(.link).font(.caption)
+                Button("All") { selected = Set(threads.map(\.id)) }.buttonStyle(.link).font(.syCaption)
+                Button("None") { selected = [] }.buttonStyle(.link).font(.syCaption)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     if threads.isEmpty {
-                        Text("No unresolved comments").font(.callout).foregroundStyle(Color.syDim)
+                        Text("No unresolved comments").font(.syCallout).foregroundStyle(Color.syDim)
                     }
                     ForEach(threads) { th in
                         Toggle(isOn: Binding(get: { selected.contains(th.id) }, set: { on in if on { selected.insert(th.id) } else { selected.remove(th.id) } })) {
                             HStack(spacing: 6) {
                                 Text("\(th.path)\((th.line ?? th.originalLine).map { ":\($0)" } ?? "")")
-                                    .font(.system(.caption, design: .monospaced))
+                                    .font(.syCaption.monospaced())
                                     .foregroundStyle(Color.sySky)
                                     .lineLimit(1)
                                     .truncationMode(.head)
                                 if th.isOutdated { ChipView(text: "outdated", color: .syAmber) }
                                 Text("@\(th.comments.nodes.first?.author?.login ?? "?"): \(th.comments.nodes.first?.body.replacingOccurrences(of: "\n", with: " ") ?? "")")
-                                    .font(.caption)
+                                    .font(.syCaption)
                                     .foregroundStyle(Color.syMuted)
                                     .lineLimit(1)
                             }
@@ -173,7 +173,7 @@ struct FixWithClaudeSheet: View {
                     if !general.isEmpty {
                         Toggle("General review feedback (\(general.count))", isOn: $options.includeGeneral)
                             .toggleStyle(.checkbox)
-                            .font(.caption)
+                            .font(.syCaption)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -187,17 +187,17 @@ struct FixWithClaudeSheet: View {
     private var ciOptions: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Failing checks").font(.caption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                Text("Failing checks").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
                 if allFailing.count > failing.count {
-                    Text("showing \(failing.count) of \(allFailing.count)").font(.caption).foregroundStyle(Color.syDim)
+                    Text("showing \(failing.count) of \(allFailing.count)").font(.syCaption).foregroundStyle(Color.syDim)
                 }
                 if ciLoading {
                     ProgressView().controlSize(.mini)
-                    Text("Collecting logs…").font(.caption).foregroundStyle(Color.syDim)
+                    Text("Collecting logs…").font(.syCaption).foregroundStyle(Color.syDim)
                 }
                 Spacer()
-                Button("All") { ciSelected = Set(failing.map(\.id)) }.buttonStyle(.link).font(.caption)
-                Button("None") { ciSelected = [] }.buttonStyle(.link).font(.caption)
+                Button("All") { ciSelected = Set(failing.map(\.id)) }.buttonStyle(.link).font(.syCaption)
+                Button("None") { ciSelected = [] }.buttonStyle(.link).font(.syCaption)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
@@ -206,7 +206,7 @@ struct FixWithClaudeSheet: View {
                             HStack(spacing: 6) {
                                 OutcomeIcon(outcome: c.outcome)
                                 Text(c.workflowName.map { "\($0) / \(c.title)" } ?? c.title)
-                                    .font(.caption)
+                                    .font(.syCaption)
                                     .foregroundStyle(Color.syText)
                                     .lineLimit(1)
                                 ciStatus(c)
@@ -228,11 +228,11 @@ struct FixWithClaudeSheet: View {
         if let item = ciItems[c.id] {
             if let note = item.note {
                 Label("partial", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
+                    .font(.syCaption)
                     .foregroundStyle(Color.syAmber)
                     .help(note)
             } else {
-                Text(ciDetail(item)).font(.caption).foregroundStyle(Color.syDim).lineLimit(1)
+                Text(ciDetail(item)).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
             }
         } else if ciLoading {
             ProgressView().controlSize(.mini)
@@ -282,21 +282,21 @@ struct FixWithClaudeSheet: View {
     private var promptEditor: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Prompt").font(.caption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                Text("Prompt").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
                 if custom != nil {
                     ChipView(text: "edited", color: .syAmber)
-                    Button("Reset") { custom = nil }.buttonStyle(.link).font(.caption)
+                    Button("Reset") { custom = nil }.buttonStyle(.link).font(.syCaption)
                 }
                 if source == .ci, custom != nil, ciStale || ciLoading {
                     Label(ciLoading ? "Logs still loading — your edit won't include them" : "Logs loaded after your edit — Reset to include them", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
+                        .font(.syCaption)
                         .foregroundStyle(Color.syAmber)
                 }
                 Spacer()
-                Text("\(prompt.count)").font(.caption2.monospacedDigit()).foregroundStyle(Color.syDim)
+                Text("\(prompt.count)").font(.syCaption2.monospacedDigit()).foregroundStyle(Color.syDim)
             }
             TextEditor(text: Binding(get: { prompt }, set: { custom = $0 }))
-                .font(.system(size: 11.5, design: .monospaced))
+                .font(.sy(size: 11.5, design: .monospaced))
                 .foregroundStyle(Color.syText)
                 .scrollContentBackground(.hidden)
                 .padding(8)
@@ -353,7 +353,7 @@ struct ClaudeFixBanner: View {
                     .buttonStyle(.borderedProminent)
                     .tint(Color.syCoral)
             }
-            .font(.callout)
+            .font(.syCallout)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.syCoral.opacity(0.08)))
@@ -426,7 +426,7 @@ struct ReReviewBanner: View {
 
     private func banner<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         HStack(spacing: 8) { content() }
-            .font(.callout)
+            .font(.syCallout)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.sySky.opacity(0.08)))

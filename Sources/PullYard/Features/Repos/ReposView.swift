@@ -21,7 +21,7 @@ struct ReposView: View {
 
     var body: some View {
         List(selection: Binding(get: { app.detailRoot }, set: { app.select($0) })) {
-            if let error { Text(error).foregroundStyle(Color.syRed).font(.caption) }
+            if let error { Text(error).foregroundStyle(Color.syRed).font(.syCaption) }
             ForEach(visible) { r in
                 RepoRow(repo: r)
                     .rowAppear(r.id, rows)
@@ -135,12 +135,12 @@ struct RepoRow: View {
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
-                    Text(repo.nameWithOwner).fontWeight(.semibold).foregroundStyle(Color.syText).lineLimit(1)
+                    Text(repo.nameWithOwner).font(.syBody).fontWeight(.semibold).foregroundStyle(Color.syText).lineLimit(1)
                     if repo.isArchived { ChipView(text: "archived", color: .syAmber) }
-                    if repo.isFork { Image(systemName: "tuningfork").font(.caption2).foregroundStyle(Color.syDim) }
+                    if repo.isFork { Image(systemName: "tuningfork").font(.syCaption2).foregroundStyle(Color.syDim) }
                 }
                 if let d = repo.description, !d.isEmpty {
-                    Text(d).font(.caption).foregroundStyle(Color.syMuted).lineLimit(2)
+                    Text(d).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(2)
                 }
                 HStack(spacing: 10) {
                     if let lang = repo.primaryLanguage {
@@ -155,7 +155,7 @@ struct RepoRow: View {
                     Spacer()
                     Text(Fmt.rel(repo.pushedAt)).foregroundStyle(Color.syDim)
                 }
-                .font(.caption)
+                .font(.syCaption)
             }
         }
         .padding(.vertical, 4)
@@ -243,7 +243,7 @@ struct RepoDetailView: View {
                 IconTile(systemImage: info?.isPrivate == true ? "lock.fill" : "book.closed.fill", color: .syTeal, size: 36)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        Text(repo.full).font(.title2.weight(.semibold)).foregroundStyle(Color.syText).textSelection(.enabled)
+                        Text(repo.full).font(.syTitle2.weight(.semibold)).foregroundStyle(Color.syText).textSelection(.enabled)
                         if info?.isPrivate == true { ChipView(text: "private", color: .syAmber, icon: "lock.fill") }
                     }
                     if let d = info?.description, !d.isEmpty { Text(d).foregroundStyle(Color.syMuted).lineLimit(2) }
@@ -284,13 +284,13 @@ struct RepoDetailView: View {
 
     private var itemsList: some View {
         List {
-            if let e = model.error { Text(e).foregroundStyle(Color.syRed) }
+            if let e = model.error { Text(e).font(.syBody).foregroundStyle(Color.syRed) }
             ForEach(model.items) { item in
                 NavigationLink(value: item.route) { ItemRow(item: item).rowAppear(item.id, model.rows) }
                     .contextMenu { ItemContextMenu(item: item) }
                     .onAppear { if item.id == model.items.last?.id { Task { await model.loadMore(api: app.api) } } }
             }
-            if model.items.isEmpty, !model.loading { Text("Nothing here").foregroundStyle(Color.syMuted) }
+            if model.items.isEmpty, !model.loading { Text("Nothing here").font(.syBody).foregroundStyle(Color.syMuted) }
         }
         .overlay { if model.loading && model.items.isEmpty { ProgressView().controlSize(.small) } }
         .liveRefresh(updated: model.lastUpdated, refreshing: model.refreshing, error: model.items.isEmpty ? nil : model.error) {

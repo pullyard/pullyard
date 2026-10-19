@@ -39,19 +39,19 @@ struct CommitDetailView: View {
     private func header(_ c: CommitDetailREST) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             let lines = c.commit.message.components(separatedBy: "\n")
-            Text(lines.first ?? "").font(.title3.weight(.semibold)).textSelection(.enabled)
+            Text(lines.first ?? "").font(.syTitle3.weight(.semibold)).textSelection(.enabled)
             let rest = lines.dropFirst().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             if !rest.isEmpty {
-                Text(rest).font(.system(.callout, design: .monospaced)).foregroundStyle(Color.syMuted).textSelection(.enabled)
+                Text(rest).font(.syCallout.monospaced()).foregroundStyle(Color.syMuted).textSelection(.enabled)
             }
             HStack(spacing: 8) {
                 Avatar(url: c.author?.avatarUrl, size: 18)
                 Text(c.author?.login ?? c.commit.author?.name ?? "").fontWeight(.semibold)
                 Text(Fmt.rel(c.commit.author?.date)).foregroundStyle(Color.syMuted)
-                Text(c.sha).font(.system(.caption, design: .monospaced)).foregroundStyle(Color.syMuted).textSelection(.enabled)
+                Text(c.sha).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted).textSelection(.enabled)
                 if let s = c.stats { DiffStat(additions: s.additions, deletions: s.deletions) }
             }
-            .font(.callout)
+            .font(.syCallout)
         }
         .padding(16)
     }

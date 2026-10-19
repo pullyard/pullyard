@@ -45,7 +45,7 @@ struct LoginView: View {
                             .resizable()
                             .frame(width: 104, height: 104)
                             .shadow(color: Color.syAccent.opacity(0.25), radius: 18, y: 6)
-                        Text("PullYard").font(.largeTitle.weight(.bold)).foregroundStyle(Color.syText)
+                        Text("PullYard").font(.syLargeTitle.weight(.bold)).foregroundStyle(Color.syText)
                         Text("Fast PR browsing without a browser").foregroundStyle(Color.syMuted)
                     }
                     .padding(.bottom, 6)
@@ -69,7 +69,7 @@ struct LoginView: View {
                 if let _ = cliBinary {
                     card {
                         cardTitle(provider == .gitlab ? "GitLab CLI" : "GitHub CLI", icon: "terminal.fill", color: .sySky)
-                        Text(provider == .gitlab ? "Use the token you're signed in with in `glab`." : "Use the token you're signed in with in `gh`.").font(.callout).foregroundStyle(Color.syMuted)
+                        Text(provider == .gitlab ? "Use the token you're signed in with in `glab`." : "Use the token you're signed in with in `gh`.").font(.syCallout).foregroundStyle(Color.syMuted)
                         Button {
                             signInWithCLI()
                         } label: {
@@ -83,7 +83,7 @@ struct LoginView: View {
 
                 card {
                     cardTitle(provider == .bitbucket ? "API token" : "Personal Access Token", icon: "key.fill", color: .syAmber)
-                    Text(provider.tokenHint).font(.callout).foregroundStyle(Color.syMuted)
+                    Text(provider.tokenHint).font(.syCallout).foregroundStyle(Color.syMuted)
                     if provider == .bitbucket {
                         TextField("Atlassian account email", text: $email)
                             .textFieldStyle(.roundedBorder)
@@ -117,7 +117,7 @@ struct LoginView: View {
 
                 if embedded {
                     Label("Adding an account switches to it. A new account gets its own Claude Code sign-in; the first account keeps the Claude you already use.", systemImage: "info.circle")
-                        .font(.caption)
+                        .font(.syCaption)
                         .foregroundStyle(Color.syMuted)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -153,8 +153,8 @@ struct LoginView: View {
                     HStack(spacing: 10) {
                         Avatar(url: a.avatarUrl, size: 24)
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(a.name ?? a.login).font(.callout.weight(.medium)).foregroundStyle(Color.syText)
-                            Text("\(a.provider.title) · \(a.subtitle)").font(.caption).foregroundStyle(Color.syMuted)
+                            Text(a.name ?? a.login).font(.syCallout.weight(.medium)).foregroundStyle(Color.syText)
+                            Text("\(a.provider.title) · \(a.subtitle)").font(.syCaption).foregroundStyle(Color.syMuted)
                         }
                         Spacer()
                         if GitAccounts.shared.hasCredential(a) {
@@ -171,12 +171,12 @@ struct LoginView: View {
     @ViewBuilder
     private var deviceContent: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(deviceHelp).font(.callout).foregroundStyle(Color.syMuted)
+            Text(deviceHelp).font(.syCallout).foregroundStyle(Color.syMuted)
             TextField(provider == .gitlab ? "Application ID" : "Client ID", text: $clientID).textFieldStyle(.roundedBorder)
             if let device {
                 HStack(spacing: 12) {
                     Text(device.userCode)
-                        .font(.system(.title, design: .monospaced).weight(.bold))
+                        .font(.syTitle.monospaced().weight(.bold))
                         .foregroundStyle(Color.syText)
                         .textSelection(.enabled)
                         .padding(.horizontal, 10)
@@ -189,7 +189,7 @@ struct LoginView: View {
                     .buttonStyle(.borderedProminent)
                     ProgressView().controlSize(.small)
                 }
-                Text("Enter the code at \(device.verificationUri) — you'll be signed in automatically.").font(.caption).foregroundStyle(Color.syMuted)
+                Text("Enter the code at \(device.verificationUri) — you'll be signed in automatically.").font(.syCaption).foregroundStyle(Color.syMuted)
             } else {
                 Button("Get code") { startDevice() }
                     .disabled(clientID.trimmingCharacters(in: .whitespaces).isEmpty || effectiveHost.isEmpty)
@@ -222,7 +222,7 @@ struct LoginView: View {
     private func cardTitle(_ title: String, icon: String, color: Color) -> some View {
         HStack(spacing: 8) {
             IconTile(systemImage: icon, color: color, size: 22)
-            Text(title).font(.headline).foregroundStyle(Color.syText)
+            Text(title).font(.syHeadline).foregroundStyle(Color.syText)
         }
     }
 

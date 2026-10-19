@@ -203,7 +203,7 @@ struct ClaudeAuthView: View {
         ScrollView {
             VStack(spacing: 18) {
                 IconTile(systemImage: "sparkles", color: .syCoral, size: 56)
-                Text("Claude Code").font(.title.weight(.bold)).foregroundStyle(Color.syText)
+                Text("Claude Code").font(.syTitle.weight(.bold)).foregroundStyle(Color.syText)
                 ClaudeProfileSwitcher()
                 switch store.status {
                 case .notInstalled: installCard
@@ -222,11 +222,11 @@ struct ClaudeAuthView: View {
 
     private var installCard: some View {
         card {
-            Text("Claude Code isn't installed").font(.headline).foregroundStyle(Color.syText)
+            Text("Claude Code isn't installed").font(.syHeadline).foregroundStyle(Color.syText)
             Text("Install the CLI from Terminal, then press “Check again”.")
-                .font(.callout).foregroundStyle(Color.syMuted)
+                .font(.syCallout).foregroundStyle(Color.syMuted)
             Text(Self.installCommand)
-                .font(.system(.callout, design: .monospaced))
+                .font(.syCallout.monospaced())
                 .textSelection(.enabled)
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -242,9 +242,9 @@ struct ClaudeAuthView: View {
 
     private var loginCard: some View {
         card {
-            Text("Sign in to Claude").font(.headline).foregroundStyle(Color.syText)
+            Text("Sign in to Claude").font(.syHeadline).foregroundStyle(Color.syText)
             Text("Sign-in opens in your browser. The account is shared with Claude Code in Terminal.")
-                .font(.callout).foregroundStyle(Color.syMuted)
+                .font(.syCallout).foregroundStyle(Color.syMuted)
             if store.loggingIn {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
@@ -252,7 +252,7 @@ struct ClaudeAuthView: View {
                         Text("Confirm the sign-in in your browser…")
                     }
                     if let url = store.fallbackURL {
-                        Text("Browser didn't open, or the page shows a code?").font(.caption).foregroundStyle(Color.syMuted)
+                        Text("Browser didn't open, or the page shows a code?").font(.syCaption).foregroundStyle(Color.syMuted)
                         HStack {
                             Button("Open sign-in link") { LinkBrowser.open(url) }
                             Button("Copy link") { copyToPasteboard(url.absoluteString) }
@@ -291,7 +291,7 @@ struct ClaudeAuthView: View {
                 }
             }
             if let e = store.loginError {
-                Text(e).font(.caption).foregroundStyle(Color.syRed).textSelection(.enabled)
+                Text(e).font(.syCaption).foregroundStyle(Color.syRed).textSelection(.enabled)
             }
         }
     }
@@ -318,9 +318,9 @@ struct ClaudeAccountCard: View {
             ProfileBadge(profile: profile, size: compact ? 26 : 34)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 5) {
-                    Text(info.email ?? "Signed in").font(compact ? .callout.weight(.medium) : .headline).foregroundStyle(Color.syText).lineLimit(1)
+                    Text(info.email ?? "Signed in").font(compact ? .syCallout.weight(.medium) : .syHeadline).foregroundStyle(Color.syText).lineLimit(1)
                     if ClaudeProfiles.shared.visible.count > 1 {
-                        Text(profile.label).font(.caption2.weight(.semibold)).foregroundStyle(Color.syMuted)
+                        Text(profile.label).font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syMuted)
                             .padding(.horizontal, 5).background(Capsule().fill(Color.syMuted.opacity(0.14)))
                     }
                 }
@@ -328,16 +328,16 @@ struct ClaudeAccountCard: View {
                     if let org = info.orgName { Text(org).lineLimit(1) }
                     if let plan = info.subscription {
                         Text(plan)
-                            .font(.caption2.weight(.semibold))
+                            .font(.syCaption2.weight(.semibold))
                             .foregroundStyle(Color.syCoral)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
                             .background(Capsule().fill(Color.syCoral.opacity(0.12)))
                     } else if info.method == "console" || info.provider != "firstParty" {
-                        Text(info.provider == "firstParty" ? "API" : (info.provider ?? "API")).font(.caption2)
+                        Text(info.provider == "firstParty" ? "API" : (info.provider ?? "API")).font(.syCaption2)
                     }
                 }
-                .font(.caption)
+                .font(.syCaption)
                 .foregroundStyle(Color.syMuted)
             }
             Spacer(minLength: 4)

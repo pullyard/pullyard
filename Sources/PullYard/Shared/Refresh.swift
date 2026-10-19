@@ -41,10 +41,10 @@ struct RefreshStatus: View {
             if error != nil, !refreshing, let retry {
                 Button("Retry", action: retry)
                     .buttonStyle(.link)
-                    .font(.caption.weight(.medium))
+                    .font(.syCaption.weight(.medium))
             }
         }
-        .font(.caption)
+        .font(.syCaption)
         .foregroundStyle(Color.syMuted)
         .help(error.map { "Last refresh failed: \($0)" } ?? "Pull down to refresh (⌘R)")
     }
@@ -159,8 +159,8 @@ private struct PullIndicator: View {
             switch phase {
             case .done:
                 HStack(spacing: 5) {
-                    Image(systemName: "checkmark").font(.caption2.weight(.bold)).foregroundStyle(Color.syGreen)
-                    Text("Updated just now").font(.caption.weight(.medium)).foregroundStyle(Color.syMuted)
+                    Image(systemName: "checkmark").font(.syCaption2.weight(.bold)).foregroundStyle(Color.syGreen)
+                    Text("Updated just now").font(.syCaption.weight(.medium)).foregroundStyle(Color.syMuted)
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)

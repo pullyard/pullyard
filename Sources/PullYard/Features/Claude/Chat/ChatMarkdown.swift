@@ -145,7 +145,7 @@ func inlineMarkdown(_ text: String) -> AttributedString {
     opts.failurePolicy = .returnPartiallyParsedIfPossible
     var attr = (try? AttributedString(markdown: text, options: opts)) ?? AttributedString(text)
     for run in attr.runs where run.inlinePresentationIntent?.contains(.code) == true {
-        attr[run.range].font = .system(.body, design: .monospaced)
+        attr[run.range].font = .syBody.monospaced()
         attr[run.range].backgroundColor = Color.syLineStrong
     }
     return attr
@@ -172,7 +172,7 @@ struct MarkdownView: View {
         switch block {
         case .heading(let level, let s):
             Text(inlineMarkdown(s))
-                .font(level == 1 ? .title2.weight(.bold) : level == 2 ? .title3.weight(.semibold) : .headline)
+                .font(level == 1 ? .syTitle2.weight(.bold) : level == 2 ? .syTitle3.weight(.semibold) : .syHeadline)
                 .padding(.top, 4)
         case .paragraph(let s):
             Text(inlineMarkdown(s)).fixedSize(horizontal: false, vertical: true)
@@ -222,7 +222,7 @@ struct CodeBlockView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(language.isEmpty ? "code" : language).font(.caption.monospaced()).foregroundStyle(Color.syMuted)
+                Text(language.isEmpty ? "code" : language).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
                 Spacer()
                 Button {
                     copyToPasteboard(code)
@@ -230,7 +230,7 @@ struct CodeBlockView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
                 } label: {
                     Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .font(.caption)
+                        .font(.syCaption)
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(Color.syMuted)
@@ -241,7 +241,7 @@ struct CodeBlockView: View {
             .overlay(alignment: .bottom) { Rectangle().fill(Color.syLine).frame(height: 1) }
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(highlighted)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.sy(size: 12, design: .monospaced))
                     .fixedSize(horizontal: true, vertical: true)
                     .padding(10)
             }

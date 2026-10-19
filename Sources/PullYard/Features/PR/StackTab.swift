@@ -262,7 +262,7 @@ struct StackTab: View {
             Button {
                 update(animated: true) { v, g in v.zoomed(to: 1, at: middle, content: g.size, viewport: size) }
             } label: {
-                Text("\(Int((vp.zoom * 100).rounded()))%").font(.caption.monospacedDigit()).frame(width: 40)
+                Text("\(Int((vp.zoom * 100).rounded()))%").font(.syCaption.monospacedDigit()).frame(width: 40)
             }
             .buttonStyle(.borderless)
             .help("Actual size")
@@ -567,7 +567,7 @@ private struct BasePill: View {
 
     var body: some View {
         Label(name, systemImage: "arrow.triangle.branch")
-            .font(.callout.monospaced())
+            .font(.syCallout.monospaced())
             .lineLimit(1)
             .truncationMode(.middle)
             .padding(.horizontal, 12)
@@ -598,7 +598,7 @@ private struct StackCard: View, Equatable {
             HStack(spacing: 6) {
                 Text("#\(node.number)").fontWeight(.semibold)
                 if let key = node.jiraKey {
-                    Text(key).font(.caption.monospaced()).foregroundStyle(Color.syMuted)
+                    Text(key).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
                 }
                 Spacer(minLength: 4)
                 Button(action: onNote) {
@@ -609,16 +609,16 @@ private struct StackCard: View, Equatable {
                     }
                 }
                 .buttonStyle(.plain)
-                .font(.caption.weight(.semibold))
+                .font(.syCaption.weight(.semibold))
                 .help(noteCount > 0 ? plural(noteCount, "note", "notes") + " — click to open" : "Add a note")
                 if opening {
                     ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
                 }
                 StatusPill(status: node.status)
             }
-            .font(.callout)
+            .font(.syCallout)
             Text(node.title)
-                .font(.callout.weight(.semibold))
+                .font(.syCallout.weight(.semibold))
                 .lineLimit(1)
                 .padding(.bottom, 2)
             field("branch", node.headRefName)
@@ -634,11 +634,11 @@ private struct StackCard: View, Equatable {
                     .buttonStyle(.plain)
                     .help("Resume Claude Code session")
                 }
-                .font(.caption)
+                .font(.syCaption)
             }
             if let oid = node.commitOid {
                 Text("› \(oid) \(node.commitHeadline ?? "")")
-                    .font(.caption.monospaced())
+                    .font(.syCaption.monospaced())
                     .foregroundStyle(Color.syMuted)
                     .lineLimit(1)
                     .padding(.horizontal, 6)
@@ -671,9 +671,9 @@ private struct StackCard: View, Equatable {
     private func field(_ label: String, _ value: String) -> some View {
         HStack(spacing: 6) {
             Text(label).foregroundStyle(Color.syDim).frame(width: 48, alignment: .leading)
-            Text(value).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
+            Text(value).font(.syCaption.monospaced()).lineLimit(1).truncationMode(.middle)
         }
-        .font(.caption)
+        .font(.syCaption)
     }
 }
 
@@ -720,7 +720,7 @@ struct StatusPill: View {
 
     var body: some View {
         Text(status.title)
-            .font(.caption2.weight(.semibold))
+            .font(.syCaption2.weight(.semibold))
             .foregroundStyle(status.color)
             .padding(.horizontal, 7)
             .padding(.vertical, 2)

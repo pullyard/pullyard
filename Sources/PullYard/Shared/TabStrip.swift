@@ -27,14 +27,14 @@ struct TabStrip<ID: Hashable>: View {
                         Text(item.title)
                         if let badge = item.badge {
                             Text(badge)
-                                .font(.caption.monospacedDigit().weight(.semibold))
+                                .font(.syCaption.monospacedDigit().weight(.semibold))
                                 .foregroundStyle(item.badgeColor)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1)
                                 .background(Capsule().fill(selected ? Color.syAccent.opacity(0.16) : Color.syLine))
                         }
                     }
-                    .font(.callout.weight(selected ? .semibold : .regular))
+                    .font(.syCallout.weight(selected ? .semibold : .regular))
                     .foregroundStyle(selected || hovered == item.id ? Color.syText : Color.syMuted)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)

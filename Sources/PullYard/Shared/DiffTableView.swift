@@ -14,8 +14,9 @@ enum DiffTableRow {
 }
 
 private enum DiffStyle {
-    static let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-    static let gutterWidth: CGFloat = 112
+    private(set) static var scale: CGFloat = 1
+    private(set) static var font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+    private(set) static var gutterWidth: CGFloat = 112
     static let vPad: CGFloat = 1.5
     static let addBG = NSColor.syAddBG
     static let delBG = NSColor.syDelBG
@@ -25,7 +26,16 @@ private enum DiffStyle {
         p.lineBreakMode = .byCharWrapping
         return p
     }()
-    static let lineHeight: CGFloat = ceil(font.ascender - font.descender + font.leading)
+    private(set) static var lineHeight: CGFloat = ceil(font.ascender - font.descender + font.leading)
+
+    static func apply(scale: CGFloat) {
+        guard scale != self.scale else { return }
+        self.scale = scale
+        font = .monospacedSystemFont(ofSize: TextZoom.size(12, at: scale), weight: .regular)
+        gutterWidth = (112 * scale).rounded()
+        lineHeight = ceil(font.ascender - font.descender + font.leading)
+        gutterAttributes = [.font: font, .foregroundColor: NSColor.syGutter]
+    }
 
     static func codeAttributes(_ kind: DiffLine.Kind) -> [NSAttributedString.Key: Any] {
         [.font: font, .paragraphStyle: paragraph, .foregroundColor: color(kind)]
@@ -40,7 +50,7 @@ private enum DiffStyle {
         }
     }
 
-    static let gutterAttributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.syGutter]
+    private(set) static var gutterAttributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.syGutter]
 
     static func codeText(_ line: DiffLine) -> String {
         switch line.kind {
@@ -54,7 +64,7 @@ private enum DiffStyle {
     static func height(_ line: DiffLine, width: CGFloat) -> CGFloat {
         let text = codeText(line)
         let available = max(80, width - gutterWidth - 12)
-        let approxChars = Int(available / 7.2)
+        let approxChars = Int(available / (7.2 * scale))
         if text.count < approxChars - 2 { return lineHeight + vPad * 2 + (line.kind == .hunk ? 4 : 0) }
         let rect = (text as NSString).boundingRect(with: NSSize(width: available, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin], attributes: codeAttributes(line.kind))
         return ceil(rect.height) + vPad * 2 + (line.kind == .hunk ? 4 : 0)
@@ -163,6 +173,7 @@ struct DiffTableView: NSViewRepresentable {
     var version: Int = 0
     var scrollTarget: String?
     var onComment: ((String, DiffLine) -> Void)?
+    var zoom = TextZoom.shared.scale
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -190,12 +201,12 @@ struct DiffTableView: NSViewRepresentable {
         scroll.contentView.postsBoundsChangedNotifications = true
         context.coordinator.table = table
         context.coordinator.observeWidth(scroll)
-        context.coordinator.update(rows: rows, version: version, onComment: onComment)
+        context.coordinator.update(rows: rows, version: version, zoom: zoom, onComment: onComment)
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        context.coordinator.update(rows: rows, version: version, onComment: onComment)
+        context.coordinator.update(rows: rows, version: version, zoom: zoom, onComment: onComment)
         if let target = scrollTarget, target != context.coordinator.lastScrollTarget {
             context.coordinator.lastScrollTarget = target
             context.coordinator.scroll(to: target)
@@ -208,6 +219,7 @@ struct DiffTableView: NSViewRepresentable {
         var ids: [String] = []
         var signature: [Int] = []
         var version = -1
+        var zoom: CGFloat = 0
         var onComment: ((String, DiffLine) -> Void)?
         var lastScrollTarget: String?
         private var lineHeights: [String: CGFloat] = [:]
@@ -232,8 +244,9 @@ struct DiffTableView: NSViewRepresentable {
             scroll.contentView.postsFrameChangedNotifications = true
         }
 
-        func update(rows newRows: [DiffTableRow], version newVersion: Int, onComment: ((String, DiffLine) -> Void)?) {
+        func update(rows newRows: [DiffTableRow], version newVersion: Int, zoom newZoom: CGFloat, onComment: ((String, DiffLine) -> Void)?) {
             self.onComment = onComment
+            DiffStyle.apply(scale: newZoom)
             let newIds = newRows.map(\.id)
             let newSignature = newRows.map { row -> Int in
                 switch row {
@@ -249,7 +262,7 @@ struct DiffTableView: NSViewRepresentable {
                     return id.hashValue
                 }
             }
-            guard newIds != ids || newVersion != version || newSignature != signature else {
+            guard newIds != ids || newVersion != version || newSignature != signature || newZoom != zoom else {
                 rows = newRows
                 refreshVisibleHosts()
                 return
@@ -258,6 +271,7 @@ struct DiffTableView: NSViewRepresentable {
             ids = newIds
             signature = newSignature
             version = newVersion
+            zoom = newZoom
             lineHeights.removeAll()
             table?.reloadData()
         }

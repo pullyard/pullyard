@@ -144,7 +144,7 @@ struct ForgeListView: View {
             Divider()
             List(selection: Binding(get: { app.forgeSelection?.id }, set: { id in app.forgeSelection = model.items.first { $0.id == id } })) {
                 if let e = model.error, model.items.isEmpty {
-                    Text(e).foregroundStyle(.red).font(.caption).textSelection(.enabled)
+                    Text(e).foregroundStyle(.red).font(.syCaption).textSelection(.enabled)
                 }
                 if kind.grouped {
                     ForEach(groups(items)) { group in
@@ -161,7 +161,7 @@ struct ForgeListView: View {
                     ForEach(items) { row($0, showRepo: true) }
                 }
                 if items.isEmpty, !model.loading, model.error == nil {
-                    Text("Nothing here").foregroundStyle(Color.syMuted)
+                    Text("Nothing here").font(.syBody).foregroundStyle(Color.syMuted)
                 }
             }
             .opacity(model.loading && !model.items.isEmpty ? 0.55 : 1)
@@ -234,12 +234,12 @@ struct ForgeItemDetailView: View {
                 HStack(spacing: 8) {
                     StateBadge(state: item.visualState)
                     Text("\(item.repository.nameWithOwner)\(item.isPR ? provider.numberPrefix : "#")\(item.number)")
-                        .font(.callout.monospaced())
+                        .font(.syCallout.monospaced())
                         .foregroundStyle(Color.syMuted)
                         .textSelection(.enabled)
                 }
                 Text(item.title)
-                    .font(.title2.weight(.semibold))
+                    .font(.syTitle2.weight(.semibold))
                     .foregroundStyle(Color.syText)
                     .textSelection(.enabled)
                 HStack(spacing: 6) {
@@ -247,10 +247,10 @@ struct ForgeItemDetailView: View {
                     Text(item.author?.login ?? "").fontWeight(.medium)
                     Text("opened \(Fmt.rel(item.createdAt)) · updated \(Fmt.rel(item.updatedAt))").foregroundStyle(Color.syMuted)
                 }
-                .font(.callout)
+                .font(.syCallout)
                 if let base = item.baseRefName {
                     Label("into \(base)", systemImage: "arrow.triangle.merge")
-                        .font(.callout)
+                        .font(.syCallout)
                         .foregroundStyle(Color.syMuted)
                         .textSelection(.enabled)
                 }
@@ -269,7 +269,7 @@ struct ForgeItemDetailView: View {
                 .controlSize(.large)
                 .padding(.top, 4)
                 Label(item.isPR ? "Changed files, comments and review for \(provider.title) are coming in a later version. Open the \(provider.requestTitle) in the browser to review it." : "Comments for \(provider.title) issues are coming in a later version. Open the issue in the browser to reply.", systemImage: "info.circle")
-                    .font(.callout)
+                    .font(.syCallout)
                     .foregroundStyle(Color.syMuted)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
