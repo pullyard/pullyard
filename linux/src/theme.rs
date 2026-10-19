@@ -303,7 +303,39 @@ list.sy-sidebar-list > row:selected { background-color: alpha(@sy_text, 0.07); b
 .tab-strip button.active { border-bottom-color: @sy_accent; color: @sy_text; }
 .tab-strip button:not(.active) { color: @sy_muted; }
 .tab-badge { font-size: 0.78em; padding: 0 6px; border-radius: 999px; background-color: alpha(@sy_text, 0.08); }
-.stack-strip { background-color: alpha(@sy_indigo, 0.06); border-radius: 9px; }
+.stack-strip { background-color: alpha(@sy_indigo, 0.06); border-radius: 9px; padding: 1px 4px; }
+.stack-canvas { background-color: @sy_sunken; }
+.stack-card { background-color: @sy_raised; border-radius: 10px; border: 1px solid @sy_line_strong; padding: 7px 10px; }
+.stack-card.current { border: 2px solid @sy_indigo; padding: 6px 9px; }
+.stack-card.compact { padding: 0; border-width: 3px; border-radius: 12px; }
+.stack-card.compact.current { border-width: 8px; }
+.stack-card .stack-status-bar { border-radius: 0; min-width: 14px; }
+.stack-compact-num { font-size: 40px; font-weight: 700; }
+.stack-compact-status { font-size: 26px; font-weight: 600; }
+.stack-commit { background-color: @sy_sunken; border-radius: 5px; padding: 3px 6px; font-family: monospace; font-size: 0.82em; color: @sy_muted; }
+.stack-pill { font-size: 0.74em; padding: 1px 7px; }
+.stack-base-pill { background-color: @sy_raised; border: 1px solid @sy_line_strong; border-radius: 999px; padding: 0 12px; }
+.stack-zoom-bar { background-color: @sy_raised; border: 1px solid @sy_line_strong; border-radius: 8px; padding: 2px 4px; }
+.stack-zoom-bar button { min-height: 22px; min-width: 22px; padding: 2px 4px; }
+.stack-sticky { background-color: alpha(@sy_amber, 0.16); border: 1px solid alpha(@sy_amber, 0.45); border-radius: 5px; padding: 6px 9px; }
+.stack-sticky:hover { background-color: alpha(@sy_amber, 0.22); border-color: alpha(@sy_amber, 0.8); }
+.stack-sticky .stack-dot { border-radius: 999px; min-width: 6px; min-height: 6px; }
+.stack-note-btn { padding: 1px 3px; border-radius: 5px; }
+.stack-note-btn:hover { background-color: alpha(@sy_text, 0.06); }
+.stack-notes-panel { background-color: @sy_raised; border: 1px solid @sy_line_strong; border-radius: 10px; padding: 14px; box-shadow: 0 4px 12px alpha(black, 0.18); }
+.stack-note-text { border: 1px solid @sy_line_strong; border-radius: 6px; padding: 6px; }
+.stack-note-text, .stack-note-text text { background-color: alpha(@sy_amber, 0.10); }
+listview.stack-list { background-color: transparent; padding: 12px; }
+listview.stack-list > row { padding: 0; margin: 1px 0; background: none; }
+.stack-row { border-radius: 7px; padding: 7px 10px; }
+.stack-row:hover { background-color: @sy_line; }
+.stack-row.current { background-color: alpha(@sy_indigo, 0.12); box-shadow: inset 0 0 0 1px alpha(@sy_indigo, 0.5); }
+.stack-row.opening { box-shadow: inset 0 0 0 1px alpha(@sy_indigo, 0.5); }
+.stack-base-row { padding: 6px 10px; }
+.stack-entry .stack-entry-capsule { min-width: 12px; min-height: 5px; border-radius: 3px; }
+.shimmer { background-color: alpha(@sy_text, 0.08); border-radius: 6px; animation: sy-shimmer 1.1s ease-in-out infinite alternate; }
+.shimmer.wide { border-radius: 9px; }
+@keyframes sy-shimmer { from { opacity: 0.45; } to { opacity: 1; } }
 .chat-scroller { background-color: @sy_panel; }
 .chat-user { background-color: @sy_raised; border-radius: 10px; padding: 12px; }
 .chat-tool { background-color: @sy_raised; border-radius: 10px; }

@@ -8,11 +8,11 @@ use serde_json::json;
 
 use crate::api::models::*;
 use crate::api::queries as q;
-use crate::api::endpoints::StackRefs;
 use crate::api::{ApiError, ErrorKind, GitHubApi};
 use crate::conversation_html::{self, Look};
 use crate::diff::{DiffAnchor, DiffFile};
 use crate::signal::Signal;
+use crate::stack::{self, StackNode, StackTree};
 
 const FULL_REFRESH_EVERY: Duration = Duration::from_secs(300);
 
@@ -22,6 +22,7 @@ pub enum PrTab {
     Commits,
     Checks,
     Files,
+    Stack,
 }
 
 impl PrTab {
@@ -31,6 +32,7 @@ impl PrTab {
             PrTab::Commits => "commits",
             PrTab::Checks => "checks",
             PrTab::Files => "files",
+            PrTab::Stack => "stack",
         }
     }
 
@@ -39,6 +41,7 @@ impl PrTab {
             "commits" => PrTab::Commits,
             "checks" => PrTab::Checks,
             "files" => PrTab::Files,
+            "stack" => PrTab::Stack,
             _ => PrTab::Conversation,
         }
     }
@@ -87,7 +90,8 @@ pub struct PrModel {
     pub error: RefCell<Option<String>>,
     pub busy: Cell<bool>,
     pub tab: Cell<PrTab>,
-    pub stack: RefCell<Vec<StackPr>>,
+    pub stack: RefCell<Option<StackTree>>,
+    pub preview: RefCell<Option<StackNode>>,
     pub html: RefCell<String>,
     pub files: RefCell<Vec<DiffFile>>,
     pub files_loaded: Cell<bool>,
@@ -105,6 +109,7 @@ pub struct PrModel {
     full_reason: Cell<Option<&'static str>>,
     last_full: Cell<Option<Instant>>,
     stack_fresh: Cell<bool>,
+    stack_key: RefCell<Option<String>>,
     reload_files: Cell<bool>,
     files_stale: Cell<bool>,
     pub files_oid: RefCell<Option<String>>,
@@ -128,7 +133,8 @@ impl PrModel {
             error: RefCell::new(None),
             busy: Cell::new(false),
             tab: Cell::new(PrTab::Conversation),
-            stack: RefCell::new(vec![]),
+            stack: RefCell::new(None),
+            preview: RefCell::new(None),
             html: RefCell::new(String::new()),
             files: RefCell::new(vec![]),
             files_loaded: Cell::new(false),
@@ -146,6 +152,7 @@ impl PrModel {
             full_reason: Cell::new(None),
             last_full: Cell::new(None),
             stack_fresh: Cell::new(false),
+            stack_key: RefCell::new(None),
             reload_files: Cell::new(false),
             files_stale: Cell::new(false),
             files_oid: RefCell::new(None),
@@ -357,11 +364,7 @@ impl PrModel {
                 *self.viewed.borrow_mut() = pr.files.as_ref().map(|f| f.nodes.iter().filter(|v| v.viewer_viewed_state == "VIEWED").map(|v| v.path.clone()).collect()).unwrap_or_default();
                 self.index_threads(&pr.review_threads.nodes);
                 let head = pr.head_ref_oid.clone();
-                let refs = StackRefs {
-                    head_owner: pr.head_repository.as_ref().and_then(|h| h.name_with_owner.split('/').next()).unwrap_or("").to_string(),
-                    head: pr.head_ref_name.clone(),
-                    base: pr.base_ref_name.clone(),
-                };
+                let stack_key = stack_cache_key(&pr);
                 let recheck = pr.is_open() && (pr.merge_state_status.as_deref() == Some("UNKNOWN") || pr.mergeable == "UNKNOWN");
                 let files_stale = self.reload_files.replace(false) || self.files_oid.borrow().as_deref() != Some(head.as_str());
                 if files_stale && self.files_loaded.get() {
@@ -373,9 +376,13 @@ impl PrModel {
                 *self.refresh_error.borrow_mut() = None;
                 self.last_updated.set(Some(Utc::now()));
                 self.last_full.set(Some(Instant::now()));
+                *self.preview.borrow_mut() = None;
                 self.emit(Change::Pr);
-                let me = self.clone();
-                crate::rt::spawn_local(async move { me.load_stack(refs).await });
+                if self.stack_fresh.get() || self.stack_key.borrow().as_deref() != Some(stack_key.as_str()) {
+                    let force = self.stack_fresh.replace(false);
+                    let me = self.clone();
+                    crate::rt::spawn_local(async move { me.load_stack(force).await });
+                }
                 self.schedule_merge_recheck(recheck);
             }
             Err(e) => {
@@ -416,16 +423,65 @@ impl PrModel {
         });
     }
 
-    async fn load_stack(self: Rc<Self>, refs: StackRefs) {
-        let fresh = self.stack_fresh.replace(false);
-        let api = self.api.clone();
-        let r = self.r.clone();
-        if let Ok(s) = crate::rt::run(async move { api.pull_request_stack_cached(&r, &refs, fresh).await }).await {
-            if *self.stack.borrow() != s {
-                *self.stack.borrow_mut() = s;
-                self.emit(Change::Stack);
+    pub async fn load_stack(self: Rc<Self>, force: bool) {
+        let Some(key) = self.pr.borrow().as_ref().map(stack_cache_key) else { return };
+        *self.stack_key.borrow_mut() = Some(key);
+        if let Some((nodes, fresh)) = stack::store::cached(&self.api, &self.r.repo).await {
+            self.apply_stack(&nodes);
+            if !force && fresh {
+                return;
             }
         }
+        if let Some(nodes) = stack::store::fetch(&self.api, &self.r.repo).await {
+            self.apply_stack(&nodes);
+        }
+    }
+
+    pub fn current_stack_node(&self) -> Option<StackNode> {
+        let pr = self.pr.borrow();
+        let pr = pr.as_ref()?;
+        Some(StackNode {
+            number: pr.number,
+            title: pr.title.clone(),
+            state: pr.state.clone(),
+            is_draft: pr.is_draft,
+            head_ref_name: pr.head_ref_name.clone(),
+            base_ref_name: pr.base_ref_name.clone(),
+            head_repo: pr.head_repository.as_ref().map(|h| h.name_with_owner.clone()),
+            author: pr.author.as_ref().map(|a| a.login.clone()),
+            updated_at: None,
+            review_decision: None,
+            ci: None,
+            commit_oid: None,
+            commit_headline: None,
+        })
+    }
+
+    pub fn apply_stack(&self, nodes: &[StackNode]) {
+        let Some(current) = self.current_stack_node() else { return };
+        let tree = StackTree::build(&current, nodes, &self.r.repo.full(), stack::NODE_LIMIT);
+        let none = tree.is_none();
+        if *self.stack.borrow() != tree {
+            *self.stack.borrow_mut() = tree;
+            self.emit(Change::Stack);
+        }
+        if none && self.tab.get() == PrTab::Stack {
+            self.set_tab(PrTab::Conversation);
+        }
+    }
+
+    pub fn seed_stack(&self, node: &StackNode, nodes: &[StackNode]) {
+        if self.pr.borrow().is_some() {
+            self.tab.set(PrTab::Stack);
+            return;
+        }
+        *self.preview.borrow_mut() = Some(node.clone());
+        *self.stack.borrow_mut() = StackTree::build(node, nodes, &self.r.repo.full(), stack::NODE_LIMIT);
+        self.tab.set(PrTab::Stack);
+    }
+
+    pub fn stack_note_key(&self, number: i64) -> String {
+        stack::notes::key(&crate::app::cache_account(), self.api.host(), &self.r.repo, number)
     }
 
     pub fn ensure_files(self: &Rc<Self>) {
@@ -573,7 +629,6 @@ impl PrModel {
         match res {
             Ok(()) => {
                 if reload {
-                    self.stack_fresh.set(true);
                     self.force_full("mutation");
                 }
                 true
@@ -638,8 +693,14 @@ impl PrModel {
         self.run(true, move |api| async move { api.mutate(query, json!({ "id": thread_id })).await }).await
     }
 
+    fn invalidate_stack(&self) {
+        stack::store::invalidate(&self.api, &self.r.repo);
+        self.stack_fresh.set(true);
+    }
+
     pub async fn merge(self: Rc<Self>, method: String, title: Option<String>, body: Option<String>, delete_branch: bool) -> bool {
         let Some(pr) = self.pr.borrow().clone() else { return false };
+        self.invalidate_stack();
         self.run(true, move |api| async move {
             api.mutate(q::MERGE, json!({ "id": pr.id, "m": method, "t": title, "b": body })).await?;
             if delete_branch {
@@ -659,6 +720,7 @@ impl PrModel {
 
     pub async fn simple(self: Rc<Self>, mutation: &'static str) -> bool {
         let Some(id) = self.pr_id() else { return false };
+        self.invalidate_stack();
         self.run(true, move |api| async move { api.mutate(mutation, json!({ "id": id })).await }).await
     }
 
@@ -703,4 +765,8 @@ impl PrModel {
         })
         .await
     }
+}
+
+fn stack_cache_key(pr: &PullRequestDetail) -> String {
+    format!("{}|{}|{}|{}|{}|{}", pr.number, pr.state, pr.is_draft, pr.head_repository.as_ref().map(|h| h.name_with_owner.as_str()).unwrap_or(""), pr.head_ref_name, pr.base_ref_name)
 }

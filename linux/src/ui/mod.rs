@@ -26,6 +26,7 @@ pub mod sections;
 pub mod settings;
 pub mod sidebar;
 pub mod splash;
+pub mod stacks;
 pub mod tabstrip;
 pub mod unlock;
 pub mod update;

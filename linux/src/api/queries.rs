@@ -10,24 +10,7 @@ pub fn repo_pull_requests() -> String {
     format!("query($o: String!, $n: String!, $b: String, $states: [PullRequestState!], $first: Int!) {{ repository(owner: $o, name: $n) {{ pullRequests(headRefName: $b, states: $states, first: $first, orderBy: {{field: UPDATED_AT, direction: DESC}}) {{ nodes {{ __typename ...PRItem }} }} }} }}\n{PR_ITEM_FRAGMENT}")
 }
 
-pub const STACK_NODE: &str = "fragment StackPR on PullRequest { number title state isDraft headRefName baseRefName }";
-
-pub fn pr_stack() -> String {
-    format!("query($o: String!, $n: String!, $num: Int!) {{ repository(owner: $o, name: $n) {{ defaultBranchRef {{ name }} pullRequest(number: $num) {{ ...StackPR stack {{ entries(first: 30) {{ nodes {{ position pullRequest {{ ...StackPR }} }} }} }} }} }} }}\n{STACK_NODE}")
-}
-
-pub fn pr_stack_fallback() -> String {
-    format!("query($o: String!, $n: String!, $num: Int!) {{ repository(owner: $o, name: $n) {{ defaultBranchRef {{ name }} pullRequest(number: $num) {{ ...StackPR }} }} }}\n{STACK_NODE}")
-}
-
-pub fn pr_stack_neighbors() -> String {
-    format!(
-        "query($o: String!, $n: String!, $head: String!, $base: String!) {{ repository(owner: $o, name: $n) {{
-  parents: pullRequests(headRefName: $base, states: [OPEN, MERGED], first: 3, orderBy: {{field: UPDATED_AT, direction: DESC}}) {{ nodes {{ ...StackPR }} }}
-  children: pullRequests(baseRefName: $head, states: [OPEN, MERGED], first: 5, orderBy: {{field: UPDATED_AT, direction: DESC}}) {{ nodes {{ ...StackPR }} }}
-}} }}\n{STACK_NODE}"
-    )
-}
+pub const REPO_STACK: &str = "query RepoStack($o: String!, $n: String!, $after: String) { repository(owner: $o, name: $n) { pullRequests(states: OPEN, first: 100, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) { pageInfo { hasNextPage endCursor } nodes { number title state isDraft headRefName baseRefName updatedAt reviewDecision author { login } headRepository { nameWithOwner } commits(last: 1) { nodes { commit { abbreviatedOid messageHeadline statusCheckRollup { state } } } } } } } }";
 
 pub fn search() -> String {
     format!("query($q: String!, $after: String) {{ search(query: $q, type: ISSUE, first: 40, after: $after) {{ issueCount pageInfo {{ hasNextPage endCursor }} nodes {{ __typename ...PRItem ...IssueItem }} }} }}\n{PR_ITEM_FRAGMENT}\n{ISSUE_ITEM_FRAGMENT}")

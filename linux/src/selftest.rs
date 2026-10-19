@@ -105,8 +105,8 @@ pub fn run() -> i32 {
             })
             .await;
             step(&mut failures, "stack", async {
-                let s = api.pull_request_stack(&pr).await?;
-                Ok(format!("entries={}", s.len()))
+                let s = api.open_stack_nodes(&pr.repo, 1).await?;
+                Ok(format!("open={}", s.len()))
             })
             .await;
         }

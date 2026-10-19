@@ -246,23 +246,6 @@ impl VisualState {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct StackPr {
-    pub number: i64,
-    pub title: String,
-    pub state: String,
-    pub is_draft: bool,
-    pub head_ref_name: String,
-    pub base_ref_name: String,
-}
-
-impl StackPr {
-    pub fn visual_state(&self) -> VisualState {
-        VisualState::pr(&self.state, self.is_draft)
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct Viewer {
     pub login: String,
