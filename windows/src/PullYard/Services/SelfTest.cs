@@ -3,6 +3,7 @@ using PullYard.Core;
 using PullYard.Core.Api;
 using PullYard.Core.Claude;
 using PullYard.Core.Html;
+using PullYard.Core.Stacks;
 using PullYard.Core.Update;
 using PullYard.Core.Util;
 
@@ -168,8 +169,9 @@ public static class SelfTest
             await Step($"repo PRs {pr.Repo.Full}", async () =>
             {
                 var open = await api.RepoPullRequests(pr.Repo, states: new[] { "OPEN" });
-                var stack = await api.PullRequestStack(pr);
-                return $"open={open.Count} stack={stack.Count}";
+                var nodes = await api.OpenStackNodes(pr.Repo, pages: 1);
+                var tree = nodes.FirstOrDefault(n => n.Number == pr.Number) is { } current ? StackTree.Build(current, nodes, pr.Repo.Full) : null;
+                return $"open={open.Count} stackNodes={nodes.Count} stack={tree?.Count ?? 0}";
             });
         }
         if (sampleIssue is { } issue)

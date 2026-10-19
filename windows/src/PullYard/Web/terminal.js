@@ -66,6 +66,10 @@
       send({ type: "input", data: data });
     });
     term.attachCustomKeyEventHandler(function (e) {
+      if (e.type === "keydown" && e.ctrlKey && !e.altKey && !e.metaKey && (e.key === "=" || e.key === "+" || e.key === "-" || e.key === "_" || e.key === "0")) {
+        send({ type: "zoom", id: e.key === "-" || e.key === "_" ? "out" : e.key === "0" ? "reset" : "in" });
+        return false;
+      }
       if (e.type === "keydown" && e.ctrlKey && e.shiftKey && (e.key === "C" || e.key === "c")) {
         var sel = term.getSelection();
         if (sel) send({ type: "copy", data: sel });

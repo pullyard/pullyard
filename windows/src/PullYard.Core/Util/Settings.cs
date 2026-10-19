@@ -176,4 +176,7 @@ public static class Keys
     public const string CloseToTray = "window.closeToTray";
     public const string WindowBounds = "window.bounds";
     public const string DiagnosticsEnabled = "diagnosticsEnabled";
+    public const string TextZoom = "text.zoom";
+    public const string StackView = "stack.view";
+    public const string StackSupportAsked = "stack.graphSupportAsked";
 }

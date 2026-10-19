@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using PullYard.Core.Api;
+using PullYard.Core.Stacks;
 using PullYard.Core.Util;
 using Xunit;
 
@@ -359,38 +360,27 @@ public class RequestPolicyTests : IDisposable
         Assert.Null(RateLimitPause.Evaluate(new HttpResponseMessage(HttpStatusCode.OK), Encoding.UTF8.GetBytes("{\"data\":{}}"), true, now));
     }
 
-    private const string StackReply = "{\"data\":{\"repository\":{\"defaultBranchRef\":{\"name\":\"main\"},\"pullRequest\":{\"number\":7,\"title\":\"t\",\"state\":\"OPEN\",\"headRefName\":\"b\",\"baseRefName\":\"main\",\"stack\":{\"entries\":{\"nodes\":[{\"position\":2,\"pullRequest\":{\"number\":7}},{\"position\":1,\"pullRequest\":{\"number\":6}}]}}}}}}";
+    private const string StackPage1 = "{\"data\":{\"repository\":{\"pullRequests\":{\"pageInfo\":{\"hasNextPage\":true,\"endCursor\":\"c1\"},\"nodes\":[{\"number\":7,\"title\":\"t\",\"state\":\"OPEN\",\"isDraft\":false,\"headRefName\":\"b\",\"baseRefName\":\"a\",\"updatedAt\":\"2026-10-01T12:00:00Z\",\"reviewDecision\":\"APPROVED\",\"author\":{\"login\":\"me\"},\"headRepository\":{\"nameWithOwner\":\"o/r\"},\"commits\":{\"nodes\":[{\"commit\":{\"abbreviatedOid\":\"abc1234\",\"messageHeadline\":\"Fix\",\"statusCheckRollup\":{\"state\":\"SUCCESS\"}}}]}}]}}}}";
+    private const string StackPage2 = "{\"data\":{\"repository\":{\"pullRequests\":{\"pageInfo\":{\"hasNextPage\":false,\"endCursor\":null},\"nodes\":[{\"number\":6,\"title\":\"base\",\"state\":\"OPEN\",\"isDraft\":true,\"headRefName\":\"a\",\"baseRefName\":\"main\",\"headRepository\":null,\"commits\":{\"nodes\":[]}}]}}}}";
 
     [Fact]
-    public async Task StackIsCachedAndReusedOnLiveTicks()
+    public async Task OpenStackNodesPagesThroughOpenPullRequests()
     {
         var (api, h) = Make();
-        h.Then(HttpStatusCode.OK, StackReply);
-        var first = await api.PullRequestStack(Pr, "b", "main");
-        Assert.Equal(new[] { 6, 7 }, first.Select(s => s.Number));
-        var again = await api.PullRequestStack(Pr, "b", "main", live: true);
-        Assert.Same(first, again);
-        Assert.Single(h.Seen);
-        h.Then(HttpStatusCode.OK, StackReply);
-        await api.PullRequestStack(Pr, "b", "other");
+        h.Then(HttpStatusCode.OK, StackPage1).Then(HttpStatusCode.OK, StackPage2);
+        var nodes = await api.OpenStackNodes(Pr.Repo);
+        Assert.Equal(new[] { 7, 6 }, nodes.Select(n => n.Number));
         Assert.Equal(2, h.Seen.Count);
-    }
-
-    [Fact]
-    public async Task StackFallsBackOnlyOnSchemaError()
-    {
-        var (api, h) = Make();
-        h.Then(HttpStatusCode.OK, "{\"data\":null,\"errors\":[{\"message\":\"Field 'stack' doesn't exist on type 'PullRequest'\",\"extensions\":{\"code\":\"undefinedField\"}}]}")
-            .Then(HttpStatusCode.OK, "{\"data\":{\"repository\":{\"defaultBranchRef\":{\"name\":\"main\"},\"pullRequest\":{\"number\":7,\"headRefName\":\"b\",\"baseRefName\":\"main\"}}}}")
-            .Then(HttpStatusCode.OK, "{\"data\":{\"repository\":{\"parents\":{\"nodes\":[]},\"children\":{\"nodes\":[]}}}}");
-        Assert.Empty(await api.PullRequestStack(Pr, "b", "main"));
-        Assert.Contains("stack {", h.Seen[0].Body);
-        Assert.DoesNotContain("stack {", h.Seen[1].Body);
-
-        var (api2, h2) = Make();
-        h2.Throw(new HttpRequestException(HttpRequestError.ConnectionError, "Connection refused")).Throw(new HttpRequestException(HttpRequestError.ConnectionError, "Connection refused"));
-        await Assert.ThrowsAsync<HttpRequestException>(() => api2.PullRequestStack(Pr, "b", "main"));
-        Assert.Equal(2, h2.Seen.Count);
-        Assert.All(h2.Seen, s => Assert.Contains("stack {", s.Body));
+        Assert.Contains("RepoStack", h.Seen[0].Body);
+        Assert.Contains("\"after\":\"c1\"", h.Seen[1].Body);
+        var first = nodes[0];
+        Assert.Equal("o/r", first.HeadRepo);
+        Assert.Equal("me", first.Author);
+        Assert.Equal("SUCCESS", first.Ci);
+        Assert.Equal("abc1234", first.CommitOid);
+        Assert.Equal("Fix", first.CommitHeadline);
+        Assert.Equal(StackStatus.Ready, first.Status);
+        Assert.Null(nodes[1].HeadRepo);
+        Assert.Equal(StackStatus.Draft, nodes[1].Status);
     }
 }

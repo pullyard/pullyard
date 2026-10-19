@@ -569,6 +569,14 @@
     if (e.key === "Escape" && meta.busy) send({ type: "stop" });
   });
 
+  document.addEventListener("keydown", function (e) {
+    if (!e.ctrlKey || e.altKey || e.metaKey) return;
+    var id = e.key === "=" || e.key === "+" ? "in" : e.key === "-" || e.key === "_" ? "out" : e.key === "0" ? "reset" : null;
+    if (!id) return;
+    e.preventDefault();
+    send({ type: "zoom", id: id });
+  }, true);
+
   if (host) host.addEventListener("message", onMessage);
   document.addEventListener("DOMContentLoaded", function () {
     renderTail();

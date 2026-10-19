@@ -9,12 +9,13 @@ public enum PRFilter { ReviewRequested, Mine, Assigned, Mentioned, Reviewed }
 
 public enum IssueFilter { Assigned, Mine, Mentioned }
 
-public enum SectionKind { Notifications, Prs, MyPrsByRepo, Issues, Repos, Projects, Claude }
+public enum SectionKind { Notifications, Prs, MyPrsByRepo, Stacks, Issues, Repos, Projects, Claude }
 
 public sealed record Section(SectionKind Kind, PRFilter Pr = PRFilter.ReviewRequested, IssueFilter Issue = IssueFilter.Assigned)
 {
     public static Section Notifications { get; } = new(SectionKind.Notifications);
     public static Section MyPrsByRepo { get; } = new(SectionKind.MyPrsByRepo);
+    public static Section Stacks { get; } = new(SectionKind.Stacks);
     public static Section Repos { get; } = new(SectionKind.Repos);
     public static Section Projects { get; } = new(SectionKind.Projects);
     public static Section Claude { get; } = new(SectionKind.Claude);
@@ -33,6 +34,7 @@ public sealed record Section(SectionKind Kind, PRFilter Pr = PRFilter.ReviewRequ
         SectionKind.Notifications => L.T("Section_Notifications", "Notifications"),
         SectionKind.Prs => Pr.Title(),
         SectionKind.MyPrsByRepo => L.T("Section_MyPrsByProject", "My PRs by project"),
+        SectionKind.Stacks => L.T("Section_Stacks", "Stacks"),
         SectionKind.Issues => L.F("Section_IssuesTitle", "Issues: {0}", Issue.Title()),
         SectionKind.Repos => L.T("Section_Repositories", "Repositories"),
         SectionKind.Projects => L.T("Section_Projects", "Projects"),

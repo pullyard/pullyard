@@ -162,6 +162,7 @@ public sealed class ShellView : Grid
         Header(L.T("Nav_PullRequests", "Pull requests"));
         foreach (var f in Enum.GetValues<PRFilter>()) Item(Section.Prs(f), f.Title(), f.Glyph(), f.ColorKey());
         Item(Section.MyPrsByRepo, L.T("Section_MyPrsByProject", "My PRs by project"), "", "coral");
+        Item(Section.Stacks, L.T("Section_Stacks", "Stacks"), "\uE81E", "indigo");
         Header(L.T("Nav_Issues", "Issues"));
         foreach (var f in Enum.GetValues<IssueFilter>()) Item(Section.Issues(f), f.Title(), f.Glyph(), f.ColorKey());
         Header(L.T("Nav_Code", "Code"));
@@ -342,6 +343,7 @@ public sealed class ShellView : Grid
             SectionKind.Notifications => new NotificationsView(),
             SectionKind.Prs => new SearchListView(s.Title, "pr", s.Pr.Query(), false),
             SectionKind.MyPrsByRepo => new SearchListView(s.Title, "pr", PRFilter.Mine.Query(), true),
+            SectionKind.Stacks => new StacksView(),
             SectionKind.Issues => new SearchListView(s.Title, "issue", s.Issue.Query(), false),
             SectionKind.Repos => new ReposView(),
             SectionKind.Projects => new ProjectsView(),
@@ -349,6 +351,7 @@ public sealed class ShellView : Grid
             _ => new Grid()
         };
         list.Transitions = new TransitionCollection { new ContentThemeTransition() };
+        TextZoom.ApplyWhenLoaded(list);
         listHost.Content = list;
         App.MainWindow?.SetSubtitle(s.Title);
         if (s.Kind == SectionKind.Claude)
@@ -358,6 +361,7 @@ public sealed class ShellView : Grid
         }
         else if (stack.Count > 0)
         {
+            TextZoom.ApplyWhenLoaded(stack[^1].View);
             detailHost.Content = stack[^1].View;
         }
         else
@@ -378,6 +382,7 @@ public sealed class ShellView : Grid
             _ => ForgeDetailView.Unavailable(app.Provider)
         };
         list.Transitions = new TransitionCollection { new ContentThemeTransition() };
+        TextZoom.ApplyWhenLoaded(list);
         listHost.Content = list;
         App.MainWindow?.SetSubtitle(title);
         if (s.Kind == SectionKind.Claude)
@@ -435,7 +440,8 @@ public sealed class ShellView : Grid
         var view = CreateDetail(route);
         stack.Add((route, view));
         if (stack.Count > 12) stack.RemoveAt(0);
-        view.Transitions = new TransitionCollection { new EntranceThemeTransition { FromVerticalOffset = 10, FromHorizontalOffset = 0 } };
+        if (!app.TakeQuietRoute()) view.Transitions = new TransitionCollection { new EntranceThemeTransition { FromVerticalOffset = 10, FromHorizontalOffset = 0 } };
+        TextZoom.ApplyWhenLoaded(view);
         detailHost.Content = view;
     }
 
@@ -447,6 +453,7 @@ public sealed class ShellView : Grid
     {
         if (stack.Count <= 1) return;
         stack.RemoveAt(stack.Count - 1);
+        TextZoom.ApplyWhenLoaded(stack[^1].View);
         detailHost.Content = stack[^1].View;
         app.DetailRoot = stack[^1].Route;
     }
