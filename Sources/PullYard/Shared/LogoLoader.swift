@@ -171,3 +171,29 @@ struct PullYardLoader: View {
         t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
     }
 }
+
+struct WakeLoader: View {
+    @State private var start = Date()
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 30, paused: Motion.reduced)) { context in
+            let t = context.date.timeIntervalSince(start)
+            Canvas { ctx, size in
+                let colors = [LogoGeometry.sky, Color(red: 0.43, green: 0.65, blue: 0.98), LogoGeometry.violet]
+                for i in 0..<3 {
+                    let phase = Motion.reduced ? 0.5 : (t * 1.6 - Double(i) * 0.22).truncatingRemainder(dividingBy: 1)
+                    let p = phase < 0 ? phase + 1 : phase
+                    let x = size.width * (0.12 + 0.3 * CGFloat(i))
+                    let lift = CGFloat(sin(p * .pi)) * size.height * 0.28
+                    let y = size.height * 0.62 - lift
+                    var wave = Path()
+                    wave.move(to: CGPoint(x: x - 3, y: y))
+                    wave.addQuadCurve(to: CGPoint(x: x + 3, y: y), control: CGPoint(x: x, y: y - 3))
+                    ctx.stroke(wave, with: .color(colors[i].opacity(0.45 + 0.55 * sin(p * .pi))), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                }
+            }
+        }
+        .frame(width: 20, height: 12)
+        .accessibilityLabel("Running")
+    }
+}

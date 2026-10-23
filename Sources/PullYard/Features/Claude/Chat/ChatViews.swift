@@ -204,17 +204,23 @@ private struct ChatScrollObserver: NSViewRepresentable {
 struct JumpToLatestButton: View {
     let action: () -> Void
     @State private var hover = false
+    @State private var start = Date()
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "arrow.down")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Color.syText)
-                .frame(width: 38, height: 38)
-                .background(Circle().fill(.regularMaterial))
-                .overlay(Circle().strokeBorder(Color.syLineStrong, lineWidth: 1))
-                .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
-                .scaleEffect(hover ? 1.06 : 1)
+            TimelineView(.animation(minimumInterval: 1 / 60, paused: Motion.reduced)) { context in
+                let t = context.date.timeIntervalSince(start)
+                let bob = Motion.reduced ? 0 : CGFloat(sin(t * 2.6)) * 2.5 + 1
+                PullYardDownMark(wave: Motion.reduced ? 0 : t)
+                    .frame(width: 30, height: 30)
+                    .offset(y: bob)
+            }
+            .frame(width: 44, height: 44)
+            .background(Circle().fill(.regularMaterial))
+            .overlay(Circle().strokeBorder(LinearGradient(colors: [BrandMark.violet, BrandMark.sky], startPoint: .top, endPoint: .bottom), lineWidth: 1.5))
+            .clipShape(Circle())
+            .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
+            .scaleEffect(hover ? 1.06 : 1)
         }
         .buttonStyle(.plain)
         .onHover { h in withAnimation(Motion.quick) { hover = h } }
@@ -583,7 +589,7 @@ struct ToolCallView: View {
             if call.permission?.resolved == false {
                 Image(systemName: "hand.raised.fill").foregroundStyle(Color.syAmber)
             } else {
-                ProgressView().controlSize(.mini).frame(width: 14)
+                WakeLoader()
             }
         case .done: Image(systemName: "checkmark").foregroundStyle(Color.syDim)
         case .error: Image(systemName: "xmark.circle.fill").foregroundStyle(Color.syRed)
@@ -862,6 +868,54 @@ struct PermissionCard: View {
             .buttonStyle(.borderedProminent)
             .disabled(answers.count < questions.count)
             Button("Skip") { chat.respond(request, allow: false, message: "The user skipped the question") }
+        }
+    }
+}
+
+struct PullYardDownMark: View {
+    var wave: Double = 0
+
+    var body: some View {
+        Canvas { ctx, size in
+            let k = min(size.width, size.height) / 100
+            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * k, y: y * k) }
+            var left = Path()
+            left.move(to: pt(28, 18))
+            left.addCurve(to: pt(50, 50), control1: pt(28, 36), control2: pt(50, 34))
+            var right = Path()
+            right.move(to: pt(72, 18))
+            right.addCurve(to: pt(50, 50), control1: pt(72, 36), control2: pt(50, 34))
+            ctx.stroke(left, with: .color(BrandMark.violet), style: StrokeStyle(lineWidth: 6 * k, lineCap: .round))
+            ctx.stroke(right, with: .color(BrandMark.sky), style: StrokeStyle(lineWidth: 6 * k, lineCap: .round))
+            for (c, color) in [(pt(28, 12), BrandMark.violet), (pt(72, 12), BrandMark.sky)] {
+                let r = 7 * k
+                let circle = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2))
+                ctx.fill(circle, with: .color(Color(red: 0.04, green: 0.07, blue: 0.13)))
+                ctx.stroke(circle, with: .color(color), lineWidth: 4.5 * k)
+            }
+            var cabin = Path(roundedRect: CGRect(x: 38 * k, y: 40 * k, width: 24 * k, height: 14 * k), cornerRadius: 3 * k)
+            cabin.addRect(.zero)
+            ctx.fill(cabin, with: .color(Color(red: 0.97, green: 0.98, blue: 0.99)))
+            var hull = Path()
+            hull.move(to: pt(20, 54))
+            hull.addLine(to: pt(80, 54))
+            hull.addLine(to: pt(70, 76))
+            hull.addLine(to: pt(30, 76))
+            hull.closeSubpath()
+            ctx.fill(hull, with: .linearGradient(Gradient(colors: [BrandMark.hullTop, BrandMark.hullBottom]), startPoint: pt(50, 54), endPoint: pt(50, 76)))
+            var deck = Path()
+            deck.move(to: pt(20, 54))
+            deck.addLine(to: pt(80, 54))
+            deck.addLine(to: pt(78.6, 57.5))
+            deck.addLine(to: pt(21.4, 57.5))
+            deck.closeSubpath()
+            ctx.fill(deck, with: .color(Color(red: 1, green: 0.8, blue: 0.83)))
+            let shift = CGFloat(sin(wave * 2.2)) * 3
+            var waves = Path()
+            waves.move(to: pt(26 + shift, 88))
+            waves.addCurve(to: pt(50 + shift, 88), control1: pt(34 + shift, 83), control2: pt(42 + shift, 93))
+            waves.addCurve(to: pt(74 + shift, 88), control1: pt(58 + shift, 83), control2: pt(66 + shift, 93))
+            ctx.stroke(waves, with: .color(BrandMark.sky.opacity(0.6)), style: StrokeStyle(lineWidth: 4 * k, lineCap: .round))
         }
     }
 }

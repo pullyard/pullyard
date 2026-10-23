@@ -174,10 +174,14 @@ struct ToolGroupView: View {
                 Button(action: toggle) {
                     HStack(spacing: 6) {
                         if calls.contains(where: { $0.status == .running }) {
-                            PullYardLoader(size: 20)
+                            WakeLoader()
                         }
                         ToolKindDots(calls: calls)
-                        Text(ToolGrouping.label(calls)).foregroundStyle(Color.syMuted)
+                        if let running = calls.last(where: { $0.status == .running }) {
+                            Text("Running: " + ToolGrouping.title(running, folder: folder)).foregroundStyle(Color.syText).lineLimit(1).truncationMode(.middle)
+                        } else {
+                            Text(ToolGrouping.label(calls)).foregroundStyle(Color.syMuted)
+                        }
                         let failed = calls.filter { $0.status == .error }.count
                         if failed > 0 {
                             Text("· \(failed) failed").foregroundStyle(Color.syRed)
@@ -309,7 +313,7 @@ struct ToolRowView: View {
     @ViewBuilder
     private var statusGlyph: some View {
         switch call.status {
-        case .running: ProgressView().controlSize(.mini).frame(width: 14)
+        case .running: WakeLoader()
         case .error: Image(systemName: "xmark.circle.fill").foregroundStyle(Color.syRed)
         case .denied: Image(systemName: "nosign").foregroundStyle(Color.syAmber)
         case .done: EmptyView()
