@@ -174,7 +174,7 @@ struct ToolGroupView: View {
                 Button(action: toggle) {
                     HStack(spacing: 6) {
                         if calls.contains(where: { $0.status == .running }) {
-                            ProgressView().controlSize(.mini)
+                            PullYardLoader(size: 20)
                         }
                         ToolKindDots(calls: calls)
                         Text(ToolGrouping.label(calls)).foregroundStyle(Color.syMuted)

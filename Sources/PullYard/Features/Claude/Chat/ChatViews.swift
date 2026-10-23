@@ -288,7 +288,7 @@ struct WorkingIndicator: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { ctx in
             HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
+                PullYardLoader(size: 26)
                 Text(chat.status ?? (chat.pendingCount > 0 ? "Waiting for you" : "Working…"))
                     .foregroundStyle(Color.syMuted)
                 if let start = chat.turnStartedAt {
