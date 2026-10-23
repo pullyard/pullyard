@@ -91,9 +91,7 @@ final class AppModel {
     enum Phase { case checking, loggedOut, locked, loggedIn }
 
     var phase: Phase = .checking
-    var api: GitHubAPI? {
-        didSet { StackNotesMCP.target = api.map { (cacheAccount, $0.host) } }
-    }
+    var api: GitHubAPI?
     var forge: ForgeClient?
     var account: GitAccount?
     var forgeSelection: SearchItem?
@@ -138,6 +136,11 @@ final class AppModel {
     init() {
         URLCache.shared = URLCache(memoryCapacity: 40 << 20, diskCapacity: 200 << 20)
         Diagnostics.shared.start()
+        StackNotesMCP.target = { [weak self] in
+            guard let self, let api = self.api else { return nil }
+            return (self.cacheAccount, api.host)
+        }
+        _ = StackNotes.shared
         Task { await restore() }
     }
 

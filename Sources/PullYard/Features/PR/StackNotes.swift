@@ -43,9 +43,9 @@ final class StackNotes {
     }()
 
     nonisolated static func read(key: String) -> [StackNote] {
-        guard let data = try? Data(contentsOf: defaultFile),
-              let decoded = try? JSONDecoder().decode([String: [StackNote]].self, from: data) else { return [] }
-        return decoded[key] ?? []
+        let saved = (try? Data(contentsOf: defaultFile)).flatMap { try? JSONDecoder().decode([String: [StackNote]].self, from: $0) }?[key] ?? []
+        let pending = StackNotesInbox.peek().filter { $0.key == key }.map { StackNote(kind: $0.kind, text: $0.text, updated: $0.created, source: "Claude") }
+        return saved + pending
     }
 
     private(set) var byPR: [String: [StackNote]] = [:]
@@ -195,6 +195,7 @@ struct StackNotesEditor: View {
     let title: String
     let store: StackNotes
     let onClose: () -> Void
+    @State private var seen: Set<UUID> = []
     @State private var drafts: [StackNote] = []
     @State private var commitTask: Task<Void, Never>?
 
@@ -245,8 +246,18 @@ struct StackNotesEditor: View {
         .onAppear {
             drafts = store.notes(key)
             if drafts.isEmpty { drafts = [StackNote()] }
+            seen = Set(drafts.map(\.id))
         }
-        .onChange(of: drafts) { scheduleCommit() }
+        .onChange(of: drafts) {
+            seen.formUnion(drafts.map(\.id))
+            scheduleCommit()
+        }
+        .onChange(of: store.notes(key)) { _, stored in
+            let arrived = stored.filter { !seen.contains($0.id) }
+            guard !arrived.isEmpty else { return }
+            drafts.removeAll { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            drafts += arrived
+        }
         .onDisappear {
             commit()
             store.flush()
