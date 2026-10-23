@@ -163,6 +163,7 @@ final class ChatSession {
     @ObservationIgnored var lastActivity = Date()
     var memoryBytes = 0
     var expandedTools: Set<String> = []
+    var draftRequest: String?
 
     @ObservationIgnored private var process: Process?
     @ObservationIgnored private var stdin: FileHandle?
@@ -179,6 +180,13 @@ final class ChatSession {
     @ObservationIgnored var onSessionId: ((String) -> Void)?
     @ObservationIgnored var onTurnFinished: (() -> Void)?
     @ObservationIgnored var onNeedsInput: ((PermissionRequest) -> Void)?
+
+    var currentTodos: [[String: Any]] {
+        for item in items.reversed() {
+            if case .tool(let c) = item, c.name == "TodoWrite", let todos = c.input["todos"] as? [[String: Any]] { return todos }
+        }
+        return []
+    }
 
     var lastAssistantText: String? {
         for item in items.reversed() {

@@ -150,6 +150,7 @@ struct ChatComposer: View {
     @State private var selected = 0
     @State private var files: [String] = []
     @State private var focusToken = 0
+    @State private var dropTarget = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -172,6 +173,7 @@ struct ChatComposer: View {
                 .background(Color.syAmber.opacity(0.08))
                 .overlay(alignment: .bottom) { Rectangle().fill(Color.syAmber.opacity(0.35)).frame(height: 1) }
             }
+            TodoProgressBar(todos: chat.currentTodos)
             VStack(alignment: .leading, spacing: 6) {
                 if completion != nil, !completionItems.isEmpty {
                     completionList
@@ -209,21 +211,52 @@ struct ChatComposer: View {
             }
             .padding(10)
             .card(radius: 12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(LinearGradient(colors: [BrandMark.violet, BrandMark.sky], startPoint: .leading, endPoint: .trailing), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                    .opacity(dropTarget ? 1 : 0)
+            )
+            .overlay {
+                if dropTarget {
+                    Label("Drop images to attach, files to mention", systemImage: "arrow.down.doc")
+                        .font(.syCallout.weight(.medium))
+                        .foregroundStyle(Color.syText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(.regularMaterial))
+                        .transition(.opacity)
+                }
+            }
+            .animation(Motion.fade, value: dropTarget)
             .padding(12)
         }
         .onChange(of: text) { updateCompletion() }
         .onChange(of: caret) { updateCompletion() }
-        .onDrop(of: [.fileURL, .image], isTargeted: nil) { providers in
+        .onChange(of: chat.draftRequest) {
+            guard let draft = chat.draftRequest else { return }
+            text = draft
+            caret = (draft as NSString).length
+            focusToken += 1
+            chat.draftRequest = nil
+        }
+        .onDrop(of: [.fileURL, .image], isTargeted: $dropTarget) { providers in
             for p in providers {
-                _ = p.loadDataRepresentation(for: .png) { data, _ in
-                    if let data { DispatchQueue.main.async { images.append(ChatImage(data: data, mediaType: "image/png")) } }
+                if p.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                    _ = p.loadObject(ofClass: URL.self) { url, _ in
+                        guard let url else { return }
+                        DispatchQueue.main.async { dropped(url) }
+                    }
+                } else {
+                    _ = p.loadDataRepresentation(for: .png) { data, _ in
+                        if let data { DispatchQueue.main.async { images.append(ChatImage(data: data, mediaType: "image/png")) } }
+                    }
                 }
             }
             return true
         }
         .background {
             Button("") { cycleMode() }.keyboardShortcut(.tab, modifiers: .shift).hidden()
-            Button("") { focusToken += 1 }.keyboardShortcut("k", modifiers: [.command]).hidden()
+            Button("") { focusToken += 1 }.keyboardShortcut("j", modifiers: [.command]).hidden()
         }
     }
 
@@ -445,6 +478,25 @@ struct ChatComposer: View {
         }
     }
 
+    private func dropped(_ url: URL) {
+        let ext = url.pathExtension.lowercased()
+        if ["png", "jpg", "jpeg", "gif", "webp", "heic"].contains(ext), let data = try? Data(contentsOf: url) {
+            let type = ext == "jpg" ? "image/jpeg" : "image/" + ext
+            if ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "gif" || ext == "webp" {
+                images.append(ChatImage(data: data, mediaType: type))
+            } else if let rep = NSBitmapImageRep(data: data), let png = rep.representation(using: .png, properties: [:]) {
+                images.append(ChatImage(data: png, mediaType: "image/png"))
+            }
+            return
+        }
+        let path = url.path.hasPrefix(chat.folder + "/") ? String(url.path.dropFirst(chat.folder.count + 1)) : url.path
+        let mention = "@" + (path.contains(" ") ? "\"\(path)\"" : path) + " "
+        let separator = text.isEmpty || text.hasSuffix(" ") || text.hasSuffix("\n") ? "" : " "
+        text += separator + mention
+        caret = (text as NSString).length
+        focusToken += 1
+    }
+
     private func attachImage() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.png, .jpeg, .gif, .webP]
@@ -507,6 +559,61 @@ struct ComposerRoundButton: View {
             }
         case .stop:
             Color.syText.opacity(hover ? 0.12 : 0.07)
+        }
+    }
+}
+
+struct TodoProgressBar: View {
+    let todos: [[String: Any]]
+    @State private var open = false
+
+    private func status(_ t: [String: Any]) -> String { t["status"] as? String ?? "pending" }
+    private func title(_ t: [String: Any]) -> String { t["activeForm"] as? String ?? t["content"] as? String ?? t["subject"] as? String ?? "" }
+
+    var body: some View {
+        let done = todos.filter { status($0) == "completed" }.count
+        if !todos.isEmpty, done < todos.count {
+            let current = todos.first { status($0) == "in_progress" } ?? todos.first { status($0) != "completed" }
+            VStack(alignment: .leading, spacing: 0) {
+                Button { withAnimation(Motion.smooth) { open.toggle() } } label: {
+                    HStack(spacing: 8) {
+                        ZStack {
+                            Circle().stroke(Color.syText.opacity(0.1), lineWidth: 2.5)
+                            Circle()
+                                .trim(from: 0, to: CGFloat(done) / CGFloat(max(todos.count, 1)))
+                                .stroke(LinearGradient(colors: [BrandMark.violet, BrandMark.sky], startPoint: .top, endPoint: .bottom), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                                .rotationEffect(.degrees(-90))
+                                .animation(Motion.smooth, value: done)
+                        }
+                        .frame(width: 14, height: 14)
+                        Text("\(done)/\(todos.count)").font(.syCaption.monospacedDigit().weight(.semibold)).foregroundStyle(Color.syMuted)
+                        if let current {
+                            Text(title(current)).font(.syCallout).foregroundStyle(Color.syText).lineLimit(1)
+                                .id(title(current))
+                                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .opacity.combined(with: .offset(y: -6))))
+                        }
+                        Spacer(minLength: 6)
+                        Image(systemName: "chevron.up")
+                            .font(.syCaption2.weight(.semibold))
+                            .foregroundStyle(Color.syDim)
+                            .rotationEffect(.degrees(open ? 180 : 0))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .animation(Motion.smooth, value: current.map(title))
+                if open {
+                    TodoListView(todos: todos)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 8)
+                        .transition(.opacity.combined(with: .offset(y: 6)))
+                }
+            }
+            .background(Color.syText.opacity(0.03))
+            .overlay(alignment: .bottom) { Rectangle().fill(Color.syLine).frame(height: 1) }
+            .transition(.opacity)
         }
     }
 }

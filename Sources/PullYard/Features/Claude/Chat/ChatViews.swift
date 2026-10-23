@@ -422,7 +422,7 @@ struct ChatItemView: View {
     var body: some View {
         switch item {
         case .user(_, let text, let images):
-            UserBubble(text: text, images: images)
+            UserBubble(text: text, images: images) { chat.draftRequest = text }
         case .text(let t):
             AssistantText(text: t)
         case .thinking(let t):
@@ -455,49 +455,108 @@ struct ChatItemView: View {
 struct UserBubble: View {
     let text: String
     let images: [ChatImage]
+    var onEdit: (() -> Void)?
     @State private var expanded = false
+    @State private var hover = false
 
     var body: some View {
-        HStack {
-            Spacer(minLength: 80)
-            VStack(alignment: .leading, spacing: 8) {
-                if !images.isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(images) { img in
-                            if let ns = img.image {
-                                Image(nsImage: ns).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 8))
+        VStack(alignment: .trailing, spacing: 4) {
+            HStack {
+                Spacer(minLength: 80)
+                VStack(alignment: .leading, spacing: 8) {
+                    if !images.isEmpty {
+                        HStack(spacing: 6) {
+                            ForEach(images) { img in
+                                if let ns = img.image {
+                                    Image(nsImage: ns).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
                             }
                         }
                     }
-                }
-                if !text.isEmpty {
-                    Text(text)
-                        .foregroundStyle(Color.syText)
-                        .textSelection(.enabled)
-                        .lineLimit(expanded ? nil : 12)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if text.split(separator: "\n").count > 12 {
-                        Button(expanded ? "Collapse" : "Show all") { withAnimation(Motion.quick) { expanded.toggle() } }
-                            .buttonStyle(.link)
-                            .font(.syCaption)
+                    if !text.isEmpty {
+                        Text(text)
+                            .foregroundStyle(Color.syText)
+                            .textSelection(.enabled)
+                            .lineLimit(expanded ? nil : 12)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if text.split(separator: "\n").count > 12 {
+                            Button(expanded ? "Collapse" : "Show all") { withAnimation(Motion.quick) { expanded.toggle() } }
+                                .buttonStyle(.link)
+                                .font(.syCaption)
+                        }
                     }
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.syAgentAccent.opacity(0.13)))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.syAgentAccent.opacity(0.22)))
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.syAgentAccent.opacity(0.13)))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.syAgentAccent.opacity(0.22)))
+            MessageActions(visible: hover && !text.isEmpty) {
+                MessageActionButton(icon: "doc.on.doc", help: "Copy") { copyToPasteboard(text) }
+                if let onEdit {
+                    MessageActionButton(icon: "pencil", help: "Edit and send again") { onEdit() }
+                }
+            }
         }
+        .onHover { h in withAnimation(Motion.fade) { hover = h } }
+    }
+}
+
+struct MessageActions<Content: View>: View {
+    let visible: Bool
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        HStack(spacing: 2) { content }
+            .opacity(visible ? 1 : 0)
+            .offset(y: visible || Motion.reduced ? 0 : -3)
+            .allowsHitTesting(visible)
+            .frame(height: 20)
+    }
+}
+
+struct MessageActionButton: View {
+    let icon: String
+    let help: String
+    let action: () -> Void
+    @State private var done = false
+    @State private var hover = false
+
+    var body: some View {
+        Button {
+            action()
+            withAnimation(Motion.quick) { done = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { withAnimation(Motion.fade) { done = false } }
+        } label: {
+            Image(systemName: done && icon == "doc.on.doc" ? "checkmark" : icon)
+                .font(.syCaption)
+                .foregroundStyle(hover ? Color.syText : Color.syMuted)
+                .frame(width: 22, height: 20)
+                .background(RoundedRectangle(cornerRadius: 5).fill(Color.syText.opacity(hover ? 0.08 : 0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help(help)
     }
 }
 
 struct AssistantText: View {
     let text: ChatText
+    @State private var hover = false
 
     var body: some View {
         if !text.text.isEmpty {
-            MarkdownView(text: text.text, streaming: !text.finalized)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                MarkdownView(text: text.text, streaming: !text.finalized)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if text.finalized {
+                    MessageActions(visible: hover) {
+                        MessageActionButton(icon: "doc.on.doc", help: "Copy") { copyToPasteboard(text.text) }
+                    }
+                }
+            }
+            .onHover { h in withAnimation(Motion.fade) { hover = h } }
         }
     }
 }
