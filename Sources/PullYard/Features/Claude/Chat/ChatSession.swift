@@ -221,6 +221,7 @@ final class ChatSession {
             args += ["--resume", resume]
             if fork { args.append("--fork-session") } else { sessionId = resume }
         }
+        args += StackNotesMCP.args
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: bin)

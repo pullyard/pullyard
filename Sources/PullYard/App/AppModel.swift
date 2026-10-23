@@ -91,7 +91,9 @@ final class AppModel {
     enum Phase { case checking, loggedOut, locked, loggedIn }
 
     var phase: Phase = .checking
-    var api: GitHubAPI?
+    var api: GitHubAPI? {
+        didSet { StackNotesMCP.target = api.map { (cacheAccount, $0.host) } }
+    }
     var forge: ForgeClient?
     var account: GitAccount?
     var forgeSelection: SearchItem?

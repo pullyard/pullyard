@@ -18,25 +18,40 @@ struct StackNote: Codable, Identifiable, Hashable {
     var kind: Kind
     var text: String
     var updated: Date
+    var source: String?
 
-    init(id: UUID = UUID(), kind: Kind = .note, text: String = "", updated: Date = Date()) {
+    init(id: UUID = UUID(), kind: Kind = .note, text: String = "", updated: Date = Date(), source: String? = nil) {
         self.id = id
         self.kind = kind
         self.text = text
         self.updated = updated
+        self.source = source
     }
 }
 
 @Observable
 @MainActor
 final class StackNotes {
-    static let shared = StackNotes(file: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    nonisolated static let defaultFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("PullYard", isDirectory: true)
-        .appendingPathComponent("stack-notes.json"))
+        .appendingPathComponent("stack-notes.json")
+
+    static let shared: StackNotes = {
+        let store = StackNotes(file: defaultFile)
+        store.watchInbox()
+        return store
+    }()
+
+    nonisolated static func read(key: String) -> [StackNote] {
+        guard let data = try? Data(contentsOf: defaultFile),
+              let decoded = try? JSONDecoder().decode([String: [StackNote]].self, from: data) else { return [] }
+        return decoded[key] ?? []
+    }
 
     private(set) var byPR: [String: [StackNote]] = [:]
     @ObservationIgnored private let file: URL
     @ObservationIgnored private var saveTask: Task<Void, Never>?
+    @ObservationIgnored private var inboxSource: DispatchSourceFileSystemObject?
 
     init(file: URL) {
         self.file = file
@@ -45,7 +60,7 @@ final class StackNotes {
         }
     }
 
-    static func key(account: String?, host: String, repo: RepoRef, number: Int) -> String {
+    nonisolated static func key(account: String?, host: String, repo: RepoRef, number: Int) -> String {
         "\(account?.lowercased() ?? "")|\(host)|\(repo.full.lowercased())#\(number)"
     }
 
@@ -69,6 +84,30 @@ final class StackNotes {
         guard kept != (byPR[key] ?? []) else { return }
         byPR[key] = kept.isEmpty ? nil : kept
         scheduleSave()
+    }
+
+    func importInbox() {
+        let entries = StackNotesInbox.drain()
+        guard !entries.isEmpty else { return }
+        for e in entries {
+            byPR[e.key, default: []].append(StackNote(kind: e.kind, text: e.text, updated: e.created, source: "Claude"))
+        }
+        scheduleSave()
+    }
+
+    private func watchInbox() {
+        let dir = StackNotesInbox.directory
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        importInbox()
+        let fd = open(dir.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.importInbox() }
+        }
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        inboxSource = source
     }
 
     func flush() {
@@ -126,6 +165,9 @@ struct StickyNote: View {
                 HStack(spacing: 5) {
                     Circle().fill(n.kind.color).frame(width: 6, height: 6)
                     Text(n.kind.title).font(.syCaption2.weight(.semibold)).foregroundStyle(n.kind.color)
+                    if n.source != nil {
+                        Image(systemName: "terminal").font(.syCaption2).foregroundStyle(Color.syMuted).help("Added by Claude")
+                    }
                     Text(n.text.replacingOccurrences(of: "\n", with: " "))
                         .font(.syCaption)
                         .foregroundStyle(Color.syText)
