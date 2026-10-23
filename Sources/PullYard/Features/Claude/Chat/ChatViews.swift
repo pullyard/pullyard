@@ -498,7 +498,26 @@ struct UserBubble: View {
                 }
             }
         }
-        .onHover { h in withAnimation(Motion.fade) { hover = h } }
+        .contentShape(Rectangle())
+        .modifier(LingeringHover(hover: $hover))
+    }
+}
+
+struct LingeringHover: ViewModifier {
+    @Binding var hover: Bool
+    @State private var hide: DispatchWorkItem?
+
+    func body(content: Content) -> some View {
+        content.onHover { inside in
+            hide?.cancel()
+            if inside {
+                withAnimation(Motion.fade) { hover = true }
+            } else {
+                let item = DispatchWorkItem { withAnimation(Motion.fade) { hover = false } }
+                hide = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: item)
+            }
+        }
     }
 }
 
@@ -510,8 +529,7 @@ struct MessageActions<Content: View>: View {
         HStack(spacing: 2) { content }
             .opacity(visible ? 1 : 0)
             .offset(y: visible || Motion.reduced ? 0 : -3)
-            .allowsHitTesting(visible)
-            .frame(height: 20)
+            .frame(height: 22)
     }
 }
 
@@ -556,7 +574,8 @@ struct AssistantText: View {
                     }
                 }
             }
-            .onHover { h in withAnimation(Motion.fade) { hover = h } }
+            .contentShape(Rectangle())
+            .modifier(LingeringHover(hover: $hover))
         }
     }
 }
