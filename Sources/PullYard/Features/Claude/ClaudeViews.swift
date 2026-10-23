@@ -161,7 +161,7 @@ struct ClaudeProjectsColumn: View {
                         }
                         Button("Close") { ws.close(tab) }
                     }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(.opacity)
             }
             Rectangle().fill(Color.syLine).frame(height: 1).padding(.horizontal, 8).padding(.vertical, 8)
         }
@@ -176,25 +176,24 @@ struct ClaudeProjectsColumn: View {
                     ws.newSession(folder: project.path)
                 }
                 .padding(.horizontal, 8)
-                if open {
+                Collapsible(open: open) {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(SessionTree.build(Array(project.sessions.filter { !$0.archived }.prefix(query.isEmpty ? 40 : 200)))) { node in
                             sessionRow(node.session, children: node.children.count)
-                            if !node.children.isEmpty, !collapsedParents.contains(node.id) {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    ForEach(Array(node.children.enumerated()), id: \.element.id) { index, child in
-                                        sessionRow(child, depth: 1, last: index == node.children.count - 1)
+                            if !node.children.isEmpty {
+                                Collapsible(open: !collapsedParents.contains(node.id)) {
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        ForEach(Array(node.children.enumerated()), id: \.element.id) { index, child in
+                                            sessionRow(child, depth: 1, last: index == node.children.count - 1)
+                                        }
                                     }
                                 }
-                                .transition(.opacity.combined(with: .move(edge: .top)))
                             }
                         }
                     }
                     .padding(.bottom, 4)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            .clipped()
         }
         if ws.projects.isEmpty, !ws.loadingProjects {
             Text("No Claude Code sessions yet").font(.syBody).foregroundStyle(Color.syMuted).padding(12)
@@ -1324,5 +1323,38 @@ struct AgentBranchMenu: View {
         let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         switchTo(name, create: true)
+    }
+}
+
+struct Collapsible<Content: View>: View {
+    let open: Bool
+    @ViewBuilder let content: () -> Content
+    @State private var mounted: Bool
+    @State private var unmount: DispatchWorkItem?
+
+    init(open: Bool, @ViewBuilder content: @escaping () -> Content) {
+        self.open = open
+        self.content = content
+        _mounted = State(initialValue: open)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if mounted || open { content() }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(height: open ? nil : 0, alignment: .top)
+        .clipped()
+        .opacity(open ? 1 : 0)
+        .onChange(of: open) { _, now in
+            unmount?.cancel()
+            if now {
+                mounted = true
+            } else {
+                let item = DispatchWorkItem { mounted = false }
+                unmount = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
+            }
+        }
     }
 }
