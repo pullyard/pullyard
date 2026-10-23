@@ -8,6 +8,8 @@ struct ChatView: View {
     let chat: ChatSession
     @State private var follow = ChatFollow()
     @State private var awayCount: Int?
+    @State private var topID: String?
+    @State private var keptTopID: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,6 +41,7 @@ struct ChatView: View {
                         }
                         Color.clear.frame(height: 1).id("bottom")
                     }
+                    .scrollTargetLayout()
                     .padding(.horizontal, 28)
                     .padding(.vertical, 20)
                     .animation(Motion.smooth, value: chat.items.count)
@@ -53,6 +56,7 @@ struct ChatView: View {
                     }
                     .background(ChatScrollObserver(follow: follow))
                 }
+                .scrollPosition(id: $topID)
                 .coordinateSpace(name: ChatContentFrameKey.space)
                 .background {
                     GeometryReader { g in
@@ -71,6 +75,8 @@ struct ChatView: View {
                 .onChange(of: chat.pendingCount) {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { scrollDown(proxy) }
                 }
+                .onChange(of: topID) { if !follow.resizing { keptTopID = topID } }
+                .onChange(of: follow.resizeTick) { keepPosition(proxy) }
                 .onAppear { jumpToBottom(proxy) }
                 .onChange(of: tab.id) { jumpToBottom(proxy) }
                 .overlay(alignment: .bottom) {
@@ -116,6 +122,17 @@ struct ChatView: View {
         }
     }
 
+    private func keepPosition(_ proxy: ScrollViewProxy) {
+        guard !follow.stick, let id = keptTopID else { return }
+        proxy.scrollTo(id, anchor: .top)
+        for delay in [0.05, 0.15, 0.3, 0.5, 0.7] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard !follow.stick else { return }
+                proxy.scrollTo(id, anchor: .top)
+            }
+        }
+    }
+
     private func scrollDown(_ proxy: ScrollViewProxy) {
         guard follow.stick else { return }
         if chat.busy {
@@ -129,6 +146,8 @@ struct ChatView: View {
 @Observable
 final class ChatFollow {
     var stick = true
+    var resizeTick = 0
+    @ObservationIgnored var resizing = false
     @ObservationIgnored var viewportHeight: CGFloat = 0
     @ObservationIgnored private var contentHeight: CGFloat = 0
 
@@ -158,7 +177,6 @@ private struct ChatScrollObserver: NSViewRepresentable {
         private weak var scroll: NSScrollView?
         private var observers: [NSObjectProtocol] = []
         private var lastWidth: CGFloat = 0
-        private var keptDistance: CGFloat = 0
         private var restoreUntil = Date.distantPast
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -191,7 +209,6 @@ private struct ChatScrollObserver: NSViewRepresentable {
                 return event
             }
             lastWidth = s.contentView.bounds.width
-            keptDistance = distanceToBottom
             let clip = s.contentView
             clip.postsBoundsChangedNotifications = true
             clip.postsFrameChangedNotifications = true
@@ -211,19 +228,23 @@ private struct ChatScrollObserver: NSViewRepresentable {
         }
 
         private func layoutChanged() {
-            guard let s = scroll, let doc = s.documentView else { return }
+            guard let s = scroll, let doc = s.documentView, let follow else { return }
             let clip = s.contentView
             let width = clip.bounds.width
             if abs(width - lastWidth) > 0.5 {
                 lastWidth = width
-                restoreUntil = Date().addingTimeInterval(0.6)
+                restoreUntil = Date().addingTimeInterval(0.8)
+                if !follow.resizing {
+                    follow.resizing = true
+                    follow.resizeTick += 1
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) { [weak self] in
+                    guard let self, self.restoreUntil < Date() else { return }
+                    self.follow?.resizing = false
+                }
             }
-            guard restoreUntil > Date() else {
-                keptDistance = distanceToBottom
-                return
-            }
-            let distance = follow?.stick == true ? 0 : keptDistance
-            let y = max(0, doc.frame.height - clip.bounds.height - distance)
+            guard restoreUntil > Date(), follow.stick else { return }
+            let y = max(0, doc.frame.height - clip.bounds.height)
             guard abs(clip.bounds.origin.y - y) > 0.5 else { return }
             clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
             s.reflectScrolledClipView(clip)
@@ -259,21 +280,26 @@ struct JumpToLatestButton: View {
 
     var body: some View {
         Button(action: action) {
-            TimelineView(.animation(minimumInterval: 1 / 120, paused: Motion.reduced)) { context in
-                let t = context.date.timeIntervalSince(start)
-                ZStack {
-                    Circle().fill(Color.syRaised)
-                    DiveLogo(time: Motion.reduced ? nil : t)
-                        .clipShape(Circle())
-                    Circle()
-                        .strokeBorder(
-                            AngularGradient(colors: [BrandMark.violet, BrandMark.sky, BrandMark.violet.opacity(0.25), BrandMark.violet], center: .center, angle: .degrees(Motion.reduced ? 0 : t * 70)),
-                            lineWidth: 1.5
-                        )
+            ZStack {
+                Circle()
+                    .fill(Color.syRaised)
+                    .shadow(color: .black.opacity(hover ? 0.32 : 0.2), radius: hover ? 14 : 9, y: hover ? 6 : 3)
+                TimelineView(.animation(minimumInterval: 1 / 60, paused: Motion.reduced)) { context in
+                    let t = context.date.timeIntervalSince(start)
+                    ZStack {
+                        DiveLogo(time: Motion.reduced ? nil : t)
+                            .clipShape(Circle())
+                        Circle()
+                            .strokeBorder(
+                                AngularGradient(colors: [BrandMark.violet, BrandMark.sky, BrandMark.violet.opacity(0.25), BrandMark.violet], center: .center),
+                                lineWidth: 1.5
+                            )
+                            .rotationEffect(.degrees(Motion.reduced ? 0 : t * 70))
+                    }
+                    .drawingGroup()
                 }
-                .frame(width: 44, height: 44)
             }
-            .shadow(color: .black.opacity(hover ? 0.32 : 0.2), radius: hover ? 14 : 9, y: hover ? 6 : 3)
+            .frame(width: 44, height: 44)
             .overlay(alignment: .topTrailing) {
                 if newCount > 0 {
                     Text(newCount > 99 ? "99+" : "\(newCount)")

@@ -137,7 +137,10 @@ final class AppModel {
     init() {
         URLCache.shared = URLCache(memoryCapacity: 40 << 20, diskCapacity: 200 << 20)
         Diagnostics.shared.start()
-        DispatchQueue.main.async { [weak self] in self?.claude.observeBadge() }
+        DispatchQueue.main.async { [weak self] in
+            self?.claude.observeBadge()
+            ForegroundActivity.start()
+        }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.section == .claude, let tab = self.claude.selectedTab else { return }
