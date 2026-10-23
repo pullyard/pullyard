@@ -156,6 +156,10 @@ private struct ChatScrollObserver: NSViewRepresentable {
         weak var follow: ChatFollow?
         private var monitor: Any?
         private weak var scroll: NSScrollView?
+        private var observers: [NSObjectProtocol] = []
+        private var lastWidth: CGFloat = 0
+        private var keptDistance: CGFloat = 0
+        private var restoreUntil = Date.distantPast
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -168,11 +172,14 @@ private struct ChatScrollObserver: NSViewRepresentable {
 
         deinit {
             if let monitor { NSEvent.removeMonitor(monitor) }
+            observers.forEach(NotificationCenter.default.removeObserver)
         }
 
         private func detach() {
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers = []
             scroll = nil
         }
 
@@ -183,6 +190,43 @@ private struct ChatScrollObserver: NSViewRepresentable {
                 self?.handle(event)
                 return event
             }
+            lastWidth = s.contentView.bounds.width
+            keptDistance = distanceToBottom
+            let clip = s.contentView
+            clip.postsBoundsChangedNotifications = true
+            clip.postsFrameChangedNotifications = true
+            s.documentView?.postsFrameChangedNotifications = true
+            let center = NotificationCenter.default
+            observers.append(center.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.layoutChanged() }
+            })
+            observers.append(center.addObserver(forName: NSView.frameDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.layoutChanged() }
+            })
+            if let doc = s.documentView {
+                observers.append(center.addObserver(forName: NSView.frameDidChangeNotification, object: doc, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.layoutChanged() }
+                })
+            }
+        }
+
+        private func layoutChanged() {
+            guard let s = scroll, let doc = s.documentView else { return }
+            let clip = s.contentView
+            let width = clip.bounds.width
+            if abs(width - lastWidth) > 0.5 {
+                lastWidth = width
+                restoreUntil = Date().addingTimeInterval(0.6)
+            }
+            guard restoreUntil > Date() else {
+                keptDistance = distanceToBottom
+                return
+            }
+            let distance = follow?.stick == true ? 0 : keptDistance
+            let y = max(0, doc.frame.height - clip.bounds.height - distance)
+            guard abs(clip.bounds.origin.y - y) > 0.5 else { return }
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
+            s.reflectScrolledClipView(clip)
         }
 
         private var distanceToBottom: CGFloat {
