@@ -52,42 +52,46 @@ struct ClaudeProjectsColumn: View {
     }
 
     var body: some View {
-        List {
-            Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
                 switch ClaudeAccountStore.shared.status {
                 case .loggedIn(let info):
                     ClaudeAccountCard(info: info, compact: true)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
                 case .loggedOut:
                     Label("Not signed in to Claude — sign in on the right", systemImage: "person.crop.circle.badge.exclamationmark")
                         .foregroundStyle(Color.syAmber)
+                        .padding(8)
                     if ClaudeProfiles.shared.visible.count > 1 {
-                        ClaudeProfileSwitcher()
+                        ClaudeProfileSwitcher().padding(.horizontal, 8)
                     }
                 case .notInstalled:
                     Label("claude CLI not found — see the right side", systemImage: "exclamationmark.triangle")
                         .foregroundStyle(Color.syAmber)
+                        .padding(8)
                 default:
                     EmptyView()
                 }
-            }
-            if ClaudeAccountStore.shared.isLoggedIn {
-                if ready { historyContent }
-            } else if case .checking = ClaudeAccountStore.shared.status {
-                HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
-            } else if case .unknown = ClaudeAccountStore.shared.status {
-                HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    Image(systemName: "lock.fill").font(.syTitle3).foregroundStyle(Color.syDim)
-                    Text("Session history and projects appear after you sign in to Claude.")
-                        .font(.syCallout)
-                        .foregroundStyle(Color.syMuted)
+                if ClaudeAccountStore.shared.isLoggedIn {
+                    if ready { historyContent }
+                } else if case .checking = ClaudeAccountStore.shared.status {
+                    HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }.padding(.top, 20)
+                } else if case .unknown = ClaudeAccountStore.shared.status {
+                    HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }.padding(.top, 20)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Image(systemName: "lock.fill").font(.syTitle3).foregroundStyle(Color.syDim)
+                        Text("Session history and projects appear after you sign in to Claude.")
+                            .font(.syCallout)
+                            .foregroundStyle(Color.syMuted)
+                    }
+                    .padding(12)
                 }
-                .padding(.vertical, 8)
             }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
         }
-        .listStyle(.inset)
         .surface(.list)
         .overlay { if ws.loadingProjects && ws.projects.isEmpty { ProgressView().controlSize(.small) } }
         .liveRefresh(updated: ws.projectsUpdated, refreshing: ws.loadingProjects) { await ws.reloadProjects() }
@@ -122,67 +126,79 @@ struct ClaudeProjectsColumn: View {
 
     @ViewBuilder
     private var historyContent: some View {
-            if !ws.tabs.isEmpty {
-                Section {
-                    ForEach(ws.tabs) { tab in
-                        OpenTabRow(tab: tab, selected: ws.selectedTabID == tab.id)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
-                            .listRowSeparator(.hidden)
-                            .contentShape(Rectangle())
-                            .onTapGesture { ws.selectedTabID = tab.id }
-                            .listRowBackground(ClaudeRowHighlight(selected: ws.selectedTabID == tab.id))
-                            .contextMenu {
-                                if tab.running {
-                                    Button("Free memory (sleep)") { tab.sleepNow() }
-                                        .disabled(tab.state == .working || tab.state == .waiting)
-                                } else {
-                                    Button("Wake up") { ws.restart(tab) }
-                                }
-                                Button("Close") { ws.close(tab) }
-                            }
-                    }
-                } header: {
-                    HStack(spacing: 6) {
-                        Text("Open").font(.sySubheadline.weight(.semibold))
-                        Spacer()
-                        Image(systemName: "memorychip").imageScale(.small)
-                        Text(ws.totalMemory > 0 ? ProcessMemory.format(ws.totalMemory) : "0 " + "MB").font(.sySubheadline.weight(.semibold))
-                            .monospacedDigit()
-                        if ws.awakeCount > 0 {
-                            Button("Sleep all") { ws.sleepAll() }
-                                .buttonStyle(.link)
-                                .help("Stop idle processes and free memory")
-                        }
-                    }
-                    .font(.syCaption)
-                    .foregroundStyle(Color.syMuted)
-                    .textCase(nil)
-                    .help("Memory used by running Claude processes")
+        if !ws.tabs.isEmpty {
+            HStack(spacing: 6) {
+                Text("Open").font(.sySubheadline.weight(.semibold))
+                Spacer()
+                Image(systemName: "memorychip").imageScale(.small)
+                Text(ws.totalMemory > 0 ? ProcessMemory.format(ws.totalMemory) : "0 " + "MB").font(.sySubheadline.weight(.semibold))
+                    .monospacedDigit()
+                if ws.awakeCount > 0 {
+                    Button("Sleep all") { ws.sleepAll() }
+                        .buttonStyle(.link)
+                        .help("Stop idle processes and free memory")
                 }
             }
-            ForEach(filtered) { project in
-                Section {
-                    if expanded.contains(project.id) || !query.isEmpty {
+            .font(.syCaption)
+            .foregroundStyle(Color.syMuted)
+            .padding(.horizontal, 8)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+            .help("Memory used by running Claude processes")
+            ForEach(ws.tabs) { tab in
+                OpenTabRow(tab: tab, selected: ws.selectedTabID == tab.id)
+                    .padding(.horizontal, 8)
+                    .background(ClaudeRowHighlight(selected: ws.selectedTabID == tab.id))
+                    .modifier(HoverHighlight(radius: 6))
+                    .contentShape(Rectangle())
+                    .onTapGesture { ws.selectedTabID = tab.id }
+                    .contextMenu {
+                        if tab.running {
+                            Button("Free memory (sleep)") { tab.sleepNow() }
+                                .disabled(tab.state == .working || tab.state == .waiting)
+                        } else {
+                            Button("Wake up") { ws.restart(tab) }
+                        }
+                        Button("Close") { ws.close(tab) }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            Rectangle().fill(Color.syLine).frame(height: 1).padding(.horizontal, 8).padding(.vertical, 8)
+        }
+        ForEach(filtered) { project in
+            let open = expanded.contains(project.id) || !query.isEmpty
+            VStack(alignment: .leading, spacing: 0) {
+                ProjectHeader(project: project, expanded: open) {
+                    withAnimation(Motion.smooth) {
+                        if expanded.contains(project.id) { expanded.remove(project.id) } else { expanded.insert(project.id) }
+                    }
+                } onNew: {
+                    ws.newSession(folder: project.path)
+                }
+                .padding(.horizontal, 8)
+                if open {
+                    VStack(alignment: .leading, spacing: 0) {
                         ForEach(SessionTree.build(Array(project.sessions.filter { !$0.archived }.prefix(query.isEmpty ? 40 : 200)))) { node in
                             sessionRow(node.session, children: node.children.count)
                             if !node.children.isEmpty, !collapsedParents.contains(node.id) {
-                                ForEach(Array(node.children.enumerated()), id: \.element.id) { index, child in
-                                    sessionRow(child, depth: 1, last: index == node.children.count - 1)
+                                VStack(alignment: .leading, spacing: 0) {
+                                    ForEach(Array(node.children.enumerated()), id: \.element.id) { index, child in
+                                        sessionRow(child, depth: 1, last: index == node.children.count - 1)
+                                    }
                                 }
+                                .transition(.opacity.combined(with: .move(edge: .top)))
                             }
                         }
                     }
-                } header: {
-                    ProjectHeader(project: project, expanded: expanded.contains(project.id) || !query.isEmpty) {
-                        if expanded.contains(project.id) { expanded.remove(project.id) } else { expanded.insert(project.id) }
-                    } onNew: {
-                        ws.newSession(folder: project.path)
-                    }
+                    .padding(.bottom, 4)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            if ws.projects.isEmpty, !ws.loadingProjects {
-                Text("No Claude Code sessions yet").font(.syBody).foregroundStyle(Color.syMuted)
-            }
+            .clipped()
+        }
+        if ws.projects.isEmpty, !ws.loadingProjects {
+            Text("No Claude Code sessions yet").font(.syBody).foregroundStyle(Color.syMuted).padding(12)
+        }
     }
 
     private func sessionRow(_ s: ClaudeSessionInfo, children: Int = 0, depth: Int = 0, last: Bool = false) -> some View {
@@ -195,14 +211,16 @@ struct ClaudeProjectsColumn: View {
             depth: depth,
             last: last
         ) {
-            if collapsedParents.contains(s.id) { collapsedParents.remove(s.id) } else { collapsedParents.insert(s.id) }
+            withAnimation(Motion.smooth) {
+                if collapsedParents.contains(s.id) { collapsedParents.remove(s.id) } else { collapsedParents.insert(s.id) }
+            }
         }
+        .padding(.horizontal, 8)
+        .modifier(HoverHighlight(radius: 6))
         .rowAppear(s.id, ws.sessionRows)
         .contentShape(Rectangle())
         .onTapGesture { ws.resume(s) }
         .contextMenu { sessionMenu(s) }
-        .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
-        .listRowSeparator(.hidden)
     }
 
     @ViewBuilder
