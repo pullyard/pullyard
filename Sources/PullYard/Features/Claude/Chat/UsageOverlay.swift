@@ -102,7 +102,7 @@ struct UsageOverlay: View {
                 .padding(12)
                 .card(radius: 10)
             HStack {
-                Button(detailed ? "Hide breakdown" : "See detailed breakdown") { detailed.toggle() }
+                Button(detailed ? "Hide breakdown" : "See detailed breakdown") { withAnimation(Motion.quick) { detailed.toggle() } }
                     .controlSize(.small)
                 Spacer()
                 if chat.totalCost > 0 {

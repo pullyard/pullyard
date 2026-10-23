@@ -250,7 +250,7 @@ struct SearchListView: View {
                             }
                         } header: {
                             RepoGroupHeader(group: group, expanded: open) {
-                                if collapsed.contains(group.id) { collapsed.remove(group.id) } else { collapsed.insert(group.id) }
+                                withAnimation(Motion.quick) { if collapsed.contains(group.id) { collapsed.remove(group.id) } else { collapsed.insert(group.id) } }
                             }
                         }
                     }

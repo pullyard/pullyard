@@ -202,7 +202,7 @@ struct ToolGroupView: View {
                         }
                     }
                     .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syLine))
-                    .transition(.opacity)
+                    .transition(.reveal)
                 }
             }
         }
@@ -252,6 +252,7 @@ struct ThinkingStepRow: View {
                 Text(text.text).font(.syCallout).foregroundStyle(Color.syMuted).textSelection(.enabled)
                     .padding(.horizontal, 10)
                     .padding(.bottom, 10)
+                    .transition(.reveal)
             }
         }
     }
@@ -300,7 +301,7 @@ struct ToolRowView: View {
                     .padding(.horizontal, framed ? 10 : 0)
                     .padding(.top, framed ? 0 : 6)
                     .padding(.bottom, framed ? 10 : 0)
-                    .transition(.opacity)
+                    .transition(.reveal)
             }
         }
     }

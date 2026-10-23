@@ -399,7 +399,7 @@ struct UserBubble: View {
                         .lineLimit(expanded ? nil : 12)
                         .fixedSize(horizontal: false, vertical: true)
                     if text.split(separator: "\n").count > 12 {
-                        Button(expanded ? "Collapse" : "Show all") { expanded.toggle() }
+                        Button(expanded ? "Collapse" : "Show all") { withAnimation(Motion.quick) { expanded.toggle() } }
                             .buttonStyle(.link)
                             .font(.syCaption)
                     }
@@ -443,7 +443,7 @@ struct ThinkingView: View {
                 .buttonStyle(.plain)
                 if open {
                     Text(text.text).font(.syCallout).foregroundStyle(Color.syMuted).textSelection(.enabled).padding(.leading, 18)
-                        .transition(.opacity)
+                        .transition(.reveal)
                 }
             }
         }
@@ -553,7 +553,7 @@ struct ToolCallView: View {
                 Rectangle().fill(Color.syLine).frame(height: 1)
                 ToolDetails(call: call, folder: folder)
                     .padding(10)
-                    .transition(.opacity)
+                    .transition(.reveal)
             }
             if let p = call.permission, !p.resolved {
                 PermissionCard(request: p, chat: chat, folder: folder)
@@ -715,7 +715,7 @@ struct InlineDiff: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(shown) { DiffLineView(line: $0).equatable() }
             if lines.count > 60 && !showAll {
-                Button("Show \(lines.count - 60) more lines") { showAll = true }
+                Button("Show \(lines.count - 60) more lines") { withAnimation(Motion.quick) { showAll = true } }
                     .buttonStyle(.link).font(.syCaption).padding(6)
             }
         }

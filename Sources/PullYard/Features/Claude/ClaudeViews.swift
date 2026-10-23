@@ -517,7 +517,7 @@ struct ClaudeWorkspaceView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 if ws.selectedTab != nil {
-                    Button { ws.showInspector.toggle() } label: { Label("Inspector", systemImage: "sidebar.right") }
+                    Button { withAnimation(Motion.smooth) { ws.showInspector.toggle() } } label: { Label("Inspector", systemImage: "sidebar.right") }
                         .help("Toggle changes panel")
                 }
             }
