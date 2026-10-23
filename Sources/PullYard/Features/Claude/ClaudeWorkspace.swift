@@ -289,6 +289,12 @@ final class ClaudeWorkspace {
         return nil
     }
 
+    func cycleTab(_ delta: Int) {
+        guard !tabs.isEmpty else { return }
+        let i = tabs.firstIndex { $0.id == selectedTabID } ?? 0
+        selectedTabID = tabs[(i + delta + tabs.count) % tabs.count].id
+    }
+
     func isWatching(_ tab: ClaudeTab) -> Bool {
         selectedTabID == tab.id && NSApp.isActive && NSApp.keyWindow?.isVisible == true
     }

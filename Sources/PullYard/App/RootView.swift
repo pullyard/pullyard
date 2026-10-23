@@ -109,6 +109,7 @@ struct MainView: View {
         }
         .modifier(BrandToolbar())
         .sheet(isPresented: $app.showOpenLink) { OpenLinkSheet() }
+        .sheet(isPresented: $app.showQuickOpen) { AgentQuickOpen().environment(app) }
         .overlay(alignment: .bottom) {
             VStack(spacing: 8) {
                 ToastBanner()

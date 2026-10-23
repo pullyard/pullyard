@@ -40,6 +40,14 @@ struct PullYardApp: App {
                     .keyboardShortcut("r")
                 Button("Open by Link…") { app.showOpenLink = true }
                     .keyboardShortcut("l")
+                Button("Go to Session…") { app.showQuickOpen = true }
+                    .keyboardShortcut("k")
+                Button("New Agent Session") { app.newAgentSession() }
+                    .keyboardShortcut("n")
+                Button("Next Session") { app.claude.cycleTab(1) }
+                    .keyboardShortcut("]", modifiers: [.command, .shift])
+                Button("Previous Session") { app.claude.cycleTab(-1) }
+                    .keyboardShortcut("[", modifiers: [.command, .shift])
                 Divider()
                 Button("Review Requests") { app.section = .prs(.reviewRequested) }.keyboardShortcut("1")
                 Button("My Pull Requests") { app.section = .prs(.mine) }.keyboardShortcut("2")

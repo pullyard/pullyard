@@ -107,6 +107,7 @@ final class AppModel {
     var refreshTick = 0
     var liveTick = 0
     var showOpenLink = false
+    var showQuickOpen = false
     var clipboardRoute: Route?
     var toast: String?
     var pendingCode: CodeOpenRequest?
@@ -527,6 +528,15 @@ final class AppModel {
         unreadCount = 0
         RowAppearTracker.resetAll()
         phase = .loggedOut
+    }
+
+    func newAgentSession() {
+        section = .claude
+        if let folder = claude.selectedTab?.folder ?? claude.projects.first(where: \.exists)?.path {
+            claude.newSession(folder: folder)
+        } else {
+            showQuickOpen = true
+        }
     }
 
     func refresh() {
