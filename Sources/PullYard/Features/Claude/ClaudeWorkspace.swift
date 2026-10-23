@@ -290,7 +290,7 @@ final class ClaudeWorkspace {
         let sessionId = UUID().uuidString.lowercased()
         var args = ["--session-id", sessionId]
         if let name, !name.isEmpty { args += ["-n", name] }
-        if let prompt, !prompt.isEmpty { args.append(prompt) }
+        if let prompt, !prompt.isEmpty { args.append(ClaudeLauncher.positionalPrompt(prompt)) }
         let tab = makeTab(folder: folder, kind: .terminal, title: title, sessionId: sessionId)
         launchTerminal(tab, extra: args, mode: mode)
         return tab

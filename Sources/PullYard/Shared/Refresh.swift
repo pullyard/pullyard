@@ -83,7 +83,8 @@ extension View {
     }
 }
 
-private let pullThreshold: CGFloat = 36
+private let pullThreshold: CGFloat = 64
+private let pullCooldown: TimeInterval = 10
 private let heldMargin: CGFloat = 48
 
 enum PullPhase: Equatable {
@@ -99,6 +100,7 @@ private struct LiveRefreshModifier: ViewModifier {
     let action: @MainActor () async -> Void
     @State private var pull: CGFloat = 0
     @State private var phase: PullPhase = .idle
+    @State private var lastPull: Date?
 
     private var held: Bool { phase != .idle }
 
@@ -135,6 +137,8 @@ private struct LiveRefreshModifier: ViewModifier {
 
     private func pulled() {
         guard phase == .idle else { return }
+        if let lastPull, Date().timeIntervalSince(lastPull) < pullCooldown { return }
+        lastPull = Date()
         withAnimation(Motion.insert) { phase = .loading }
         Task { @MainActor in
             await action()
@@ -203,27 +207,25 @@ private struct PullIndicator: View {
 struct PullGesture {
     private(set) var value: CGFloat = 0
     private var active = false
-    private var fired = false
 
     mutating func handle(_ event: NSEvent, atTop: Bool) -> (pull: CGFloat?, fire: Bool) {
         guard event.hasPreciseScrollingDeltas, event.momentumPhase == [] else { return (nil, false) }
         if event.phase.contains(.began) || event.phase.contains(.mayBegin) {
-            active = true
-            fired = false
+            active = atTop
             value = 0
         }
-        if active, event.phase.contains(.changed) {
-            if atTop || value > 0 { value = max(0, value + event.scrollingDeltaY) }
-            if !fired, value >= pullThreshold {
-                fired = true
-                return (value, true)
+        if event.phase.contains(.changed) {
+            guard active else { return (nil, false) }
+            if !atTop && value <= 0 {
+                active = false
+                return (0, false)
             }
+            value = max(0, value + event.scrollingDeltaY)
             return (value, false)
         }
         if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
-            let fire = active && !fired && event.phase.contains(.ended) && value >= pullThreshold * 0.7
+            let fire = active && event.phase.contains(.ended) && value >= pullThreshold
             active = false
-            fired = false
             value = 0
             return (0, fire)
         }

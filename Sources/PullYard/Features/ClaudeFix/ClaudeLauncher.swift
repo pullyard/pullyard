@@ -41,6 +41,10 @@ enum ClaudePermissionMode: String, CaseIterable, Identifiable {
 }
 
 enum ClaudeLauncher {
+    static func positionalPrompt(_ prompt: String) -> String {
+        prompt.hasPrefix("-") ? " " + prompt : prompt
+    }
+
     static func shellQuote(_ s: String) -> String {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
@@ -77,7 +81,7 @@ enum ClaudeLauncher {
         let id = UUID().uuidString.prefix(8)
         let promptURL = dir.appendingPathComponent("prompt-\(id).md")
         let scriptURL = dir.appendingPathComponent("fix-\(id).command")
-        try prompt.write(to: promptURL, atomically: true, encoding: .utf8)
+        try positionalPrompt(prompt).write(to: promptURL, atomically: true, encoding: .utf8)
 
         let configExport = configDir.map { "export CLAUDE_CONFIG_DIR=\(shellQuote($0))" } ?? ""
         var args = ""

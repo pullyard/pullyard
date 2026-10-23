@@ -294,7 +294,7 @@ struct JobLogSheet: View {
                 if let log { Button("Copy") { copyToPasteboard(log) } }
                 if let link = check.link { Button("Open in browser") { openInBrowser(link) } }
                 if let onFix {
-                    Button("Fix with Claude Code") { onFix(log) }
+                    Button("Fix with agent") { onFix(log) }
                         .buttonStyle(.borderedProminent)
                         .tint(Color.syCoral)
                 }

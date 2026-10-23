@@ -114,6 +114,9 @@ final class ForgeHTTP {
         if !query.isEmpty { c.queryItems = (c.queryItems ?? []) + query }
         c.percentEncodedQuery = c.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         guard let u = c.url else { throw APIError(message: "Invalid address: \(base)\(path)") }
+        guard u.scheme == "https", u.host?.lowercased() == URL(string: base)?.host?.lowercased() else {
+            throw APIError(message: "Refusing to send credentials to \(u.host ?? path)")
+        }
         return u
     }
 

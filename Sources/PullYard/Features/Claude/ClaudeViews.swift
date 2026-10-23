@@ -91,7 +91,7 @@ struct ClaudeProjectsColumn: View {
         .overlay { if ws.loadingProjects && ws.projects.isEmpty { ProgressView().controlSize(.small) } }
         .liveRefresh(updated: ws.projectsUpdated, refreshing: ws.loadingProjects) { await ws.reloadProjects() }
         .searchable(text: $query, placement: .toolbar, prompt: "Search sessions")
-        .navigationTitle("Claude Code")
+        .navigationTitle("Agents")
         .toolbar {
             ToolbarItemGroup {
                 Button { openFolder() } label: { Label("Open folder", systemImage: "folder.badge.plus") }
@@ -399,7 +399,7 @@ struct ClaudeWorkspaceView: View {
                 ClaudeEmptyState()
             }
         }
-        .navigationTitle(ws.selectedTab?.title ?? "Claude Code")
+        .navigationTitle(ws.selectedTab?.title ?? "Agents")
         .navigationSubtitle(ws.selectedTab?.folder.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~") ?? "")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -418,9 +418,9 @@ struct ClaudeEmptyState: View {
     var body: some View {
         let ws = app.claude
         VStack(spacing: 16) {
-            IconTile(systemImage: "sparkles", color: .syCoral, size: 56)
-            Text("Claude Code").font(.syTitle2.weight(.semibold)).foregroundStyle(Color.syText)
-            Text("Start a new session in a project or resume one from the history on the left.")
+            IconTile(systemImage: "terminal.fill", color: .syCoral, size: 56)
+            Text("Agents").font(.syTitle2.weight(.semibold)).foregroundStyle(Color.syText)
+            Text("Runs Claude Code, installed on this Mac. Start a new session in a project or resume one from the history on the left.")
                 .foregroundStyle(Color.syMuted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
@@ -1076,7 +1076,7 @@ struct InspectorPRDetail: View {
                     Button {
                         app.claude.send("Review PR #\(pr.number) (\(pr.url)) and briefly summarize what it does and any problems.", to: tab)
                     } label: {
-                        Label("Ask Claude to review this PR", systemImage: "sparkles")
+                        Label("Ask Claude to review this PR", systemImage: "text.magnifyingglass")
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .tint(.syCoral)

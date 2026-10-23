@@ -22,7 +22,7 @@ struct ResolveConflictsSheet: View {
             HStack(spacing: 10) {
                 IconTile(systemImage: "arrow.triangle.merge", color: .syCoral, size: 30)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Resolve Conflicts with Claude Code").font(.syHeadline).foregroundStyle(Color.syText)
+                    Text("Resolve conflicts with agent").font(.syHeadline).foregroundStyle(Color.syText)
                     HStack(spacing: 6) {
                         Text("#\(pr.number)").foregroundStyle(Color.syViolet).fontWeight(.semibold)
                         Text(pr.title).foregroundStyle(Color.syMuted).lineLimit(1)

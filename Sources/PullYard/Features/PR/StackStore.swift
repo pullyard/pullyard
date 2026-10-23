@@ -5,13 +5,14 @@ enum StackStore {
     static let ttl: TimeInterval = 120
     private static var memory: [String: (nodes: [StackNode], at: Date)] = [:]
     private static var fetches: [String: Task<[StackNode]?, Never>] = [:]
+    private static var invalidated: Set<String> = []
 
     private static func key(_ api: GitHubAPI, _ repo: RepoRef, _ account: String?) -> String {
         "\(account ?? "")|\(api.host)|\(repo.full.lowercased())"
     }
 
     private static func diskKey(_ api: GitHubAPI, _ repo: RepoRef) -> String {
-        "stack|\(api.host)|\(repo.full)"
+        "stack|\(api.host)|\(repo.full.lowercased())"
     }
 
     static func memoryNodes(api: GitHubAPI, repo: RepoRef, account: String?) -> [StackNode]? {
@@ -24,7 +25,11 @@ enum StackStore {
             return (hit.nodes, Date().timeIntervalSince(hit.at) < ttl)
         }
         guard let snap = await ListCache.load([StackNode].self, account: account, key: diskKey(api, repo)) else { return nil }
-        if memory[k] == nil { memory[k] = (snap.value, snap.saved) }
+        if let hit = memory[k] {
+            return (hit.nodes, Date().timeIntervalSince(hit.at) < ttl)
+        }
+        if invalidated.contains(k) { return (snap.value, false) }
+        memory[k] = (snap.value, snap.saved)
         return (snap.value, Date().timeIntervalSince(snap.saved) < ttl)
     }
 
@@ -49,6 +54,7 @@ enum StackStore {
             ListCache.save(nodes, account: account, key: diskKey(api, repo))
         }
         memory[k] = (nodes, Date())
+        invalidated.remove(k)
         return nodes
     }
 
@@ -56,9 +62,12 @@ enum StackStore {
         fetches.values.forEach { $0.cancel() }
         fetches = [:]
         memory = [:]
+        invalidated = []
     }
 
     static func invalidate(api: GitHubAPI, repo: RepoRef, account: String?) {
-        memory[key(api, repo, account)] = nil
+        let k = key(api, repo, account)
+        memory[k] = nil
+        invalidated.insert(k)
     }
 }

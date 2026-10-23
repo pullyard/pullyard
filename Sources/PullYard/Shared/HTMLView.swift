@@ -55,6 +55,7 @@ struct HTMLView: NSViewRepresentable {
         private var token = 0
         private var restoreY: Double?
         private var scrollBottom = false
+        private var loading = false
 
         init(_ parent: HTMLView) {
             self.parent = parent
@@ -79,6 +80,8 @@ struct HTMLView: NSViewRepresentable {
                 view.loadHTMLString(html, baseURL: URL(string: "https://github.com/"))
                 return
             }
+            loading = true
+            webView?.atTop = false
             view.evaluateJavaScript("window.scrollY") { [weak self, weak view] y, _ in
                 self?.restoreY = y as? Double
                 view?.loadHTMLString(html, baseURL: URL(string: "https://github.com/"))
@@ -92,7 +95,25 @@ struct HTMLView: NSViewRepresentable {
             } else if let y = restoreY {
                 webView.evaluateJavaScript("window.scrollTo(0, \(y))")
             }
+            webView.evaluateJavaScript("window.scrollY") { [weak self] y, _ in
+                guard let self else { return }
+                self.loading = false
+                self.webView?.atTop = ((y as? Double) ?? 0) <= 0
+            }
             restoreY = nil
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            loading = false
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            loading = false
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            loading = false
+            html = ""
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
@@ -114,9 +135,9 @@ struct HTMLView: NSViewRepresentable {
         }
 
         func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard let body = message.body as? [String: Any], let type = body["type"] as? String, let id = body["id"] as? String else { return }
+            guard message.frameInfo.isMainFrame, let body = message.body as? [String: Any], let type = body["type"] as? String, let id = body["id"] as? String else { return }
             if type == "atTop" {
-                webView?.atTop = id == "1"
+                if !loading { webView?.atTop = id == "1" }
                 return
             }
             parent.onAction(type, id)

@@ -757,7 +757,7 @@ private struct StackListRow: View {
                 Text(key).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
             }
             if hasSession {
-                Image(systemName: "sparkles").font(.syCaption).foregroundStyle(Color.syCoral).help("Has a Claude Code session")
+                Image(systemName: "terminal").font(.syCaption).foregroundStyle(Color.syMuted).help("Has a Claude Code session")
             }
             BranchChip(name: node.headRefName, color: current ? .syViolet : .sySlate)
             Button(action: onNote) {

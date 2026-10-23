@@ -215,7 +215,7 @@ struct PRDetailContent: View {
                 Button { showReviewers = true } label: { Label("Request review", systemImage: "person.crop.circle.badge.plus") }
                     .help("Request or re-request review")
             }
-            Button { showFix = true } label: { Label("Fix with Claude", systemImage: "sparkles") }
+            Button { showFix = true } label: { Label("Fix with agent", systemImage: "wrench.and.screwdriver") }
                 .help("Send review comments to a new Claude Code session")
             if canMerge {
                 Button { showMerge = true } label: { Label("Merge", systemImage: "arrow.triangle.merge") }
@@ -251,7 +251,7 @@ struct PRDetailContent: View {
                 }
             }
             if MergeConflicts.applies(pr) {
-                Button("Resolve conflicts with Claude Code…") { model.showResolveConflicts = true }
+                Button("Resolve conflicts with agent…") { model.showResolveConflicts = true }
             }
             if pr.mergeStateStatus == "BEHIND" || pr.mergeStateStatus == "BLOCKED" || pr.mergeStateStatus == "UNSTABLE" {
                 Button("Update branch from \(pr.baseRefName)") { Task { await model.simple(Q.updateBranch) } }
@@ -720,7 +720,7 @@ struct ChecksTab: View {
                     }
                     Spacer()
                     if CIFailureCollector.isFixable(c), pr.isOpen {
-                        Button("Fix with Claude Code") { onFix(CIFixRequest(focus: c.id)) }
+                        Button("Fix with agent") { onFix(CIFixRequest(focus: c.id)) }
                             .controlSize(.small)
                             .tint(Color.syCoral)
                     }

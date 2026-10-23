@@ -158,12 +158,14 @@ final class ChatSession {
     var lastError: String?
     var turnStartedAt: Date?
     var sleeping = false
-    var lastActivity = Date()
+    @ObservationIgnored var lastActivity = Date()
     var memoryBytes = 0
 
     @ObservationIgnored private var process: Process?
     @ObservationIgnored private var stdin: FileHandle?
-    @ObservationIgnored private var buffer = Data()
+    @ObservationIgnored private var decoder = StreamLineDecoder()
+    @ObservationIgnored private var pending: [[String: Any]] = []
+    @ObservationIgnored private var flushScheduled = false
     @ObservationIgnored private var stderrTail = ""
     @ObservationIgnored private var tools: [String: ChatToolCall] = [:]
     @ObservationIgnored private var streamTexts: [String: ChatText] = [:]
@@ -232,11 +234,16 @@ final class ChatSession {
         p.standardInput = inPipe
         p.standardOutput = outPipe
         p.standardError = errPipe
-        buffer = Data()
+        let decoder = StreamLineDecoder()
+        self.decoder = decoder
+        pending = []
         outPipe.fileHandleForReading.readabilityHandler = { [weak self] h in
             let data = h.availableData
             guard !data.isEmpty else { h.readabilityHandler = nil; return }
-            DispatchQueue.main.async { self?.consume(data) }
+            let objects = decoder.decode(data)
+            guard !objects.isEmpty else { return }
+            let batch = StreamBatch(objects: objects)
+            DispatchQueue.main.async { self?.enqueue(batch, from: decoder) }
         }
         errPipe.fileHandleForReading.readabilityHandler = { [weak self] h in
             let data = h.availableData
@@ -273,6 +280,7 @@ final class ChatSession {
     }
 
     private func terminated(code: Int32) {
+        flush()
         let wasIntentional = intentionalStop
         intentionalStop = false
         running = false
@@ -362,18 +370,26 @@ final class ChatSession {
         if !allow, let id = req.toolUseId, let tool = tools[id] { tool.status = .denied }
     }
 
-    private func consume(_ data: Data) {
-        buffer.append(data)
-        while let nl = buffer.firstIndex(of: 0x0A) {
-            let line = buffer[buffer.startIndex..<nl]
-            buffer.removeSubrange(buffer.startIndex...nl)
-            guard !line.isEmpty, let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else { continue }
-            handle(obj)
-        }
+    private static let flushInterval: TimeInterval = 0.05
+
+    private func enqueue(_ batch: StreamBatch, from source: StreamLineDecoder) {
+        guard source === decoder else { return }
+        pending += batch.objects
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.flushInterval) { [weak self] in self?.flush() }
+    }
+
+    private func flush() {
+        flushScheduled = false
+        let objects = pending
+        pending = []
+        guard !objects.isEmpty else { return }
+        lastActivity = Date()
+        for o in objects { handle(o) }
     }
 
     private func handle(_ o: [String: Any]) {
-        lastActivity = Date()
         switch o["type"] as? String {
         case "system": handleSystem(o)
         case "stream_event": handleStream(o)
@@ -513,19 +529,26 @@ final class ChatSession {
         }
     }
 
+    static let maxResultLength = 64_000
+
     static func resultText(_ content: Any?) -> String? {
-        if let s = content as? String { return s }
-        if let arr = content as? [[String: Any]] {
-            return arr.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined(separator: "\n")
+        let text: String
+        if let s = content as? String {
+            text = s
+        } else if let arr = content as? [[String: Any]] {
+            text = arr.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined(separator: "\n")
+        } else {
+            return nil
         }
-        return nil
+        guard text.utf8.count > maxResultLength else { return text }
+        return String(text.prefix(maxResultLength)) + "\n… output truncated (\(ByteCountFormatter.string(fromByteCount: Int64(text.utf8.count), countStyle: .file)) total)"
     }
 
     private func handleResult(_ o: [String: Any]) {
         busy = false
         status = nil
         if let c = o["total_cost_usd"] as? Double { totalCost += c }
-        for t in tools.values where t.status == .running && t.parentToolUseId == nil { t.status = .done }
+        for t in tools.values where t.status == .running { t.status = .done }
         if o["is_error"] as? Bool == true {
             let sub = o["subtype"] as? String ?? ""
             let text = sub == "error_during_execution" ? "Stopped" : (o["result"] as? String ?? sub)
@@ -704,5 +727,29 @@ final class ChatSession {
         if !items.isEmpty {
             items.append(.notice(id: "resumed", text: "Session resumed", isError: false))
         }
+    }
+}
+
+struct StreamBatch: @unchecked Sendable {
+    let objects: [[String: Any]]
+}
+
+final class StreamLineDecoder: @unchecked Sendable {
+    private var buffer = Data()
+    private let lock = NSLock()
+
+    func decode(_ data: Data) -> [[String: Any]] {
+        lock.lock()
+        defer { lock.unlock() }
+        buffer.append(data)
+        var out: [[String: Any]] = []
+        while let nl = buffer.firstIndex(of: 0x0A) {
+            let line = buffer[buffer.startIndex..<nl]
+            buffer.removeSubrange(buffer.startIndex...nl)
+            guard !line.isEmpty, let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else { continue }
+            out.append(obj)
+        }
+        if buffer.startIndex > 0 { buffer = Data(buffer) }
+        return out
     }
 }

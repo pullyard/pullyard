@@ -75,10 +75,10 @@ enum ConversationHTML {
             """
         }.joined()
         var actions = ""
-        if t.viewerCanReply { actions += "<button onclick=\"post('reply','\(esc(t.id))')\">\("Reply")</button>" }
-        if t.isResolved, t.viewerCanUnresolve { actions += "<button onclick=\"post('unresolve','\(esc(t.id))')\">\("Unresolve")</button>" }
-        if !t.isResolved, t.viewerCanResolve { actions += "<button onclick=\"post('resolve','\(esc(t.id))')\">\("Resolve")</button>" }
-        actions += "<button class=\"ghost\" onclick=\"post('file','\(esc(t.path))')\">\("View in files")</button>"
+        if t.viewerCanReply { actions += "<button data-n=\"\(nonce)\" data-act=\"reply\" data-id=\"\(esc(t.id))\">\("Reply")</button>" }
+        if t.isResolved, t.viewerCanUnresolve { actions += "<button data-n=\"\(nonce)\" data-act=\"unresolve\" data-id=\"\(esc(t.id))\">\("Unresolve")</button>" }
+        if !t.isResolved, t.viewerCanResolve { actions += "<button data-n=\"\(nonce)\" data-act=\"resolve\" data-id=\"\(esc(t.id))\">\("Resolve")</button>" }
+        actions += "<button class=\"ghost\" data-n=\"\(nonce)\" data-act=\"file\" data-id=\"\(esc(t.path))\">\("View in files")</button>"
         return """
         <details class="thread"\(t.isResolved ? "" : " open")><summary class="th">\(esc(t.path))\(line.map { "<span class=\"ln\">:\($0)</span>" } ?? "")\(tags)</summary>
         \(hunk(t.comments.nodes.first?.diffHunk))\(comments)<div class="actions">\(actions)</div></details>
@@ -122,19 +122,19 @@ enum ConversationHTML {
         case .checking:
             content = "<p class=\"note\">\("Checking which files conflict with") \(base)…</p>"
         case .files(let files) where files.isEmpty:
-            content = "<p class=\"note\">\("No conflicts when merging locally — GitHub may still be updating its status.") <a class=\"act\" onclick=\"post('rescanConflicts','')\">\("Check again")</a></p>"
+            content = "<p class=\"note\">\("No conflicts when merging locally — GitHub may still be updating its status.") <a class=\"act\" data-n=\"\(nonce)\" data-act=\"rescanConflicts\" data-id=\"\">\("Check again")</a></p>"
         case .files(let files):
             let rows = files.map { f in
-                "<li data-path=\"\(esc(f))\" onclick=\"post('file',this.dataset.path)\" title=\"\("View in files")\"><span class=\"fi\">⚠︎</span>\(esc(f))</li>"
+                "<li data-n=\"\(nonce)\" data-act=\"file\" data-id=\"\(esc(f))\" title=\"\("View in files")\"><span class=\"fi\">⚠︎</span>\(esc(f))</li>"
             }.joined()
             content = "<p class=\"note\">\(plural(files.count, "file conflicts", "files conflict")) \("with") \(base):</p><ul class=\"cfiles\">\(rows)</ul>"
         case .noClone:
             let name = esc(repo?.full ?? "this repository")
-            content = "<p class=\"note\">\("This branch has conflicts with") \(base). \("Link a local clone of") <b>\(name)</b> \("to see which files conflict.")</p><div class=\"actions\"><button onclick=\"post('chooseClone','')\">\("Choose local folder…")</button></div>"
+            content = "<p class=\"note\">\("This branch has conflicts with") \(base). \("Link a local clone of") <b>\(name)</b> \("to see which files conflict.")</p><div class=\"actions\"><button data-n=\"\(nonce)\" data-act=\"chooseClone\" data-id=\"\">\("Choose local folder…")</button></div>"
         case .unavailable(let message):
-            content = "<p class=\"note\">\("This branch has conflicts with") \(base). \(esc(message)) <a class=\"act\" onclick=\"post('rescanConflicts','')\">\("Try again")</a></p>"
+            content = "<p class=\"note\">\("This branch has conflicts with") \(base). \(esc(message)) <a class=\"act\" data-n=\"\(nonce)\" data-act=\"rescanConflicts\" data-id=\"\">\("Try again")</a></p>"
         }
-        let actions = "<div class=\"actions\"><button class=\"claude\" onclick=\"post('resolveConflicts','')\">✦ \("Resolve Conflicts with Claude Code")</button><a href=\"\(esc(pr.url))/conflicts\">\("Resolve on GitHub")</a></div>"
+        let actions = "<div class=\"actions\"><button class=\"claude\" data-n=\"\(nonce)\" data-act=\"resolveConflicts\" data-id=\"\">\("Resolve conflicts with agent")</button><a href=\"\(esc(pr.url))/conflicts\">\("Resolve on GitHub")</a></div>"
         return """
         <div class="item conflict"><span class="cic">!</span><div class="box">
         <div class="head"><b>\("This branch has conflicts that must be resolved")</b></div>
@@ -215,10 +215,17 @@ enum ConversationHTML {
 
     private static func page(_ content: String) -> String {
         """
-        <!doctype html><html><head><meta charset="utf-8"><style>\(css)</style>
-        <script>function post(t,id){window.webkit.messageHandlers.app.postMessage({type:t,id:id})}</script>
+        <!doctype html><html><head><meta charset="utf-8">\(csp(scripts: true))<style>\(css)</style>
+        <script nonce="\(nonce)">document.addEventListener("click",function(e){var el=e.target.closest("[data-act]");if(!el||el.getAttribute("data-n")!=="\(nonce)")return;e.preventDefault();window.webkit.messageHandlers.app.postMessage({type:el.dataset.act,id:el.dataset.id||""})});</script>
         </head><body><div class="tl">\(content)</div></body></html>
         """
+    }
+
+    static let nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+
+    static func csp(scripts: Bool) -> String {
+        let script = scripts ? "'nonce-\(nonce)'" : "'none'"
+        return "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src https: data:; media-src https:; font-src https: data:; style-src 'unsafe-inline'; script-src \(script); form-action 'none'; base-uri https://github.com/\">"
     }
 
     static var css: String { Theme.isBrand ? brandVars + baseCSS + brandOverrides : systemVars + baseCSS }

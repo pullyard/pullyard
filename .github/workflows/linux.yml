@@ -86,6 +86,13 @@ jobs:
           desktop-file-validate "dist/share/applications/${APP_ID}.desktop"
           appstreamcli validate --no-net --explain "dist/share/metainfo/${APP_ID}.metainfo.xml" || echo "::warning::appstream validation reported issues"
 
+      - name: Third-party notices
+        run: |
+          cargo install cargo-about --locked --features cli --version 0.9.2 --quiet
+          ./packaging/notices.sh
+          . dist/brand.out
+          test -s "dist/share/licenses/${APP_ID}/THIRD-PARTY-NOTICES.txt"
+
       - name: Debian package
         run: |
           cargo install cargo-deb --locked --quiet || true
@@ -93,6 +100,7 @@ jobs:
           cargo deb --no-build --no-strip --deb-version "${VERSION}" --output "dist/${BIN_NAME}_${VERSION}_$(dpkg --print-architecture).deb"
           dpkg-deb --info dist/*.deb
           dpkg-deb --contents dist/*.deb
+          dpkg-deb --contents dist/*.deb | grep -q 'usr/share/doc/pullyard/THIRD-PARTY-NOTICES.txt'
 
       - name: Tarball
         run: |
@@ -103,7 +111,7 @@ jobs:
           cp "target/release/${BIN_NAME}" "${stage}/bin/"
           cp -r dist/share "${stage}/share"
           cp dist/brand.out packaging/install.sh packaging/uninstall.sh "${stage}/"
-          cp ../LICENSE "${stage}/"
+          cp ../LICENSE dist/THIRD-PARTY-NOTICES.txt "${stage}/"
           tar -C dist/stage -czf "dist/${name}.tar.gz" "${name}"
           ls -la dist
 
@@ -243,6 +251,7 @@ jobs:
           . linux/dist/brand.out
           flatpak install -y --user --noninteractive "${{ steps.names.outputs.bundle }}"
           flatpak run "${APP_ID}" --version
+          flatpak run --command=test "${APP_ID}" -s "/app/share/licenses/${APP_ID}/THIRD-PARTY-NOTICES.txt"
 
   release:
     name: Attach to release

@@ -263,7 +263,7 @@ struct RepoCodeView: View {
 
     private func page(_ inner: String) -> String {
         """
-        <!doctype html><html><head><meta charset="utf-8"><style>\(ConversationHTML.css) .md{padding:8px 4px} .tl{max-width:900px} .md a.anchor,.md .anchor,.md .octicon-link{display:none}</style></head>
+        <!doctype html><html><head><meta charset="utf-8">\(ConversationHTML.csp(scripts: false))<style>\(ConversationHTML.css) .md{padding:8px 4px} .tl{max-width:900px} .md a.anchor,.md .anchor,.md .octicon-link{display:none}</style></head>
         <body><div class="tl"><div class="md">\(inner)</div></div></body></html>
         """
     }

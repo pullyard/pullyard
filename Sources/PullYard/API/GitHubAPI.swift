@@ -54,6 +54,7 @@ final class GitHubAPI {
     private let lock = NSLock()
     private var polled: [String: PolledEntry] = [:]
     private var polledGeneration: [String: Int] = [:]
+    private var blockedUntil: [String: Date] = [:]
 
     static let retryDelay: UInt64 = 1_000_000_000
     static let retryBudget: TimeInterval = 45
@@ -105,6 +106,11 @@ final class GitHubAPI {
     }
 
     private func perform(_ req: URLRequest, _ kind: RequestKind, _ name: @autoclosure () -> String, retry: Bool, delegate: URLSessionTaskDelegate? = nil) async throws -> (Data, URLResponse, Int?) {
+        let isRead = req.httpMethod == nil || req.httpMethod == "GET" || (kind == .graphql && retry)
+        let bucket = Self.rateBucket(req.url, kind)
+        if isRead, let until = lock.withLock({ blockedUntil[bucket] }), until > Date() {
+            throw APIError(message: "GitHub rate limit reached. Requests resume at \(until.formatted(date: .omitted, time: .shortened)).", status: 429)
+        }
         let start = Date()
         var attempt = req
         var retried = false
@@ -137,7 +143,19 @@ final class GitHubAPI {
 
     private func noteRateLimit(_ http: HTTPURLResponse, _ data: Data) {
         guard http.statusCode == 403 || http.statusCode == 429 else { return }
-        if let until = Self.rateLimitEnd(http, data) { onRateLimit?(until) }
+        if let until = Self.rateLimitEnd(http, data) {
+            block(http.value(forHTTPHeaderField: "X-RateLimit-Resource") ?? Self.rateBucket(http.url, http.url?.path.hasSuffix("/graphql") == true ? .graphql : .rest), until: until)
+        }
+    }
+
+    static func rateBucket(_ url: URL?, _ kind: RequestKind) -> String {
+        if kind == .graphql { return "graphql" }
+        return url?.path.contains("/search/") == true ? "search" : "core"
+    }
+
+    private func block(_ bucket: String, until: Date) {
+        lock.withLock { if until > (blockedUntil[bucket] ?? .distantPast) { blockedUntil[bucket] = until } }
+        onRateLimit?(until)
     }
 
     static func rateLimitEnd(_ http: HTTPURLResponse, _ data: Data?) -> Date? {
@@ -185,7 +203,7 @@ final class GitHubAPI {
             throw APIError(message: "Failed to parse response: \(error)")
         }
         if let errors = decoded.errors, errors.contains(where: { $0.type == "RATE_LIMITED" }), let http = response as? HTTPURLResponse {
-            onRateLimit?(Self.rateLimitEnd(http, nil) ?? Date().addingTimeInterval(60))
+            block("graphql", until: Self.rateLimitEnd(http, nil) ?? Date().addingTimeInterval(60))
         }
         if let errors = decoded.errors, let first = errors.first, strict || decoded.data == nil {
             if let recordID { Diagnostics.shared.annotate(recordID, error: "graphql error") }

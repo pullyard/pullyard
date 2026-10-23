@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var showAddAccount = false
     @State private var pendingSwitch: GitAccount?
     @State private var confirmSignOut = false
+    @State private var showLicenses = false
     @AppStorage(Updater.autoCheckKey) private var autoCheckUpdates = true
     @AppStorage(Diagnostics.enabledKey) private var diagnosticsEnabled = false
     @Environment(\.openWindow) private var openWindow
@@ -131,7 +132,7 @@ struct SettingsView: View {
                         .font(.syCaption)
                         .foregroundStyle(Color.syMuted)
                 } header: {
-                    SettingsHeader(title: "Claude Code", icon: "sparkles", color: .syCoral)
+                    SettingsHeader(title: "Agents", icon: "terminal.fill", color: .syCoral)
                 }
             }
             Section {
@@ -181,11 +182,26 @@ struct SettingsView: View {
             } header: {
                 SettingsHeader(title: "Support PullYard", icon: "heart.fill", color: .syCoral)
             }
+            Section {
+                Text(Legal.disclaimer)
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+                HStack {
+                    Text("PullYard is open source under the MIT License.")
+                        .font(.syCaption)
+                        .foregroundStyle(Color.syMuted)
+                    Spacer()
+                    Button("Third-Party Licenses…") { showLicenses = true }
+                }
+            } header: {
+                SettingsHeader(title: "About", icon: "info.circle.fill", color: .syMuted)
+            }
         }
         .formStyle(.grouped)
         .surface(.panel)
         .task { await ClaudeAccountStore.shared.refresh() }
         .sheet(isPresented: $showAddProfile) { AddClaudeProfileSheet().environment(app) }
+        .sheet(isPresented: $showLicenses) { LicensesSheet() }
         .modifier(AccountDialogs(pendingSwitch: $pendingSwitch, confirmSignOut: $confirmSignOut, showAdd: $showAddAccount))
         .confirmationDialog("Sign out of Claude Code?", isPresented: $confirmClaudeLogout) {
             Button("Sign out", role: .destructive) {
@@ -198,7 +214,7 @@ struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This also signs out Claude Code in Terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Claude Code section.")
+            Text("This also signs out Claude Code in Terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Agents section.")
         }
         .frame(width: 500, height: 560)
         .padding(.vertical, 10)
@@ -215,5 +231,41 @@ struct SettingsHeader: View {
             IconTile(systemImage: icon, color: color, size: 16)
             Text(title).font(.syBody.weight(.semibold)).foregroundStyle(Color.syText)
         }
+    }
+}
+
+enum Legal {
+    static let disclaimer = "PullYard is an independent project and is not affiliated with or endorsed by GitHub, Inc., Anthropic, PBC or Atlassian. GitHub, Claude, Claude Code and Jira are trademarks of their respective owners."
+    static let noticesURL = "https://github.com/pullyard/pullyard/blob/main/Resources/THIRD-PARTY-NOTICES.txt"
+
+    static var notices: String? {
+        guard let url = Bundle.main.url(forResource: "THIRD-PARTY-NOTICES", withExtension: "txt") else { return nil }
+        return try? String(contentsOf: url, encoding: .utf8)
+    }
+}
+
+struct LicensesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Third-Party Licenses").font(.syHeadline).foregroundStyle(Color.syText)
+            ScrollView {
+                Text(Legal.notices ?? "Licenses are bundled with the app. See \(Legal.noticesURL)")
+                    .font(.syCaption.monospaced())
+                    .foregroundStyle(Color.syText)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+            }
+            .card(radius: 8, fill: .sySunken)
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 560, height: 480)
+        .surface(.panel)
     }
 }

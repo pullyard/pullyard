@@ -31,7 +31,11 @@ struct StackEntry: Identifiable, Equatable {
                 byRoot[tree.root] = StackEntry(repo: repo, tree: tree, mine: mineHere, updated: updated)
             }
         }
-        return byRoot.values.sorted { $0.updated > $1.updated }
+        return byRoot.values.sorted(by: newestFirst)
+    }
+
+    static func newestFirst(_ a: StackEntry, _ b: StackEntry) -> Bool {
+        a.updated != b.updated ? a.updated > b.updated : a.id < b.id
     }
 }
 
@@ -88,12 +92,27 @@ final class StacksModel {
                 }
             }
             let picked = (repos.filter(\.stacked) + repos.filter { !$0.stacked }).prefix(Self.maxRepos)
-            var found: [StackEntry] = []
-            for r in picked {
-                guard let nodes = await StackStore.nodes(api: api, repo: r.repo, account: account, force: force) else { continue }
-                found += StackEntry.collect(repo: r.repo, mine: r.numbers, open: nodes)
+            let previous = entries
+            let results = await withTaskGroup(of: (Int, [StackNode]?).self) { group in
+                for (i, r) in picked.enumerated() {
+                    group.addTask { @MainActor in
+                        if let nodes = await StackStore.nodes(api: api, repo: r.repo, account: account, force: force) { return (i, nodes) }
+                        return (i, await StackStore.cached(api: api, repo: r.repo, account: account)?.nodes)
+                    }
+                }
+                var out = [[StackNode]?](repeating: nil, count: picked.count)
+                for await (i, nodes) in group { out[i] = nodes }
+                return out
             }
-            found.sort { $0.updated > $1.updated }
+            var found: [StackEntry] = []
+            for (r, nodes) in zip(picked, results) {
+                if let nodes {
+                    found += StackEntry.collect(repo: r.repo, mine: r.numbers, open: nodes)
+                } else {
+                    found += previous.filter { $0.repo == r.repo }
+                }
+            }
+            found.sort(by: StackEntry.newestFirst)
             guard !Task.isCancelled, generation == mine else { return }
             if found != entries { entries = found }
             error = nil

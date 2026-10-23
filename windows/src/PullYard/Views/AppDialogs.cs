@@ -211,7 +211,34 @@ public static class SettingsDialog
         Ui.Tip(pizza, AppInfo.DonateUrl);
         pizza.Click += (_, _) => LinkBrowser.OpenDonation();
         panel.Children.Add(Group(L.F("Support_Title", "Support {0}", AppInfo.DisplayName), "\uEB51", "coral", pizza));
+        panel.Children.Add(Group(L.T("Settings_About", "About"), "\uE946", "slate", AboutSection()));
         return panel;
+    }
+
+    private static FrameworkElement AboutSection()
+    {
+        var notices = Path.Combine(AppContext.BaseDirectory, "THIRD-PARTY-NOTICES.txt");
+        var license = Path.Combine(AppContext.BaseDirectory, "LICENSE.txt");
+        var licenses = Path.Combine(AppContext.BaseDirectory, "licenses");
+        var links = Ui.H(16);
+        if (File.Exists(notices)) links.Children.Add(Ui.Link(L.T("About_ThirdPartyLicenses", "Third-party licenses"), () => OpenPath(notices), 13));
+        if (Directory.Exists(licenses)) links.Children.Add(Ui.Link(L.T("About_LicenseFiles", "License files"), () => OpenPath(licenses), 13));
+        if (File.Exists(license)) links.Children.Add(Ui.Link(L.T("About_License", "MIT License"), () => OpenPath(license), 13));
+        return Ui.V(8,
+            Ui.Text(L.F("About_Acknowledgements", "{0} is open source and builds on the .NET runtime, the Windows App SDK, WebView2, CommunityToolkit.Mvvm, xterm.js and marked. Their licenses and copyright notices are listed in the third-party notices.", AppInfo.DisplayName), 12.5, "muted", wrap: true),
+            Ui.Text(L.F("About_Disclaimer", "{0} is an independent project and is not affiliated with or endorsed by GitHub, Inc. or Anthropic. GitHub and Claude are trademarks of their respective owners.", AppInfo.DisplayName), 12.5, "muted", wrap: true),
+            links);
+    }
+
+    private static void OpenPath(string path)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch
+        {
+        }
     }
 
     private static ContentDialog? openDialog;

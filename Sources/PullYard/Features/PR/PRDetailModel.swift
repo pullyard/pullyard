@@ -80,8 +80,10 @@ final class PRDetailModel {
     @ObservationIgnored private var pulse: PRPulse?
     @ObservationIgnored private var needsFull = false
     @ObservationIgnored private var fullReason: String?
+    @ObservationIgnored private var manualRefresh = false
     @ObservationIgnored private var lastFullFetch: Date?
-    private static let fullFetchInterval: TimeInterval = 300
+    private static let fullFetchInterval: TimeInterval = 900
+    private static let manualRefreshGrace: TimeInterval = 20
     @ObservationIgnored private var mergeRecheck: Task<Void, Never>?
     @ObservationIgnored private var mergeRechecks = 0
     var html = ""
@@ -151,6 +153,7 @@ final class PRDetailModel {
             reloadFiles = true
             stackRequest = true
         }
+        manualRefresh = full
         if !live {
             needsFull = true
             fullReason = "\(full ? "refresh" : "load") \(file.split(separator: "/").last ?? ""):\(line)"
@@ -183,7 +186,9 @@ final class PRDetailModel {
         loading = true
         defer { loading = false }
         let recent = lastFullFetch.map { Date().timeIntervalSince($0) < Self.fullFetchInterval } ?? false
-        let forced = needsFull ? fullReason : nil
+        let justFetched = lastFullFetch.map { Date().timeIntervalSince($0) < Self.manualRefreshGrace } ?? false
+        let forced = needsFull && !(manualRefresh && justFetched && pulse != nil) ? fullReason : nil
+        manualRefresh = false
         needsFull = false
         fullReason = nil
         let reason: String
@@ -354,6 +359,7 @@ final class PRDetailModel {
                                 headRefName: pr.headRefName, baseRefName: pr.baseRefName, headRepo: pr.headRepository?.nameWithOwner,
                                 author: pr.author?.login, updatedAt: nil, reviewDecision: nil, ci: nil, commitOid: nil, commitHeadline: nil)
         let tree = StackTree.build(current: current, open: nodes, repo: ref.repo.full)
+        if tree == nil, stackTree != nil, pr.state != "OPEN" { return }
         if tree != stackTree { stackTree = tree }
         if tree == nil, tab == .stack { tab = .conversation }
     }

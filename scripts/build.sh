@@ -27,6 +27,7 @@ if [ ! -f Resources/AppIcon.icns ]; then
     iconutil -c icns "$ICONSET" -o Resources/AppIcon.icns
 fi
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp Resources/THIRD-PARTY-NOTICES.txt LICENSE "$APP/Contents/Resources/"
 
 codesign --force --options runtime --sign "${SIGN_ID:--}" "$APP"
 echo "Built: $APP (signed with: ${SIGN_ID:-ad-hoc})"

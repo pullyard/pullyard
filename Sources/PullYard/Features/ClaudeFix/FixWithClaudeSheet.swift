@@ -51,9 +51,9 @@ struct FixWithClaudeSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                IconTile(systemImage: "sparkles", color: .syCoral, size: 30)
+                IconTile(systemImage: "wrench.and.screwdriver", color: .syCoral, size: 30)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Fix with Claude Code").font(.syHeadline).foregroundStyle(Color.syText)
+                    Text("Fix with agent").font(.syHeadline).foregroundStyle(Color.syText)
                     HStack(spacing: 6) {
                         Text("#\(pr.number)").foregroundStyle(Color.syViolet).fontWeight(.semibold)
                         Text(pr.title).foregroundStyle(Color.syMuted).lineLimit(1)
@@ -333,7 +333,7 @@ struct ClaudeFixBanner: View {
         }
         if pr.isOpen, unresolved > 0 || found != nil {
             HStack(spacing: 8) {
-                IconTile(systemImage: "sparkles", color: .syCoral, size: 18)
+                IconTile(systemImage: "wrench.and.screwdriver", color: .syCoral, size: 18)
                 if unresolved > 0 {
                     Text(plural(unresolved, "unresolved comment", "unresolved comments"))
                         .foregroundStyle(Color.syText)
@@ -348,7 +348,7 @@ struct ClaudeFixBanner: View {
                         .foregroundStyle(Color.syMuted)
                 }
                 Spacer()
-                Button("Fix with Claude Code", action: action)
+                Button("Fix with agent", action: action)
                     .controlSize(.small)
                     .buttonStyle(.borderedProminent)
                     .tint(Color.syCoral)

@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Pull requests, without the browser.</b><br>
-  A tiny native GitHub client for macOS, Windows and Linux, with a built-in Claude Code workspace.
+  A tiny native GitHub client for macOS, Windows and Linux, with a built-in workspace for AI coding agents that runs Claude Code.
 </p>
 
 <p align="center">
@@ -58,9 +58,9 @@ GitHub in a browser tab can take up a gigabyte of memory to show a single diff. 
 - Open any GitHub link inside the app (`⌘L`)
 - Updates from inside the app. PullYard looks for a new release every 6 hours and lets you know with a notification and an "Update to …" item in the sidebar and menu bar. Installing it replaces the app and restarts it. You can also check by hand with **PullYard → Check for Updates…**
 
-**Claude Code workspace**
+**Agents** (runs the Claude Code CLI you install)
 - A native chat for the official Claude Code CLI, right next to the PR, its changed files and its branch
-- **Fix with Claude Code**: one click starts a new session with the review feedback. If the reviewer left a "Fix prompt", PullYard uses it; otherwise it writes one from the comments
+- **Fix with agent**: one click starts a new session with the review feedback. If the reviewer left a "Fix prompt", PullYard uses it; otherwise it writes one from the comments
 - Session history grouped by project, showing the branch and the PR for each session
 - Change the model, effort and permission mode, approve tool calls in the chat, and see a diff for every edit
 - Idle sessions go to sleep to free memory and pick up again on your next message
@@ -195,6 +195,7 @@ PullYard is free and open source, and every feature is there for everyone. If it
 
 ## Acknowledgements
 
+- Third-party licenses ship inside every build (**Settings → About → Third-Party Licenses** on macOS) and are listed in [`Resources/THIRD-PARTY-NOTICES.txt`](Resources/THIRD-PARTY-NOTICES.txt).
 - The terminal mode uses [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) by Miguel de Icaza (MIT License).
 
 ## License

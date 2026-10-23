@@ -11,6 +11,7 @@ struct Release: Equatable {
     let publishedAt: Date?
     let dmgURL: URL
     let dmgSize: Int64
+    var signatureURL: URL? = nil
 }
 
 enum UpdateError: LocalizedError {
@@ -25,6 +26,8 @@ enum UpdateError: LocalizedError {
     case versionMismatch(String, String)
     case install(String)
     case cancelled
+    case unsigned
+    case badSignature
 
     var errorDescription: String? {
         switch self {
@@ -34,6 +37,8 @@ enum UpdateError: LocalizedError {
                 : "GitHub responded with error \(code)."
         case .noReleases: return "No releases found."
         case .noAsset: return "The release has no PullYard.dmg file."
+        case .unsigned: return "The release has no signature, so PullYard won't install it. Download it from the release page instead."
+        case .badSignature: return "The update's signature doesn't match. It may have been tampered with, so PullYard didn't install it."
         case .download(let s): return "Couldn't download the update: \(s)"
         case .mount(let s): return "Couldn't mount the disk image: \(s)"
         case .noApp: return "PullYard.app wasn't found in the disk image."
@@ -195,6 +200,7 @@ final class Updater {
                 }
             }
             state = .installing
+            try await UpdateSignature.verify(dmg: dmg, signatureURL: release.signatureURL)
             let bundleID = Bundle.main.bundleIdentifier
             let version = release.version
             stagedApp = try await Task.detached { try Self.stage(dmg: dmg, version: version, bundleID: bundleID) }.value
@@ -344,6 +350,7 @@ final class Updater {
         decoder.dateDecodingStrategy = .iso8601
         let payload = try decoder.decode(Payload.self, from: data)
         guard let asset = payload.assets.first(where: { $0.name == Self.dmgName }) else { throw UpdateError.noAsset }
+        let signature = payload.assets.first { $0.name == Self.dmgName + ".sig" }
         var version = payload.tagName.trimmingCharacters(in: .whitespaces)
         if version.hasPrefix("v") || version.hasPrefix("V") { version.removeFirst() }
         let name = payload.name?.trimmingCharacters(in: .whitespaces) ?? ""
@@ -354,7 +361,8 @@ final class Updater {
             pageURL: payload.htmlUrl,
             publishedAt: payload.publishedAt,
             dmgURL: asset.browserDownloadUrl,
-            dmgSize: asset.size
+            dmgSize: asset.size,
+            signatureURL: signature?.browserDownloadUrl
         )
     }
 

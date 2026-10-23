@@ -95,6 +95,8 @@ windows/
 
 Localized strings are in `src/PullYard/Strings/<language>/Resources.resw`. Code calls `L.T("Key", "English default")`; `python windows/tools/strings.py` regenerates the English file from those defaults (CI checks it is up to date). To add a language, copy `en-US` to another folder and translate the values.
 
+Third-party notices: `src/PullYard/THIRD-PARTY-NOTICES.txt` and `LICENSE.txt` are copied into the app folder on build. After `dotnet publish`, `pwsh windows/tools/collect-notices.ps1 -AppDir <publish folder>` copies the license files of every NuGet package listed in the published `.deps.json` into `licenses\` and appends the package inventory (CI does this before building the installer and the portable zip).
+
 The app icon is `src/PullYard/Assets/AppIcon.ico`, generated from `Resources/Brand/icon.svg` with `scripts/make_icon.swift` and `tools/make-ico.py`.
 
 ## Third-party code

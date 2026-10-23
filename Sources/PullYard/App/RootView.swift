@@ -156,7 +156,7 @@ struct SidebarView: View {
                 gitHubSections
             }
             SidebarGroup("AI") {
-                SidebarRow(section: .claude, title: "Claude Code", icon: "sparkles", color: .syCoral, count: app.claude.attentionCount > 0 ? app.claude.attentionCount : app.claude.tabs.filter(\.running).count)
+                SidebarRow(section: .claude, title: "Agents", icon: "terminal.fill", color: .syCoral, count: app.claude.attentionCount > 0 ? app.claude.attentionCount : app.claude.tabs.filter(\.running).count)
             }
         }
         .listStyle(.sidebar)

@@ -18,6 +18,13 @@ rm -f "$DMG"
 ./scripts/make_dmg.sh "$APP" "$DMG"
 cp "$DMG" "$LATEST"
 echo "DMG: $DMG ($(du -h "$DMG" | cut -f1))"
+SIG_ASSET=()
+if grep -q 'static let publicKey = ""' Sources/PullYard/Features/Update/UpdateSignature.swift; then
+    echo "warning: update signing is not set up (swift scripts/update_signing.swift keygen); publishing without $LATEST.sig" >&2
+else
+    swift scripts/update_signing.swift sign "$LATEST"
+    SIG_ASSET=("$LATEST.sig")
+fi
 
 LEGACY_DIR="$(mktemp -d)"
 trap 'rm -rf "$LEGACY_DIR"' EXIT
@@ -36,5 +43,5 @@ The app is not notarized. On first launch macOS will block it — open **System 
 \`\`\`
 xattr -dr com.apple.quarantine /Applications/PullYard.app
 \`\`\`"
-    gh release create "v$VERSION" "$DMG" "$LATEST" "$LEGACY" --title "PullYard $VERSION" --notes "$NOTES" --target "$(git rev-parse HEAD)"
+    gh release create "v$VERSION" "$DMG" "$LATEST" ${SIG_ASSET[@]+"${SIG_ASSET[@]}"} "$LEGACY" --title "PullYard $VERSION" --notes "$NOTES" --target "$(git rev-parse HEAD)"
 fi

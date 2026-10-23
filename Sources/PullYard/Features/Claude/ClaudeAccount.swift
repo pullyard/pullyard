@@ -143,10 +143,40 @@ final class ClaudeAccountStore {
         }
     }
 
-    func submitCode(_ code: String) {
-        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let loginInput else { return }
-        try? loginInput.write(contentsOf: Data((trimmed + "\n").utf8))
+    func loginInTerminal(method: ClaudeLoginMethod, email: String?) {
+        cancelLogin()
+        do {
+            let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("PullYard/claude", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let scriptURL = dir.appendingPathComponent("login-\(UUID().uuidString.prefix(8)).command")
+            let configExport = ClaudeProfiles.shared.activeOverride.map { "export CLAUDE_CONFIG_DIR=\(ClaudeLauncher.shellQuote($0))" } ?? ""
+            var args = "auth login \(method.flag)"
+            if let email = email?.trimmingCharacters(in: .whitespaces), !email.isEmpty { args += " --email \(ClaudeLauncher.shellQuote(email))" }
+            let script = """
+            #!/bin/bash
+            export PATH="$HOME/.local/bin:$HOME/.claude/local:/opt/homebrew/bin:/usr/local/bin:$PATH"
+            unset CLAUDECODE PULLYARD_TOKEN $(env | grep -o '^CLAUDE_CODE_[A-Z_]*')
+            \(configExport)
+            rm -f "$0"
+            clear
+            if ! command -v claude >/dev/null 2>&1; then echo "claude CLI not found in PATH"; exit 1; fi
+            claude \(args)
+            echo
+            echo "You can close this window and return to PullYard."
+
+            """
+            try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
+            guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else {
+                loginError = "Terminal app not found"
+                return
+            }
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.open([scriptURL], withApplicationAt: appURL, configuration: config)
+        } catch {
+            loginError = error.localizedDescription
+        }
     }
 
     func cancelLogin() {
@@ -195,15 +225,15 @@ final class ClaudeAccountStore {
 struct ClaudeAuthView: View {
     @State private var method: ClaudeLoginMethod = .claudeai
     @State private var email = ""
-    @State private var code = ""
     private var store: ClaudeAccountStore { ClaudeAccountStore.shared }
     static let installCommand = "curl -fsSL https://claude.ai/install.sh | bash"
 
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                IconTile(systemImage: "sparkles", color: .syCoral, size: 56)
-                Text("Claude Code").font(.syTitle.weight(.bold)).foregroundStyle(Color.syText)
+                IconTile(systemImage: "terminal.fill", color: .syCoral, size: 56)
+                Text("Agents").font(.syTitle.weight(.bold)).foregroundStyle(Color.syText)
+                Text("Runs Claude Code, installed on this Mac").font(.syCallout).foregroundStyle(Color.syMuted)
                 ClaudeProfileSwitcher()
                 switch store.status {
                 case .notInstalled: installCard
@@ -218,6 +248,9 @@ struct ClaudeAuthView: View {
         }
         .surface(.panel)
         .task { await store.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await store.refresh() }
+        }
     }
 
     private var installCard: some View {
@@ -252,21 +285,12 @@ struct ClaudeAuthView: View {
                         Text("Confirm the sign-in in your browser…")
                     }
                     if let url = store.fallbackURL {
-                        Text("Browser didn't open, or the page shows a code?").font(.syCaption).foregroundStyle(Color.syMuted)
+                        Text("Browser didn't open, or the page shows a code? Finish the sign-in in Terminal: the code goes straight to Claude Code, never through PullYard.").font(.syCaption).foregroundStyle(Color.syMuted)
                         HStack {
                             Button("Open sign-in link") { LinkBrowser.open(url) }
-                            Button("Copy link") { copyToPasteboard(url.absoluteString) }
+                            Button("Sign in in Terminal") { store.loginInTerminal(method: method, email: email) }
                         }
                         .controlSize(.small)
-                        HStack {
-                            SecureField("Paste the code from the page", text: $code)
-                                .textFieldStyle(.roundedBorder)
-                                .onSubmit { store.submitCode(code); code = "" }
-                            Button("Submit") { store.submitCode(code); code = "" }
-                                .buttonStyle(.borderedProminent)
-                                .tint(.syCoral)
-                                .disabled(code.isEmpty)
-                        }
                     }
                     Button("Cancel", role: .cancel) { store.cancelLogin() }
                 }
@@ -278,6 +302,8 @@ struct ClaudeAuthView: View {
                 TextField("Email (optional)", text: $email)
                     .textFieldStyle(.roundedBorder)
                 HStack {
+                    Button("Sign in in Terminal") { store.loginInTerminal(method: method, email: email) }
+                        .controlSize(.large)
                     Spacer()
                     Button {
                         store.login(method: method, email: email)

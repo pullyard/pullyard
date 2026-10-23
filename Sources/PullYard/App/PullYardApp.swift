@@ -44,7 +44,7 @@ struct PullYardApp: App {
                 Button("Notifications") { app.section = .notifications }.keyboardShortcut("3")
                 Button("Repositories") { app.section = .repos }.keyboardShortcut("4")
                 Button("Projects") { app.section = .projects }.keyboardShortcut("5")
-                Button("Claude Code") { app.section = .claude }.keyboardShortcut("6")
+                Button("Agents") { app.section = .claude }.keyboardShortcut("6")
                 Divider()
                 Button("Copy Short Link") { if let ref = app.frontItem { app.copyShortLink(ref) } }
                     .keyboardShortcut("c", modifiers: [.command, .shift])

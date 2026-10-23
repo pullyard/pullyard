@@ -194,6 +194,18 @@ pub fn open_link_dialog() {
     entry.grab_focus();
 }
 
+fn third_party_notices() -> Option<std::path::PathBuf> {
+    let file = "THIRD-PARTY-NOTICES.txt";
+    let prefix = std::env::current_exe().ok()?.parent()?.parent()?.to_path_buf();
+    [
+        prefix.join("share/licenses").join(brand::APP_ID).join(file),
+        prefix.join("share/doc").join(brand::BIN_NAME).join(file),
+        prefix.join(file),
+    ]
+    .into_iter()
+    .find(|p| p.is_file())
+}
+
 pub fn about() {
     let d = adw::AboutDialog::builder()
         .application_name(brand::APP_NAME)
@@ -212,6 +224,44 @@ pub fn about() {
         gtk::License::Custom,
         Some(&format!("{} is an independent project and is not affiliated with or endorsed by GitHub, Inc. or Anthropic. GitHub and Claude are trademarks of their respective owners.", brand::APP_NAME)),
     );
+    d.add_acknowledgement_section(
+        Some("Rust crates"),
+        &[
+            "gtk4-rs and libadwaita-rs https://gtk-rs.org",
+            "vte4 https://crates.io/crates/vte4",
+            "webkit6 https://crates.io/crates/webkit6",
+            "sourceview5 https://crates.io/crates/sourceview5",
+            "reqwest https://crates.io/crates/reqwest",
+            "tokio https://tokio.rs",
+            "serde and serde_json https://serde.rs",
+            "chrono https://crates.io/crates/chrono",
+            "regex https://crates.io/crates/regex",
+            "url https://crates.io/crates/url",
+            "uuid https://crates.io/crates/uuid",
+            "base64 https://crates.io/crates/base64",
+            "async-channel https://crates.io/crates/async-channel",
+            "oo7 https://crates.io/crates/oo7",
+            "rust-openssl https://crates.io/crates/openssl",
+            "libc https://crates.io/crates/libc",
+        ],
+    );
+    let notices = third_party_notices();
+    let location = match &notices {
+        Some(path) => format!("The full list of crates with their license texts is installed at {}.", util::markup_esc(&path.to_string_lossy())),
+        None => "The full list of crates with their license texts ships with every package as THIRD-PARTY-NOTICES.txt.".to_string(),
+    };
+    d.add_legal_section(
+        "Third-party licenses",
+        None,
+        gtk::License::Custom,
+        Some(&format!(
+            "{} includes open source Rust crates distributed under the MIT, Apache-2.0, BSD, ISC, Zlib, Unicode and MPL-2.0 licenses. {location}\n\nGTK 4, libadwaita, VTE, WebKitGTK and GtkSourceView are LGPL libraries and OpenSSL is Apache-2.0 licensed; they are provided by the system or the Flatpak runtime and linked dynamically, not bundled.",
+            brand::APP_NAME
+        )),
+    );
+    if let Some(uri) = notices.and_then(|p| gtk::glib::filename_to_uri(p, None).ok()) {
+        d.add_link("Third-Party Licenses", &uri);
+    }
     let w = app::main_window();
     d.present(w.as_ref());
 }

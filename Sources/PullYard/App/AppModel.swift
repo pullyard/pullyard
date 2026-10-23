@@ -535,6 +535,22 @@ final class AppModel {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    static let maxLinkPromptLength = 8000
+
+    private static func promptPreview(_ prompt: String) -> NSView {
+        let scroll = NSTextView.scrollableTextView()
+        scroll.frame = NSRect(x: 0, y: 0, width: 420, height: 220)
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        if let text = scroll.documentView as? NSTextView {
+            text.isEditable = false
+            text.isSelectable = true
+            text.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            text.string = prompt
+        }
+        return scroll
+    }
+
     func handle(url: URL) {
         guard let scheme = url.scheme, scheme.hasPrefix("pullyard") || scheme.hasPrefix("shipyard") || scheme.hasPrefix("ghlite") else { return }
         guard phase == .loggedIn else { return }
@@ -563,11 +579,19 @@ final class AppModel {
                 NSApp.activate(ignoringOtherApps: true)
                 let alert = NSAlert()
                 alert.messageText = "Start a Claude session from a link?"
-                alert.informativeText = "Folder: \(folder)" + (prompt.map { "\n\nPrompt:\n\($0.prefix(600))" } ?? "")
-                alert.addButton(withTitle: "Start Session")
+                if let prompt, prompt.count > Self.maxLinkPromptLength {
+                    alert.alertStyle = .warning
+                    alert.informativeText = "The link's prompt is \(prompt.count) characters long, which is more than PullYard accepts from a link (\(Self.maxLinkPromptLength))."
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                    return
+                }
+                alert.informativeText = "Folder: \(folder)\n\nThe session starts in Plan mode: Claude can read files but asks before it edits anything or runs commands. Read the whole prompt before you start it."
+                if let prompt, !prompt.isEmpty { alert.accessoryView = Self.promptPreview(prompt) }
+                alert.addButton(withTitle: "Start in Plan Mode")
                 alert.addButton(withTitle: "Cancel")
                 if alert.runModal() == .alertFirstButtonReturn {
-                    claude.newSession(folder: folder, prompt: prompt, name: value("name"))
+                    claude.newSession(folder: folder, prompt: prompt, name: value("name"), mode: .plan)
                 }
             }
             if url.path == "/resume", let id = value("id") {

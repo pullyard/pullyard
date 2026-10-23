@@ -57,7 +57,6 @@ struct ChatView: View {
                     if case .user? = chat.items.last { follow.stick = true }
                     scrollDown(proxy)
                 }
-                .onChange(of: lastTextLength) { scrollDown(proxy) }
                 .onChange(of: chat.busy) { scrollDown(proxy) }
                 .onChange(of: chat.lastError) { scrollDown(proxy) }
                 .onChange(of: chat.pendingCount) {
@@ -85,11 +84,6 @@ struct ChatView: View {
         .background(Theme.isBrand ? Color.syPanel : Color(nsColor: .textBackgroundColor).opacity(0.35))
     }
 
-    private var lastTextLength: Int {
-        if case .text(let t)? = chat.items.last { return t.text.count }
-        return 0
-    }
-
     private func jumpToBottom(_ proxy: ScrollViewProxy) {
         follow.stick = true
         proxy.scrollTo("bottom", anchor: .bottom)
@@ -100,7 +94,11 @@ struct ChatView: View {
 
     private func scrollDown(_ proxy: ScrollViewProxy) {
         guard follow.stick else { return }
-        withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom", anchor: .bottom) }
+        if chat.busy {
+            proxy.scrollTo("bottom", anchor: .bottom)
+        } else {
+            withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom", anchor: .bottom) }
+        }
     }
 }
 
@@ -153,8 +151,8 @@ struct ChatWelcome: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                IconTile(systemImage: "sparkles", color: .syCoral, size: 24)
-                Text("Claude Code").font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText)
+                IconTile(systemImage: "terminal.fill", color: .syCoral, size: 24)
+                Text("New session").font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText)
             }
             Text("Describe a task — Claude will read the code, propose changes and ask before acting.")
                 .foregroundStyle(Color.syMuted)
@@ -300,7 +298,7 @@ struct AssistantText: View {
 
     var body: some View {
         if !text.text.isEmpty {
-            MarkdownView(text: text.text)
+            MarkdownView(text: text.text, streaming: !text.finalized)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }

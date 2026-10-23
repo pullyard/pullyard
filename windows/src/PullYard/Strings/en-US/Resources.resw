@@ -4,6 +4,11 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="About_Acknowledgements" xml:space="preserve"><value>{0} is open source and builds on the .NET runtime, the Windows App SDK, WebView2, CommunityToolkit.Mvvm, xterm.js and marked. Their licenses and copyright notices are listed in the third-party notices.</value></data>
+  <data name="About_Disclaimer" xml:space="preserve"><value>{0} is an independent project and is not affiliated with or endorsed by GitHub, Inc. or Anthropic. GitHub and Claude are trademarks of their respective owners.</value></data>
+  <data name="About_License" xml:space="preserve"><value>MIT License</value></data>
+  <data name="About_LicenseFiles" xml:space="preserve"><value>License files</value></data>
+  <data name="About_ThirdPartyLicenses" xml:space="preserve"><value>Third-party licenses</value></data>
   <data name="Accounts_Add" xml:space="preserve"><value>Add Account…</value></data>
   <data name="Accounts_AddTitle" xml:space="preserve"><value>Add account</value></data>
   <data name="Accounts_Expired" xml:space="preserve"><value>Sign-in for {0} has expired. Sign in again to use this account.</value></data>
@@ -523,6 +528,7 @@
   <data name="Section_Projects" xml:space="preserve"><value>Projects</value></data>
   <data name="Section_Repositories" xml:space="preserve"><value>Repositories</value></data>
   <data name="Section_Stacks" xml:space="preserve"><value>Stacks</value></data>
+  <data name="Settings_About" xml:space="preserve"><value>About</value></data>
   <data name="Settings_Account" xml:space="preserve"><value>Account</value></data>
   <data name="Settings_Appearance" xml:space="preserve"><value>Appearance</value></data>
   <data name="Settings_AutoRefresh" xml:space="preserve"><value>Auto-refresh pull requests</value></data>
