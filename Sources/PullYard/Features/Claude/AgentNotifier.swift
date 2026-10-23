@@ -35,7 +35,9 @@ enum AgentNotifier {
     }
 
     static func setBadge(_ count: Int) {
-        NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
+        guard let app = NSApp as NSApplication? else { return }
+        let label = count > 0 ? "\(count)" : nil
+        if app.dockTile.badgeLabel != label { app.dockTile.badgeLabel = label }
     }
 
     static func snippet(_ text: String?) -> String {
