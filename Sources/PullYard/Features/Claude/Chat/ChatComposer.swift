@@ -265,24 +265,27 @@ struct ChatComposer: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(Color.syMuted)
                 .help("Attach image")
+            Button { dictate() } label: { Image(systemName: "mic") }
+                .buttonStyle(.borderless)
+                .foregroundStyle(Color.syMuted)
+                .help("Dictate a prompt (macOS dictation)")
             Spacer()
             UsageRingButton(chat: chat)
             if chat.busy {
-                Button { chat.interrupt() } label: { Image(systemName: "stop.fill") }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.syRed)
-                    .controlSize(.small)
-                    .help("Stop (Esc)")
+                ComposerRoundButton(icon: "stop.fill", style: .stop, help: "Stop (Esc)") { chat.interrupt() }
+                    .transition(.scale.combined(with: .opacity))
             }
-            Button { submit() } label: { Image(systemName: "arrow.up") }
-                .buttonStyle(.borderedProminent)
-                .tint(.syAgentAccent)
-                .controlSize(.small)
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty)
-                .help("Send (↩)")
+            ComposerRoundButton(icon: "arrow.up", style: .send, enabled: !(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty), help: "Send (↩)") { submit() }
         }
         .font(.syCaption)
         .controlSize(.small)
+    }
+
+    private func dictate() {
+        focusToken += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil)
+        }
     }
 
     private var modeTitle: String { (ClaudeMode(rawValue: chat.permissionMode) ?? .standard).title }
@@ -458,4 +461,52 @@ struct ChatComposer: View {
 
 extension Array {
     subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
+}
+
+struct ComposerRoundButton: View {
+    enum Style { case send, stop }
+    let icon: String
+    let style: Style
+    var enabled = true
+    let help: String
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: style == .stop ? 9 : 11, weight: .bold))
+                .foregroundStyle(foreground)
+                .frame(width: 26, height: 26)
+                .background(background)
+                .clipShape(Circle())
+                .overlay(Circle().strokeBorder(style == .stop ? Color.syLineStrong : .clear, lineWidth: 1))
+                .scaleEffect(hover && enabled ? 1.06 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .onHover { h in withAnimation(Motion.quick) { hover = h } }
+        .help(help)
+    }
+
+    private var foreground: Color {
+        switch style {
+        case .send: return enabled ? .white : Color.syDim
+        case .stop: return hover ? BrandMark.hullTop : Color.syText
+        }
+    }
+
+    @ViewBuilder
+    private var background: some View {
+        switch style {
+        case .send:
+            if enabled {
+                LinearGradient(colors: [BrandMark.violet, BrandMark.sky], startPoint: .topLeading, endPoint: .bottomTrailing)
+            } else {
+                Color.syText.opacity(0.08)
+            }
+        case .stop:
+            Color.syText.opacity(hover ? 0.12 : 0.07)
+        }
+    }
 }

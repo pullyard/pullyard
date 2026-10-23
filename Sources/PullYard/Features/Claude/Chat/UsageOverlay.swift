@@ -67,7 +67,7 @@ struct UsageRingButton: View {
                 Circle().stroke(Color.syLineStrong, lineWidth: 2.5)
                 Circle()
                     .trim(from: 0, to: CGFloat(min(max(pct, 1), 100)) / 100)
-                    .stroke(ringColor(pct), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .stroke(ringStyle(pct), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                     .rotationEffect(.degrees(-90))
             }
             .frame(width: 16, height: 16)
@@ -81,8 +81,10 @@ struct UsageRingButton: View {
         }
     }
 
-    private func ringColor(_ pct: Int) -> Color {
-        pct >= 85 ? .syRed : pct >= 65 ? .syAmber : .sySky
+    private func ringStyle(_ pct: Int) -> AnyShapeStyle {
+        if pct >= 85 { return AnyShapeStyle(BrandMark.hullBottom) }
+        if pct >= 65 { return AnyShapeStyle(Color.syAmber) }
+        return AnyShapeStyle(LinearGradient(colors: [BrandMark.violet, BrandMark.sky], startPoint: .top, endPoint: .bottom))
     }
 }
 

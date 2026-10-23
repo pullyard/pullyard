@@ -202,6 +202,14 @@ enum SessionIndicator {
     }
 }
 
+enum BrandMark {
+    static let violet = Color(red: 0.655, green: 0.545, blue: 0.980)
+    static let sky = Color(red: 0.220, green: 0.741, blue: 0.973)
+    static let hullTop = Color(red: 0.984, green: 0.443, blue: 0.522)
+    static let hullBottom = Color(red: 0.839, green: 0.122, blue: 0.306)
+    static var branches: AngularGradient { AngularGradient(colors: [violet, sky, violet], center: .center) }
+}
+
 struct SessionIndicatorDot: View {
     let indicator: SessionIndicator
     @State private var spin = false
@@ -214,10 +222,10 @@ struct SessionIndicatorDot: View {
                 EmptyView()
             case .working:
                 ZStack {
-                    Circle().stroke(Color.syViolet.opacity(0.22), lineWidth: 2)
+                    Circle().stroke(BrandMark.violet.opacity(0.2), lineWidth: 2)
                     Circle()
-                        .trim(from: 0, to: 0.32)
-                        .stroke(Color.syViolet, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .trim(from: 0, to: 0.34)
+                        .stroke(LinearGradient(colors: [BrandMark.sky, BrandMark.violet], startPoint: .leading, endPoint: .trailing), style: StrokeStyle(lineWidth: 2, lineCap: .round))
                         .rotationEffect(.degrees(spin ? 360 : 0))
                 }
                 .frame(width: 10, height: 10)
@@ -227,17 +235,17 @@ struct SessionIndicatorDot: View {
                 }
             case .done:
                 ZStack {
-                    Circle().fill(Color.syGreen.opacity(0.18))
-                    Circle().strokeBorder(Color.syGreen, lineWidth: 2.2)
+                    Circle().strokeBorder(BrandMark.branches, lineWidth: 2)
+                    Circle().fill(LinearGradient(colors: [BrandMark.violet, BrandMark.sky], startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 4, height: 4)
                 }
                 .frame(width: 10, height: 10)
             case .waiting:
                 ZStack {
                     Circle()
-                        .fill(Color.syCoral.opacity(0.25))
+                        .fill(BrandMark.hullTop.opacity(0.3))
                         .scaleEffect(pulse ? 1.7 : 1)
                         .opacity(pulse ? 0 : 1)
-                    Circle().fill(Color.syCoral)
+                    Circle().fill(LinearGradient(colors: [BrandMark.hullTop, BrandMark.hullBottom], startPoint: .top, endPoint: .bottom))
                     Text("?").font(.system(size: 8, weight: .heavy, design: .rounded)).foregroundStyle(.white)
                 }
                 .frame(width: 12, height: 12)

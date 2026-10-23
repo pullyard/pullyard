@@ -50,6 +50,7 @@ struct ChatView: View {
                             Color.clear.preference(key: ChatContentFrameKey.self, value: g.frame(in: .named(ChatContentFrameKey.space)))
                         }
                     }
+                    .background(ChatScrollObserver(follow: follow))
                 }
                 .coordinateSpace(name: ChatContentFrameKey.space)
                 .background {
@@ -71,6 +72,17 @@ struct ChatView: View {
                 }
                 .onAppear { jumpToBottom(proxy) }
                 .onChange(of: tab.id) { jumpToBottom(proxy) }
+                .overlay(alignment: .bottom) {
+                    if !follow.stick, !chat.items.isEmpty {
+                        JumpToLatestButton {
+                            follow.stick = true
+                            withAnimation(Motion.smooth) { proxy.scrollTo("bottom", anchor: .bottom) }
+                        }
+                        .padding(.bottom, 14)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    }
+                }
+                .animation(Motion.spring, value: follow.stick)
             }
             if chat.sleeping && !chat.running {
                 HStack(spacing: 8) {
@@ -109,20 +121,104 @@ struct ChatView: View {
     }
 }
 
-private final class ChatFollow {
+@Observable
+final class ChatFollow {
     var stick = true
-    var viewportHeight: CGFloat = 0
-    private var contentFrame: CGRect = .zero
+    @ObservationIgnored var viewportHeight: CGFloat = 0
+    @ObservationIgnored private var contentHeight: CGFloat = 0
 
     func track(_ frame: CGRect) -> Bool {
-        let grew = frame.height > contentFrame.height + 1
-        if frame.maxY - viewportHeight <= 40 {
-            stick = true
-        } else if frame.minY > contentFrame.minY + 1 {
-            stick = false
-        }
-        contentFrame = frame
+        let grew = frame.height > contentHeight + 1
+        contentHeight = frame.height
         return grew && stick
+    }
+}
+
+private struct ChatScrollObserver: NSViewRepresentable {
+    let follow: ChatFollow
+
+    func makeNSView(context: Context) -> ObserverView {
+        let v = ObserverView()
+        v.follow = follow
+        return v
+    }
+
+    func updateNSView(_ view: ObserverView, context: Context) {
+        view.follow = follow
+    }
+
+    final class ObserverView: NSView {
+        weak var follow: ChatFollow?
+        private var monitor: Any?
+        private weak var scroll: NSScrollView?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            detach()
+            guard window != nil else { return }
+            DispatchQueue.main.async { [weak self] in self?.attach() }
+        }
+
+        deinit {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+        }
+
+        private func detach() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            scroll = nil
+        }
+
+        private func attach() {
+            guard monitor == nil, let s = enclosingScrollView else { return }
+            scroll = s
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                self?.handle(event)
+                return event
+            }
+        }
+
+        private var distanceToBottom: CGFloat {
+            guard let s = scroll, let doc = s.documentView else { return 0 }
+            let clip = s.contentView
+            return doc.frame.height - clip.bounds.maxY
+        }
+
+        private func handle(_ event: NSEvent) {
+            guard let s = scroll, let window = s.window, event.window === window else { return }
+            let point = s.convert(event.locationInWindow, from: nil)
+            guard s.bounds.contains(point) else { return }
+            if event.scrollingDeltaY > 0 {
+                follow?.stick = false
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let follow = self.follow else { return }
+                if self.distanceToBottom < 24 { follow.stick = true }
+            }
+        }
+    }
+}
+
+struct JumpToLatestButton: View {
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.down")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.syText)
+                .frame(width: 38, height: 38)
+                .background(Circle().fill(.regularMaterial))
+                .overlay(Circle().strokeBorder(Color.syLineStrong, lineWidth: 1))
+                .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+                .scaleEffect(hover ? 1.06 : 1)
+        }
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(Motion.quick) { hover = h } }
+        .help("Jump to the latest message")
     }
 }
 
