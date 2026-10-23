@@ -274,6 +274,14 @@ final class ClaudeWorkspace {
         projectsUpdated = Date()
     }
 
+    func pullRequest(for tab: ClaudeTab) -> (number: Int, url: String)? {
+        guard !tab.sessionId.isEmpty else { return nil }
+        for project in projects {
+            if let s = project.sessions.first(where: { $0.id == tab.sessionId }), let n = s.prNumber, let url = s.prURL { return (n, url) }
+        }
+        return nil
+    }
+
     func tab(forSession id: String) -> ClaudeTab? {
         tabs.first { $0.sessionId == id }
     }

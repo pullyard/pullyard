@@ -119,10 +119,10 @@ enum ClaudeTabState {
 
     var color: Color {
         switch self {
-        case .working: return .sySky
+        case .working: return .syMuted
         case .waiting: return .syAmber
-        case .active: return .syGreen
-        case .sleeping: return .syIndigo
+        case .active: return .syMuted
+        case .sleeping: return .syDim
         case .stopped: return .syDim
         }
     }

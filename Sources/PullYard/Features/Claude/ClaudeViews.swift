@@ -208,35 +208,31 @@ struct ProjectHeader: View {
     let expanded: Bool
     let onToggle: () -> Void
     let onNew: () -> Void
+    @State private var hover = false
 
     var body: some View {
-        let color = ProjectPalette.color(for: project.path)
-        HStack(spacing: 7) {
-            Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.syCaption2.weight(.bold)).foregroundStyle(Color.syDim).frame(width: 10)
-            IconTile(systemImage: project.exists ? "folder.fill" : "folder.badge.questionmark", color: project.exists ? color : .sySlate, size: 24)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(project.name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
-                Text(project.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
-                    .font(.syCaption2).foregroundStyle(Color.syDim).lineLimit(1).truncationMode(.middle)
-            }
+        HStack(spacing: 6) {
+            Image(systemName: "chevron.right")
+                .font(.syCaption2.weight(.semibold))
+                .foregroundStyle(Color.syDim)
+                .rotationEffect(.degrees(expanded ? 90 : 0))
+                .frame(width: 10)
+            Text(project.name).font(.syCallout.weight(.semibold)).foregroundStyle(project.exists ? Color.syText : Color.syMuted).lineLimit(1)
+            Text("\(project.sessions.count)").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
             Spacer()
-            Text("\(project.sessions.count)")
-                .font(.syCaption2.weight(.semibold).monospacedDigit())
-                .foregroundStyle(color)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(Capsule().fill(color.opacity(0.14)))
             Button(action: onNew) { Image(systemName: "plus") }
                 .buttonStyle(.borderless)
-                .foregroundStyle(Color.syCoral)
+                .foregroundStyle(Color.syMuted)
+                .opacity(hover ? 1 : 0.5)
                 .help("New session")
                 .disabled(!project.exists)
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onToggle)
+        .onHover { hover = $0 }
+        .help(project.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
         .textCase(nil)
-        .padding(.vertical, 3)
-        .opacity(project.exists ? 1 : 0.6)
+        .padding(.vertical, 2)
     }
 }
 
@@ -245,32 +241,26 @@ struct SessionRow: View {
     let open: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            RoundedRectangle(cornerRadius: 1.5)
-                .fill(ProjectPalette.color(for: ClaudeSessionParser.projectRoot(for: session.cwd)).opacity(open ? 1 : 0.45))
-                .frame(width: 3)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if open {
-                        Image(systemName: "bubble.left.fill").font(.syCaption2).foregroundStyle(Color.ghGreen).help("Open")
-                    }
-                    Text(session.title).font(.syBody).lineLimit(2).fontWeight(open ? .semibold : .regular).foregroundStyle(Color.syText)
-                }
-                HStack(spacing: 5) {
-                    if let b = session.branch { BranchTag(name: b) }
-                    if let w = session.worktreeName {
-                        Label(w, systemImage: "square.stack.3d.up").labelStyle(CompactLabelStyle()).font(.syCaption).foregroundStyle(Color.syTeal).lineLimit(1)
-                    }
-                    if let n = session.prNumber { PRTag(number: n) }
-                    Spacer(minLength: 4)
-                    if let a = session.linesAdded, let r = session.linesRemoved, a + r > 0 {
-                        DiffStat(additions: a, deletions: r)
-                    }
-                    Text(Fmt.rel(session.modified)).font(.syCaption).foregroundStyle(Color.syDim).fixedSize()
-                }
-            }
+        HStack(spacing: 8) {
+            Text(session.title)
+                .font(.syBody)
+                .fontWeight(open ? .semibold : .regular)
+                .foregroundStyle(Color.syText)
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            Text(Fmt.rel(session.modified)).font(.syCaption).foregroundStyle(Color.syDim).fixedSize()
         }
-        .padding(.vertical, 3)
+        .padding(.leading, 16)
+        .padding(.vertical, 1)
+        .help(details)
+    }
+
+    private var details: String {
+        var parts: [String] = []
+        if let b = session.branch { parts.append("Branch: " + b) }
+        if let w = session.worktreeName { parts.append("Worktree: " + w) }
+        if let n = session.prNumber { parts.append("PR #\(n)") }
+        return parts.joined(separator: "\n")
     }
 }
 
@@ -279,34 +269,40 @@ struct OpenTabRow: View {
     let selected: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            RoundedRectangle(cornerRadius: 1.5).fill(ProjectPalette.color(for: tab.folder)).frame(width: 3)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Image(systemName: tab.kind == .chat ? "bubble.left.and.text.bubble.right" : "terminal").font(.syCaption2).foregroundStyle(Color.syMuted)
-                    Text(tab.title).font(.syBody).lineLimit(1).fontWeight(selected ? .semibold : .regular).foregroundStyle(Color.syText)
-                }
-                HStack(spacing: 6) {
-                    TabStateBadge(state: tab.state, memory: tab.memoryBytes)
-                    Spacer(minLength: 4)
-                    Text(tab.projectName).font(.syCaption).foregroundStyle(ProjectPalette.color(for: tab.folder)).lineLimit(1)
-                }
+        HStack(spacing: 8) {
+            SessionStateGlyph(state: tab.state)
+            Text(tab.title).font(.syBody).lineLimit(1).fontWeight(selected ? .semibold : .regular).foregroundStyle(Color.syText)
+            Spacer(minLength: 6)
+            Text(tab.projectName).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
+        }
+        .padding(.vertical, 1)
+        .help(tab.state.help)
+    }
+}
+
+struct SessionStateGlyph: View {
+    let state: ClaudeTabState
+
+    var body: some View {
+        Group {
+            switch state {
+            case .working: ProgressView().controlSize(.mini)
+            case .waiting: Circle().fill(Color.syAmber).frame(width: 7, height: 7)
+            case .active: Circle().fill(Color.syMuted).frame(width: 5, height: 5)
+            case .sleeping, .stopped: Circle().strokeBorder(Color.syDim, lineWidth: 1).frame(width: 6, height: 6)
             }
         }
-        .padding(.vertical, 2)
+        .frame(width: 12, height: 12)
     }
 }
 
 struct ClaudeRowHighlight: View {
     let selected: Bool
-    var color: Color = .sySky
+    var color: Color = .syText
 
     var body: some View {
         if selected {
-            ZStack(alignment: .leading) {
-                color.opacity(0.14)
-                Rectangle().fill(color).frame(width: 3)
-            }
+            RoundedRectangle(cornerRadius: 6).fill(color.opacity(0.08)).padding(.horizontal, 4)
         } else {
             Color.clear
         }
@@ -366,12 +362,12 @@ struct ClaudeWorkspaceView: View {
                                     if !tab.running {
                                         VStack(spacing: 10) {
                                             if tab.terminalSleeping {
-                                                Label("Session is sleeping — memory freed", systemImage: "moon.zzz.fill").foregroundStyle(Color.syIndigo)
+                                                Label("Session is sleeping — memory freed", systemImage: "moon.zzz").foregroundStyle(Color.syMuted)
                                             } else {
                                                 Text("Session ended" + (tab.exitCode.map { " (\($0))" } ?? "")).foregroundStyle(Color.syMuted)
                                             }
                                             HStack {
-                                                Button("Resume session") { ws.restart(tab) }.buttonStyle(.borderedProminent).tint(.syCoral)
+                                                Button("Resume session") { ws.restart(tab) }.buttonStyle(.borderedProminent).tint(.syAgentAccent)
                                                 Button("Close tab") { ws.close(tab) }
                                             }
                                         }
@@ -418,7 +414,7 @@ struct ClaudeEmptyState: View {
     var body: some View {
         let ws = app.claude
         VStack(spacing: 16) {
-            IconTile(systemImage: "terminal.fill", color: .syCoral, size: 56)
+            Image(systemName: "terminal").font(.system(size: 34, weight: .light)).foregroundStyle(Color.syMuted)
             Text("Agents").font(.syTitle2.weight(.semibold)).foregroundStyle(Color.syText)
             Text("Runs Claude Code, installed on this Mac. Start a new session in a project or resume one from the history on the left.")
                 .foregroundStyle(Color.syMuted)
@@ -430,11 +426,11 @@ struct ClaudeEmptyState: View {
                         ws.newSession(folder: p.path)
                     } label: {
                         HStack(spacing: 10) {
-                            IconTile(systemImage: "folder.fill", color: ProjectPalette.color(for: p.path), size: 22)
+                            Image(systemName: "folder").foregroundStyle(Color.syMuted).frame(width: 22)
                             Text(p.name).fontWeight(.medium).foregroundStyle(Color.syText)
                             Spacer()
                             Text(Fmt.rel(p.lastActivity)).font(.syCaption).foregroundStyle(Color.syDim)
-                            Image(systemName: "plus.circle.fill").foregroundStyle(Color.syCoral)
+                            Image(systemName: "plus").foregroundStyle(Color.syMuted)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -461,9 +457,7 @@ struct ClaudeTabBar: View {
                 ForEach(ws.tabs) { tab in
                     let selected = tab.id == ws.selectedTabID
                     HStack(spacing: 6) {
-                        RoundedRectangle(cornerRadius: 2).fill(ProjectPalette.color(for: tab.folder)).frame(width: 3, height: 14)
-                        TabStateBadge(state: tab.state, compact: true)
-                        Image(systemName: tab.kind == .chat ? "bubble.left.and.text.bubble.right" : "terminal").font(.syCaption2).foregroundStyle(Color.syMuted)
+                        SessionStateGlyph(state: tab.state)
                         Text(tab.title).lineLimit(1).frame(maxWidth: 180, alignment: .leading).foregroundStyle(selected ? Color.syText : Color.syMuted)
                         Text(tab.projectName).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
                         Button { ws.close(tab) } label: { Image(systemName: "xmark").font(.syCaption2.weight(.bold)) }
@@ -474,8 +468,7 @@ struct ClaudeTabBar: View {
                     .font(.syCallout)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.syAccent.opacity(0.14) : Color.syText.opacity(0.04)))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? Color.syAccent.opacity(0.45) : Color.syLine))
+                    .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.syText.opacity(0.08) : Color.clear))
                     .contentShape(Rectangle())
                     .onTapGesture { ws.selectedTabID = tab.id }
                 }
@@ -510,12 +503,10 @@ struct ClaudeControlBar: View {
     var body: some View {
         let ws = app.claude
         HStack(spacing: 6) {
-            HStack(spacing: 6) {
-                IconTile(systemImage: "folder.fill", color: ProjectPalette.color(for: tab.folder), size: 18)
+            HStack(spacing: 8) {
                 Text(tab.projectName).fontWeight(.semibold).foregroundStyle(Color.syText).lineLimit(1)
-                if let b = tab.git.branch, b != "HEAD" { BranchTag(name: b) }
+                AgentBranchMenu(tab: tab, pr: ws.pullRequest(for: tab))
                 TabStateBadge(state: tab.state, memory: tab.memoryBytes)
-                    .padding(.leading, 4)
             }
             .fixedSize(horizontal: false, vertical: true)
             .layoutPriority(1)
@@ -686,7 +677,7 @@ struct ChangesPanel: View {
             ClaudeHairline()
             if git.changes.isEmpty {
                 VStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle").font(.syLargeTitle).foregroundStyle(Color.syGreen.opacity(0.6))
+                    Image(systemName: "checkmark.circle").font(.syLargeTitle).foregroundStyle(Color.syDim)
                     Text("Changes Claude makes will show up here automatically")
                         .font(.syCallout).foregroundStyle(Color.syMuted).multilineTextAlignment(.center)
                 }
@@ -890,7 +881,7 @@ struct BranchPRPanel: View {
                 Text(item.author?.login ?? "").foregroundStyle(Color.syMuted)
                 CIIcon(state: item.ciState)
                 if let a = item.additions, let d = item.deletions { DiffStat(additions: a, deletions: d) }
-                if let note { Text(note).foregroundStyle(Color.syViolet) }
+                if let note { Text(note).foregroundStyle(Color.syMuted) }
                 Spacer()
                 Text(Fmt.rel(item.updatedAt)).foregroundStyle(Color.syDim)
             }
@@ -1079,7 +1070,7 @@ struct InspectorPRDetail: View {
                         Label("Ask Claude to review this PR", systemImage: "text.magnifyingglass")
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .tint(.syCoral)
+                    .tint(.syAgentAccent)
                 }
                 .controlSize(.small)
             }
@@ -1125,5 +1116,92 @@ struct InspectorPRDetail: View {
             .onChange(of: showFiles) { _, open in model?.inspectorFilesVisible = open }
             .onDisappear { model?.inspectorFilesVisible = false }
         }
+    }
+}
+
+struct AgentBranchMenu: View {
+    let tab: ClaudeTab
+    let pr: (number: Int, url: String)?
+    @Environment(AppModel.self) private var app
+    @State private var hover = false
+
+    var body: some View {
+        let git = tab.git
+        if git.isRepo, let branch = git.branch {
+            Menu {
+                Section("Switch branch") {
+                    ForEach(git.localBranches.prefix(20), id: \.self) { b in
+                        Button { switchTo(b) } label: {
+                            if b == branch { Label(b, systemImage: "checkmark") } else { Text(b) }
+                        }
+                        .disabled(b == branch || tab.state == .working)
+                    }
+                }
+                Button("New Branch…") { newBranch() }
+                    .disabled(tab.state == .working)
+                Divider()
+                Button("Copy Branch Name") { copyToPasteboard(branch) }
+                if let worktree = git.worktree {
+                    Button("Reveal Worktree “\(worktree)” in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: tab.folder)]) }
+                }
+                if let pr {
+                    Button("Open Pull Request #\(pr.number)") {
+                        if let r = GitHubURL.parse(pr.url) { app.section = .prs(.mine); app.open(r) }
+                    }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.triangle.branch").imageScale(.small)
+                    Text(branch).lineLimit(1).truncationMode(.middle)
+                    if let worktree = git.worktree {
+                        Text("·").foregroundStyle(Color.syDim)
+                        Image(systemName: "square.stack.3d.up").imageScale(.small)
+                        Text(worktree).lineLimit(1)
+                    }
+                    if let pr {
+                        Text("·").foregroundStyle(Color.syDim)
+                        Text("#\(pr.number)")
+                    }
+                    Image(systemName: "chevron.down").font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syDim)
+                }
+                .font(.syCallout)
+                .foregroundStyle(Color.syMuted)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.syText.opacity(hover ? 0.08 : 0.04)))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .onHover { hover = $0 }
+            .help(git.worktree == nil ? "Branch" : "Branch and worktree")
+        }
+    }
+
+    private func switchTo(_ branch: String, create: Bool = false) {
+        Task {
+            if let error = await tab.git.switchBranch(branch, create: create) {
+                let alert = NSAlert()
+                alert.messageText = "Couldn't switch to \(branch)"
+                alert.informativeText = error
+                alert.runModal()
+            }
+        }
+    }
+
+    private func newBranch() {
+        let alert = NSAlert()
+        alert.messageText = "New branch"
+        alert.informativeText = "Creates the branch from the current HEAD and switches to it."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.placeholderString = "feature/name"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Create")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        switchTo(name, create: true)
     }
 }

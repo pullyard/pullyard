@@ -8,7 +8,7 @@ struct GitCommitLine: Identifiable, Hashable {
 }
 
 enum Git {
-    static func run(_ args: [String], in dir: String, env extra: [String: String] = [:], timeout: TimeInterval? = nil) -> (out: String, ok: Bool, status: Int32) {
+    static func run(_ args: [String], in dir: String, env extra: [String: String] = [:], timeout: TimeInterval? = nil, mergeStderr: Bool = false) -> (out: String, ok: Bool, status: Int32) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         var safeArgs = args
@@ -25,7 +25,7 @@ enum Git {
         p.environment = env
         let out = Pipe()
         p.standardOutput = out
-        p.standardError = FileHandle.nullDevice
+        p.standardError = mergeStderr ? out : FileHandle.nullDevice
         do { try p.run() } catch { return ("", false, -1) }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + (timeout ?? 30)) { [weak p] in
             if p?.isRunning == true { p?.terminate() }
@@ -95,6 +95,8 @@ final class GitWorkingCopy {
     let path: String
     var isRepo = false
     var branch: String?
+    var worktree: String?
+    var localBranches: [String] = []
     var repo: RepoRef?
     var changes: [DiffFile] = []
     var unpushed: [GitCommitLine] = []
@@ -121,9 +123,12 @@ final class GitWorkingCopy {
         loading = true
         defer { loading = false }
         let dir = path
-        let result = await Task.detached(priority: .utility) { () -> (Bool, String?, RepoRef?, [DiffFile], [GitCommitLine]) in
-            guard Git.run(["rev-parse", "--is-inside-work-tree"], in: dir).ok else { return (false, nil, nil, [], []) }
+        let result = await Task.detached(priority: .utility) { () -> (Bool, String?, RepoRef?, [DiffFile], [GitCommitLine], String?, [String]) in
+            guard Git.run(["rev-parse", "--is-inside-work-tree"], in: dir).ok else { return (false, nil, nil, [], [], nil, []) }
             let branch = Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: dir).out.trimmingCharacters(in: .whitespacesAndNewlines)
+            let dirs = Git.run(["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "--show-toplevel"], in: dir).out.split(separator: "\n").map(String.init)
+            let worktree = dirs.count == 3 && dirs[0] != dirs[1] ? (dirs[2] as NSString).lastPathComponent : nil
+            let branches = Git.run(["for-each-ref", "--format=%(refname:short)", "--sort=-committerdate", "--count=30", "refs/heads"], in: dir).out.split(separator: "\n").map(String.init)
             let repo = Git.remoteRepo(dir)
             var files = Git.parseUnifiedDiff(Git.run(["diff", "HEAD", "--no-color", "-M"], in: dir).out)
             if files.isEmpty {
@@ -151,7 +156,7 @@ final class GitWorkingCopy {
                     return parts.count == 3 ? GitCommitLine(id: parts[0], short: parts[1], subject: parts[2]) : nil
                 }
             }
-            return (true, branch.isEmpty ? nil : branch, repo, files.map(DiffFile.init), commits)
+            return (true, branch.isEmpty ? nil : branch, repo, files.map(DiffFile.init), commits, worktree, branches)
         }.value
         isRepo = result.0
         branch = result.1
@@ -159,7 +164,19 @@ final class GitWorkingCopy {
         changes = result.3
         unpushed = result.4
         ahead = result.4.count
+        worktree = result.5
+        localBranches = result.6
         lastRefresh = Date()
+    }
+
+    func switchBranch(_ name: String, create: Bool = false) async -> String? {
+        guard !name.isEmpty, !name.hasPrefix("-"), !name.contains(" ") else { return "Invalid branch name" }
+        let dir = path
+        let result = await Task.detached(priority: .userInitiated) { () -> (out: String, ok: Bool, status: Int32) in
+            Git.run(create ? ["switch", "-c", name] : ["switch", name], in: dir, mergeStderr: true)
+        }.value
+        await refresh()
+        return result.ok ? nil : (result.out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "git switch failed" : result.out.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     func startWatching() {

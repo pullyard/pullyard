@@ -276,7 +276,7 @@ struct ChatComposer: View {
             }
             Button { submit() } label: { Image(systemName: "arrow.up") }
                 .buttonStyle(.borderedProminent)
-                .tint(.syCoral)
+                .tint(.syAgentAccent)
                 .controlSize(.small)
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty)
                 .help("Send (↩)")
@@ -403,7 +403,7 @@ struct ChatComposer: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(RoundedRectangle(cornerRadius: 6).fill(i == selected ? Color.sySky.opacity(0.16) : .clear))
+                .background(RoundedRectangle(cornerRadius: 6).fill(i == selected ? Color.syText.opacity(0.08) : .clear))
                 .contentShape(Rectangle())
                 .onTapGesture { accept(item) }
             }

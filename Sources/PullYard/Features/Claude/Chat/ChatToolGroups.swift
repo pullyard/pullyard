@@ -1,0 +1,239 @@
+import SwiftUI
+
+enum ChatDisplayItem: Identifiable {
+    case item(ChatItem)
+    case tools(id: String, calls: [ChatToolCall])
+
+    var id: String {
+        switch self {
+        case .item(let item): return item.id
+        case .tools(let id, _): return "g" + id
+        }
+    }
+
+    static func build(_ items: [ChatItem]) -> [ChatDisplayItem] {
+        var out: [ChatDisplayItem] = []
+        var run: [ChatToolCall] = []
+        func flush() {
+            guard let first = run.first else { return }
+            out.append(.tools(id: first.id, calls: run))
+            run = []
+        }
+        for item in items {
+            switch item {
+            case .tool(let call) where ToolGrouping.groupable(call):
+                run.append(call)
+            case .thinking where !run.isEmpty:
+                continue
+            default:
+                flush()
+                out.append(.item(item))
+            }
+        }
+        flush()
+        return out
+    }
+}
+
+enum ToolGrouping {
+    static func groupable(_ call: ChatToolCall) -> Bool {
+        if let p = call.permission, !p.resolved { return false }
+        switch call.name {
+        case "TodoWrite", "ExitPlanMode", "AskUserQuestion": return false
+        default: return true
+        }
+    }
+
+    private enum Kind: Int, CaseIterable {
+        case command, read, edit, search, web, agent, other
+
+        var verb: String {
+            switch self {
+            case .command: return "Ran"
+            case .read: return "Read"
+            case .edit: return "Edited"
+            case .search: return "Searched"
+            case .web: return "Fetched"
+            case .agent: return "Ran"
+            case .other: return "Used"
+            }
+        }
+
+        func noun(_ n: Int) -> String {
+            switch self {
+            case .command: return plural(n, "command", "commands")
+            case .read, .edit: return plural(n, "file", "files")
+            case .search: return plural(n, "pattern", "patterns")
+            case .web: return plural(n, "page", "pages")
+            case .agent: return plural(n, "agent", "agents")
+            case .other: return plural(n, "tool", "tools")
+            }
+        }
+    }
+
+    private static func kind(_ name: String) -> Kind {
+        switch name {
+        case "Bash", "BashOutput", "KillShell": return .command
+        case "Read": return .read
+        case "Edit", "MultiEdit", "Write", "NotebookEdit": return .edit
+        case "Grep", "Glob": return .search
+        case "WebFetch", "WebSearch": return .web
+        case "Task", "Agent": return .agent
+        default: return .other
+        }
+    }
+
+    static func label(_ calls: [ChatToolCall]) -> String {
+        var counts: [Kind: Int] = [:]
+        for c in calls { counts[kind(c.name), default: 0] += 1 }
+        let parts = Kind.allCases.compactMap { k -> String? in
+            guard let n = counts[k] else { return nil }
+            return "\(k.verb.lowercased()) \(k.noun(n))"
+        }
+        let text = parts.joined(separator: ", ")
+        return text.prefix(1).uppercased() + text.dropFirst()
+    }
+
+    static func title(_ call: ChatToolCall, folder: String) -> String {
+        let i = call.input
+        let path = { (key: String) in ToolPresentation.relative(i[key] as? String ?? "", folder) }
+        switch call.name {
+        case "Bash":
+            if let d = i["description"] as? String, !d.isEmpty { return d }
+            return (i["command"] as? String)?.split(separator: "\n").first.map(String.init) ?? "Command"
+        case "Read": return "Read " + path("file_path")
+        case "Edit", "MultiEdit": return "Edited " + path("file_path")
+        case "Write": return "Wrote " + path("file_path")
+        case "NotebookEdit": return "Edited " + path("notebook_path")
+        case "Grep": return "Searched for \"\(i["pattern"] as? String ?? "")\""
+        case "Glob": return "Found files matching \(i["pattern"] as? String ?? "")"
+        case "WebFetch": return "Fetched " + ((i["url"] as? String).flatMap { URL(string: $0)?.host } ?? "page")
+        case "WebSearch": return "Searched the web for \"\(i["query"] as? String ?? "")\""
+        case "Task", "Agent":
+            let steps = call.children.isEmpty ? "" : " · " + plural(call.children.count, "step", "steps")
+            return "Agent: " + (i["description"] as? String ?? "task") + steps
+        default:
+            let summary = ToolPresentation.summary(call, folder: folder)
+            return summary.isEmpty ? ToolPresentation.title(call) : ToolPresentation.title(call) + " " + summary
+        }
+    }
+}
+
+struct ToolGroupView: View {
+    let calls: [ChatToolCall]
+    let chat: ChatSession
+    let folder: String
+    @State private var open = false
+
+    var body: some View {
+        if calls.count == 1, let call = calls.first {
+            ToolRowView(call: call, chat: chat, folder: folder, framed: false)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Button { withAnimation(Motion.quick) { open.toggle() } } label: {
+                    HStack(spacing: 6) {
+                        if calls.contains(where: { $0.status == .running }) {
+                            ProgressView().controlSize(.mini)
+                        }
+                        Text(ToolGrouping.label(calls)).foregroundStyle(Color.syMuted)
+                        let failed = calls.filter { $0.status == .error }.count
+                        if failed > 0 {
+                            Text("· \(failed) failed").foregroundStyle(Color.syRed)
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.syCaption2.weight(.semibold))
+                            .foregroundStyle(Color.syDim)
+                            .rotationEffect(.degrees(open ? 90 : 0))
+                    }
+                    .font(.syCallout)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if open {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(calls.enumerated()), id: \.element.id) { index, call in
+                            if index > 0 { Rectangle().fill(Color.syLine).frame(height: 1) }
+                            ToolRowView(call: call, chat: chat, folder: folder, framed: true)
+                        }
+                    }
+                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syLine))
+                    .transition(.opacity)
+                }
+            }
+        }
+    }
+}
+
+struct ToolRowView: View {
+    let call: ChatToolCall
+    let chat: ChatSession
+    let folder: String
+    let framed: Bool
+    @State private var open = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { withAnimation(Motion.quick) { open.toggle() } } label: {
+                HStack(spacing: 6) {
+                    statusGlyph
+                    Text(ToolGrouping.title(call, folder: folder))
+                        .foregroundStyle(call.status == .running ? Color.syText : Color.syMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let stat = ToolPresentation.diffStat(call) { stat }
+                    Image(systemName: "chevron.right")
+                        .font(.syCaption2.weight(.semibold))
+                        .foregroundStyle(Color.syDim)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                    Spacer(minLength: 0)
+                }
+                .font(.syCallout)
+                .padding(.horizontal, framed ? 10 : 0)
+                .padding(.vertical, framed ? 7 : 0)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if open {
+                details
+                    .padding(.horizontal, framed ? 10 : 0)
+                    .padding(.top, framed ? 0 : 6)
+                    .padding(.bottom, framed ? 10 : 0)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var statusGlyph: some View {
+        switch call.status {
+        case .running: ProgressView().controlSize(.mini).frame(width: 14)
+        case .error: Image(systemName: "xmark.circle.fill").foregroundStyle(Color.syRed)
+        case .denied: Image(systemName: "nosign").foregroundStyle(Color.syAmber)
+        case .done: EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var details: some View {
+        if call.name == "Task" || call.name == "Agent" {
+            VStack(alignment: .leading, spacing: 8) {
+                if !call.children.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(call.children.enumerated()), id: \.element.id) { index, child in
+                            if index > 0 { Rectangle().fill(Color.syLine).frame(height: 1) }
+                            ToolRowView(call: child, chat: chat, folder: folder, framed: true)
+                        }
+                    }
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.syLine))
+                }
+                if let text = call.resultText ?? call.agentText, !text.isEmpty {
+                    MarkdownView(text: text)
+                        .font(.syCallout)
+                        .foregroundStyle(Color.syMuted)
+                }
+            }
+        } else {
+            ToolDetails(call: call, folder: folder)
+        }
+    }
+}

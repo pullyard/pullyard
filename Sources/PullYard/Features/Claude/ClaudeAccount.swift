@@ -231,7 +231,7 @@ struct ClaudeAuthView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                IconTile(systemImage: "terminal.fill", color: .syCoral, size: 56)
+                Image(systemName: "terminal").font(.system(size: 34, weight: .light)).foregroundStyle(Color.syMuted)
                 Text("Agents").font(.syTitle.weight(.bold)).foregroundStyle(Color.syText)
                 Text("Runs Claude Code, installed on this Mac").font(.syCallout).foregroundStyle(Color.syMuted)
                 ClaudeProfileSwitcher()
@@ -268,7 +268,7 @@ struct ClaudeAuthView: View {
                 Button("Copy command") { copyToPasteboard(Self.installCommand) }
                 Button("Docs") { openInBrowser("https://code.claude.com/docs/en/setup") }
                 Spacer()
-                Button("Check again") { Task { await store.refresh() } }.buttonStyle(.borderedProminent).tint(.syCoral)
+                Button("Check again") { Task { await store.refresh() } }.buttonStyle(.borderedProminent).tint(.syAgentAccent)
             }
         }
     }
@@ -311,7 +311,7 @@ struct ClaudeAuthView: View {
                         Label("Sign in with browser", systemImage: "person.badge.key")
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.syCoral)
+                    .tint(.syAgentAccent)
                     .controlSize(.large)
                     .keyboardShortcut(.defaultAction)
                 }
@@ -355,10 +355,10 @@ struct ClaudeAccountCard: View {
                     if let plan = info.subscription {
                         Text(plan)
                             .font(.syCaption2.weight(.semibold))
-                            .foregroundStyle(Color.syCoral)
+                            .foregroundStyle(Color.syMuted)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.syCoral.opacity(0.12)))
+                            .background(Capsule().fill(Color.syMuted.opacity(0.14)))
                     } else if info.method == "console" || info.provider != "firstParty" {
                         Text(info.provider == "firstParty" ? "API" : (info.provider ?? "API")).font(.syCaption2)
                     }

@@ -16,10 +16,17 @@ struct ChatView: View {
                         if chat.items.isEmpty {
                             ChatWelcome(chat: chat, folder: tab.folder)
                         }
-                        ForEach(chat.items) { item in
-                            ChatItemView(item: item, chat: chat, folder: tab.folder)
-                                .id(item.id)
-                                .transition(.rise)
+                        ForEach(ChatDisplayItem.build(chat.items)) { entry in
+                            Group {
+                                switch entry {
+                                case .item(let item):
+                                    ChatItemView(item: item, chat: chat, folder: tab.folder)
+                                case .tools(_, let calls):
+                                    ToolGroupView(calls: calls, chat: chat, folder: tab.folder)
+                                }
+                            }
+                            .id(entry.id)
+                            .transition(.rise)
                         }
                         if chat.busy {
                             WorkingIndicator(chat: chat)
@@ -67,7 +74,7 @@ struct ChatView: View {
             }
             if chat.sleeping && !chat.running {
                 HStack(spacing: 8) {
-                    Image(systemName: "moon.zzz.fill").foregroundStyle(Color.syIndigo)
+                    Image(systemName: "moon.zzz").foregroundStyle(Color.syMuted)
                     Text("Session is sleeping — process stopped, memory freed. A new message resumes it.")
                         .font(.syCallout)
                         .foregroundStyle(Color.syMuted)
@@ -76,7 +83,7 @@ struct ChatView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .background(Color.syIndigo.opacity(0.08))
+                .background(Color.syText.opacity(0.03))
                 .overlay(alignment: .top) { Rectangle().fill(Color.syLine).frame(height: 1) }
             }
             ChatComposer(tab: tab, chat: chat)
@@ -151,7 +158,7 @@ struct ChatWelcome: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                IconTile(systemImage: "terminal.fill", color: .syCoral, size: 24)
+                Image(systemName: "terminal").foregroundStyle(Color.syMuted)
                 Text("New session").font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText)
             }
             Text("Describe a task — Claude will read the code, propose changes and ask before acting.")
@@ -169,7 +176,7 @@ struct ChatWelcome: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .card(radius: 12, fill: Color.syCoral.opacity(0.06))
+        .card(radius: 12)
     }
 
     private var suggestions: [String] {
@@ -221,7 +228,7 @@ struct ErrorBanner: View {
                     }
                     .controlSize(.small)
                     .buttonStyle(.borderedProminent)
-                    .tint(.syCoral)
+                    .tint(.syAgentAccent)
                 }
             }
         }
@@ -314,7 +321,7 @@ struct ThinkingView: View {
                 Button { withAnimation(Motion.quick) { open.toggle() } } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "chevron.right").font(.syCaption2).rotationEffect(.degrees(open ? 90 : 0))
-                        Image(systemName: "brain").foregroundStyle(Color.syViolet)
+                        Image(systemName: "brain").foregroundStyle(Color.syDim)
                         Text("Thinking")
                     }
                     .font(.syCaption)
@@ -357,6 +364,17 @@ enum ToolPresentation {
             return parts.last.map(String.init) ?? call.name
         }
         return call.name
+    }
+
+    static func diffStat(_ call: ChatToolCall) -> DiffStat? {
+        if let patch = call.structured?["structuredPatch"] as? [[String: Any]], !patch.isEmpty {
+            let lines = patch.flatMap { $0["lines"] as? [String] ?? [] }
+            return DiffStat(additions: lines.filter { $0.hasPrefix("+") }.count, deletions: lines.filter { $0.hasPrefix("-") }.count)
+        }
+        if call.name == "Write", let content = call.string("content") {
+            return DiffStat(additions: content.split(separator: "\n", omittingEmptySubsequences: false).count, deletions: 0)
+        }
+        return nil
     }
 
     static func relative(_ path: String, _ folder: String) -> String {
@@ -409,7 +427,7 @@ struct ToolCallView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 4)
-                    if let stat = diffStat { stat }
+                    if let stat = ToolPresentation.diffStat(call) { stat }
                     Image(systemName: "chevron.down").font(.syCaption2).foregroundStyle(Color.syDim).rotationEffect(.degrees(isOpen ? 180 : 0))
                 }
                 .font(.syCallout)
@@ -454,22 +472,12 @@ struct ToolCallView: View {
             } else {
                 ProgressView().controlSize(.mini).frame(width: 14)
             }
-        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.syGreen)
+        case .done: Image(systemName: "checkmark").foregroundStyle(Color.syDim)
         case .error: Image(systemName: "xmark.circle.fill").foregroundStyle(Color.syRed)
         case .denied: Image(systemName: "nosign").foregroundStyle(Color.syAmber)
         }
     }
 
-    private var diffStat: DiffStat? {
-        if let patch = call.structured?["structuredPatch"] as? [[String: Any]], !patch.isEmpty {
-            let lines = patch.flatMap { $0["lines"] as? [String] ?? [] }
-            return DiffStat(additions: lines.filter { $0.hasPrefix("+") }.count, deletions: lines.filter { $0.hasPrefix("-") }.count)
-        }
-        if call.name == "Write", let content = call.string("content") {
-            return DiffStat(additions: content.split(separator: "\n", omittingEmptySubsequences: false).count, deletions: 0)
-        }
-        return nil
-    }
 }
 
 struct ToolDetails: View {
@@ -612,7 +620,7 @@ struct TodoListView: View {
                 let status = todo["status"] as? String ?? "pending"
                 HStack(spacing: 8) {
                     Image(systemName: status == "completed" ? "checkmark.circle.fill" : status == "in_progress" ? "circle.dotted.circle" : "circle")
-                        .foregroundStyle(status == "completed" ? Color.syGreen : status == "in_progress" ? Color.sySky : Color.syDim)
+                        .foregroundStyle(status == "completed" ? Color.syMuted : status == "in_progress" ? Color.syText : Color.syDim)
                     Text(todo["content"] as? String ?? todo["subject"] as? String ?? "")
                         .strikethrough(status == "completed")
                         .foregroundStyle(status == "completed" ? Color.syMuted : Color.syText)

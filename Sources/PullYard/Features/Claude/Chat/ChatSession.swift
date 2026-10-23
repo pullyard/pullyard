@@ -53,6 +53,8 @@ final class ChatToolCall: Identifiable {
     var structured: [String: Any]?
     var permission: PermissionRequest?
     var parentToolUseId: String?
+    var children: [ChatToolCall] = []
+    var agentText: String?
 
     init(id: String, name: String) {
         self.id = id
@@ -461,7 +463,7 @@ final class ChatSession {
                 call.parentToolUseId = parent
                 tools[id] = call
                 streamTexts[key] = ChatText(id: "tool:" + id, text: "")
-                if parent == nil { items.append(.tool(call)) }
+                if let parent { tools[parent]?.children.append(call) } else { items.append(.tool(call)) }
             default:
                 break
             }
@@ -491,8 +493,11 @@ final class ChatSession {
         for block in content {
             switch block["type"] as? String {
             case "text":
-                guard parent == nil else { continue }
                 let full = block["text"] as? String ?? ""
+                if let parent {
+                    if !full.isEmpty { tools[parent]?.agentText = full }
+                    continue
+                }
                 if let existing = messageTexts[mid]?.first(where: { !$0.finalized }) {
                     existing.text = full
                     existing.finalized = true
@@ -508,7 +513,7 @@ final class ChatSession {
                     let c = ChatToolCall(id: id, name: name)
                     c.parentToolUseId = parent
                     tools[id] = c
-                    if parent == nil { items.append(.tool(c)) }
+                    if let parent { tools[parent]?.children.append(c) } else { items.append(.tool(c)) }
                     return c
                 }()
                 call.input = block["input"] as? [String: Any] ?? [:]
