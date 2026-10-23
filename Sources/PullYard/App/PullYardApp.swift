@@ -1,3 +1,4 @@
+import StackNotesKit
 import SwiftUI
 
 @main
@@ -5,7 +6,7 @@ enum Main {
     static func main() {
         signal(SIGPIPE, SIG_IGN)
         if CommandLine.arguments.contains(StackNotesMCP.flag) {
-            StackNotesMCP.run(arguments: CommandLine.arguments)
+            StackNotesMCPServer.run(arguments: CommandLine.arguments)
         } else if CommandLine.arguments.contains("--selftest") {
             SelfTest.run()
         } else {

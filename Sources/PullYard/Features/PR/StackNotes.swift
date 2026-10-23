@@ -1,40 +1,11 @@
 import Foundation
+import StackNotesKit
 import SwiftUI
-
-struct StackNote: Codable, Identifiable, Hashable {
-    enum Kind: String, Codable, CaseIterable, Identifiable {
-        case note, question, decision
-        var id: String { rawValue }
-        var title: String {
-            switch self {
-            case .note: return "Note"
-            case .question: return "Question"
-            case .decision: return "Decision"
-            }
-        }
-    }
-
-    let id: UUID
-    var kind: Kind
-    var text: String
-    var updated: Date
-    var source: String?
-
-    init(id: UUID = UUID(), kind: Kind = .note, text: String = "", updated: Date = Date(), source: String? = nil) {
-        self.id = id
-        self.kind = kind
-        self.text = text
-        self.updated = updated
-        self.source = source
-    }
-}
 
 @Observable
 @MainActor
 final class StackNotes {
-    nonisolated static let defaultFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("PullYard", isDirectory: true)
-        .appendingPathComponent("stack-notes.json")
+    nonisolated static var defaultFile: URL { StackNotesFile.defaultFile }
 
     static let shared: StackNotes = {
         let store = StackNotes(file: defaultFile)
@@ -42,11 +13,7 @@ final class StackNotes {
         return store
     }()
 
-    nonisolated static func read(key: String) -> [StackNote] {
-        let saved = (try? Data(contentsOf: defaultFile)).flatMap { try? JSONDecoder().decode([String: [StackNote]].self, from: $0) }?[key] ?? []
-        let pending = StackNotesInbox.peek().filter { $0.key == key }.map { StackNote(kind: $0.kind, text: $0.text, updated: $0.created, source: "Claude") }
-        return saved + pending
-    }
+    nonisolated static func read(key: String) -> [StackNote] { StackNotesFile.read(key: key) }
 
     private(set) var byPR: [String: [StackNote]] = [:]
     @ObservationIgnored private let file: URL
@@ -61,7 +28,7 @@ final class StackNotes {
     }
 
     nonisolated static func key(account: String?, host: String, repo: RepoRef, number: Int) -> String {
-        "\(account?.lowercased() ?? "")|\(host)|\(repo.full.lowercased())#\(number)"
+        StackNotesFile.key(account: account, host: host, repo: repo.full, number: number)
     }
 
     func notes(_ key: String) -> [StackNote] {

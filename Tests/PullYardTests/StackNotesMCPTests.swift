@@ -1,8 +1,9 @@
 import XCTest
 @testable import PullYard
+import StackNotesKit
 
 final class StackNotesMCPTests: XCTestCase {
-    private let server = StackNotesMCP.Server(account: "me", host: "github.com")
+    private let server = StackNotesMCPServer.Server(account: "me", host: "github.com")
 
     func testInitializeAdvertisesTools() throws {
         let reply = try XCTUnwrap(server.handle(["jsonrpc": "2.0", "id": 1, "method": "initialize", "params": ["protocolVersion": "2025-06-18"]]))
@@ -34,10 +35,11 @@ final class StackNotesMCPTests: XCTestCase {
     }
 
     func testConfigShape() throws {
-        let json = try XCTUnwrap(StackNotesMCP.config(account: "me", host: "github.com"))
+        let json = try XCTUnwrap(StackNotesMCP.config(account: "me", host: "github.com", command: "/tmp/pullyard-mcp"))
         let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
         let server = try XCTUnwrap((obj["mcpServers"] as? [String: Any])?["pullyard"] as? [String: Any])
         XCTAssertEqual(server["type"] as? String, "stdio")
-        XCTAssertEqual((server["args"] as? [String])?.first, StackNotesMCP.flag)
+        XCTAssertEqual(server["command"] as? String, "/tmp/pullyard-mcp")
+        XCTAssertEqual(server["args"] as? [String], ["--host", "github.com", "--account", "me"])
     }
 }
