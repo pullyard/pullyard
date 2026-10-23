@@ -78,8 +78,8 @@ struct RefreshFooter: View {
 }
 
 extension View {
-    func liveRefresh(updated: Date?, refreshing: Bool, error: String? = nil, footer: Bool = true, web: Bool = false, button: Bool = true, action: @escaping @MainActor () async -> Void) -> some View {
-        modifier(LiveRefreshModifier(updated: updated, refreshing: refreshing, error: error, footer: footer, web: web, button: button, action: action))
+    func liveRefresh(updated: Date?, refreshing: Bool, error: String? = nil, footer: Bool = true, web: Bool = false, button: Bool = true, revealOnTick: Bool? = nil, action: @escaping @MainActor () async -> Void) -> some View {
+        modifier(LiveRefreshModifier(updated: updated, refreshing: refreshing, error: error, footer: footer, web: web, button: button, revealOnTick: revealOnTick ?? footer, action: action))
     }
 }
 
@@ -98,6 +98,7 @@ private struct LiveRefreshModifier: ViewModifier {
     let footer: Bool
     let web: Bool
     let button: Bool
+    let revealOnTick: Bool
     let action: @MainActor () async -> Void
     @Environment(AppModel.self) private var app: AppModel?
     @State private var pull: CGFloat = 0
@@ -133,12 +134,12 @@ private struct LiveRefreshModifier: ViewModifier {
                     Button(action: manualRefresh) {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
-                    .help("Refresh (⌘R)")
+                    .help("Refresh")
                     .disabled(phase != .idle)
                 }
             }
         }
-        .onChange(of: app?.refreshTick) { reveal() }
+        .onChange(of: app?.refreshTick) { if revealOnTick { reveal() } }
         .onChange(of: refreshing) { _, now in
             guard revealing else { return }
             if now { sawRefreshing = true } else if sawRefreshing { finish() }
