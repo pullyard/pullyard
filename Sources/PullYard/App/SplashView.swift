@@ -23,9 +23,8 @@ struct SplashView: View {
                 }
                 .opacity(appeared ? 1 : 0)
                 .offset(y: appeared || Motion.reduced ? 0 : 10)
-                ProgressView()
-                    .controlSize(.small)
-                    .opacity(appeared ? 0.7 : 0)
+                PullYardLoader(size: 44)
+                    .opacity(appeared ? 1 : 0)
             }
             .opacity(appeared ? 1 : 0)
         }

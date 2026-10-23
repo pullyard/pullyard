@@ -45,7 +45,7 @@ struct ProjectsListView: View {
                 Text("No projects").font(.syBody).foregroundStyle(Color.syMuted)
             }
         }
-        .overlay { if loading && projects.isEmpty { ProgressView().controlSize(.small) } }
+        .overlay { if loading && projects.isEmpty { PullYardLoader(size: 44) } }
         .liveRefresh(updated: lastUpdated, refreshing: loading, error: projects.isEmpty ? nil : error) { await load() }
         .navigationTitle("Projects")
         .toolbar {

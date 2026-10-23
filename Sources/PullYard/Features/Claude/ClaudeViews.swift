@@ -76,9 +76,9 @@ struct ClaudeProjectsColumn: View {
                 if ClaudeAccountStore.shared.isLoggedIn {
                     if ready { historyContent }
                 } else if case .checking = ClaudeAccountStore.shared.status {
-                    HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }.padding(.top, 20)
+                    HStack { Spacer(); PullYardLoader(size: 32); Spacer() }.padding(.top, 20)
                 } else if case .unknown = ClaudeAccountStore.shared.status {
-                    HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }.padding(.top, 20)
+                    HStack { Spacer(); PullYardLoader(size: 32); Spacer() }.padding(.top, 20)
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
                         Image(systemName: "lock.fill").font(.syTitle3).foregroundStyle(Color.syDim)
@@ -93,7 +93,7 @@ struct ClaudeProjectsColumn: View {
             .padding(.vertical, 6)
         }
         .surface(.list)
-        .overlay { if ws.loadingProjects && ws.projects.isEmpty { ProgressView().controlSize(.small) } }
+        .overlay { if ws.loadingProjects && ws.projects.isEmpty { PullYardLoader(size: 44) } }
         .liveRefresh(updated: ws.projectsUpdated, refreshing: ws.loadingProjects) { await ws.reloadProjects() }
         .searchable(text: $query, placement: .toolbar, prompt: "Search sessions")
         .navigationTitle("Agents")
@@ -984,7 +984,7 @@ struct BranchPRPanel: View {
         }
         .listStyle(.inset)
         .surface(.panel)
-        .liveRefresh(updated: lastUpdated, refreshing: branchLoading || listLoading, footer: false) { await load() }
+        .liveRefresh(updated: lastUpdated, refreshing: branchLoading || listLoading, footer: false, button: false) { await load() }
     }
 
     private func row(_ item: SearchItem, note: String? = nil) -> some View {
@@ -1103,7 +1103,7 @@ struct InspectorPRDetail: View {
             ClaudeHairline()
             if let pr = model?.pr {
                 ScrollView { content(pr).padding(12) }
-                    .liveRefresh(updated: model?.lastUpdated, refreshing: model?.loading ?? false, footer: false) { await model?.load(full: true) }
+                    .liveRefresh(updated: model?.lastUpdated, refreshing: model?.loading ?? false, footer: false, button: false) { await model?.load(full: true) }
             } else if let e = model?.error {
                 ErrorStateView(message: e) { Task { await model?.load() } }
             } else {
