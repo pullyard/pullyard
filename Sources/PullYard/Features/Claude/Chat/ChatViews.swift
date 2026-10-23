@@ -210,17 +210,15 @@ struct JumpToLatestButton: View {
         Button(action: action) {
             TimelineView(.animation(minimumInterval: 1 / 60, paused: Motion.reduced)) { context in
                 let t = context.date.timeIntervalSince(start)
-                let bob = Motion.reduced ? 0 : CGFloat(sin(t * 2.6)) * 2.5 + 1
                 PullYardDownMark(wave: Motion.reduced ? 0 : t)
-                    .frame(width: 30, height: 30)
-                    .offset(y: bob)
+                    .frame(width: 22, height: 22)
+                    .offset(y: Motion.reduced ? 0 : CGFloat(sin(t * 2.4)) * 1.2 + 0.6)
             }
-            .frame(width: 44, height: 44)
-            .background(Circle().fill(.regularMaterial))
-            .overlay(Circle().strokeBorder(LinearGradient(colors: [BrandMark.violet, BrandMark.sky], startPoint: .top, endPoint: .bottom), lineWidth: 1.5))
-            .clipShape(Circle())
-            .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
-            .scaleEffect(hover ? 1.06 : 1)
+            .frame(width: 34, height: 34)
+            .background(Circle().fill(Color.syRaised))
+            .overlay(Circle().strokeBorder(Color.syLineStrong.opacity(hover ? 1 : 0.7), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.22), radius: 6, y: 2)
+            .scaleEffect(hover ? 1.05 : 1)
         }
         .buttonStyle(.plain)
         .onHover { h in withAnimation(Motion.quick) { hover = h } }
@@ -880,42 +878,36 @@ struct PullYardDownMark: View {
             let k = min(size.width, size.height) / 100
             func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * k, y: y * k) }
             var left = Path()
-            left.move(to: pt(28, 18))
-            left.addCurve(to: pt(50, 50), control1: pt(28, 36), control2: pt(50, 34))
+            left.move(to: pt(30, 19))
+            left.addCurve(to: pt(50, 44), control1: pt(30, 33), control2: pt(50, 31))
             var right = Path()
-            right.move(to: pt(72, 18))
-            right.addCurve(to: pt(50, 50), control1: pt(72, 36), control2: pt(50, 34))
-            ctx.stroke(left, with: .color(BrandMark.violet), style: StrokeStyle(lineWidth: 6 * k, lineCap: .round))
-            ctx.stroke(right, with: .color(BrandMark.sky), style: StrokeStyle(lineWidth: 6 * k, lineCap: .round))
-            for (c, color) in [(pt(28, 12), BrandMark.violet), (pt(72, 12), BrandMark.sky)] {
-                let r = 7 * k
+            right.move(to: pt(70, 19))
+            right.addCurve(to: pt(50, 44), control1: pt(70, 33), control2: pt(50, 31))
+            ctx.stroke(left, with: .color(BrandMark.violet), style: StrokeStyle(lineWidth: 4.5 * k, lineCap: .round))
+            ctx.stroke(right, with: .color(BrandMark.sky), style: StrokeStyle(lineWidth: 4.5 * k, lineCap: .round))
+            for (c, color) in [(pt(30, 13), BrandMark.violet), (pt(70, 13), BrandMark.sky)] {
+                let r = 5.5 * k
                 let circle = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2))
-                ctx.fill(circle, with: .color(Color(red: 0.04, green: 0.07, blue: 0.13)))
-                ctx.stroke(circle, with: .color(color), lineWidth: 4.5 * k)
+                ctx.stroke(circle, with: .color(color), lineWidth: 3.5 * k)
             }
-            var cabin = Path(roundedRect: CGRect(x: 38 * k, y: 40 * k, width: 24 * k, height: 14 * k), cornerRadius: 3 * k)
-            cabin.addRect(.zero)
+            let cabin = Path(roundedRect: CGRect(x: 42 * k, y: 38 * k, width: 16 * k, height: 11 * k), cornerRadius: 2.5 * k)
             ctx.fill(cabin, with: .color(Color(red: 0.97, green: 0.98, blue: 0.99)))
+            for x: CGFloat in [45, 51.5] {
+                ctx.fill(Path(roundedRect: CGRect(x: x * k, y: 41 * k, width: 3.5 * k, height: 3.5 * k), cornerRadius: 1 * k), with: .color(Color(red: 0.12, green: 0.16, blue: 0.23)))
+            }
             var hull = Path()
-            hull.move(to: pt(20, 54))
-            hull.addLine(to: pt(80, 54))
-            hull.addLine(to: pt(70, 76))
-            hull.addLine(to: pt(30, 76))
+            hull.move(to: pt(27, 49))
+            hull.addLine(to: pt(73, 49))
+            hull.addLine(to: pt(66, 66))
+            hull.addLine(to: pt(34, 66))
             hull.closeSubpath()
-            ctx.fill(hull, with: .linearGradient(Gradient(colors: [BrandMark.hullTop, BrandMark.hullBottom]), startPoint: pt(50, 54), endPoint: pt(50, 76)))
-            var deck = Path()
-            deck.move(to: pt(20, 54))
-            deck.addLine(to: pt(80, 54))
-            deck.addLine(to: pt(78.6, 57.5))
-            deck.addLine(to: pt(21.4, 57.5))
-            deck.closeSubpath()
-            ctx.fill(deck, with: .color(Color(red: 1, green: 0.8, blue: 0.83)))
-            let shift = CGFloat(sin(wave * 2.2)) * 3
+            ctx.fill(hull, with: .linearGradient(Gradient(colors: [BrandMark.hullTop, BrandMark.hullBottom]), startPoint: pt(50, 49), endPoint: pt(50, 66)))
+            let shift = CGFloat(sin(wave * 2.2)) * 2.5
             var waves = Path()
-            waves.move(to: pt(26 + shift, 88))
-            waves.addCurve(to: pt(50 + shift, 88), control1: pt(34 + shift, 83), control2: pt(42 + shift, 93))
-            waves.addCurve(to: pt(74 + shift, 88), control1: pt(58 + shift, 83), control2: pt(66 + shift, 93))
-            ctx.stroke(waves, with: .color(BrandMark.sky.opacity(0.6)), style: StrokeStyle(lineWidth: 4 * k, lineCap: .round))
+            waves.move(to: pt(34 + shift, 79))
+            waves.addCurve(to: pt(50 + shift, 79), control1: pt(39 + shift, 75.5), control2: pt(45 + shift, 82.5))
+            waves.addCurve(to: pt(66 + shift, 79), control1: pt(55 + shift, 75.5), control2: pt(61 + shift, 82.5))
+            ctx.stroke(waves, with: .color(BrandMark.sky.opacity(0.55)), style: StrokeStyle(lineWidth: 3 * k, lineCap: .round))
         }
     }
 }
