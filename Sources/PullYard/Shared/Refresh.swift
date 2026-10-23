@@ -107,6 +107,7 @@ private struct LiveRefreshModifier: ViewModifier {
     @State private var scrollTopToken = 0
     @State private var revealing = false
     @State private var sawRefreshing = false
+    @State private var manual = false
 
     private var held: Bool { phase != .idle }
 
@@ -153,7 +154,8 @@ private struct LiveRefreshModifier: ViewModifier {
         } else {
             content
                 .scrollBounceBehavior(.always, axes: .vertical)
-                .contentMargins(.top, held ? heldMargin : nil, for: .scrollContent)
+                .contentMargins(.top, held && !manual ? heldMargin : nil, for: .scrollContent)
+                .padding(.top, held && manual ? heldMargin : 0)
         }
     }
 
@@ -168,6 +170,7 @@ private struct LiveRefreshModifier: ViewModifier {
         guard phase == .idle else { return }
         lastPull = Date()
         scrollTopToken += 1
+        manual = true
         run()
     }
 
@@ -175,6 +178,7 @@ private struct LiveRefreshModifier: ViewModifier {
         withAnimation(Motion.insert) { phase = .loading }
         Task { @MainActor in
             await action()
+            try? await Task.sleep(nanoseconds: 600_000_000)
             finish()
         }
     }
@@ -182,6 +186,7 @@ private struct LiveRefreshModifier: ViewModifier {
     private func reveal() {
         guard phase == .idle else { return }
         scrollTopToken += 1
+        manual = true
         revealing = true
         sawRefreshing = refreshing
         withAnimation(Motion.insert) { phase = .loading }
@@ -198,7 +203,10 @@ private struct LiveRefreshModifier: ViewModifier {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard phase == .done else { return }
-            withAnimation(Motion.insert) { phase = .idle }
+            withAnimation(Motion.insert) {
+                phase = .idle
+                manual = false
+            }
         }
     }
 }
