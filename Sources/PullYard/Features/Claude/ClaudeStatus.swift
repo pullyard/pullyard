@@ -204,6 +204,7 @@ enum SessionIndicator {
 
 struct SessionIndicatorDot: View {
     let indicator: SessionIndicator
+    @State private var spin = false
     @State private var pulse = false
 
     var body: some View {
@@ -212,23 +213,43 @@ struct SessionIndicatorDot: View {
             case .none:
                 EmptyView()
             case .working:
-                Circle()
-                    .fill(Color.syMuted)
-                    .frame(width: 7, height: 7)
-                    .opacity(pulse ? 0.35 : 1)
-                    .onAppear {
-                        guard !Motion.reduced else { return }
-                        withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
-                    }
+                ZStack {
+                    Circle().stroke(Color.syViolet.opacity(0.22), lineWidth: 2)
+                    Circle()
+                        .trim(from: 0, to: 0.32)
+                        .stroke(Color.syViolet, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(spin ? 360 : 0))
+                }
+                .frame(width: 10, height: 10)
+                .onAppear {
+                    guard !Motion.reduced else { return }
+                    withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) { spin = true }
+                }
             case .done:
-                Circle().fill(Color.sySky).frame(width: 7, height: 7)
+                ZStack {
+                    Circle().fill(Color.syGreen.opacity(0.18))
+                    Circle().strokeBorder(Color.syGreen, lineWidth: 2.2)
+                }
+                .frame(width: 10, height: 10)
             case .waiting:
-                Circle().fill(Color.syAmber).frame(width: 7, height: 7)
-                    .overlay(Circle().stroke(Color.syAmber.opacity(0.35), lineWidth: 3))
+                ZStack {
+                    Circle()
+                        .fill(Color.syCoral.opacity(0.25))
+                        .scaleEffect(pulse ? 1.7 : 1)
+                        .opacity(pulse ? 0 : 1)
+                    Circle().fill(Color.syCoral)
+                    Text("?").font(.system(size: 8, weight: .heavy, design: .rounded)).foregroundStyle(.white)
+                }
+                .frame(width: 12, height: 12)
+                .onAppear {
+                    guard !Motion.reduced else { return }
+                    withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) { pulse = true }
+                }
             }
         }
-        .frame(width: 12, height: 12)
+        .frame(width: 14, height: 14)
         .help(indicator.help)
+        .accessibilityLabel(indicator.help)
     }
 }
 
