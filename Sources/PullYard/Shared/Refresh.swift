@@ -100,7 +100,7 @@ private struct LiveRefreshModifier: ViewModifier {
     let button: Bool
     let revealOnTick: Bool
     let action: @MainActor () async -> Void
-    @Environment(AppModel.self) private var app: AppModel?
+    @Environment(AppModel.self) private var app
     @State private var pull: CGFloat = 0
     @State private var phase: PullPhase = .idle
     @State private var lastPull: Date?
@@ -140,7 +140,7 @@ private struct LiveRefreshModifier: ViewModifier {
                 }
             }
         }
-        .onChange(of: app?.refreshTick) { if revealOnTick { reveal() } }
+        .onChange(of: app.refreshTick) { if revealOnTick { reveal() } }
         .onChange(of: refreshing) { _, now in
             guard revealing else { return }
             if now { sawRefreshing = true } else if sawRefreshing { finish() }
