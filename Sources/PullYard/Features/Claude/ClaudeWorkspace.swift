@@ -313,8 +313,7 @@ final class ClaudeWorkspace {
 
     func indicator(for session: ClaudeSessionInfo) -> SessionIndicator {
         if let tab = tab(forSession: session.id) { return SessionIndicator(tab: tab) }
-        if Date().timeIntervalSince(session.modified) < 15 { return .working }
-        return SessionSeen.shared.isUnread(session.id, modified: session.modified) ? .done : .none
+        return SessionIndicator(closed: session)
     }
 
     func tab(forSession id: String) -> ClaudeTab? {

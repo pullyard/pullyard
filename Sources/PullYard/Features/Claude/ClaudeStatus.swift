@@ -192,6 +192,11 @@ enum SessionIndicator {
         }
     }
 
+    @MainActor init(closed session: ClaudeSessionInfo, now: Date = Date()) {
+        if now.timeIntervalSince(session.modified) < 15 { self = .working; return }
+        self = SessionSeen.shared.isUnread(session.id, modified: session.modified) ? .done : .none
+    }
+
     var help: String {
         switch self {
         case .none: return ""
@@ -212,8 +217,6 @@ enum BrandMark {
 
 struct SessionIndicatorDot: View {
     let indicator: SessionIndicator
-    @State private var spin = false
-    @State private var pulse = false
 
     var body: some View {
         Group {
@@ -221,18 +224,17 @@ struct SessionIndicatorDot: View {
             case .none:
                 EmptyView()
             case .working:
-                ZStack {
-                    Circle().stroke(BrandMark.violet.opacity(0.2), lineWidth: 2)
-                    Circle()
-                        .trim(from: 0, to: 0.34)
-                        .stroke(LinearGradient(colors: [BrandMark.sky, BrandMark.violet], startPoint: .leading, endPoint: .trailing), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                        .rotationEffect(.degrees(spin ? 360 : 0))
+                TimelineView(.animation(minimumInterval: 1 / 60, paused: Motion.reduced)) { context in
+                    let angle = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1) * 360
+                    ZStack {
+                        Circle().stroke(BrandMark.violet.opacity(0.2), lineWidth: 2)
+                        Circle()
+                            .trim(from: 0, to: 0.34)
+                            .stroke(LinearGradient(colors: [BrandMark.sky, BrandMark.violet], startPoint: .leading, endPoint: .trailing), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .rotationEffect(.degrees(angle))
+                    }
                 }
                 .frame(width: 10, height: 10)
-                .onAppear {
-                    guard !Motion.reduced else { return }
-                    withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) { spin = true }
-                }
             case .done:
                 ZStack {
                     Circle().strokeBorder(BrandMark.branches, lineWidth: 2)
@@ -240,19 +242,19 @@ struct SessionIndicatorDot: View {
                 }
                 .frame(width: 10, height: 10)
             case .waiting:
-                ZStack {
-                    Circle()
-                        .fill(BrandMark.hullTop.opacity(0.3))
-                        .scaleEffect(pulse ? 1.7 : 1)
-                        .opacity(pulse ? 0 : 1)
-                    Circle().fill(LinearGradient(colors: [BrandMark.hullTop, BrandMark.hullBottom], startPoint: .top, endPoint: .bottom))
-                    Text("?").font(.system(size: 8, weight: .heavy, design: .rounded)).foregroundStyle(.white)
+                TimelineView(.animation(minimumInterval: 1 / 60, paused: Motion.reduced)) { context in
+                    let t = Motion.reduced ? 0 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
+                    let eased = 1 - pow(1 - t, 3)
+                    ZStack {
+                        Circle()
+                            .fill(BrandMark.hullTop.opacity(0.3))
+                            .scaleEffect(1 + 0.7 * eased)
+                            .opacity(1 - eased)
+                        Circle().fill(LinearGradient(colors: [BrandMark.hullTop, BrandMark.hullBottom], startPoint: .top, endPoint: .bottom))
+                        Text("?").font(.system(size: 8, weight: .heavy, design: .rounded)).foregroundStyle(.white)
+                    }
                 }
                 .frame(width: 12, height: 12)
-                .onAppear {
-                    guard !Motion.reduced else { return }
-                    withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) { pulse = true }
-                }
             }
         }
         .frame(width: 14, height: 14)

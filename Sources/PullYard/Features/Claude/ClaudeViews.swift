@@ -405,7 +405,13 @@ struct SessionRow: View {
             if childCount > 0 {
                 Text("\(childCount)").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
             }
-            SessionIndicatorDot(indicator: indicator)
+            if indicator == .working && !open {
+                TimelineView(.periodic(from: .now, by: 2)) { context in
+                    SessionIndicatorDot(indicator: SessionIndicator(closed: session, now: context.date))
+                }
+            } else {
+                SessionIndicatorDot(indicator: indicator)
+            }
         }
         .padding(.vertical, 7)
         .padding(.leading, 4)
