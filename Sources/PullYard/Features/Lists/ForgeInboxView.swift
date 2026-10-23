@@ -32,7 +32,7 @@ struct ForgeInboxView: View {
             }
         }
         .overlay {
-            if loading && items.isEmpty { ProgressView().controlSize(.small) }
+            if loading && items.isEmpty { PullYardLoader(size: 44) }
         }
         .liveRefresh(updated: updated, refreshing: refreshing, error: items.isEmpty ? nil : error) {
             await load()
@@ -150,7 +150,7 @@ struct ForgeReposView: View {
             }
         }
         .overlay {
-            if loading && repos.isEmpty { ProgressView().controlSize(.small) }
+            if loading && repos.isEmpty { PullYardLoader(size: 44) }
         }
         .liveRefresh(updated: updated, refreshing: loading, error: repos.isEmpty ? nil : error) {
             await load()

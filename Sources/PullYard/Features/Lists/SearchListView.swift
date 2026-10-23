@@ -264,7 +264,7 @@ struct SearchListView: View {
             .opacity(model.loading && !model.showingCached && !model.items.isEmpty ? 0.55 : 1)
             .animation(.easeOut(duration: 0.15), value: model.loading)
             .overlay {
-                if model.loading && !model.checkingCache && model.items.isEmpty { ProgressView().controlSize(.small) }
+                if model.loading && !model.checkingCache && model.items.isEmpty { PullYardLoader(size: 44) }
             }
             .liveRefresh(updated: model.lastUpdated, refreshing: model.refreshing, error: model.items.isEmpty ? nil : model.error) {
                 await reload(silent: true)

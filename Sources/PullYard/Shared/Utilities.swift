@@ -261,8 +261,7 @@ struct LoadingView: View {
     @State private var visible = false
 
     var body: some View {
-        ProgressView()
-            .controlSize(.small)
+        PullYardLoader(size: 48)
             .opacity(visible ? 1 : 0)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .task {

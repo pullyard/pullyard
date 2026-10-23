@@ -82,7 +82,7 @@ struct RepoCodeView: View {
                 }
             }
             .listStyle(.inset)
-            .overlay { if model.loadingDir && model.entries.isEmpty { ProgressView().controlSize(.small) } }
+            .overlay { if model.loadingDir && model.entries.isEmpty { PullYardLoader(size: 44) } }
         }
     }
 

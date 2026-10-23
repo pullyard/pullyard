@@ -152,7 +152,7 @@ struct StacksListView: View {
             }
         }
         .overlay {
-            if model.loading && model.entries.isEmpty { ProgressView().controlSize(.small) }
+            if model.loading && model.entries.isEmpty { PullYardLoader(size: 44) }
         }
         .liveRefresh(updated: model.lastUpdated, refreshing: model.refreshing, error: model.entries.isEmpty ? nil : model.error) {
             await model.load(api: app.api, account: app.cacheAccount, force: true)

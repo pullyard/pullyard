@@ -34,7 +34,7 @@ struct ReposView: View {
                     .onAppear { if r.id == repos.last?.id { Task { await loadMore() } } }
             }
         }
-        .overlay { if loading && !checkingCache && repos.isEmpty { ProgressView().controlSize(.small) } }
+        .overlay { if loading && !checkingCache && repos.isEmpty { PullYardLoader(size: 44) } }
         .liveRefresh(updated: lastUpdated, refreshing: refreshing, error: repos.isEmpty ? nil : error) { await load() }
         .searchable(text: $text, placement: .toolbar, prompt: "Filter repositories")
         .navigationTitle("Repositories")
@@ -292,7 +292,7 @@ struct RepoDetailView: View {
             }
             if model.items.isEmpty, !model.loading { Text("Nothing here").font(.syBody).foregroundStyle(Color.syMuted) }
         }
-        .overlay { if model.loading && model.items.isEmpty { ProgressView().controlSize(.small) } }
+        .overlay { if model.loading && model.items.isEmpty { PullYardLoader(size: 44) } }
         .liveRefresh(updated: model.lastUpdated, refreshing: model.refreshing, error: model.items.isEmpty ? nil : model.error) {
             await model.load(api: app.api, account: app.cacheAccount, query: query, silent: true)
         }
