@@ -104,6 +104,18 @@ enum ToolGrouping {
         }
     }
 
+    static func tint(_ name: String) -> Color {
+        switch kind(name) {
+        case .command: return .sySky
+        case .read: return .syViolet
+        case .edit: return .syAgentAccent
+        case .search: return .syTeal
+        case .web: return .syIndigo
+        case .agent: return .syAmber
+        case .other: return .syMuted
+        }
+    }
+
     static func label(_ calls: [ChatToolCall]) -> String {
         var counts: [Kind: Int] = [:]
         for c in calls { counts[kind(c.name), default: 0] += 1 }
@@ -164,6 +176,7 @@ struct ToolGroupView: View {
                         if calls.contains(where: { $0.status == .running }) {
                             ProgressView().controlSize(.mini)
                         }
+                        ToolKindDots(calls: calls)
                         Text(ToolGrouping.label(calls)).foregroundStyle(Color.syMuted)
                         let failed = calls.filter { $0.status == .error }.count
                         if failed > 0 {
@@ -259,8 +272,12 @@ struct ToolRowView: View {
                     if open { chat.expandedTools.remove(call.id) } else { chat.expandedTools.insert(call.id) }
                 }
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: 7) {
                     statusGlyph
+                    Image(systemName: ToolPresentation.icon(call.name))
+                        .font(.syCaption)
+                        .foregroundStyle(ToolGrouping.tint(call.name))
+                        .frame(width: 14)
                     Text(ToolGrouping.title(call, folder: folder))
                         .foregroundStyle(call.status == .running ? Color.syText : Color.syMuted)
                         .lineLimit(1)
@@ -319,6 +336,26 @@ struct ToolRowView: View {
             }
         } else {
             ToolDetails(call: call, folder: folder)
+        }
+    }
+}
+
+struct ToolKindDots: View {
+    let calls: [ChatToolCall]
+
+    var body: some View {
+        var seen: [String] = []
+        for c in calls {
+            let icon = ToolPresentation.icon(c.name)
+            if !seen.contains(icon) { seen.append(icon) }
+        }
+        let names = Dictionary(calls.map { (ToolPresentation.icon($0.name), $0.name) }, uniquingKeysWith: { a, _ in a })
+        return HStack(spacing: 4) {
+            ForEach(seen.prefix(4), id: \.self) { icon in
+                Image(systemName: icon)
+                    .font(.syCaption2)
+                    .foregroundStyle(ToolGrouping.tint(names[icon] ?? ""))
+            }
         }
     }
 }

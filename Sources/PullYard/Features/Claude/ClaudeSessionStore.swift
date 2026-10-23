@@ -12,10 +12,58 @@ struct ClaudeSessionInfo: Identifiable, Hashable {
     let model: String?
     let linesAdded: Int?
     let linesRemoved: Int?
+    var parentId: String? = nil
+    var archived = false
 
     var worktreeName: String? {
         guard let r = cwd.range(of: "/.claude/worktrees/") else { return nil }
         return String(cwd[r.upperBound...]).components(separatedBy: "/").first
+    }
+}
+
+extension ClaudeSessionInfo {
+    func retitled(_ title: String) -> ClaudeSessionInfo {
+        var copy = ClaudeSessionInfo(id: id, file: file, cwd: cwd, title: title, branch: branch, modified: modified, prURL: prURL, prNumber: prNumber, model: model, linesAdded: linesAdded, linesRemoved: linesRemoved)
+        copy.parentId = parentId
+        copy.archived = archived
+        return copy
+    }
+}
+
+enum DesktopSessionIndex {
+    struct Link {
+        let parent: String?
+        let title: String?
+        let archived: Bool
+    }
+
+    static var directory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Claude/claude-code-sessions", isDirectory: true)
+    }
+
+    static func load(directory: URL = directory) -> [String: Link] {
+        let fm = FileManager.default
+        var records: [(local: String, cli: String, parentLocal: String?, title: String?, archived: Bool)] = []
+        let accounts = (try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        for account in accounts {
+            for org in (try? fm.contentsOfDirectory(at: account, includingPropertiesForKeys: nil)) ?? [] {
+                for file in (try? fm.contentsOfDirectory(at: org, includingPropertiesForKeys: nil)) ?? [] where file.pathExtension == "json" {
+                    guard let data = try? Data(contentsOf: file),
+                          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let local = obj["sessionId"] as? String, let cli = obj["cliSessionId"] as? String else { continue }
+                    let spawned = obj["spawnedFrom"] as? [String: Any]
+                    let parent = (spawned?["sessionId"] as? String) ?? (obj["forkedFromSessionId"] as? String)
+                    records.append((local, cli, parent, obj["title"] as? String, obj["isArchived"] as? Bool ?? false))
+                }
+            }
+        }
+        let cliByLocal = Dictionary(records.map { ($0.local, $0.cli) }, uniquingKeysWith: { a, _ in a })
+        var out: [String: Link] = [:]
+        for r in records {
+            out[r.cli] = Link(parent: r.parentLocal.flatMap { cliByLocal[$0] }, title: r.title, archived: r.archived)
+        }
+        return out
     }
 }
 
@@ -48,11 +96,17 @@ enum ClaudeSessionParser {
     static func loadAll(root: URL = root) -> [ClaudeProject] {
         let fm = FileManager.default
         guard let dirs = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return [] }
+        let desktop = DesktopSessionIndex.load()
         var byProject: [String: [ClaudeSessionInfo]] = [:]
         for dir in dirs {
             guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { continue }
             for file in files where file.pathExtension == "jsonl" {
-                guard let info = parse(file) else { continue }
+                guard var info = parse(file) else { continue }
+                if let link = desktop[info.id] {
+                    info.parentId = link.parent
+                    info.archived = link.archived
+                    if let title = link.title, !title.isEmpty { info = info.retitled(title) }
+                }
                 byProject[projectRoot(for: info.cwd), default: []].append(info)
             }
         }

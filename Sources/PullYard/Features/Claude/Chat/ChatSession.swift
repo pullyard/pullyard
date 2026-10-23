@@ -340,6 +340,7 @@ final class ChatSession {
 
     func interrupt() {
         control("interrupt", [:])
+        if busy { items.append(.notice(id: UUID().uuidString, text: "Interrupted", isError: false)) }
     }
 
     func setModel(_ value: String) {
@@ -537,6 +538,14 @@ final class ChatSession {
 
     static let maxResultLength = 64_000
 
+    static func historyUserItem(id: String, text raw: String) -> ChatItem? {
+        var text = raw.replacingOccurrences(of: "<system-reminder>[\\s\\S]*?</system-reminder>", with: "", options: .regularExpression)
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.hasPrefix("[Request interrupted by user") { return .notice(id: id, text: "Interrupted", isError: false) }
+        if text.isEmpty || text.hasPrefix("<command-name>") || text.hasPrefix("<local-command") || text.hasPrefix("<command-message>") || text.hasPrefix("Caveat:") { return nil }
+        return .user(id: id, text: text, images: [])
+    }
+
     static func resultText(_ content: Any?) -> String? {
         let text: String
         if let s = content as? String {
@@ -684,9 +693,7 @@ final class ChatSession {
             if type == "user" {
                 if let s = msg["content"] as? String {
                     if o["isCompactSummary"] as? Bool == true { continue }
-                    let clean = s.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if clean.hasPrefix("<command-name>") || clean.hasPrefix("<local-command") || clean.hasPrefix("Caveat:") || clean.isEmpty { continue }
-                    loaded.append(.user(id: (o["uuid"] as? String) ?? UUID().uuidString, text: clean, images: []))
+                    if let item = ChatSession.historyUserItem(id: (o["uuid"] as? String) ?? UUID().uuidString, text: s) { loaded.append(item) }
                 } else if let blocks = msg["content"] as? [[String: Any]] {
                     var texts: [String] = []
                     for b in blocks {
@@ -698,7 +705,7 @@ final class ChatSession {
                             texts.append(s)
                         }
                     }
-                    if !texts.isEmpty { loaded.append(.user(id: (o["uuid"] as? String) ?? UUID().uuidString, text: texts.joined(separator: "\n"), images: [])) }
+                    if !texts.isEmpty, let item = ChatSession.historyUserItem(id: (o["uuid"] as? String) ?? UUID().uuidString, text: texts.joined(separator: "\n")) { loaded.append(item) }
                 }
             } else if type == "assistant", let blocks = msg["content"] as? [[String: Any]] {
                 let uuid = (o["uuid"] as? String) ?? UUID().uuidString

@@ -37,6 +37,7 @@ struct ClaudeProjectsColumn: View {
     @Environment(AppModel.self) private var app
     @State private var query = ""
     @State private var expanded: Set<String> = []
+    @State private var collapsedParents: Set<String> = []
     @State private var ready = false
 
     private var ws: ClaudeWorkspace { app.claude }
@@ -125,6 +126,8 @@ struct ClaudeProjectsColumn: View {
                 Section {
                     ForEach(ws.tabs) { tab in
                         OpenTabRow(tab: tab, selected: ws.selectedTabID == tab.id)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
+                            .listRowSeparator(.hidden)
                             .contentShape(Rectangle())
                             .onTapGesture { ws.selectedTabID = tab.id }
                             .listRowBackground(ClaudeRowHighlight(selected: ws.selectedTabID == tab.id))
@@ -160,12 +163,13 @@ struct ClaudeProjectsColumn: View {
             ForEach(filtered) { project in
                 Section {
                     if expanded.contains(project.id) || !query.isEmpty {
-                        ForEach(project.sessions.prefix(query.isEmpty ? 30 : 200)) { s in
-                            SessionRow(session: s, open: ws.tab(forSession: s.id) != nil)
-                                .rowAppear(s.id, ws.sessionRows)
-                                .contentShape(Rectangle())
-                                .onTapGesture { ws.resume(s) }
-                                .contextMenu { sessionMenu(s) }
+                        ForEach(SessionTree.build(Array(project.sessions.filter { !$0.archived }.prefix(query.isEmpty ? 40 : 200)))) { node in
+                            sessionRow(node.session, children: node.children.count)
+                            if !node.children.isEmpty, !collapsedParents.contains(node.id) {
+                                ForEach(Array(node.children.enumerated()), id: \.element.id) { index, child in
+                                    sessionRow(child, depth: 1, last: index == node.children.count - 1)
+                                }
+                            }
                         }
                     }
                 } header: {
@@ -179,6 +183,26 @@ struct ClaudeProjectsColumn: View {
             if ws.projects.isEmpty, !ws.loadingProjects {
                 Text("No Claude Code sessions yet").font(.syBody).foregroundStyle(Color.syMuted)
             }
+    }
+
+    private func sessionRow(_ s: ClaudeSessionInfo, children: Int = 0, depth: Int = 0, last: Bool = false) -> some View {
+        SessionRow(
+            session: s,
+            open: ws.tab(forSession: s.id) != nil,
+            indicator: ws.indicator(for: s),
+            childCount: children,
+            collapsed: collapsedParents.contains(s.id),
+            depth: depth,
+            last: last
+        ) {
+            if collapsedParents.contains(s.id) { collapsedParents.remove(s.id) } else { collapsedParents.insert(s.id) }
+        }
+        .rowAppear(s.id, ws.sessionRows)
+        .contentShape(Rectangle())
+        .onTapGesture { ws.resume(s) }
+        .contextMenu { sessionMenu(s) }
+        .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
+        .listRowSeparator(.hidden)
     }
 
     @ViewBuilder
@@ -232,31 +256,105 @@ struct ProjectHeader: View {
         .onHover { hover = $0 }
         .help(project.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
         .textCase(nil)
-        .padding(.vertical, 2)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+    }
+}
+
+enum SessionTree {
+    struct Node: Identifiable {
+        let session: ClaudeSessionInfo
+        let children: [ClaudeSessionInfo]
+        var id: String { session.id }
+    }
+
+    static func build(_ sessions: [ClaudeSessionInfo]) -> [Node] {
+        let ids = Set(sessions.map(\.id))
+        var children: [String: [ClaudeSessionInfo]] = [:]
+        var roots: [ClaudeSessionInfo] = []
+        for s in sessions {
+            if let p = s.parentId, p != s.id, ids.contains(p) { children[p, default: []].append(s) } else { roots.append(s) }
+        }
+        return roots
+            .map { Node(session: $0, children: (children[$0.id] ?? []).sorted { $0.modified > $1.modified }) }
+            .sorted { ($0.children.first?.modified ?? $0.session.modified).max($0.session.modified) > ($1.children.first?.modified ?? $1.session.modified).max($1.session.modified) }
+    }
+}
+
+private extension Date {
+    func max(_ other: Date) -> Date { self > other ? self : other }
+}
+
+struct SessionTreeGuide: View {
+    let last: Bool
+
+    var body: some View {
+        GeometryReader { g in
+            Path { p in
+                let x: CGFloat = 0.5
+                let mid = g.size.height / 2
+                p.move(to: CGPoint(x: x, y: 0))
+                if last {
+                    p.addLine(to: CGPoint(x: x, y: mid - 6))
+                    p.addQuadCurve(to: CGPoint(x: x + 8, y: mid), control: CGPoint(x: x, y: mid))
+                } else {
+                    p.addLine(to: CGPoint(x: x, y: g.size.height))
+                }
+            }
+            .stroke(Color.syLineStrong, lineWidth: 1)
+        }
+        .frame(width: 10)
     }
 }
 
 struct SessionRow: View {
     let session: ClaudeSessionInfo
     let open: Bool
+    var indicator: SessionIndicator = .none
+    var childCount = 0
+    var collapsed = false
+    var depth = 0
+    var last = false
+    var onToggle: () -> Void = {}
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
+            if depth > 0 {
+                SessionTreeGuide(last: last).padding(.leading, 10)
+            }
             Text(session.title)
                 .font(.syBody)
                 .fontWeight(open ? .semibold : .regular)
-                .foregroundStyle(Color.syText)
+                .foregroundStyle(depth > 0 ? Color.syMuted : Color.syText)
                 .lineLimit(1)
-            Spacer(minLength: 6)
-            Text(Fmt.rel(session.modified)).font(.syCaption).foregroundStyle(Color.syDim).fixedSize()
+            if childCount > 0 {
+                Button(action: onToggle) {
+                    Image(systemName: "chevron.down")
+                        .font(.syCaption2.weight(.semibold))
+                        .rotationEffect(.degrees(collapsed ? -90 : 0))
+                        .foregroundStyle(Color.syDim)
+                        .padding(2)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 8)
+            if session.prNumber != nil {
+                Image(systemName: "arrow.triangle.pull").font(.syCaption).foregroundStyle(Color.syViolet.opacity(0.85))
+            }
+            if childCount > 0 {
+                Text("\(childCount)").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
+            }
+            SessionIndicatorDot(indicator: indicator)
         }
-        .padding(.leading, 16)
-        .padding(.vertical, 1)
+        .padding(.vertical, 7)
+        .padding(.leading, 4)
+        .frame(minHeight: 32)
         .help(details)
     }
 
     private var details: String {
-        var parts: [String] = []
+        var parts = ["Updated " + Fmt.rel(session.modified)]
         if let b = session.branch { parts.append("Branch: " + b) }
         if let w = session.worktreeName { parts.append("Worktree: " + w) }
         if let n = session.prNumber { parts.append("PR #\(n)") }
@@ -270,12 +368,14 @@ struct OpenTabRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            SessionStateGlyph(state: tab.state)
             Text(tab.title).font(.syBody).lineLimit(1).fontWeight(selected ? .semibold : .regular).foregroundStyle(Color.syText)
             Spacer(minLength: 6)
             Text(tab.projectName).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
+            SessionIndicatorDot(indicator: SessionIndicator(tab: tab))
         }
-        .padding(.vertical, 1)
+        .padding(.vertical, 7)
+        .padding(.leading, 4)
+        .frame(minHeight: 32)
         .help(tab.state.help)
     }
 }

@@ -94,6 +94,7 @@ final class ClaudeTab: Identifiable {
     var terminalRunning = false
     var terminalSleeping = false
     var terminalMemory = 0
+    var unread = false
     var exitCode: Int32?
     var startedAt = Date()
     let git: GitWorkingCopy
@@ -165,7 +166,13 @@ final class ClaudeTab: Identifiable {
 @MainActor
 final class ClaudeWorkspace {
     var tabs: [ClaudeTab] = []
-    var selectedTabID: UUID?
+    var selectedTabID: UUID? {
+        didSet {
+            guard let tab = selectedTab else { return }
+            tab.unread = false
+            SessionSeen.shared.mark(tab.sessionId)
+        }
+    }
     var projects: [ClaudeProject] = []
     var loadingProjects = false
     var projectsUpdated: Date?
@@ -280,6 +287,12 @@ final class ClaudeWorkspace {
             if let s = project.sessions.first(where: { $0.id == tab.sessionId }), let n = s.prNumber, let url = s.prURL { return (n, url) }
         }
         return nil
+    }
+
+    func indicator(for session: ClaudeSessionInfo) -> SessionIndicator {
+        if let tab = tab(forSession: session.id) { return SessionIndicator(tab: tab) }
+        if Date().timeIntervalSince(session.modified) < 15 { return .working }
+        return SessionSeen.shared.isUnread(session.id, modified: session.modified) ? .done : .none
     }
 
     func tab(forSession id: String) -> ClaudeTab? {
@@ -412,8 +425,13 @@ final class ClaudeWorkspace {
     private func startChat(_ tab: ClaudeTab, resume: String?, fork: Bool = false, prompt: String?, mode modeOverride: ClaudeMode?) {
         guard let chat = tab.chat else { return }
         chat.onSessionId = { [weak tab] sid in tab?.sessionId = sid }
-        chat.onTurnFinished = { [weak tab] in
+        chat.onTurnFinished = { [weak self, weak tab] in
             guard let tab else { return }
+            if self?.selectedTabID == tab.id, NSApp.isActive {
+                SessionSeen.shared.mark(tab.sessionId)
+            } else {
+                tab.unread = true
+            }
             Task { await tab.git.refresh() }
         }
         let m = modeOverride ?? mode

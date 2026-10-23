@@ -180,3 +180,88 @@ struct TabStateBadge: View {
         .help(state.help + (memory.map { $0 > 0 ? " — " + ProcessMemory.format($0) : "" } ?? ""))
     }
 }
+
+enum SessionIndicator {
+    case none, working, done, waiting
+
+    @MainActor init(tab: ClaudeTab) {
+        switch tab.state {
+        case .waiting: self = .waiting
+        case .working: self = .working
+        default: self = tab.unread ? .done : .none
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .none: return ""
+        case .working: return "Claude is working"
+        case .done: return "Finished — not viewed yet"
+        case .waiting: return "Claude is waiting for you"
+        }
+    }
+}
+
+struct SessionIndicatorDot: View {
+    let indicator: SessionIndicator
+    @State private var pulse = false
+
+    var body: some View {
+        Group {
+            switch indicator {
+            case .none:
+                EmptyView()
+            case .working:
+                Circle()
+                    .fill(Color.syMuted)
+                    .frame(width: 7, height: 7)
+                    .opacity(pulse ? 0.35 : 1)
+                    .onAppear {
+                        guard !Motion.reduced else { return }
+                        withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
+                    }
+            case .done:
+                Circle().fill(Color.sySky).frame(width: 7, height: 7)
+            case .waiting:
+                Circle().fill(Color.syAmber).frame(width: 7, height: 7)
+                    .overlay(Circle().stroke(Color.syAmber.opacity(0.35), lineWidth: 3))
+            }
+        }
+        .frame(width: 12, height: 12)
+        .help(indicator.help)
+    }
+}
+
+@Observable
+@MainActor
+final class SessionSeen {
+    static let shared = SessionSeen()
+    private static let key = "agents.seen"
+    private static let baselineKey = "agents.seenBaseline"
+    private var seen: [String: Date]
+    private let baseline: Date
+
+    private init() {
+        let d = UserDefaults.standard
+        if let b = d.object(forKey: Self.baselineKey) as? Date {
+            baseline = b
+        } else {
+            baseline = Date()
+            d.set(baseline, forKey: Self.baselineKey)
+        }
+        seen = (d.dictionary(forKey: Self.key) as? [String: Date]) ?? [:]
+    }
+
+    func isUnread(_ id: String, modified: Date) -> Bool {
+        modified > baseline && modified > (seen[id] ?? .distantPast).addingTimeInterval(2)
+    }
+
+    func mark(_ id: String) {
+        guard !id.isEmpty else { return }
+        seen[id] = Date()
+        if seen.count > 600 {
+            for (k, _) in seen.sorted(by: { $0.value < $1.value }).prefix(seen.count - 500) { seen[k] = nil }
+        }
+        UserDefaults.standard.set(seen, forKey: Self.key)
+    }
+}

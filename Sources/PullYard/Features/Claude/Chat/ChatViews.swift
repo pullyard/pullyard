@@ -12,7 +12,7 @@ struct ChatView: View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
+                    LazyVStack(alignment: .leading, spacing: 18) {
                         if chat.items.isEmpty {
                             ChatWelcome(chat: chat, folder: tab.folder)
                         }
@@ -38,8 +38,8 @@ struct ChatView: View {
                         }
                         Color.clear.frame(height: 1).id("bottom")
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 20)
                     .animation(Motion.smooth, value: chat.items.count)
                     .animation(Motion.fade, value: chat.busy)
                     .animation(Motion.spring, value: chat.lastError)
@@ -256,10 +256,23 @@ struct ChatItemView: View {
         case .tool(let call):
             ToolCallView(call: call, chat: chat, folder: folder)
         case .notice(_, let text, let isError):
-            HStack(spacing: 6) {
-                Rectangle().fill(Color.syLine).frame(height: 1)
-                Text(text).font(.syCaption).foregroundStyle(isError ? Color.syRed : Color.syDim).fixedSize()
-                Rectangle().fill(Color.syLine).frame(height: 1)
+            if text == "Interrupted" {
+                HStack(spacing: 5) {
+                    Image(systemName: "stop.circle")
+                    Text("Interrupted")
+                }
+                .font(.syCaption)
+                .foregroundStyle(Color.syMuted)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(Color.syText.opacity(0.06)))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
+                HStack(spacing: 6) {
+                    Rectangle().fill(Color.syLine).frame(height: 1)
+                    Text(text).font(.syCaption).foregroundStyle(isError ? Color.syRed : Color.syDim).fixedSize()
+                    Rectangle().fill(Color.syLine).frame(height: 1)
+                }
             }
         }
     }
@@ -271,32 +284,36 @@ struct UserBubble: View {
     @State private var expanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !images.isEmpty {
-                HStack(spacing: 6) {
-                    ForEach(images) { img in
-                        if let ns = img.image {
-                            Image(nsImage: ns).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 6))
+        HStack {
+            Spacer(minLength: 80)
+            VStack(alignment: .leading, spacing: 8) {
+                if !images.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(images) { img in
+                            if let ns = img.image {
+                                Image(nsImage: ns).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
                         }
                     }
                 }
-            }
-            if !text.isEmpty {
-                Text(text)
-                    .foregroundStyle(Color.syText)
-                    .textSelection(.enabled)
-                    .lineLimit(expanded ? nil : 12)
-                    .fixedSize(horizontal: false, vertical: true)
-                if text.split(separator: "\n").count > 12 {
-                    Button(expanded ? "Collapse" : "Show all") { expanded.toggle() }
-                        .buttonStyle(.link)
-                        .font(.syCaption)
+                if !text.isEmpty {
+                    Text(text)
+                        .foregroundStyle(Color.syText)
+                        .textSelection(.enabled)
+                        .lineLimit(expanded ? nil : 12)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if text.split(separator: "\n").count > 12 {
+                        Button(expanded ? "Collapse" : "Show all") { expanded.toggle() }
+                            .buttonStyle(.link)
+                            .font(.syCaption)
+                    }
                 }
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.syAgentAccent.opacity(0.13)))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.syAgentAccent.opacity(0.22)))
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .card(radius: 10)
     }
 }
 
@@ -321,7 +338,7 @@ struct ThinkingView: View {
                 Button { withAnimation(Motion.quick) { open.toggle() } } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "chevron.right").font(.syCaption2).rotationEffect(.degrees(open ? 90 : 0))
-                        Image(systemName: "brain").foregroundStyle(Color.syDim)
+                        Image(systemName: "brain").foregroundStyle(Color.syViolet.opacity(0.8))
                         Text("Thinking")
                     }
                     .font(.syCaption)
