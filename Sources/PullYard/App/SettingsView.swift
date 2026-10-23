@@ -121,6 +121,8 @@ struct SettingsView: View {
                             }
                         }
                     }
+                    Toggle("Notify when Claude finishes or needs you", isOn: Binding(get: { AgentNotifier.enabled }, set: { UserDefaults.standard.set($0, forKey: AgentNotifier.enabledKey); browserTick += 1 }))
+                        .id(browserTick)
                     Picker("Sleep idle sessions after", selection: Binding(get: { app.claude.idleMinutes }, set: { app.claude.idleMinutes = $0 })) {
                         Text("Never").tag(0)
                         Text("5 minutes").tag(5)

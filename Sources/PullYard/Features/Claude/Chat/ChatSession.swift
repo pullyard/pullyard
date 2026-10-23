@@ -178,6 +178,14 @@ final class ChatSession {
     @ObservationIgnored private var intentionalStop = false
     @ObservationIgnored var onSessionId: ((String) -> Void)?
     @ObservationIgnored var onTurnFinished: (() -> Void)?
+    @ObservationIgnored var onNeedsInput: ((PermissionRequest) -> Void)?
+
+    var lastAssistantText: String? {
+        for item in items.reversed() {
+            if case .text(let t) = item, !t.text.isEmpty { return t.text }
+        }
+        return nil
+    }
 
     init(folder: String, configDir: String?) {
         self.folder = folder
@@ -619,6 +627,7 @@ final class ChatSession {
         }
         pendingPermissions.append(p)
         NSApp.requestUserAttention(.informationalRequest)
+        onNeedsInput?(p)
     }
 
     private func handleRateLimit(_ o: [String: Any]) {

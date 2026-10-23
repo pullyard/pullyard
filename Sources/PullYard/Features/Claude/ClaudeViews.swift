@@ -53,7 +53,7 @@ struct ClaudeProjectsColumn: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 switch ClaudeAccountStore.shared.status {
                 case .loggedIn(let info):
                     ClaudeAccountCard(info: info, compact: true)

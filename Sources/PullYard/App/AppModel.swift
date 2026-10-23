@@ -136,7 +136,23 @@ final class AppModel {
     init() {
         URLCache.shared = URLCache(memoryCapacity: 40 << 20, diskCapacity: 200 << 20)
         Diagnostics.shared.start()
-        StackNotesMCP.target = { [weak self] in
+        claude.observeBadge()
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.section == .claude, let tab = self.claude.selectedTab else { return }
+                tab.unread = false
+                SessionSeen.shared.mark(tab.sessionId)
+            }
+        }
+        NotificationCenter.default.addObserver(forName: .openAgentTab, object: nil, queue: .main) { [weak self] note in
+            guard let id = note.object as? UUID else { return }
+            MainActor.assumeIsolated {
+                guard let self, self.claude.tabs.contains(where: { $0.id == id }) else { return }
+                self.section = .claude
+                self.claude.selectedTabID = id
+            }
+        }
+                StackNotesMCP.target = { [weak self] in
             guard let self, let api = self.api else { return nil }
             return (self.cacheAccount, api.host)
         }

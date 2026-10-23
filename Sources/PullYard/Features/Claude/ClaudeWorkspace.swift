@@ -289,6 +289,22 @@ final class ClaudeWorkspace {
         return nil
     }
 
+    func isWatching(_ tab: ClaudeTab) -> Bool {
+        selectedTabID == tab.id && NSApp.isActive && NSApp.keyWindow?.isVisible == true
+    }
+
+    var attentionBadge: Int {
+        tabs.filter { $0.state == .waiting || $0.unread }.count
+    }
+
+    func observeBadge() {
+        withObservationTracking {
+            AgentNotifier.setBadge(attentionBadge)
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.observeBadge() }
+        }
+    }
+
     func indicator(for session: ClaudeSessionInfo) -> SessionIndicator {
         if let tab = tab(forSession: session.id) { return SessionIndicator(tab: tab) }
         if Date().timeIntervalSince(session.modified) < 15 { return .working }
@@ -427,12 +443,18 @@ final class ClaudeWorkspace {
         chat.onSessionId = { [weak tab] sid in tab?.sessionId = sid }
         chat.onTurnFinished = { [weak self, weak tab] in
             guard let tab else { return }
-            if self?.selectedTabID == tab.id, NSApp.isActive {
+            if self?.isWatching(tab) == true {
                 SessionSeen.shared.mark(tab.sessionId)
             } else {
                 tab.unread = true
+                AgentNotifier.post(tab: tab.id, title: "Claude finished · " + tab.title, body: AgentNotifier.snippet(tab.chat?.lastAssistantText))
             }
             Task { await tab.git.refresh() }
+        }
+        chat.onNeedsInput = { [weak self, weak tab] request in
+            guard let tab, self?.isWatching(tab) != true else { return }
+            let body = request.toolName == "AskUserQuestion" ? "Claude has a question for you" : request.toolName == "ExitPlanMode" ? "Claude has a plan ready for review" : "Claude needs permission: " + request.toolName
+            AgentNotifier.post(tab: tab.id, title: tab.title, body: body)
         }
         let m = modeOverride ?? mode
         chat.start(
