@@ -24,7 +24,7 @@ struct RootView: View {
         }
         .animation(Motion.smooth, value: splashHold)
         .task {
-            try? await Task.sleep(nanoseconds: 750_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(SplashLogo.hold * 1_000_000_000))
             splashHold = false
         }
         .task { await Updater.shared.checkOnLaunch() }
