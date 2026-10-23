@@ -7,6 +7,7 @@ struct ChatView: View {
     let tab: ClaudeTab
     let chat: ChatSession
     @State private var follow = ChatFollow()
+    @State private var awayCount: Int?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -74,15 +75,19 @@ struct ChatView: View {
                 .onChange(of: tab.id) { jumpToBottom(proxy) }
                 .overlay(alignment: .bottom) {
                     if !follow.stick, !chat.items.isEmpty {
-                        JumpToLatestButton {
+                        JumpToLatestButton(newCount: max(0, chat.items.count - (awayCount ?? chat.items.count))) {
                             follow.stick = true
-                            withAnimation(Motion.smooth) { proxy.scrollTo("bottom", anchor: .bottom) }
+                            withAnimation(Motion.reduced ? nil : .spring(response: 0.55, dampingFraction: 0.86)) { proxy.scrollTo("bottom", anchor: .bottom) }
                         }
-                        .padding(.bottom, 14)
-                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                        .padding(.bottom, 16)
+                        .transition(Motion.reduced ? .opacity : .asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.6)).combined(with: .offset(y: 14)),
+                            removal: .opacity.combined(with: .scale(scale: 0.85)).combined(with: .offset(y: 10))
+                        ))
                     }
                 }
-                .animation(Motion.spring, value: follow.stick)
+                .animation(Motion.reduced ? nil : .spring(response: 0.42, dampingFraction: 0.7), value: follow.stick)
+                .onChange(of: follow.stick) { _, stick in awayCount = stick ? nil : chat.items.count }
             }
             if chat.sleeping && !chat.running {
                 HStack(spacing: 8) {
@@ -202,29 +207,96 @@ private struct ChatScrollObserver: NSViewRepresentable {
 }
 
 struct JumpToLatestButton: View {
+    var newCount = 0
     let action: () -> Void
     @State private var hover = false
+    @State private var pressed = false
     @State private var start = Date()
 
     var body: some View {
         Button(action: action) {
-            TimelineView(.animation(minimumInterval: 1 / 60, paused: Motion.reduced)) { context in
+            TimelineView(.animation(minimumInterval: 1 / 120, paused: Motion.reduced)) { context in
                 let t = context.date.timeIntervalSince(start)
-                let sail = Motion.reduced ? 0 : CGFloat(sin(t * 2.2)) * 2.2 + 1
-                PullYardLogoMark(progress: 1, size: 30)
-                    .rotationEffect(.degrees(90))
-                    .offset(y: sail)
+                ZStack {
+                    Circle().fill(Color.syRaised)
+                    DiveLogo(time: Motion.reduced ? nil : t)
+                        .clipShape(Circle())
+                    Circle()
+                        .strokeBorder(
+                            AngularGradient(colors: [BrandMark.violet, BrandMark.sky, BrandMark.violet.opacity(0.25), BrandMark.violet], center: .center, angle: .degrees(Motion.reduced ? 0 : t * 70)),
+                            lineWidth: 1.5
+                        )
+                }
+                .frame(width: 44, height: 44)
             }
-            .frame(width: 44, height: 44)
-            .background(Circle().fill(Color.syRaised))
-            .overlay(Circle().strokeBorder(LinearGradient(colors: [BrandMark.violet, BrandMark.sky], startPoint: .top, endPoint: .bottom), lineWidth: 1.5))
-            .clipShape(Circle())
-            .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
-            .scaleEffect(hover ? 1.06 : 1)
+            .shadow(color: .black.opacity(hover ? 0.32 : 0.2), radius: hover ? 14 : 9, y: hover ? 6 : 3)
+            .overlay(alignment: .topTrailing) {
+                if newCount > 0 {
+                    Text(newCount > 99 ? "99+" : "\(newCount)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .frame(minWidth: 18, minHeight: 18)
+                        .background(Capsule().fill(LinearGradient(colors: [BrandMark.violet, BrandMark.sky], startPoint: .topLeading, endPoint: .bottomTrailing)))
+                        .overlay(Capsule().strokeBorder(Color.syPanel, lineWidth: 2))
+                        .offset(x: 6, y: -4)
+                        .transition(.scale.combined(with: .opacity))
+                        .id(newCount)
+                }
+            }
+            .scaleEffect(pressed ? 0.92 : (hover ? 1.06 : 1))
+            .offset(y: hover ? -2 : 0)
         }
-        .buttonStyle(.plain)
-        .onHover { h in withAnimation(Motion.quick) { hover = h } }
-        .help("Jump to the latest message")
+        .buttonStyle(PressReporter(pressed: $pressed))
+        .onHover { h in withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { hover = h } }
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: newCount)
+        .help(newCount > 0 ? "\(newCount) new — jump to the latest message" : "Jump to the latest message")
+    }
+}
+
+private struct PressReporter: ButtonStyle {
+    @Binding var pressed: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .onChange(of: configuration.isPressed) { _, p in
+                withAnimation(.spring(response: 0.22, dampingFraction: 0.6)) { pressed = p }
+            }
+    }
+}
+
+private struct DiveLogo: View {
+    let time: Double?
+    private static let cycle = 2.6
+
+    var body: some View {
+        let (y, opacity, bob) = state
+        PullYardLogoMark(progress: 1, size: 30)
+            .offset(y: y + bob)
+            .opacity(opacity)
+            .frame(width: 44, height: 44)
+    }
+
+    private var state: (CGFloat, Double, CGFloat) {
+        guard let time else { return (0, 1, 0) }
+        let t = time.truncatingRemainder(dividingBy: Self.cycle)
+        func easeOut(_ x: Double) -> Double { 1 - pow(1 - x, 4) }
+        func easeIn(_ x: Double) -> Double { pow(x, 2.6) }
+        func smooth(_ x: Double) -> Double { 0.5 - 0.5 * cos(.pi * min(max(x, 0), 1)) }
+        switch t {
+        case ..<0.7:
+            let p = easeOut(t / 0.7)
+            return (CGFloat(-34 * (1 - p)), smooth(t / 0.45), 0)
+        case ..<1.9:
+            let local = (t - 0.7) / 1.2
+            let envelope = sin(.pi * local)
+            return (0, 1, CGFloat(sin(local * .pi * 2) * 1.4 * envelope))
+        case ..<2.45:
+            let p = easeIn((t - 1.9) / 0.55)
+            return (CGFloat(34 * p), 1 - smooth((t - 2.05) / 0.4), 0)
+        default:
+            return (34, 0, 0)
+        }
     }
 }
 
