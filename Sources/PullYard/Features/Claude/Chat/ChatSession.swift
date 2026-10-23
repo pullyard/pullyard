@@ -162,6 +162,7 @@ final class ChatSession {
     var sleeping = false
     @ObservationIgnored var lastActivity = Date()
     var memoryBytes = 0
+    var expandedTools: Set<String> = []
 
     @ObservationIgnored private var process: Process?
     @ObservationIgnored private var stdin: FileHandle?

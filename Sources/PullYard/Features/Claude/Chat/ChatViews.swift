@@ -21,8 +21,8 @@ struct ChatView: View {
                                 switch entry {
                                 case .item(let item):
                                     ChatItemView(item: item, chat: chat, folder: tab.folder)
-                                case .tools(_, let calls):
-                                    ToolGroupView(calls: calls, chat: chat, folder: tab.folder)
+                                case .tools(let id, let steps):
+                                    ToolGroupView(id: id, steps: steps, chat: chat, folder: tab.folder)
                                 }
                             }
                             .id(entry.id)

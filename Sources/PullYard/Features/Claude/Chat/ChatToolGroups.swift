@@ -1,8 +1,25 @@
 import SwiftUI
 
+enum ToolStep: Identifiable {
+    case call(ChatToolCall)
+    case thinking(ChatText)
+
+    var id: String {
+        switch self {
+        case .call(let c): return c.id
+        case .thinking(let t): return "k" + t.id
+        }
+    }
+
+    var call: ChatToolCall? {
+        if case .call(let c) = self { return c }
+        return nil
+    }
+}
+
 enum ChatDisplayItem: Identifiable {
     case item(ChatItem)
-    case tools(id: String, calls: [ChatToolCall])
+    case tools(id: String, steps: [ToolStep])
 
     var id: String {
         switch self {
@@ -13,18 +30,22 @@ enum ChatDisplayItem: Identifiable {
 
     static func build(_ items: [ChatItem]) -> [ChatDisplayItem] {
         var out: [ChatDisplayItem] = []
-        var run: [ChatToolCall] = []
+        var run: [ToolStep] = []
         func flush() {
-            guard let first = run.first else { return }
-            out.append(.tools(id: first.id, calls: run))
+            guard let first = run.first(where: { $0.call != nil })?.call else {
+                for step in run { if case .thinking(let t) = step { out.append(.item(.thinking(t))) } }
+                run = []
+                return
+            }
+            out.append(.tools(id: first.id, steps: run))
             run = []
         }
         for item in items {
             switch item {
             case .tool(let call) where ToolGrouping.groupable(call):
-                run.append(call)
-            case .thinking where !run.isEmpty:
-                continue
+                run.append(.call(call))
+            case .thinking(let t) where !run.isEmpty:
+                run.append(.thinking(t))
             default:
                 flush()
                 out.append(.item(item))
@@ -120,17 +141,25 @@ enum ToolGrouping {
 }
 
 struct ToolGroupView: View {
-    let calls: [ChatToolCall]
+    let id: String
+    let steps: [ToolStep]
     let chat: ChatSession
     let folder: String
-    @State private var open = false
+
+    private var calls: [ChatToolCall] { steps.compactMap(\.call) }
+    private var groupKey: String { "g" + id }
+
+    private var open: Bool {
+        chat.expandedTools.contains(groupKey) || calls.contains { chat.expandedTools.contains($0.id) }
+    }
 
     var body: some View {
-        if calls.count == 1, let call = calls.first {
+        if steps.count == 1, let call = steps.first?.call {
             ToolRowView(call: call, chat: chat, folder: folder, framed: false)
         } else {
+            let calls = self.calls
             VStack(alignment: .leading, spacing: 6) {
-                Button { withAnimation(Motion.quick) { open.toggle() } } label: {
+                Button(action: toggle) {
                     HStack(spacing: 6) {
                         if calls.contains(where: { $0.status == .running }) {
                             ProgressView().controlSize(.mini)
@@ -151,14 +180,65 @@ struct ToolGroupView: View {
                 .buttonStyle(.plain)
                 if open {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(calls.enumerated()), id: \.element.id) { index, call in
+                        ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
                             if index > 0 { Rectangle().fill(Color.syLine).frame(height: 1) }
-                            ToolRowView(call: call, chat: chat, folder: folder, framed: true)
+                            switch step {
+                            case .call(let call): ToolRowView(call: call, chat: chat, folder: folder, framed: true)
+                            case .thinking(let t): ThinkingStepRow(text: t, chat: chat)
+                            }
                         }
                     }
                     .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syLine))
                     .transition(.opacity)
                 }
+            }
+        }
+    }
+
+    private func toggle() {
+        withAnimation(Motion.quick) {
+            if open {
+                chat.expandedTools.remove(groupKey)
+                for c in calls { chat.expandedTools.remove(c.id) }
+            } else {
+                chat.expandedTools.insert(groupKey)
+            }
+        }
+    }
+}
+
+struct ThinkingStepRow: View {
+    let text: ChatText
+    let chat: ChatSession
+
+    private var key: String { "k" + text.id }
+    private var open: Bool { chat.expandedTools.contains(key) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(Motion.quick) {
+                    if open { chat.expandedTools.remove(key) } else { chat.expandedTools.insert(key) }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Thinking").foregroundStyle(Color.syDim)
+                    Image(systemName: "chevron.right")
+                        .font(.syCaption2.weight(.semibold))
+                        .foregroundStyle(Color.syDim)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                    Spacer(minLength: 0)
+                }
+                .font(.syCallout)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if open {
+                Text(text.text).font(.syCallout).foregroundStyle(Color.syMuted).textSelection(.enabled)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
             }
         }
     }
@@ -169,11 +249,16 @@ struct ToolRowView: View {
     let chat: ChatSession
     let folder: String
     let framed: Bool
-    @State private var open = false
+
+    private var open: Bool { chat.expandedTools.contains(call.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button { withAnimation(Motion.quick) { open.toggle() } } label: {
+            Button {
+                withAnimation(Motion.quick) {
+                    if open { chat.expandedTools.remove(call.id) } else { chat.expandedTools.insert(call.id) }
+                }
+            } label: {
                 HStack(spacing: 6) {
                     statusGlyph
                     Text(ToolGrouping.title(call, folder: folder))

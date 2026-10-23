@@ -1140,7 +1140,9 @@ struct AgentBranchMenu: View {
                 Button("New Branch…") { newBranch() }
                     .disabled(tab.state == .working)
                 Divider()
-                Button("Copy Branch Name") { copyToPasteboard(branch) }
+                if branch != "HEAD" {
+                    Button("Copy Branch Name") { copyToPasteboard(branch) }
+                }
                 if let worktree = git.worktree {
                     Button("Reveal Worktree “\(worktree)” in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: tab.folder)]) }
                 }
@@ -1152,7 +1154,7 @@ struct AgentBranchMenu: View {
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "arrow.triangle.branch").imageScale(.small)
-                    Text(branch).lineLimit(1).truncationMode(.middle)
+                    Text(branch == "HEAD" ? "Detached HEAD" : branch).lineLimit(1).truncationMode(.middle)
                     if let worktree = git.worktree {
                         Text("·").foregroundStyle(Color.syDim)
                         Image(systemName: "square.stack.3d.up").imageScale(.small)

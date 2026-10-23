@@ -17,7 +17,7 @@ final class ChatToolGroupTests: XCTestCase {
         ]
         let built = ChatDisplayItem.build(items)
         XCTAssertEqual(built.map(\.id), ["u1", "ga", "tt", "gc"])
-        if case .tools(_, let calls) = built[1] { XCTAssertEqual(calls.map(\.id), ["a", "b"]) } else { XCTFail() }
+        if case .tools(_, let steps) = built[1] { XCTAssertEqual(steps.map(\.id), ["a", "kk", "b"]) } else { XCTFail() }
     }
 
     func testTodoAndPendingPermissionStayStandalone() {
@@ -39,5 +39,12 @@ final class ChatToolGroupTests: XCTestCase {
         XCTAssertEqual(ToolGrouping.title(c, folder: "/x"), "Read form state")
         c.input = ["command": "ls\npwd"]
         XCTAssertEqual(ToolGrouping.title(c, folder: "/x"), "ls")
+    }
+}
+
+extension ChatToolGroupTests {
+    func testThinkingBeforeAnyToolStaysStandalone() {
+        let built = ChatDisplayItem.build([.thinking(ChatText(id: "k", text: "plan")), .text(ChatText(id: "t", text: "hi"))])
+        XCTAssertEqual(built.map(\.id), ["kk", "tt"])
     }
 }

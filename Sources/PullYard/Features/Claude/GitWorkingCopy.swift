@@ -173,7 +173,7 @@ final class GitWorkingCopy {
         guard !name.isEmpty, !name.hasPrefix("-"), !name.contains(" ") else { return "Invalid branch name" }
         let dir = path
         let result = await Task.detached(priority: .userInitiated) { () -> (out: String, ok: Bool, status: Int32) in
-            Git.run(create ? ["switch", "-c", name] : ["switch", name], in: dir, mergeStderr: true)
+            Git.run(create ? ["switch", "-c", name] : ["switch", name], in: dir, timeout: 300, mergeStderr: true)
         }.value
         await refresh()
         return result.ok ? nil : (result.out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "git switch failed" : result.out.trimmingCharacters(in: .whitespacesAndNewlines))
