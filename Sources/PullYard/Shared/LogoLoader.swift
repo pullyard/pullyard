@@ -152,12 +152,9 @@ struct PullYardLoader: View {
 
     var body: some View {
         if reduceMotion {
-            TimelineView(.animation(minimumInterval: 1 / 30)) { context in
-                let t = context.date.timeIntervalSince(start)
-                PullYardLogoMark(progress: 1, size: size)
-                    .opacity(0.55 + 0.45 * (0.5 + 0.5 * cos(t * 2.4)))
-            }
-            .accessibilityLabel("Loading")
+            PullYardLogoMark(progress: 1, size: size)
+                .opacity(0.8)
+                .accessibilityLabel("Loading")
         } else {
             TimelineView(.animation) { context in
                 let cycle = Self.draw + Self.hold + Self.fade
