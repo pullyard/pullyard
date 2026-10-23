@@ -1172,7 +1172,8 @@ struct AgentBranchMenu: View {
                 .padding(.vertical, 3)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.syText.opacity(hover ? 0.08 : 0.04)))
             }
-            .menuStyle(.borderlessButton)
+            .menuStyle(.button)
+            .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
             .onHover { hover = $0 }
