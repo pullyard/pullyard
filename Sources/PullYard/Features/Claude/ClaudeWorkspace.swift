@@ -433,6 +433,7 @@ final class ClaudeWorkspace {
         if model != .standard { args += ["--model", model.rawValue] }
         if effort != .standard { args += ["--effort", effort.rawValue] }
         if mode != .standard { args += ["--permission-mode", mode.rawValue] }
+        args += StackNotesMCP.args
         args += extra
         let command = "exec claude " + args.map(ClaudeLauncher.shellQuote).joined(separator: " ")
         let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { FileManager.default.isExecutableFile(atPath: $0) ? $0 : nil } ?? "/bin/zsh"
