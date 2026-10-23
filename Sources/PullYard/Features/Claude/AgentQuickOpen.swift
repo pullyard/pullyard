@@ -31,7 +31,7 @@ struct AgentQuickOpen: View {
         let openIDs = Set(ws.tabs.map(\.sessionId))
         let tabs = ws.tabs.filter { hit($0.title, $0.projectName) }.map(Entry.tab)
         let sessions = ws.projects
-            .flatMap { p in p.sessions.filter { !$0.archived && !openIDs.contains($0.id) }.map { ($0, p.name) } }
+            .flatMap { p in p.sessions.filter { !AgentSessionPrefs.shared.isArchived($0) && !openIDs.contains($0.id) }.map { ($0.retitled(AgentSessionPrefs.shared.title($0)), p.name) } }
             .filter { hit($0.0.title, $0.1, $0.0.branch) }
             .sorted { $0.0.modified > $1.0.modified }
             .prefix(q.isEmpty ? 12 : 40)

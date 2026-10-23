@@ -294,3 +294,42 @@ final class SessionSeen {
         UserDefaults.standard.set(seen, forKey: Self.key)
     }
 }
+
+@Observable
+@MainActor
+final class AgentSessionPrefs {
+    static let shared = AgentSessionPrefs()
+    private(set) var pinned: [String]
+    private(set) var titles: [String: String]
+    private(set) var archived: Set<String>
+
+    private init() {
+        let d = UserDefaults.standard
+        pinned = d.stringArray(forKey: "agents.pinned") ?? []
+        titles = (d.dictionary(forKey: "agents.titles") as? [String: String]) ?? [:]
+        archived = Set(d.stringArray(forKey: "agents.archived") ?? [])
+    }
+
+    func isPinned(_ id: String) -> Bool { pinned.contains(id) }
+
+    func togglePin(_ id: String) {
+        if let i = pinned.firstIndex(of: id) { pinned.remove(at: i) } else { pinned.insert(id, at: 0) }
+        UserDefaults.standard.set(pinned, forKey: "agents.pinned")
+    }
+
+    func title(_ s: ClaudeSessionInfo) -> String { titles[s.id] ?? s.title }
+
+    func rename(_ id: String, to title: String) {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        titles[id] = t.isEmpty ? nil : t
+        UserDefaults.standard.set(titles, forKey: "agents.titles")
+    }
+
+    func isArchived(_ s: ClaudeSessionInfo) -> Bool { archived.contains(s.id) || s.archived }
+
+    func setArchived(_ id: String, _ value: Bool) {
+        if value { archived.insert(id); pinned.removeAll { $0 == id } } else { archived.remove(id) }
+        UserDefaults.standard.set(Array(archived), forKey: "agents.archived")
+        UserDefaults.standard.set(pinned, forKey: "agents.pinned")
+    }
+}

@@ -38,6 +38,8 @@ struct ClaudeProjectsColumn: View {
     @State private var query = ""
     @State private var expanded: Set<String> = []
     @State private var collapsedParents: Set<String> = []
+    @State private var showArchived = false
+    private var prefs: AgentSessionPrefs { AgentSessionPrefs.shared }
     @State private var ready = false
 
     private var ws: ClaudeWorkspace { app.claude }
@@ -165,6 +167,23 @@ struct ClaudeProjectsColumn: View {
             }
             Rectangle().fill(Color.syLine).frame(height: 1).padding(.horizontal, 8).padding(.vertical, 8)
         }
+        let pinnedSessions = prefs.pinned.compactMap { id in filtered.lazy.flatMap(\.sessions).first { $0.id == id } }
+        if !pinnedSessions.isEmpty {
+            HStack(spacing: 5) {
+                Image(systemName: "pin.fill").imageScale(.small)
+                Text("Pinned").font(.sySubheadline.weight(.semibold))
+            }
+            .font(.syCaption)
+            .foregroundStyle(Color.syMuted)
+            .padding(.horizontal, 8)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+            ForEach(pinnedSessions) { s in
+                sessionRow(s)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            Rectangle().fill(Color.syLine).frame(height: 1).padding(.horizontal, 8).padding(.vertical, 8)
+        }
         ForEach(filtered) { project in
             let open = expanded.contains(project.id) || !query.isEmpty
             VStack(alignment: .leading, spacing: 0) {
@@ -178,7 +197,7 @@ struct ClaudeProjectsColumn: View {
                 .padding(.horizontal, 8)
                 Collapsible(open: open) {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(SessionTree.build(Array(project.sessions.filter { !$0.archived }.prefix(query.isEmpty ? 40 : 200)))) { node in
+                        ForEach(SessionTree.build(Array(project.sessions.filter { (showArchived || !prefs.isArchived($0)) && !prefs.isPinned($0.id) }.prefix(query.isEmpty ? 40 : 200)))) { node in
                             sessionRow(node.session, children: node.children.count)
                             if !node.children.isEmpty {
                                 Collapsible(open: !collapsedParents.contains(node.id)) {
@@ -197,12 +216,18 @@ struct ClaudeProjectsColumn: View {
         }
         if ws.projects.isEmpty, !ws.loadingProjects {
             Text("No Claude Code sessions yet").font(.syBody).foregroundStyle(Color.syMuted).padding(12)
+        } else {
+            Button(showArchived ? "Hide archived sessions" : "Show archived sessions") { withAnimation(Motion.smooth) { showArchived.toggle() } }
+                .buttonStyle(.link)
+                .font(.syCaption)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 12)
         }
     }
 
     private func sessionRow(_ s: ClaudeSessionInfo, children: Int = 0, depth: Int = 0, last: Bool = false) -> some View {
         SessionRow(
-            session: s,
+            session: prefs.titles[s.id] == nil ? s : s.retitled(prefs.title(s)),
             open: ws.tab(forSession: s.id) != nil,
             indicator: ws.indicator(for: s),
             childCount: children,
@@ -224,6 +249,10 @@ struct ClaudeProjectsColumn: View {
 
     @ViewBuilder
     private func sessionMenu(_ s: ClaudeSessionInfo) -> some View {
+        Button(prefs.isPinned(s.id) ? "Unpin" : "Pin to Top") { withAnimation(Motion.smooth) { prefs.togglePin(s.id) } }
+        Button("Rename…") { rename(s) }
+        Button(prefs.isArchived(s) ? "Unarchive" : "Archive") { withAnimation(Motion.smooth) { prefs.setArchived(s.id, !prefs.isArchived(s)) } }
+        Divider()
         Button("Resume as chat") { ws.resume(s, kind: .chat) }
         Button("Resume in terminal") { ws.resume(s, kind: .terminal) }
         Button("Fork session") { ws.resume(s, fork: true) }
@@ -232,6 +261,20 @@ struct ClaudeProjectsColumn: View {
         Button("Copy resume command") { copyToPasteboard("cd \(ClaudeLauncher.shellQuote(s.cwd)) && claude --resume \(s.id)") }
         Button("Reveal transcript in Finder") { NSWorkspace.shared.activateFileViewerSelecting([s.file]) }
         if let pr = s.prURL { Button("Open PR") { if let r = GitHubURL.parse(pr) { app.section = .prs(.mine); app.open(r) } } }
+    }
+
+    private func rename(_ s: ClaudeSessionInfo) {
+        let alert = NSAlert()
+        alert.messageText = "Rename session"
+        alert.informativeText = "The new name is only shown in PullYard."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        field.stringValue = prefs.title(s)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        prefs.rename(s.id, to: field.stringValue)
     }
 
     private func openFolder() {
