@@ -22,6 +22,15 @@ enum StackNotesInbox {
         try fm.moveItem(at: tmp, to: directory.appendingPathComponent("\(UUID().uuidString).json"))
     }
 
+    static func peek() -> [Entry] {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { $0.pathExtension == "json" }
+            .compactMap { (try? Data(contentsOf: $0)).flatMap { try? decoder.decode(Entry.self, from: $0) } }
+            .sorted { $0.created < $1.created }
+    }
+
     static func drain() -> [Entry] {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return [] }
@@ -39,10 +48,10 @@ enum StackNotesInbox {
 enum StackNotesMCP {
     static let flag = "--mcp-stack-notes"
     static let serverName = "pullyard"
-    @MainActor static var target: (account: String?, host: String)?
+    @MainActor static var target: () -> (account: String?, host: String)? = { nil }
 
     @MainActor static var args: [String] {
-        guard let target, let json = config(account: target.account, host: target.host) else { return [] }
+        guard let t = target(), let json = config(account: t.account, host: t.host) else { return [] }
         return ["--mcp-config", json]
     }
 
@@ -65,13 +74,14 @@ enum StackNotesMCP {
             guard !line.isEmpty, let data = line.data(using: .utf8),
                   let message = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             if let reply = server.handle(message), let out = try? JSONSerialization.data(withJSONObject: reply) {
-                FileHandle.standardOutput.write(out + Data("\n".utf8))
+                try? FileHandle.standardOutput.write(contentsOf: out + Data("\n".utf8))
             }
         }
         exit(0)
     }
 
     struct Server {
+        static let versions = ["2025-06-18", "2025-03-26", "2024-11-05"]
         let account: String?
         let host: String
 
@@ -81,7 +91,7 @@ enum StackNotesMCP {
             switch message["method"] as? String {
             case "initialize":
                 return result(id, [
-                    "protocolVersion": (params["protocolVersion"] as? String) ?? "2025-06-18",
+                    "protocolVersion": Self.versions.contains(params["protocolVersion"] as? String ?? "") ? params["protocolVersion"] as! String : Self.versions[0],
                     "capabilities": ["tools": [:]],
                     "serverInfo": ["name": "pullyard", "version": "1.0"],
                     "instructions": "PullYard stack notes. Use add_stack_note when the user asks you to leave a note, question or decision on a pull request in their stack, or when you finish work on a stacked PR and something is worth remembering for the reviewer. Notes stay on the user's Mac and are never posted to GitHub.",
