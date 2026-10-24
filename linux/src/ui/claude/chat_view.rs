@@ -1,4 +1,6 @@
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -6,10 +8,11 @@ use adw::prelude::*;
 use gtk::{gdk, glib};
 use serde_json::{Map, Value};
 
-use crate::claude::accounts;
-use crate::claude::chat::{self, ChatImage, ChatItem, ChatSession, Event, PermissionRequest, ToolCall, ToolStatus};
-use crate::claude::workspace::Tab;
-use crate::claude::ClaudeMode;
+use crate::claude::chat::{self, ChatImage, ChatItem, ChatSession, ChatText, Event, PermissionRequest, ToolCall, ToolStatus};
+use crate::claude::sessions::{self, SessionInfo};
+use crate::claude::tool_groups::{self, relative, tool_summary, tool_title, DisplayItem, ToolStep};
+use crate::claude::workspace::{Tab, WsEvent};
+use crate::claude::{accounts, payload, relogin, rewind, ship, ClaudeMode, TabKind};
 use crate::diff::{DiffLine, LineKind};
 use crate::ui::markdown;
 use crate::ui::menu::Menu;
@@ -17,85 +20,46 @@ use crate::ui::pr::files::line_widget;
 use crate::ui::widgets::*;
 use crate::{app, util};
 
+struct Rendered {
+    sig: String,
+    ids: Vec<String>,
+    widget: gtk::Widget,
+}
+
 pub struct ChatView {
     pub widget: gtk::Box,
     tab: Rc<Tab>,
     chat: Rc<ChatSession>,
     items_box: gtk::Box,
-    rendered: RefCell<Vec<(String, gtk::Widget)>>,
+    rendered: RefCell<Vec<Rendered>>,
     welcome: gtk::Box,
+    welcome_key: RefCell<String>,
     working: gtk::Box,
     working_label: gtk::Label,
     working_time: gtk::Label,
     error_box: gtk::Box,
+    pr_card: gtk::Box,
+    pr_key: RefCell<Option<String>>,
     sleeping: gtk::Box,
     permission_bar: gtk::Box,
+    todo_bar: gtk::Box,
+    todo_key: RefCell<String>,
+    todo_open: Cell<bool>,
     scroller: gtk::ScrolledWindow,
+    jump: gtk::Revealer,
+    jump_button: gtk::Button,
+    jump_badge: gtk::Label,
+    away_count: Cell<Option<usize>>,
+    scroll_anim: RefCell<Option<adw::TimedAnimation>>,
     stick: Cell<bool>,
     scrolling: Cell<bool>,
     last_value: Cell<f64>,
     dirty_texts: RefCell<Vec<String>>,
     flush_scheduled: Cell<bool>,
-    open_tools: RefCell<std::collections::HashMap<String, bool>>,
     markdowns: RefCell<std::collections::HashMap<String, Rc<markdown::MarkdownView>>>,
+    relogin_waiting: Cell<bool>,
+    relogin_error: RefCell<Option<String>>,
     composer: Rc<ChatComposer>,
-}
-
-fn tool_icon(name: &str) -> &'static str {
-    match name {
-        "Read" => "sy-file-symbolic",
-        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => "document-edit-symbolic",
-        "Bash" => "sy-terminal-symbolic",
-        "Grep" | "WebSearch" => "system-search-symbolic",
-        "Glob" => "sy-folder-symbolic",
-        "WebFetch" => "sy-globe-symbolic",
-        "Task" | "Agent" => "sy-person-symbolic",
-        "TodoWrite" => "sy-checklist-symbolic",
-        "AskUserQuestion" => "sy-comment-symbolic",
-        "ExitPlanMode" => "sy-checklist-symbolic",
-        "Skill" => "sy-sparkles-symbolic",
-        n if n.starts_with("mcp__") => "sy-project-symbolic",
-        _ => "emblem-system-symbolic",
-    }
-}
-
-fn tool_title(c: &ToolCall) -> String {
-    if c.name.starts_with("mcp__") {
-        return c.name.split('_').filter(|s| !s.is_empty()).last().unwrap_or(&c.name).to_string();
-    }
-    c.name.clone()
-}
-
-fn relative(path: &str, folder: &str) -> String {
-    match path.strip_prefix(&format!("{folder}/")) {
-        Some(r) => r.to_string(),
-        None => util::tilde(path),
-    }
-}
-
-fn tool_summary(c: &ToolCall, folder: &str) -> String {
-    let i = c.input.borrow();
-    let g = |k: &str| i.get(k).and_then(|v| v.as_str()).map(|s| s.to_string());
-    match c.name.as_str() {
-        "Read" | "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => relative(&g("file_path").or_else(|| g("notebook_path")).unwrap_or_default(), folder),
-        "Bash" => g("description").or_else(|| g("command")).unwrap_or_default(),
-        "Grep" => format!("\"{}\"{}", g("pattern").unwrap_or_default(), g("path").map(|p| format!(" · {}", relative(&p, folder))).unwrap_or_default()),
-        "Glob" => g("pattern").unwrap_or_default(),
-        "WebFetch" => g("url").unwrap_or_default(),
-        "WebSearch" => g("query").unwrap_or_default(),
-        "Task" | "Agent" => g("description").unwrap_or_default(),
-        "Skill" => g("skill").unwrap_or_default(),
-        _ => match i.values().find_map(|v| v.as_str()) {
-            Some(s) => s.chars().take(120).collect(),
-            None => {
-                if c.partial_input.borrow().is_empty() {
-                    String::new()
-                } else {
-                    "…".into()
-                }
-            }
-        },
-    }
 }
 
 fn diff_lines(c: &ToolCall) -> Vec<DiffLine> {
@@ -220,6 +184,79 @@ fn markdown_strike(text: &str) -> gtk::Label {
     l
 }
 
+fn actions_row() -> gtk::Box {
+    let b = hbox(2);
+    b.add_css_class("chat-actions");
+    b.set_can_target(false);
+    b
+}
+
+fn action_button(icon_name: &str, tip: &str) -> gtk::Button {
+    let b = gtk::Button::new();
+    b.add_css_class("flat");
+    b.set_child(Some(&crate::icons::image(icon_name, 14)));
+    b.set_tooltip_text(Some(tip));
+    b
+}
+
+fn copy_button(text: impl Fn() -> String + 'static) -> gtk::Button {
+    let b = action_button("edit-copy-symbolic", "Copy");
+    b.connect_clicked(move |btn| {
+        util::copy(&text());
+        btn.set_child(Some(&crate::icons::image("sy-check-symbolic", 14)));
+        let weak = btn.downgrade();
+        glib::timeout_add_local_once(Duration::from_millis(1200), move || {
+            if let Some(btn) = weak.upgrade() {
+                btn.set_child(Some(&crate::icons::image("edit-copy-symbolic", 14)));
+            }
+        });
+    });
+    b
+}
+
+fn linger_hover(target: &impl IsA<gtk::Widget>, actions: &gtk::Box, enabled: impl Fn() -> bool + 'static) {
+    let timer: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+    let motion = gtk::EventControllerMotion::new();
+    let (t, a) = (timer.clone(), actions.downgrade());
+    motion.connect_enter(move |_, _, _| {
+        if let Some(id) = t.borrow_mut().take() {
+            id.remove();
+        }
+        if let Some(a) = a.upgrade() {
+            if enabled() {
+                a.add_css_class("shown");
+                a.set_can_target(true);
+            }
+        }
+    });
+    let (t, a) = (timer, actions.downgrade());
+    motion.connect_leave(move |_| {
+        if let Some(id) = t.borrow_mut().take() {
+            id.remove();
+        }
+        let (t2, a2) = (t.clone(), a.clone());
+        let id = glib::timeout_add_local_once(Duration::from_millis(600), move || {
+            t2.borrow_mut().take();
+            if let Some(a) = a2.upgrade() {
+                a.remove_css_class("shown");
+                a.set_can_target(false);
+            }
+        });
+        *t.borrow_mut() = Some(id);
+    });
+    target.add_controller(motion);
+}
+
+fn status_glyph(c: &ToolCall, pending_permission: bool) -> Option<gtk::Widget> {
+    match c.status.get() {
+        ToolStatus::Running if pending_permission => Some(colored_icon("sy-attention-symbolic", 14, "amber").upcast()),
+        ToolStatus::Running => Some(spinner(12).upcast()),
+        ToolStatus::Done => None,
+        ToolStatus::Error => Some(colored_icon("sy-x-symbolic", 14, "red").upcast()),
+        ToolStatus::Denied => Some(colored_icon("sy-issue-skip-symbolic", 14, "amber").upcast()),
+    }
+}
+
 impl ChatView {
     pub fn new(tab: Rc<Tab>) -> Rc<Self> {
         let chat = tab.chat.clone().expect("chat tab");
@@ -237,29 +274,15 @@ impl ChatView {
         scroller.set_vexpand(true);
         scroller.add_css_class("chat-scroller");
 
-        let welcome = vbox(10);
+        let welcome = vbox(14);
         welcome.add_css_class("chat-welcome");
-        let wt = hbox(8);
-        wt.append(&icon_tile("sy-sparkles-symbolic", "coral", 24));
-        wt.append(&label_with("Claude Code", &["title-4", "sy-text"]));
-        welcome.append(&wt);
-        welcome.append(&wrap_label("Describe a task — Claude will read the code, propose changes and ask before acting.", &["sy-muted"]));
-        let suggestions = hbox(8);
-        for s in ["Explain the project structure", "Find bugs in the latest changes", "Write tests for the changed code"] {
-            let b = button(s);
-            let c = chat.clone();
-            let t = tab.clone();
-            b.connect_clicked(move |_| {
-                if !c.running.get() {
-                    app::get().claude.restart(&t);
-                }
-                c.send(s, vec![]);
-            });
-            suggestions.append(&b);
-        }
-        welcome.append(&suggestions);
-        welcome.append(&label_with("/ commands · @ files · Shift+Enter new line · paste a screenshot Ctrl+V", &["sy-dim", "sy-small"]));
+        margins(&welcome, 16, 20, 0, 20);
         column.prepend(&welcome);
+
+        let pr_card = vbox(0);
+        pr_card.set_visible(false);
+        margins(&pr_card, 0, 20, 0, 20);
+        column.append(&pr_card);
 
         let working = hbox(8);
         working.append(&spinner(14));
@@ -281,6 +304,31 @@ impl ChatView {
         margins(&working, 0, 20, 0, 20);
         margins(&error_box, 0, 20, 16, 20);
 
+        let jump_button = gtk::Button::new();
+        jump_button.add_css_class("chat-jump");
+        jump_button.set_child(Some(&crate::icons::image("sy-down-symbolic", 18)));
+        jump_button.set_tooltip_text(Some("Jump to the latest message"));
+        let jump_badge = label_with("", &["chat-jump-badge"]);
+        jump_badge.set_halign(gtk::Align::End);
+        jump_badge.set_valign(gtk::Align::Start);
+        jump_badge.set_can_target(false);
+        jump_badge.set_visible(false);
+        let jump_overlay = gtk::Overlay::new();
+        jump_overlay.set_child(Some(&jump_button));
+        jump_overlay.add_overlay(&jump_badge);
+        let jump = gtk::Revealer::new();
+        jump.set_transition_type(gtk::RevealerTransitionType::Crossfade);
+        jump.set_transition_duration(220);
+        jump.set_child(Some(&jump_overlay));
+        jump.set_halign(gtk::Align::Center);
+        jump.set_valign(gtk::Align::End);
+        jump.set_margin_bottom(16);
+        jump.set_can_target(false);
+        let scroll_overlay = gtk::Overlay::new();
+        scroll_overlay.set_child(Some(&scroller));
+        scroll_overlay.add_overlay(&jump);
+        scroll_overlay.set_vexpand(true);
+
         let sleeping = hbox(8);
         sleeping.add_css_class("banner-box");
         sleeping.add_css_class("indigo");
@@ -301,12 +349,18 @@ impl ChatView {
         margins(&permission_bar, 6, 12, 0, 12);
         permission_bar.set_visible(false);
 
+        let todo_bar = vbox(0);
+        todo_bar.add_css_class("chat-todo");
+        margins(&todo_bar, 6, 12, 0, 12);
+        todo_bar.set_visible(false);
+
         let composer = ChatComposer::new(tab.clone(), chat.clone());
         let widget = vbox(0);
         widget.add_css_class("sy-panel-pane");
-        widget.append(&scroller);
+        widget.append(&scroll_overlay);
         widget.append(&sleeping);
         widget.append(&permission_bar);
+        widget.append(&todo_bar);
         widget.append(&composer.widget);
 
         let me = Rc::new(ChatView {
@@ -316,21 +370,39 @@ impl ChatView {
             items_box,
             rendered: RefCell::new(vec![]),
             welcome,
+            welcome_key: RefCell::new(String::new()),
             working,
             working_label,
             working_time,
             error_box,
+            pr_card,
+            pr_key: RefCell::new(None),
             sleeping,
             permission_bar,
+            todo_bar,
+            todo_key: RefCell::new(String::new()),
+            todo_open: Cell::new(false),
             scroller,
+            jump,
+            jump_button: jump_button.clone(),
+            jump_badge,
+            away_count: Cell::new(None),
+            scroll_anim: RefCell::new(None),
             stick: Cell::new(true),
             scrolling: Cell::new(false),
             last_value: Cell::new(0.0),
             dirty_texts: RefCell::new(vec![]),
             flush_scheduled: Cell::new(false),
-            open_tools: RefCell::new(std::collections::HashMap::new()),
             markdowns: RefCell::new(std::collections::HashMap::new()),
+            relogin_waiting: Cell::new(false),
+            relogin_error: RefCell::new(None),
             composer,
+        });
+        let w = Rc::downgrade(&me);
+        jump_button.connect_clicked(move |_| {
+            if let Some(me) = w.upgrade() {
+                me.glide_to_end();
+            }
         });
         let w = Rc::downgrade(&me);
         me.scroller.vadjustment().connect_value_changed(move |adj| {
@@ -353,6 +425,26 @@ impl ChatView {
             None => false,
         });
         let w = Rc::downgrade(&me);
+        me.tab.git.changed.connect(move |_| match w.upgrade() {
+            Some(me) => {
+                me.render_welcome();
+                true
+            }
+            None => false,
+        });
+        if let Some(a) = app::try_get() {
+            let w = Rc::downgrade(&me);
+            a.claude.changed.connect(move |e| match w.upgrade() {
+                Some(me) => {
+                    if matches!(e, WsEvent::Projects) {
+                        me.render_welcome();
+                    }
+                    true
+                }
+                None => false,
+            });
+        }
+        let w = Rc::downgrade(&me);
         glib::timeout_add_seconds_local(1, move || match w.upgrade() {
             Some(me) => {
                 if let Some(start) = me.chat.turn_started.get() {
@@ -372,7 +464,16 @@ impl ChatView {
     fn on_event(self: &Rc<Self>, e: &Event) {
         match e {
             Event::Reset => self.reset(),
-            Event::Appended => self.append_new(),
+            Event::Appended => {
+                self.sync(&HashSet::new());
+                let sent = matches!(self.chat.items.borrow().last(), Some(ChatItem::User { .. }));
+                if sent {
+                    self.jump_to_bottom();
+                } else {
+                    self.scroll_down();
+                }
+                self.update_jump();
+            }
             Event::Updated(id) => {
                 self.dirty_texts.borrow_mut().push(id.clone());
                 self.schedule_flush();
@@ -391,23 +492,123 @@ impl ChatView {
                 let _span = crate::diagnostics::ui_span("chat.flush");
                 me.flush_scheduled.set(false);
                 let ids: Vec<String> = std::mem::take(&mut *me.dirty_texts.borrow_mut());
-                let mut seen = std::collections::HashSet::new();
+                let mut dirty = HashSet::new();
                 for id in ids {
-                    if seen.insert(id.clone()) {
-                        me.update_item(&id);
-                    }
+                    dirty.insert(format!("t{id}"));
+                    dirty.insert(format!("k{id}"));
+                    dirty.insert(id);
                 }
+                me.sync(&dirty);
                 me.scroll_down();
             }
         });
+    }
+
+    fn refresh(self: &Rc<Self>, id: String) {
+        let mut dirty = HashSet::new();
+        dirty.insert(id);
+        self.sync(&dirty);
     }
 
     fn reset(self: &Rc<Self>) {
         clear(&self.items_box);
         self.rendered.borrow_mut().clear();
         self.markdowns.borrow_mut().clear();
-        self.append_new();
+        self.sync(&HashSet::new());
         self.jump_to_bottom();
+    }
+
+    fn sync(self: &Rc<Self>, dirty: &HashSet<String>) {
+        let (display, total) = {
+            let items = self.chat.items.borrow();
+            (tool_groups::build(&items), items.len())
+        };
+        let first_diff = {
+            let r = self.rendered.borrow();
+            let mut i = 0;
+            while i < r.len() && i < display.len() && r[i].sig == display[i].signature() {
+                i += 1;
+            }
+            i
+        };
+        if !dirty.is_empty() {
+            for (i, d) in display.iter().enumerate().take(first_diff) {
+                let hit = self.rendered.borrow()[i].ids.iter().any(|id| dirty.contains(id));
+                if hit {
+                    self.refresh_entry(i, d);
+                }
+            }
+        }
+        let removed: Vec<Rendered> = self.rendered.borrow_mut().drain(first_diff..).collect();
+        for r in removed {
+            self.items_box.remove(&r.widget);
+            let mut m = self.markdowns.borrow_mut();
+            for id in &r.ids {
+                m.remove(id);
+            }
+        }
+        for d in &display[first_diff..] {
+            let w = self.entry_widget(d);
+            self.items_box.append(&w);
+            self.rendered.borrow_mut().push(Rendered { sig: d.signature(), ids: d.item_ids(), widget: w });
+        }
+        self.welcome.set_visible(total == 0);
+        if total == 0 {
+            self.render_welcome();
+        }
+        self.render_todos();
+    }
+
+    fn refresh_entry(self: &Rc<Self>, i: usize, d: &DisplayItem) {
+        if let DisplayItem::Item(item @ ChatItem::Text(t)) = d {
+            let view = self.markdowns.borrow().get(&item.id()).cloned();
+            if let Some(view) = view {
+                view.set_text(&t.text.borrow());
+                return;
+            }
+        }
+        let new = self.entry_widget(d);
+        let old = self.rendered.borrow()[i].widget.clone();
+        self.items_box.insert_child_after(&new, Some(&old));
+        self.items_box.remove(&old);
+        self.rendered.borrow_mut()[i].widget = new;
+    }
+
+    fn entry_widget(self: &Rc<Self>, d: &DisplayItem) -> gtk::Widget {
+        match d {
+            DisplayItem::Item(item) => self.item_widget(item),
+            DisplayItem::Tools { id, steps } => self.group_widget(id, steps),
+        }
+    }
+
+    fn set_stick(&self, v: bool) {
+        if self.stick.replace(v) != v {
+            self.update_jump();
+        }
+    }
+
+    fn update_jump(&self) {
+        let total = self.chat.items.borrow().len();
+        let show = !self.stick.get() && total > 0;
+        if !show {
+            self.away_count.set(None);
+        } else if self.away_count.get().is_none() {
+            self.away_count.set(Some(total));
+        }
+        let fresh = total.saturating_sub(self.away_count.get().unwrap_or(total));
+        self.jump_badge.set_visible(fresh > 0);
+        self.jump_badge.set_text(&if fresh > 99 { "99+".to_string() } else { fresh.to_string() });
+        if fresh > 0 {
+            self.jump_button.add_css_class("fresh");
+            self.jump_button.set_tooltip_text(Some(&format!("{fresh} new — jump to the latest message")));
+        } else {
+            self.jump_button.remove_css_class("fresh");
+            self.jump_button.set_tooltip_text(Some("Jump to the latest message"));
+        }
+        if self.jump.reveals_child() != show {
+            self.jump.set_reveal_child(show);
+        }
+        self.jump.set_can_target(show);
     }
 
     fn on_scrolled(&self, adj: &gtk::Adjustment) {
@@ -418,11 +619,11 @@ impl ChatView {
         }
         let distance = adj.upper() - adj.page_size() - value;
         if distance <= 1.0 {
-            self.stick.set(true);
+            self.set_stick(true);
         } else if value < previous {
-            self.stick.set(false);
+            self.set_stick(false);
         } else if distance <= 40.0 {
-            self.stick.set(true);
+            self.set_stick(true);
         }
     }
 
@@ -434,47 +635,47 @@ impl ChatView {
         self.scrolling.set(false);
     }
 
-    fn append_new(self: &Rc<Self>) {
-        let start = self.rendered.borrow().len();
-        let (items, total): (Vec<ChatItem>, usize) = {
-            let all = self.chat.items.borrow();
-            (all.iter().skip(start).cloned().collect(), all.len())
-        };
-        let sent = items.iter().any(|i| matches!(i, ChatItem::User { .. }));
-        for item in &items {
-            let w = self.item_widget(item);
-            self.items_box.append(&w);
-            self.rendered.borrow_mut().push((item.id(), w));
+    fn glide_to_end(self: &Rc<Self>) {
+        self.set_stick(true);
+        let adj = self.scroller.vadjustment();
+        let from = adj.value();
+        let to = adj.upper() - adj.page_size();
+        if to - from < 2.0 {
+            self.scroll_to_end();
+            return;
         }
-        self.welcome.set_visible(total == 0);
-        if sent {
-            self.jump_to_bottom();
-        } else {
-            self.scroll_down();
-        }
-    }
-
-    fn update_item(self: &Rc<Self>, key: &str) {
-        let candidates = [key.to_string(), format!("t{key}"), format!("k{key}")];
-        let pos = self.rendered.borrow().iter().position(|(id, _)| candidates.contains(id));
-        let Some(pos) = pos else { return };
-        let Some(item) = self.chat.items.borrow().get(pos).cloned() else { return };
-        if let ChatItem::Text(t) = &item {
-            let view = self.markdowns.borrow().get(&item.id()).cloned();
-            if let Some(view) = view {
-                view.set_text(&t.text.borrow());
-                return;
+        let duration = (250.0 + (to - from) / 12.0).min(550.0) as u32;
+        let w = Rc::downgrade(self);
+        let target = adw::CallbackAnimationTarget::new(move |v| {
+            if let Some(me) = w.upgrade() {
+                let adj = me.scroller.vadjustment();
+                me.scrolling.set(true);
+                adj.set_value(v);
+                me.last_value.set(adj.value());
+                me.scrolling.set(false);
             }
+        });
+        let anim = adw::TimedAnimation::new(&self.scroller, from, to, duration, target);
+        anim.set_easing(adw::Easing::EaseOutCubic);
+        let w = Rc::downgrade(self);
+        anim.connect_done(move |_| {
+            if let Some(me) = w.upgrade() {
+                me.scroll_anim.borrow_mut().take();
+                if me.stick.get() {
+                    me.scroll_to_end();
+                }
+            }
+        });
+        let old = self.scroll_anim.borrow_mut().take();
+        if let Some(old) = old {
+            old.pause();
         }
-        let new = self.item_widget(&item);
-        let old = self.rendered.borrow()[pos].1.clone();
-        self.items_box.insert_child_after(&new, Some(&old));
-        self.items_box.remove(&old);
-        self.rendered.borrow_mut()[pos].1 = new;
+        *self.scroll_anim.borrow_mut() = Some(anim.clone());
+        anim.play();
     }
 
     fn scroll_down(self: &Rc<Self>) {
-        if !self.stick.get() {
+        if !self.stick.get() || self.scroll_anim.borrow().is_some() {
             return;
         }
         let w = Rc::downgrade(self);
@@ -486,7 +687,7 @@ impl ChatView {
     }
 
     fn jump_to_bottom(self: &Rc<Self>) {
-        self.stick.set(true);
+        self.set_stick(true);
         for delay in [50u64, 200, 500] {
             let w = Rc::downgrade(self);
             glib::timeout_add_local_once(Duration::from_millis(delay), move || {
@@ -504,29 +705,8 @@ impl ChatView {
         if !c.busy.get() {
             self.working_time.set_text("");
         }
-        clear(&self.error_box);
-        if let Some(e) = c.last_error.borrow().clone() {
-            self.error_box.set_visible(true);
-            let row = hbox(8);
-            row.append(&colored_icon("sy-attention-symbolic", 14, "amber"));
-            let l = selectable(wrap_label(&e, &["fg-amber"]));
-            row.append(&l);
-            self.error_box.append(&row);
-            let actions = hbox(6);
-            let restart = button("Restart session");
-            let t = self.tab.clone();
-            restart.connect_clicked(move |_| app::get().claude.restart(&t));
-            actions.append(&restart);
-            let lower = e.to_lowercase();
-            if ["login", "log in", "logged in", "auth", "api key", "credential", "401", "oauth", "token"].iter().any(|k| lower.contains(k)) {
-                let check = tinted("Check Claude sign-in", "coral");
-                check.connect_clicked(|_| crate::rt::spawn_local(async { accounts::store().refresh().await }));
-                actions.append(&check);
-            }
-            self.error_box.append(&actions);
-        } else {
-            self.error_box.set_visible(false);
-        }
+        self.render_error();
+        self.render_created_pr();
         self.sleeping.set_visible(c.sleeping.get() && !c.running.get());
         clear(&self.permission_bar);
         let pending = c.pending.borrow().iter().find(|p| !p.resolved.get()).cloned();
@@ -554,13 +734,389 @@ impl ChatView {
             }
             None => self.permission_bar.set_visible(false),
         }
+        if c.items.borrow().is_empty() {
+            self.render_welcome();
+        }
         self.composer.render_state();
         self.scroll_down();
+    }
+
+    fn render_error(self: &Rc<Self>) {
+        clear(&self.error_box);
+        let Some(e) = self.chat.last_error.borrow().clone() else {
+            self.error_box.set_visible(false);
+            return;
+        };
+        self.error_box.set_visible(true);
+        let actions = hbox(6);
+        if payload::is_auth_error(&e) {
+            let waiting = self.relogin_waiting.get();
+            let head = hbox(8);
+            head.append(&colored_icon("sy-person-symbolic", 14, "amber"));
+            head.append(&label_with("Claude sign-in expired", &["sy-bold", "fg-amber"]));
+            self.error_box.append(&head);
+            self.error_box.append(&wrap_label(
+                if waiting { "Finish signing in in the terminal. The session picks up where it stopped." } else { "Sign in again and the session resumes where it stopped." },
+                &["sy-muted"],
+            ));
+            let detail = selectable(wrap_label(&e, &["sy-dim", "sy-small"]));
+            detail.set_lines(3);
+            detail.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            self.error_box.append(&detail);
+            if let Some(err) = self.relogin_error.borrow().clone() {
+                self.error_box.append(&wrap_label(&err, &["fg-red", "sy-small"]));
+            }
+            let sign_in = tinted(if waiting { "Waiting for sign-in…" } else { "Sign in again" }, "coral");
+            if waiting {
+                let content = hbox(6);
+                content.append(&spinner(12));
+                content.append(&label("Waiting for sign-in…"));
+                sign_in.set_child(Some(&content));
+            }
+            sign_in.set_sensitive(!waiting);
+            let w = Rc::downgrade(self);
+            sign_in.connect_clicked(move |_| {
+                if let Some(me) = w.upgrade() {
+                    me.sign_in_again();
+                }
+            });
+            actions.append(&sign_in);
+        } else {
+            let row = hbox(8);
+            row.append(&colored_icon("sy-attention-symbolic", 14, "amber"));
+            let l = selectable(wrap_label(&e, &["fg-amber"]));
+            row.append(&l);
+            self.error_box.append(&row);
+        }
+        let restart = button("Restart session");
+        let w = Rc::downgrade(self);
+        restart.connect_clicked(move |_| {
+            if let Some(me) = w.upgrade() {
+                me.reconnect();
+            }
+        });
+        actions.append(&restart);
+        self.error_box.append(&actions);
+    }
+
+    fn sign_in_again(self: &Rc<Self>) {
+        if self.relogin_waiting.replace(true) {
+            return;
+        }
+        *self.relogin_error.borrow_mut() = None;
+        self.render_error();
+        let w = Rc::downgrade(self);
+        relogin::sign_in_again(self.chat.config_dir.clone(), move |res| {
+            let Some(me) = w.upgrade() else { return };
+            me.relogin_waiting.set(false);
+            match res {
+                Ok(()) => me.reconnect(),
+                Err(e) => {
+                    *me.relogin_error.borrow_mut() = Some(e);
+                    me.render_error();
+                }
+            }
+        });
+    }
+
+    fn reconnect(self: &Rc<Self>) {
+        *self.chat.last_error.borrow_mut() = None;
+        *self.relogin_error.borrow_mut() = None;
+        let Some(a) = app::try_get() else { return };
+        if !self.chat.running.get() {
+            a.claude.restart(&self.tab);
+            self.render_state();
+            return;
+        }
+        self.chat.stop();
+        let (chat, tab) = (self.chat.clone(), self.tab.clone());
+        crate::rt::spawn_local(async move {
+            for _ in 0..40 {
+                if !chat.running.get() {
+                    break;
+                }
+                crate::rt::sleep(Duration::from_millis(100)).await;
+            }
+            if let Some(a) = app::try_get() {
+                a.claude.restart(&tab);
+            }
+        });
+        self.render_state();
+    }
+
+    fn render_created_pr(self: &Rc<Self>) {
+        let pr = self.chat.created_pr.borrow().clone();
+        if *self.pr_key.borrow() == pr {
+            return;
+        }
+        *self.pr_key.borrow_mut() = pr.clone();
+        clear(&self.pr_card);
+        let Some(url) = pr else {
+            self.pr_card.set_visible(false);
+            return;
+        };
+        self.pr_card.set_visible(true);
+        let row = hbox(12);
+        row.add_css_class("chat-pr-card");
+        row.append(&icon_tile("sy-pr-symbolic", "violet", 30));
+        let text = vbox(2);
+        text.set_hexpand(true);
+        text.set_valign(gtk::Align::Center);
+        text.append(&label_with(&format!("Pull request #{} is open", ship::pr_number(&url)), &["sy-bold", "sy-text"]));
+        let repo = ship::pr_repo(&url);
+        if !repo.is_empty() {
+            text.append(&label_with(&repo, &["sy-muted", "sy-small"]));
+        }
+        row.append(&text);
+        let copy = button("Copy link");
+        copy.set_valign(gtk::Align::Center);
+        let u = url.clone();
+        copy.connect_clicked(move |b| {
+            util::copy(&u);
+            b.set_label("Copied");
+            let weak = b.downgrade();
+            glib::timeout_add_local_once(Duration::from_millis(1200), move || {
+                if let Some(b) = weak.upgrade() {
+                    b.set_label("Copy link");
+                }
+            });
+        });
+        row.append(&copy);
+        let open = tinted("Open in app", "violet");
+        open.set_valign(gtk::Align::Center);
+        let u = url.clone();
+        open.connect_clicked(move |_| match util::parse_github_url(&u, false) {
+            Some(route) => app::open(route, false),
+            None => util::open_url(&u),
+        });
+        row.append(&open);
+        self.pr_card.append(&row);
+    }
+
+    fn render_todos(self: &Rc<Self>) {
+        let todos = tool_groups::latest_todos(&self.chat.items.borrow());
+        let progress = tool_groups::todo_progress(&todos);
+        let open = self.todo_open.get();
+        let key = progress.as_ref().map(|p| format!("{open}|{}", p.key())).unwrap_or_default();
+        if *self.todo_key.borrow() == key {
+            return;
+        }
+        *self.todo_key.borrow_mut() = key;
+        clear(&self.todo_bar);
+        let Some(p) = progress else {
+            self.todo_bar.set_visible(false);
+            return;
+        };
+        self.todo_bar.set_visible(true);
+        let head = gtk::Button::new();
+        head.add_css_class("flat");
+        head.add_css_class("chat-todo-head");
+        let hb = hbox(8);
+        let bar = gtk::ProgressBar::new();
+        bar.add_css_class("chat-todo-progress");
+        bar.set_fraction(p.done as f64 / p.todos.len().max(1) as f64);
+        bar.set_valign(gtk::Align::Center);
+        bar.set_size_request(44, -1);
+        hb.append(&bar);
+        hb.append(&label_with(&format!("{}/{}", p.done, p.todos.len()), &["sy-muted", "sy-small", "sy-mono", "sy-bold"]));
+        let current = ellipsized(p.current.as_deref().unwrap_or(""), &["sy-text"]);
+        current.set_hexpand(true);
+        current.set_xalign(0.0);
+        hb.append(&current);
+        hb.append(&icon(if open { "pan-down-symbolic" } else { "pan-up-symbolic" }, 12));
+        head.set_child(Some(&hb));
+        head.set_tooltip_text(Some(if open { "Hide the plan" } else { "Show the plan" }));
+        let w = Rc::downgrade(self);
+        head.connect_clicked(move |_| {
+            if let Some(me) = w.upgrade() {
+                me.todo_open.set(!me.todo_open.get());
+                me.render_todos();
+            }
+        });
+        self.todo_bar.append(&head);
+        if open {
+            let list = todo_list(&todos);
+            margins(&list, 2, 10, 8, 10);
+            self.todo_bar.append(&list);
+        }
+    }
+
+    fn render_welcome(self: &Rc<Self>) {
+        if !self.chat.items.borrow().is_empty() {
+            return;
+        }
+        let Some(a) = app::try_get() else { return };
+        let ws = a.claude.clone();
+        let git = self.tab.git.clone();
+        let branch = git.branch.borrow().clone().filter(|b| b != "HEAD");
+        let changes = git.changes.borrow().len();
+        let ahead = git.ahead();
+        let has_repo = git.repo.borrow().is_some();
+        let sid = self.chat.session_id.borrow().clone().unwrap_or_default();
+        let root = sessions::project_root(&self.tab.folder);
+        let recent: Vec<SessionInfo> = ws.projects.borrow().iter().find(|p| p.path == root).map(|p| p.sessions.iter().filter(|s| s.id != sid).take(3).cloned().collect()).unwrap_or_default();
+        let linked: Option<(i64, String)> = if sid.is_empty() { None } else { ws.find_session(&sid).and_then(|s| Some((s.pr_number?, s.pr_url?))) };
+        let key = format!(
+            "{:?}|{changes}|{ahead}|{has_repo}|{:?}|{}",
+            branch,
+            linked,
+            recent.iter().map(|s| format!("{}:{}:{}", s.id, s.title, s.modified.timestamp())).collect::<Vec<_>>().join(",")
+        );
+        if *self.welcome_key.borrow() == key {
+            return;
+        }
+        *self.welcome_key.borrow_mut() = key;
+        clear(&self.welcome);
+        let head = hbox(12);
+        head.append(&icon_tile("sy-sparkles-symbolic", "violet", 30));
+        let titles = vbox(4);
+        titles.set_valign(gtk::Align::Center);
+        titles.append(&label_with(&util::last_component(&self.tab.folder), &["title-3", "sy-text"]));
+        let sub = hbox(6);
+        sub.add_css_class("sy-small");
+        match &branch {
+            Some(b) => {
+                sub.append(&colored_icon("sy-branch-symbolic", 12, "muted"));
+                sub.append(&ellipsized(b, &["sy-muted"]));
+                if changes > 0 {
+                    sub.append(&label_with(&format!("· {changes} changed"), &["fg-amber"]));
+                }
+                if ahead > 0 {
+                    sub.append(&label_with(&format!("· {ahead} unpushed"), &["sy-muted"]));
+                }
+            }
+            None => {
+                let l = ellipsized(&util::tilde(&self.tab.folder), &["sy-muted"]);
+                l.set_ellipsize(gtk::pango::EllipsizeMode::Start);
+                sub.append(&l);
+            }
+        }
+        titles.append(&sub);
+        head.append(&titles);
+        self.welcome.append(&head);
+        self.welcome.append(&wrap_label("Describe a task. The agent reads the code, proposes changes and asks before acting.", &["sy-muted"]));
+        let mut suggestions: Vec<(&str, String, String)> = vec![];
+        if changes > 0 {
+            suggestions.push(("sy-eye-symbolic", "Review my uncommitted changes".into(), "Review my uncommitted changes (git diff HEAD). Point out bugs, risky parts and missing tests.".into()));
+            if let (Some(b), true) = (&branch, has_repo) {
+                suggestions.push(("sy-pr-symbolic", "Open a pull request".into(), ship::open_pr_prompt(b, None, true, ahead)));
+            }
+        }
+        if let Some((n, url)) = &linked {
+            suggestions.push(("sy-comment-symbolic", format!("Address review on #{n}"), format!("Read the review comments on pull request #{n} ({url}) with gh, fix what is valid and reply to what is not.")));
+        }
+        suggestions.push(("sy-folder-symbolic", "Explain the project structure".into(), "Explain the project structure: main modules, how they connect, and where to start reading.".into()));
+        suggestions.push(("sy-issue-symbolic", "Find bugs in recent changes".into(), "Look at the last few commits and find likely bugs or regressions.".into()));
+        suggestions.push(("sy-check-circle-symbolic", "Write tests for changed code".into(), "Write tests for the code changed on this branch, following the existing test style.".into()));
+        let grid = gtk::Grid::new();
+        grid.set_column_spacing(10);
+        grid.set_row_spacing(10);
+        grid.set_column_homogeneous(true);
+        for (i, (icon_name, title, prompt)) in suggestions.into_iter().take(4).enumerate() {
+            let b = gtk::Button::new();
+            b.add_css_class("flat");
+            b.add_css_class("chat-suggestion");
+            let row = hbox(10);
+            row.append(&colored_icon(icon_name, 14, "violet"));
+            let l = wrap_label(&title, &["sy-text"]);
+            l.set_hexpand(true);
+            row.append(&l);
+            b.set_child(Some(&row));
+            let (c, t) = (self.chat.clone(), self.tab.clone());
+            b.connect_clicked(move |_| {
+                if !c.running.get() {
+                    if let Some(a) = app::try_get() {
+                        a.claude.restart(&t);
+                    }
+                }
+                c.send(&prompt, vec![]);
+            });
+            grid.attach(&b, (i % 2) as i32, (i / 2) as i32, 1, 1);
+        }
+        self.welcome.append(&grid);
+        if !recent.is_empty() {
+            let list = vbox(2);
+            list.append(&label_with("Recent in this project", &["sy-dim", "sy-small", "sy-bold"]));
+            for s in recent {
+                let b = gtk::Button::new();
+                b.add_css_class("flat");
+                let row = hbox(8);
+                row.append(&colored_icon("sy-clock-symbolic", 12, "dim"));
+                let t = ellipsized(&s.title, &["sy-text"]);
+                t.set_hexpand(true);
+                t.set_xalign(0.0);
+                row.append(&t);
+                row.append(&label_with(&util::rel(Some(s.modified)), &["sy-dim", "sy-small"]));
+                b.set_child(Some(&row));
+                b.connect_clicked(move |_| {
+                    if let Some(a) = app::try_get() {
+                        a.claude.resume(&s, false, Some(TabKind::Chat));
+                    }
+                });
+                list.append(&b);
+            }
+            self.welcome.append(&list);
+        }
+        self.welcome.append(&label_with("/ commands · @ files · Shift+Enter new line · paste a screenshot Ctrl+V", &["sy-dim", "sy-small"]));
+    }
+
+    fn edit_from_here(self: &Rc<Self>, item_id: &str, text: &str) {
+        let chat = self.chat.clone();
+        let sid = chat.session_id.borrow().clone().filter(|s| !s.is_empty());
+        let index = chat.items.borrow().iter().position(|i| i.id() == item_id);
+        let (Some(sid), Some(index), false) = (sid, index, chat.busy.get()) else {
+            *chat.draft.borrow_mut() = Some(text.to_string());
+            self.composer.render_state();
+            return;
+        };
+        let later = chat.items.borrow()[index + 1..].iter().filter(|i| matches!(i, ChatItem::User { text: t, .. } if t == text)).count();
+        let mut roots: Vec<PathBuf> = vec![PathBuf::from(chat.config_dir.clone().unwrap_or_else(|| accounts::config_dir(None))).join("projects")];
+        let fallback = PathBuf::from(accounts::default_config_dir()).join("projects");
+        if !roots.contains(&fallback) {
+            roots.push(fallback);
+        }
+        let (tab, prompt) = (self.tab.clone(), text.to_string());
+        crate::rt::spawn_local(async move {
+            let p = prompt.clone();
+            let res = crate::rt::blocking(move || -> Result<(PathBuf, Option<SessionInfo>), String> {
+                let file = rewind::session_file(&sid, &roots).ok_or_else(|| "Couldn't find the session file".to_string())?;
+                let (_, forked) = rewind::fork(&file, &p, later)?;
+                let info = sessions::parse(&forked);
+                Ok((forked, info))
+            })
+            .await;
+            let Some(a) = app::try_get() else { return };
+            let title = format!("Edit · {}", tab.title.borrow());
+            match res {
+                Ok((file, info)) => {
+                    let new = match info {
+                        Some(mut info) => {
+                            info.title = title;
+                            a.claude.resume(&info, false, Some(TabKind::Chat))
+                        }
+                        None => {
+                            let _ = std::fs::remove_file(&file);
+                            a.claude.new_session(&tab.folder, None, Some(title), None, Some(TabKind::Chat))
+                        }
+                    };
+                    if let Some(c) = &new.chat {
+                        *c.draft.borrow_mut() = Some(prompt);
+                        c.changed.emit(&Event::State);
+                    }
+                }
+                Err(e) => {
+                    *chat.draft.borrow_mut() = Some(prompt);
+                    *chat.last_error.borrow_mut() = Some(e);
+                    chat.changed.emit(&Event::State);
+                }
+            }
+        });
     }
 
     fn item_widget(self: &Rc<Self>, item: &ChatItem) -> gtk::Widget {
         match item {
             ChatItem::User { text, images, .. } => {
+                let outer = vbox(4);
                 let b = vbox(8);
                 b.add_css_class("chat-user");
                 if !images.is_empty() {
@@ -596,12 +1152,38 @@ impl ChatView {
                         b.append(&l);
                     }
                 }
-                b.upcast()
+                outer.append(&b);
+                if !text.is_empty() {
+                    let actions = actions_row();
+                    actions.set_halign(gtk::Align::End);
+                    let t = text.clone();
+                    actions.append(&copy_button(move || t.clone()));
+                    let edit = action_button("edit-undo-symbolic", "Edit from here — continues in a new branch of this session");
+                    let (w, id, t) = (Rc::downgrade(self), item.id(), text.clone());
+                    edit.connect_clicked(move |_| {
+                        if let Some(me) = w.upgrade() {
+                            me.edit_from_here(&id, &t);
+                        }
+                    });
+                    actions.append(&edit);
+                    outer.append(&actions);
+                    linger_hover(&outer, &actions, || true);
+                }
+                outer.upcast()
             }
             ChatItem::Text(t) => {
                 let view = markdown::MarkdownView::new(&t.text.borrow());
                 self.markdowns.borrow_mut().insert(item.id(), view.clone());
-                view.widget.clone().upcast()
+                let outer = vbox(2);
+                outer.append(&view.widget);
+                let actions = actions_row();
+                actions.set_halign(gtk::Align::Start);
+                let tt = t.clone();
+                actions.append(&copy_button(move || tt.text.borrow().clone()));
+                outer.append(&actions);
+                let tt = t.clone();
+                linger_hover(&outer, &actions, move || tt.finalized.get() && !tt.text.borrow().trim().is_empty());
+                outer.upcast()
             }
             ChatItem::Thinking(t) => {
                 let text = t.text.borrow().clone();
@@ -613,12 +1195,18 @@ impl ChatView {
                 head.append(&colored_icon("sy-sparkles-symbolic", 12, "violet"));
                 head.append(&label_with("Thinking", &["sy-muted", "sy-small"]));
                 e.set_label_widget(Some(&head));
+                let key = item.id();
+                e.set_expanded(self.chat.expanded.borrow().get(&key).copied().unwrap_or(false));
+                let c = self.chat.clone();
+                e.connect_expanded_notify(move |e| {
+                    c.expanded.borrow_mut().insert(key.clone(), e.is_expanded());
+                });
                 let l = selectable(wrap_label(&text, &["sy-muted"]));
                 l.set_margin_start(18);
                 e.set_child(Some(&l));
                 e.upcast()
             }
-            ChatItem::Tool(c) => self.tool_widget(c),
+            ChatItem::Tool(c) => self.tool_widget(c, false),
             ChatItem::Notice { text, is_error, .. } => {
                 let b = hbox(6);
                 let l1 = line();
@@ -635,40 +1223,133 @@ impl ChatView {
         }
     }
 
-    fn tool_widget(self: &Rc<Self>, c: &Rc<ToolCall>) -> gtk::Widget {
+    fn group_widget(self: &Rc<Self>, id: &str, steps: &[ToolStep]) -> gtk::Widget {
+        if steps.len() == 1 {
+            if let Some(c) = steps[0].call() {
+                return self.tool_widget(c, false);
+            }
+        }
+        let folder = self.tab.folder.clone();
+        let calls: Vec<Rc<ToolCall>> = steps.iter().filter_map(|s| s.call().cloned()).collect();
+        let key = format!("g{id}");
+        let open = self.chat.expanded.borrow().get(&key).copied().unwrap_or(false);
+        let b = vbox(6);
+        b.add_css_class("chat-group");
+        let head = gtk::Button::new();
+        head.add_css_class("flat");
+        head.add_css_class("chat-group-head");
+        head.set_halign(gtk::Align::Start);
+        let hb = hbox(6);
+        let (title, running) = tool_groups::group_header(&calls, &folder);
+        if running {
+            hb.append(&spinner(12));
+        }
+        let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
+        for (icon_name, tint) in tool_groups::kind_icons(&names) {
+            hb.append(&colored_icon(icon_name, 12, tint));
+        }
+        let l = label_with(&title, &[if running { "sy-text" } else { "sy-muted" }]);
+        l.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+        hb.append(&l);
+        let failed = calls.iter().filter(|c| c.status.get() == ToolStatus::Error).count();
+        if failed > 0 {
+            hb.append(&label_with(&format!("· {failed} failed"), &["fg-red"]));
+        }
+        hb.append(&icon(if open { "pan-down-symbolic" } else { "pan-end-symbolic" }, 12));
+        head.set_child(Some(&hb));
+        let w = Rc::downgrade(self);
+        let first = steps.first().map(|s| s.id()).unwrap_or_default();
+        head.connect_clicked(move |_| {
+            if let Some(me) = w.upgrade() {
+                me.chat.expanded.borrow_mut().insert(key.clone(), !open);
+                me.refresh(first.clone());
+            }
+        });
+        b.append(&head);
+        if open {
+            let list = vbox(0);
+            list.add_css_class("chat-group-steps");
+            for (i, s) in steps.iter().enumerate() {
+                if i > 0 {
+                    list.append(&line());
+                }
+                match s {
+                    ToolStep::Call(c) => list.append(&self.tool_widget(c, true)),
+                    ToolStep::Thinking(t) => list.append(&self.thinking_step(t)),
+                }
+            }
+            b.append(&list);
+        }
+        b.upcast()
+    }
+
+    fn thinking_step(self: &Rc<Self>, t: &Rc<ChatText>) -> gtk::Widget {
+        let key = format!("k{}", t.id);
+        let open = self.chat.expanded.borrow().get(&key).copied().unwrap_or(false);
+        let b = vbox(0);
+        let head = gtk::Button::new();
+        head.add_css_class("flat");
+        head.add_css_class("chat-step-head");
+        let hb = hbox(6);
+        hb.append(&label_with("Thinking", &["sy-dim"]));
+        hb.append(&icon(if open { "pan-down-symbolic" } else { "pan-end-symbolic" }, 12));
+        hb.append(&spacer());
+        head.set_child(Some(&hb));
+        let w = Rc::downgrade(self);
+        let k = key.clone();
+        head.connect_clicked(move |_| {
+            if let Some(me) = w.upgrade() {
+                me.chat.expanded.borrow_mut().insert(k.clone(), !open);
+                me.refresh(k.clone());
+            }
+        });
+        b.append(&head);
+        if open {
+            let l = selectable(wrap_label(&t.text.borrow(), &["sy-muted"]));
+            margins(&l, 0, 10, 10, 10);
+            b.append(&l);
+        }
+        b.upcast()
+    }
+
+    fn tool_widget(self: &Rc<Self>, c: &Rc<ToolCall>, in_group: bool) -> gtk::Widget {
         let folder = self.tab.folder.clone();
         let permission = c.permission.borrow().clone();
         let pending_permission = permission.as_ref().map(|p| !p.resolved.get()).unwrap_or(false);
-        let default_open = pending_permission || matches!(c.name.as_str(), "Edit" | "MultiEdit" | "Write" | "ExitPlanMode" | "TodoWrite");
-        let open = self.open_tools.borrow().get(&c.id).copied().unwrap_or(default_open);
+        let default_open = pending_permission || (!in_group && matches!(c.name.as_str(), "Edit" | "MultiEdit" | "Write" | "ExitPlanMode" | "TodoWrite"));
+        let open = self.chat.expanded.borrow().get(&c.id).copied().unwrap_or(default_open);
         let card = vbox(0);
-        card.add_css_class("chat-tool");
+        card.add_css_class(if in_group { "chat-step" } else { "chat-tool" });
         match c.status.get() {
-            ToolStatus::Error if !pending_permission => card.add_css_class("error"),
-            ToolStatus::Denied if !pending_permission => card.add_css_class("denied"),
+            ToolStatus::Error if !pending_permission && !in_group => card.add_css_class("error"),
+            ToolStatus::Denied if !pending_permission && !in_group => card.add_css_class("denied"),
             _ => {}
         }
         let head = gtk::Button::new();
         head.add_css_class("flat");
-        let hb = hbox(8);
-        match c.status.get() {
-            ToolStatus::Running => {
-                if pending_permission {
-                    hb.append(&colored_icon("sy-attention-symbolic", 14, "amber"));
-                } else {
-                    hb.append(&spinner(12));
-                }
-            }
-            ToolStatus::Done => hb.append(&colored_icon("sy-check-symbolic", 14, "green")),
-            ToolStatus::Error => hb.append(&colored_icon("sy-x-symbolic", 14, "red")),
-            ToolStatus::Denied => hb.append(&colored_icon("sy-issue-skip-symbolic", 14, "amber")),
+        if in_group {
+            head.add_css_class("chat-step-head");
         }
-        hb.append(&colored_icon(tool_icon(&c.name), 14, "muted"));
-        hb.append(&label_with(&tool_title(c), &["sy-bold", "sy-text"]));
-        let summary = label_with(&tool_summary(c, &folder), &["sy-muted"]);
-        summary.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-        summary.set_hexpand(true);
-        hb.append(&summary);
+        let hb = hbox(8);
+        if in_group {
+            if let Some(g) = status_glyph(c, pending_permission) {
+                hb.append(&g);
+            }
+            hb.append(&colored_icon(tool_groups::icon(&c.name), 14, tool_groups::Kind::of(&c.name).tint()));
+            let title = label_with(&tool_groups::step_title(c, &folder), &[if c.status.get() == ToolStatus::Running { "sy-text" } else { "sy-muted" }]);
+            title.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+            title.set_hexpand(true);
+            title.set_xalign(0.0);
+            hb.append(&title);
+        } else {
+            hb.append(&status_glyph(c, pending_permission).unwrap_or_else(|| colored_icon("sy-check-symbolic", 14, "green").upcast()));
+            hb.append(&colored_icon(tool_groups::icon(&c.name), 14, "muted"));
+            hb.append(&label_with(&tool_title(c), &["sy-bold", "sy-text"]));
+            let summary = label_with(&tool_summary(c, &folder), &["sy-muted"]);
+            summary.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+            summary.set_hexpand(true);
+            hb.append(&summary);
+        }
         if let Some((a, d)) = tool_diff_stat(c) {
             hb.append(&diff_stat(a, d));
         }
@@ -678,15 +1359,20 @@ impl ChatView {
         let id = c.id.clone();
         head.connect_clicked(move |_| {
             if let Some(me) = w.upgrade() {
-                me.open_tools.borrow_mut().insert(id.clone(), !open);
-                me.update_item(&format!("c{id}"));
+                me.chat.expanded.borrow_mut().insert(id.clone(), !open);
+                me.refresh(format!("c{id}"));
             }
         });
         card.append(&head);
         if open {
-            card.append(&line());
+            if !in_group {
+                card.append(&line());
+            }
             let details = self.tool_details(c, &folder);
             pad(&details, 10);
+            if in_group {
+                details.set_margin_top(0);
+            }
             card.append(&details);
         }
         if let Some(p) = permission.filter(|p| !p.resolved.get()) {
@@ -1490,7 +2176,20 @@ impl ChatComposer {
 
     fn render_state(self: &Rc<Self>) {
         let c = &self.chat;
-        self.placeholder.set_text(if c.busy.get() { "Message will be queued…" } else { "Ask Claude or describe a task…" });
+        let draft = c.draft.borrow_mut().take();
+        if let Some(d) = draft {
+            let buffer = self.view.buffer();
+            buffer.set_text(&d);
+            buffer.place_cursor(&buffer.end_iter());
+            self.view.grab_focus();
+        }
+        self.placeholder.set_text(if c.queued_count() > 0 && !c.running.get() {
+            "Queued — sends when the session starts…"
+        } else if c.busy.get() {
+            "Message will be queued…"
+        } else {
+            "Ask Claude or describe a task…"
+        });
         self.stop.set_visible(c.busy.get());
         self.update_send();
         let pct = c.context.borrow().as_ref().map(|x| x.percentage).or(c.context_percent.get()).unwrap_or(0);
