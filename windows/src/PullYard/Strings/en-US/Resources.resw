@@ -479,7 +479,7 @@
   <data name="Provider_Projects" xml:space="preserve"><value>Projects</value></data>
   <data name="Provider_PullRequest" xml:space="preserve"><value>pull request</value></data>
   <data name="Provider_ToDoList" xml:space="preserve"><value>To-Do List</value></data>
-  <data name="RateLimit_Hint" xml:space="preserve"><value>GitHub rate limit reached. Live polling is paused; manual refresh still works.</value></data>
+  <data name="RateLimit_Hint" xml:space="preserve"><value>GitHub rate limit reached. Live polling and refreshes are paused until the limit resets.</value></data>
   <data name="RateLimit_Paused" xml:space="preserve"><value>Rate limited — live updates resume at {0}</value></data>
   <data name="ReReview_Other" xml:space="preserve"><value>Other…</value></data>
   <data name="ReReview_Request" xml:space="preserve"><value>Re-request review</value></data>

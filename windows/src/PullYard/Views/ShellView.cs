@@ -220,7 +220,7 @@ public sealed class ShellView : Grid
             var row = Ui.Columns((Ui.Glyph("\uE823", 13, "amber"), Ui.Auto), (text, Ui.Star));
             row.ColumnSpacing = 8;
             row.Margin = new Thickness(14, 0, 10, 8);
-            Ui.Tip(row, L.T("RateLimit_Hint", "GitHub rate limit reached. Live polling is paused; manual refresh still works."));
+            Ui.Tip(row, L.T("RateLimit_Hint", "GitHub rate limit reached. Live polling and refreshes are paused until the limit resets."));
             footer.Children.Add(row);
         }
         if (app.User is { } user)

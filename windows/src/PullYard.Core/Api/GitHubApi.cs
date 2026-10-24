@@ -14,6 +14,7 @@ public sealed class ApiException : Exception
 {
     public int Status { get; }
     public bool SchemaError { get; init; }
+    public DateTimeOffset? RateLimitedUntil { get; init; }
 
     public ApiException(string message, int status = 0) : base(message)
     {
@@ -71,13 +72,14 @@ public sealed partial class GitHubApi
     }
 
     private Task<(HttpResponseMessage Response, byte[] Data)> Send(HttpClient client, Func<HttpRequestMessage> make, CancellationToken ct, string? graphQLQuery = null, string caller = "", bool keepRedirectBody = true) =>
-        SendWithRetry(client, make, ct, graphQLQuery, caller, keepRedirectBody, (response, data) => RateLimit.Observe(response, data, graphQLQuery is not null, DateTimeOffset.Now));
+        SendWithRetry(client, make, ct, graphQLQuery, caller, keepRedirectBody, (req, response, data) => RateLimit.Observe(response, data, graphQLQuery is not null, DateTimeOffset.Now, req.RequestUri), req => RateLimit.Refusal(req.RequestUri, req.Method, graphQLQuery, DateTimeOffset.Now));
 
-    private static async Task<(HttpResponseMessage Response, byte[] Data)> SendWithRetry(HttpClient client, Func<HttpRequestMessage> make, CancellationToken ct, string? graphQLQuery = null, string caller = "", bool keepRedirectBody = true, Action<HttpResponseMessage, byte[]>? observe = null)
+    private static async Task<(HttpResponseMessage Response, byte[] Data)> SendWithRetry(HttpClient client, Func<HttpRequestMessage> make, CancellationToken ct, string? graphQLQuery = null, string caller = "", bool keepRedirectBody = true, Action<HttpRequestMessage, HttpResponseMessage, byte[]>? observe = null, Func<HttpRequestMessage, Exception?>? refuse = null)
     {
         for (var attempt = 0; ; attempt++)
         {
             using var req = make();
+            if (refuse?.Invoke(req) is { } refusal) throw refusal;
             var retryable = attempt == 0 && RetryPolicy.IsRead(req.Method, graphQLQuery);
             var started = Stopwatch.GetTimestamp();
             HttpResponseMessage response;
@@ -91,7 +93,7 @@ public sealed partial class GitHubApi
                 await Backoff(ct).ConfigureAwait(false);
                 continue;
             }
-            observe?.Invoke(response, data);
+            observe?.Invoke(req, response, data);
             if (retryable && RetryPolicy.IsTransient((int)response.StatusCode))
             {
                 response.Dispose();

@@ -28,11 +28,15 @@ public static class RetryPolicy
 
 public sealed class RateLimitPause
 {
+    public const string Core = "core";
+    public const string Search = "search";
+    public const string GraphQL = "graphql";
+
     public static readonly TimeSpan Fallback = TimeSpan.FromSeconds(60);
     public static readonly TimeSpan Longest = TimeSpan.FromHours(1);
 
     private readonly object gate = new();
-    private DateTimeOffset? until;
+    private readonly Dictionary<string, DateTimeOffset> buckets = new(StringComparer.OrdinalIgnoreCase);
 
     public event Action<DateTimeOffset>? Paused;
 
@@ -40,25 +44,53 @@ public sealed class RateLimitPause
     {
         get
         {
-            lock (gate) return until;
+            lock (gate) return buckets.Count == 0 ? null : buckets.Values.Max();
         }
     }
 
     public bool IsPaused(DateTimeOffset now) => Until is { } u && u > now;
 
-    public void Observe(HttpResponseMessage response, byte[] data, bool graphQL, DateTimeOffset now)
+    public DateTimeOffset? BlockedUntil(string bucket, DateTimeOffset now)
     {
-        if (Evaluate(response, data, graphQL, now) is { } next) PauseUntil(next);
+        lock (gate) return buckets.TryGetValue(bucket, out var u) && u > now ? u : null;
     }
 
-    public void PauseUntil(DateTimeOffset next)
+    public static string Bucket(Uri? url, bool graphQL)
+    {
+        if (graphQL) return GraphQL;
+        return url?.AbsolutePath.Contains("/search/", StringComparison.OrdinalIgnoreCase) == true ? Search : Core;
+    }
+
+    public void Observe(HttpResponseMessage response, byte[] data, bool graphQL, DateTimeOffset now, Uri? url = null)
+    {
+        if (Evaluate(response, data, graphQL, now) is not { } next) return;
+        var resource = Header(response, "X-RateLimit-Resource");
+        PauseUntil(next, string.IsNullOrWhiteSpace(resource) ? Bucket(url ?? response.RequestMessage?.RequestUri, graphQL) : resource.Trim());
+    }
+
+    public void PauseUntil(DateTimeOffset next, string bucket = Core)
     {
         lock (gate)
         {
-            if (until is { } current && current >= next) return;
-            until = next;
+            if (buckets.TryGetValue(bucket, out var current) && current >= next) return;
+            buckets[bucket] = next;
         }
         Paused?.Invoke(next);
+    }
+
+    public void CarryFrom(RateLimitPause other, DateTimeOffset now)
+    {
+        List<KeyValuePair<string, DateTimeOffset>> active;
+        lock (other.gate) active = other.buckets.Where(b => b.Value > now).ToList();
+        foreach (var (bucket, until) in active) PauseUntil(until, bucket);
+    }
+
+    public ApiException? Refusal(Uri? url, HttpMethod method, string? graphQLQuery, DateTimeOffset now)
+    {
+        if (!RetryPolicy.IsRead(method, graphQLQuery)) return null;
+        if (BlockedUntil(Bucket(url, graphQLQuery is not null), now) is not { } until) return null;
+        var at = until.ToLocalTime().ToString("t", CultureInfo.CurrentCulture);
+        return new ApiException($"GitHub rate limit reached. Requests resume at {at}.", 429) { RateLimitedUntil = until };
     }
 
     public static DateTimeOffset? Evaluate(HttpResponseMessage response, byte[] data, bool graphQL, DateTimeOffset now)

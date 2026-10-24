@@ -95,7 +95,7 @@ public sealed partial class AppViewModel : ObservableObject
         rateLimitCts?.Cancel();
         RateLimitedUntil = null;
         if (newValue is null) return;
-        if (oldValue is not null && oldValue.Token == newValue.Token && oldValue.RateLimit.Until is { } carried) newValue.RateLimit.PauseUntil(carried);
+        if (oldValue is not null && oldValue.Token == newValue.Token) newValue.RateLimit.CarryFrom(oldValue.RateLimit, DateTimeOffset.Now);
         if (newValue.RateLimit.Until is { } until && until > DateTimeOffset.Now) ApplyRateLimit(until);
     }
 
