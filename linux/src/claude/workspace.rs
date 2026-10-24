@@ -138,6 +138,17 @@ impl Tab {
     }
 }
 
+pub fn new_session_args(session_id: &str, name: Option<String>, prompt: Option<String>) -> Vec<String> {
+    let mut args = vec!["--session-id".to_string(), session_id.to_string()];
+    if let Some(n) = name.filter(|n| !n.is_empty()) {
+        args.extend(["-n".into(), n]);
+    }
+    if let Some(p) = prompt.filter(|p| !p.is_empty()) {
+        args.extend(["--".into(), p]);
+    }
+    args
+}
+
 pub fn apply_terminal_colors(t: &vte4::Terminal) {
     let dark = crate::theme::is_dark();
     let brand = crate::theme::is_brand();
@@ -447,13 +458,7 @@ impl Workspace {
             return tab;
         }
         let session_id = uuid::Uuid::new_v4().to_string().to_lowercase();
-        let mut args = vec!["--session-id".to_string(), session_id.clone()];
-        if let Some(n) = name.filter(|n| !n.is_empty()) {
-            args.extend(["-n".into(), n]);
-        }
-        if let Some(p) = prompt.filter(|p| !p.is_empty()) {
-            args.push(p);
-        }
+        let args = new_session_args(&session_id, name, prompt);
         let tab = self.make_tab(folder, TabKind::Terminal, &title, &session_id);
         self.launch_terminal(&tab, args, mode);
         tab
@@ -711,5 +716,17 @@ impl Workspace {
             },
         );
         self.emit(WsEvent::TabState);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prompt_is_passed_after_separator() {
+        let args = new_session_args("abc", Some("Fix".into()), Some("--dangerously-skip-permissions".into()));
+        assert_eq!(args, vec!["--session-id", "abc", "-n", "Fix", "--", "--dangerously-skip-permissions"]);
+        assert_eq!(new_session_args("abc", None, Some(String::new())), vec!["--session-id", "abc"]);
     }
 }
