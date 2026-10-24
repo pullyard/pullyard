@@ -175,7 +175,7 @@ public static class SettingsDialog
         tray.Toggled += (_, _) => Settings.Shared.Set(Keys.CloseToTray, tray.IsOn);
         panel.Children.Add(Group(L.T("Settings_Refresh", "Refresh"), "", "green", Row(L.T("Settings_AutoRefresh", "Auto-refresh pull requests"), poll), Row(L.T("Settings_CloseToTray", "Keep running in the notification area when the window is closed"), tray)));
 
-        if (app.Phase == Phase.LoggedIn) panel.Children.Add(Group(L.T("Section_Claude", "Claude Code"), "", "coral", ClaudeSettings(app)));
+        if (app.Phase == Phase.LoggedIn) panel.Children.Add(Group(L.T("Section_Claude", "Agents"), "", "coral", ClaudeSettings(app)));
 
         var auto = new ToggleSwitch { IsOn = UpdaterViewModel.AutoCheck, OnContent = "", OffContent = "" };
         auto.Toggled += (_, _) => UpdaterViewModel.AutoCheck = auto.IsOn;
@@ -341,7 +341,7 @@ public static class SettingsDialog
         CloseOpenDialog();
         var root = App.MainWindow?.Content?.XamlRoot;
         if (!await Dialogs.Confirm(root, L.T("Claude_SignOutQ", "Sign out of Claude Code?"), L.T("Settings_SignOut", "Sign out"), true,
-                L.T("Claude_SignOutHelp", "This also signs out Claude Code in the terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Claude Code section."))) return;
+                L.T("Claude_SignOutHelp", "This also signs out Claude Code in the terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Agents section."))) return;
         app.Claude.SleepAll();
         await ClaudeAccountStore.Shared.Logout();
     }

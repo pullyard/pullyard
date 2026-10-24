@@ -87,7 +87,7 @@ public sealed class ClaudeWorkspaceView : Grid
     private void Render()
     {
         var status = ClaudeAccountStore.Shared.Status;
-        App.MainWindow?.SetSubtitle(Ws.SelectedTab is { } st ? $"{st.Title} — {Fmt.HomeRelative(st.Folder)}" : L.T("Section_Claude", "Claude Code"));
+        App.MainWindow?.SetSubtitle(Ws.SelectedTab is { } st ? $"{st.Title} — {Fmt.HomeRelative(st.Folder)}" : L.T("Section_Claude", "Agents"));
         if (status is ClaudeAccountStatus.LoggedOut or ClaudeAccountStatus.NotInstalled)
         {
             authView ??= new ClaudeAuthView();
@@ -153,7 +153,7 @@ public sealed class ClaudeWorkspaceView : Grid
     {
         var tile = Ui.IconTile("", "coral", 56);
         tile.HorizontalAlignment = HorizontalAlignment.Center;
-        var title = Ui.Text(L.T("Section_Claude", "Claude Code"), 20, "text", FontWeights.SemiBold);
+        var title = Ui.Text(L.T("Section_Claude", "Agents"), 20, "text", FontWeights.SemiBold);
         title.HorizontalAlignment = HorizontalAlignment.Center;
         var sub = Ui.Text(L.T("Claude_EmptyHelp", "Start a new session in a project or resume one from the history on the left."), 13, "muted", wrap: true);
         sub.TextAlignment = TextAlignment.Center;
@@ -364,7 +364,7 @@ public sealed class ClaudeAuthView : Grid
         content.Children.Clear();
         var tile = Ui.IconTile("", "coral", 56);
         tile.HorizontalAlignment = HorizontalAlignment.Center;
-        var title = Ui.Text(L.T("Section_Claude", "Claude Code"), 26, "text", FontWeights.Bold);
+        var title = Ui.Text(L.T("Section_Claude", "Agents"), 26, "text", FontWeights.Bold);
         title.HorizontalAlignment = HorizontalAlignment.Center;
         var switcher = ClaudeAccountCard.Switcher();
         switcher.HorizontalAlignment = HorizontalAlignment.Center;

@@ -21,7 +21,7 @@ public sealed class ClaudeSessionsView : ListPane
     private readonly DispatcherTimer stateTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private bool syncing;
 
-    public ClaudeSessionsView() : base(L.T("Section_Claude", "Claude Code"), "SessionRowTemplate")
+    public ClaudeSessionsView() : base(L.T("Section_Claude", "Agents"), "SessionRowTemplate")
     {
         FilterRow.Children.Add(accountHost);
         FilterRow.Children.Add(SearchBox(L.T("Claude_SearchSessions", "Search sessions"), t =>

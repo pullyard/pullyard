@@ -471,7 +471,7 @@ public sealed class PRContent : Grid, IShortcutHost
         }
         var actions = Ui.H(6);
         if (model.CanWrite && model.FailedRuns > 0) actions.Children.Add(Ui.Button(L.T("Checks_RerunShort", "Re-run failed"), rerun));
-        var button = Ui.Button(L.T("Fix_Button", "Fix with Claude Code"), fix, accent: true);
+        var button = Ui.Button(L.T("Fix_Button", "Fix with agent"), fix, accent: true);
         button.Background = Palette.Brush("coral");
         button.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
         actions.Children.Add(button);
@@ -525,7 +525,7 @@ public sealed class PRContent : Grid, IShortcutHost
             if (unresolved > 0) row.Children.Add(Ui.Text("·", 13, "dim"));
             row.Children.Add(Ui.Text(L.F("Fix_PromptBy", "Fix prompt by @{0}", found.Author) + (found.Date is { } d ? " · " + Fmt.Rel(d) : ""), 13, "muted"));
         }
-        var button = Ui.Button(L.T("Fix_Button", "Fix with Claude Code"), action, accent: true);
+        var button = Ui.Button(L.T("Fix_Button", "Fix with agent"), action, accent: true);
         var (fill, text) = Palette.Filled("coral");
         button.Background = fill;
         button.Foreground = text;
@@ -975,7 +975,7 @@ public sealed record CheckRowItem(CheckContext Check, Action ShowLog, Action? Fi
         if (!string.IsNullOrEmpty(c.Description)) parts.Add(c.Description);
         var body = Ui.V(1, Ui.Text(c.FullTitle, 13), Ui.Caption(string.Join(" · ", parts)));
         var right = Ui.H(4);
-        if (Fix is not null) right.Children.Add(Ui.Button(L.T("Fix_Button", "Fix with Claude Code"), Fix, glyph: "\uE945", tooltip: L.T("CiFix_RowHelp", "Send this check's log and the PR context to Claude Code")));
+        if (Fix is not null) right.Children.Add(Ui.Button(L.T("Fix_Button", "Fix with agent"), Fix, glyph: "\uE945", tooltip: L.T("CiFix_RowHelp", "Send this check's log and the PR context to Claude Code")));
         if (c.IsActionsJob && c.Outcome is not CheckOutcome.Pending and not CheckOutcome.Skipped)
             right.Children.Add(Ui.Button(L.T("Checks_Log", "Log"), ShowLog));
         if (c.Link is { } link) right.Children.Add(Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(link)));

@@ -24,7 +24,7 @@ Everything from the macOS app, adapted to Windows:
 | Sidebar, list and detail columns | `NavigationView` + resizable list column + detail pane with back navigation (Alt+Left) |
 | PR conversation (`WKWebView`) | WebView2 with the same HTML renderer, links open inside the app |
 | Diff table (`NSTableView`) | WebView2 diff with sticky file headers, lazy bodies for big files, inline threads, pending comments, "viewed" checkboxes |
-| Review, merge, edit, reviewers, reply, job log, Fix with Claude sheets | `ContentDialog`s |
+| Review, merge, edit, reviewers, reply, job log, Fix with agent sheets | `ContentDialog`s |
 | Menu bar extra with review requests | Notification-area (tray) icon with the same menu content; closing the window keeps it running there (can be turned off in Settings) |
 | Keychain | Windows Credential Manager |
 | `UserDefaults` | `%LOCALAPPDATA%\PullYard\settings.json` |

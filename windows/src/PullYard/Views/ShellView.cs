@@ -152,7 +152,7 @@ public sealed class ShellView : Grid
                 Item(Section.Repos, provider.RepositoriesTitle(), "\uE8F1", "teal");
             }
             Header(L.T("Nav_AI", "AI"));
-            Item(Section.Claude, L.T("Section_Claude", "Claude Code"), "\uE945", "coral");
+            Item(Section.Claude, L.T("Section_Claude", "Agents"), "\uE945", "coral");
             SyncNavSelection();
             UpdateBadges();
             return;
@@ -169,7 +169,7 @@ public sealed class ShellView : Grid
         Item(Section.Repos, L.T("Section_Repositories", "Repositories"), "", "teal");
         Item(Section.Projects, L.T("Section_Projects", "Projects"), "", "indigo");
         Header(L.T("Nav_AI", "AI"));
-        Item(Section.Claude, L.T("Section_Claude", "Claude Code"), "", "coral");
+        Item(Section.Claude, L.T("Section_Claude", "Agents"), "", "coral");
         SyncNavSelection();
         UpdateBadges();
     }

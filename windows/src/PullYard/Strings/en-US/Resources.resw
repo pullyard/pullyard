@@ -142,7 +142,7 @@
   <data name="Claude_SignInTitle" xml:space="preserve"><value>Sign in to Claude</value></data>
   <data name="Claude_SignOut" xml:space="preserve"><value>Sign out of Claude Code</value></data>
   <data name="Claude_SignOutDefaultHelp" xml:space="preserve"><value>This also signs out Claude Code in the terminal. You can sign in again afterwards, including with another account.</value></data>
-  <data name="Claude_SignOutHelp" xml:space="preserve"><value>This also signs out Claude Code in the terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Claude Code section.</value></data>
+  <data name="Claude_SignOutHelp" xml:space="preserve"><value>This also signs out Claude Code in the terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Agents section.</value></data>
   <data name="Claude_SignOutProfileHelp" xml:space="preserve"><value>Signs out only “{0}”. Other accounts are not affected.</value></data>
   <data name="Claude_SignOutQ" xml:space="preserve"><value>Sign out of Claude Code?</value></data>
   <data name="Claude_SignOutThis" xml:space="preserve"><value>Sign out of this account…</value></data>
@@ -238,7 +238,7 @@
   <data name="Filter_ReviewRequests" xml:space="preserve"><value>Review requests</value></data>
   <data name="Filter_ReviewedByMe" xml:space="preserve"><value>Reviewed by me</value></data>
   <data name="Fix_All" xml:space="preserve"><value>All</value></data>
-  <data name="Fix_Button" xml:space="preserve"><value>Fix with Claude Code</value></data>
+  <data name="Fix_Button" xml:space="preserve"><value>Fix with agent</value></data>
   <data name="Fix_ChooseFolder" xml:space="preserve"><value>Choose folder…</value></data>
   <data name="Fix_CloneHint" xml:space="preserve"><value>Clone it with: gh repo clone {0}</value></data>
   <data name="Fix_Commit" xml:space="preserve"><value>Commit</value></data>
@@ -521,7 +521,7 @@
   <data name="Reviewers_Stale" xml:space="preserve"><value>reviewed before latest push</value></data>
   <data name="Reviewers_Title" xml:space="preserve"><value>Request review</value></data>
   <data name="Search_Placeholder" xml:space="preserve"><value>Filter: text, repo:org/name, label:bug</value></data>
-  <data name="Section_Claude" xml:space="preserve"><value>Claude Code</value></data>
+  <data name="Section_Claude" xml:space="preserve"><value>Agents</value></data>
   <data name="Section_IssuesTitle" xml:space="preserve"><value>Issues: {0}</value></data>
   <data name="Section_MyPrsByProject" xml:space="preserve"><value>My PRs by project</value></data>
   <data name="Section_Notifications" xml:space="preserve"><value>Notifications</value></data>
