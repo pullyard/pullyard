@@ -40,8 +40,10 @@ enum SessionRewind {
     static func cutIndex(lines: [Data], text: String, occurrenceFromEnd: Int) -> Int? {
         let target = text.trimmingCharacters(in: .whitespacesAndNewlines)
         var seen = 0
+        let marker = Data("\"type\":\"user\"".utf8)
         for i in lines.indices.reversed() {
-            guard let o = try? JSONSerialization.jsonObject(with: lines[i]) as? [String: Any],
+            guard lines[i].range(of: marker) != nil,
+                  let o = try? JSONSerialization.jsonObject(with: lines[i]) as? [String: Any],
                   let t = promptText(o), t.trimmingCharacters(in: .whitespacesAndNewlines) == target else { continue }
             if seen == occurrenceFromEnd { return i }
             seen += 1
@@ -56,12 +58,12 @@ enum SessionRewind {
             throw APIError(message: "Couldn't find this message in the session file")
         }
         let newID = UUID().uuidString.lowercased()
+        let oldID = file.deletingPathExtension().lastPathComponent
         var out = Data()
         for line in lines[..<cut] {
-            guard var o = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }
-            if o["sessionId"] != nil { o["sessionId"] = newID }
-            guard let encoded = try? JSONSerialization.data(withJSONObject: o, options: [.withoutEscapingSlashes]) else { continue }
-            out.append(encoded)
+            let text = String(decoding: line, as: UTF8.self)
+                .replacingOccurrences(of: "\"sessionId\":\"\(oldID)\"", with: "\"sessionId\":\"\(newID)\"")
+            out.append(Data(text.utf8))
             out.append(0x0A)
         }
         let target = file.deletingLastPathComponent().appendingPathComponent(newID + ".jsonl")

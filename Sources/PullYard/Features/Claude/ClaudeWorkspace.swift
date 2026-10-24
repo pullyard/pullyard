@@ -377,25 +377,38 @@ final class ClaudeWorkspace {
     }
 
     func rewind(_ tab: ClaudeTab, to text: String, occurrenceFromEnd: Int) {
-        guard let chat = tab.chat, let sid = chat.sessionId, !sid.isEmpty,
-              let file = SessionRewind.sessionFile(id: sid, configDir: chat.configDir ?? ClaudeProfiles.shared.configDir()) else {
+        guard let chat = tab.chat, let sid = chat.sessionId, !sid.isEmpty else {
             tab.chat?.draftRequest = text
             return
         }
-        do {
-            let forked = try SessionRewind.fork(file: file, text: text, occurrenceFromEnd: occurrenceFromEnd)
-            let new: ClaudeTab
-            if let info = ClaudeSessionParser.parse(forked.file) {
-                new = resume(info.retitled("Edit · " + tab.title), kind: .chat)
-            } else {
-                try? FileManager.default.removeItem(at: forked.file)
-                new = newSession(folder: tab.folder, name: "Edit · " + tab.title, kind: .chat)
+        let configDir = chat.configDir ?? ClaudeProfiles.shared.configDir()
+        Task { @MainActor in
+            let result = await Task.detached(priority: .userInitiated) { () -> Result<(URL, ClaudeSessionInfo?), Error> in
+                guard let file = SessionRewind.sessionFile(id: sid, configDir: configDir) else {
+                    return .failure(APIError(message: "Couldn't find the session file"))
+                }
+                do {
+                    let forked = try SessionRewind.fork(file: file, text: text, occurrenceFromEnd: occurrenceFromEnd)
+                    return .success((forked.file, ClaudeSessionParser.parse(forked.file)))
+                } catch {
+                    return .failure(error)
+                }
+            }.value
+            switch result {
+            case .success(let (file, info)):
+                let new: ClaudeTab
+                if let info {
+                    new = resume(info.retitled("Edit · " + tab.title), kind: .chat)
+                } else {
+                    try? FileManager.default.removeItem(at: file)
+                    new = newSession(folder: tab.folder, name: "Edit · " + tab.title, kind: .chat)
+                }
+                new.chat?.draftRequest = text
+                selectedTabID = new.id
+            case .failure(let error):
+                chat.draftRequest = text
+                chat.lastError = error.localizedDescription
             }
-            new.chat?.draftRequest = text
-            selectedTabID = new.id
-        } catch {
-            chat.draftRequest = text
-            chat.lastError = error.localizedDescription
         }
     }
 
