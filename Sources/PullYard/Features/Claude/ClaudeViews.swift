@@ -991,8 +991,16 @@ struct BranchPRPanel: View {
                         Text("No PR for branch \(tab.git.branch ?? "?")")
                             .font(.syCallout).foregroundStyle(Color.syMuted)
                         if let repo, let b = tab.git.branch, b != "HEAD" {
-                            Button("Create PR in browser") { openInBrowser("https://github.com/\(repo.full)/pull/new/\(b)") }
-                                .controlSize(.small)
+                            HStack(spacing: 8) {
+                                Button("Open PR with Agent") {
+                                    app.claude.send(AgentShip.openPRPrompt(branch: b, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead), to: tab)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.syAgentAccent)
+                                .disabled(tab.busy)
+                                Button("Create in Browser") { openInBrowser("https://github.com/\(repo.full)/pull/new/\(b)") }
+                            }
+                            .controlSize(.small)
                         }
                     }
                     .padding(.vertical, 4)
@@ -1316,6 +1324,15 @@ struct AgentBranchMenu: View {
                     Button("Open Pull Request #\(pr.number)") {
                         if let r = GitHubURL.parse(pr.url) { app.section = .prs(.mine); app.open(r) }
                     }
+                    if !git.changes.isEmpty {
+                        Button("Commit and Push with Agent") { app.claude.send(AgentShip.commitPrompt(pr: pr.number), to: tab) }
+                            .disabled(tab.state == .working)
+                    }
+                } else if branch != "HEAD", git.repo != nil {
+                    Button("Open Pull Request with Agent") {
+                        app.claude.send(AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: !git.changes.isEmpty, ahead: git.ahead), to: tab)
+                    }
+                    .disabled(tab.state == .working)
                 }
             } label: {
                 HStack(spacing: 5) {

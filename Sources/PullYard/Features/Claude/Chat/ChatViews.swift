@@ -31,6 +31,11 @@ struct ChatView: View {
                             .id(entry.id)
                             .transition(.rise)
                         }
+                        if let url = chat.createdPR {
+                            CreatedPRCard(url: url)
+                                .id("created-pr")
+                                .transition(.pop)
+                        }
                         if chat.busy {
                             WorkingIndicator(chat: chat)
                                 .transition(.opacity)

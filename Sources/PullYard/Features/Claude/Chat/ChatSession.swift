@@ -158,6 +158,7 @@ final class ChatSession {
     var contextPercent: Int?
     var context: ContextUsage?
     var lastError: String?
+    var createdPR: String?
     var turnStartedAt: Date?
     var sleeping = false
     @ObservationIgnored var lastActivity = Date()
@@ -365,7 +366,7 @@ final class ChatSession {
         for q in queued { deliver(q.text, images: q.images) }
     }
 
-    static func isAuthError(_ text: String) -> Bool {
+    nonisolated static func isAuthError(_ text: String) -> Bool {
         let s = text.lowercased()
         return ["/login", "log in", "logged in", "not logged", "authentication", "invalid api key", "api key", "oauth", "401", "credential", "token has expired", "token expired"].contains { s.contains($0) }
     }
@@ -562,6 +563,10 @@ final class ChatSession {
             if tool.status != .denied { tool.status = (block["is_error"] as? Bool == true) ? .error : .done }
             tool.resultText = ChatSession.resultText(block["content"])
             tool.structured = o["tool_use_result"] as? [String: Any]
+            if tool.name == "Bash", (tool.input["command"] as? String)?.contains("gh pr create") == true,
+               let url = tool.resultText.flatMap(AgentShip.pullRequestURL) {
+                createdPR = url
+            }
         }
     }
 
