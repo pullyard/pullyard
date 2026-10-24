@@ -77,6 +77,8 @@ jobs:
 
       - name: Publish
         shell: pwsh
+        env:
+          PULLYARD_GITHUB_CLIENT_ID: ${{ vars.PULLYARD_GITHUB_CLIENT_ID }}
         run: |
           dotnet publish windows/src/PullYard/PullYard.csproj `
             -c Release `

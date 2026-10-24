@@ -148,3 +148,16 @@ public static class DeviceFlow
         return new DeviceToken(token, o.Str("refresh_token") ?? refreshToken, o.Int("expires_in"));
     }
 }
+
+public static class OAuthApp
+{
+    public static string? Bundled => Normalize(AppInfo.GitHubOAuthClientId);
+
+    public static string? Normalize(string? raw)
+    {
+        var id = (raw ?? "").Trim();
+        return id.Length == 0 ? null : id;
+    }
+
+    public static bool OneClick(GitProvider provider, string? bundled) => provider == GitProvider.GitHub && Normalize(bundled) is not null;
+}

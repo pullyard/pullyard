@@ -168,6 +168,7 @@ public sealed partial class ChatSession : ObservableObject
             if (fork) args.Add("--fork-session");
             else SessionId = resume;
         }
+        args.AddRange(Stacks.StackNotesMcp.LaunchArgs());
         var psi = new ProcessStartInfo(cmd.File)
         {
             UseShellExecute = false,

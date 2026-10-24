@@ -8,7 +8,7 @@ using PullYard.Services;
 
 namespace PullYard.ViewModels;
 
-public enum PRTab { Conversation, Commits, Checks, Files, Stack }
+public enum PRTab { Conversation, Commits, Checks, Files, Stack, Jira }
 
 public sealed record ReviewerInfo(string Login, string? Avatar, string State);
 

@@ -490,8 +490,10 @@ public sealed class StackNotesPanel : Grid
         BorderThickness = new Thickness(1);
         Shadow = new ThemeShadow();
         Translation = new System.Numerics.Vector3(0, 0, 24);
+        store.Changed += OnStoreChanged;
         Unloaded += (_, _) =>
         {
+            store.Changed -= OnStoreChanged;
             Commit();
             store.Flush().Forget();
         };
@@ -529,10 +531,41 @@ public sealed class StackNotesPanel : Grid
             if (row is not null) rows.Children.Remove(row);
             Commit(force: true);
         });
-        var top = Ui.Columns((kinds, Ui.Star), (delete, Ui.Auto));
+        var top = note.Source is { } source
+            ? Ui.Columns((kinds, Ui.Star), (AgentChip(source), Ui.Auto), (delete, Ui.Auto))
+            : Ui.Columns((kinds, Ui.Star), (delete, Ui.Auto));
         row = Ui.V(6, top, box);
         row.Tag = box;
         return row;
+    }
+
+    public static FrameworkElement AgentChip(string source)
+    {
+        var chip = Ui.Chip(source, "coral", "\uE756");
+        Ui.Tip(chip, L.F("Notes_AddedBy", "Added by {0}", source));
+        return chip;
+    }
+
+    private void OnStoreChanged(string changed)
+    {
+        if (changed != key) return;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!committed) return;
+            var known = drafts.Select(d => d.Id).ToHashSet();
+            var arrived = store.Notes(key).Where(n => !known.Contains(n.Id)).ToList();
+            if (arrived.Count == 0) return;
+            if (drafts.Count == 1 && drafts[0].IsEmpty && rows.Children.Count == 1)
+            {
+                drafts.Clear();
+                rows.Children.Clear();
+            }
+            foreach (var n in arrived)
+            {
+                drafts.Add(n);
+                rows.Children.Add(Row(n));
+            }
+        });
     }
 
     private void Update(Guid id, Func<StackNote, StackNote> change)

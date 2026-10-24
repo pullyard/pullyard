@@ -604,6 +604,7 @@ public sealed class StackGraphView : Grid
             var line = Ui.Columns(
                 (new Border { Width = 6, Height = 6, CornerRadius = new CornerRadius(3), Background = Palette.Brush(color), VerticalAlignment = VerticalAlignment.Center }, Ui.Auto),
                 (StackUi.Fixed(n.Kind.Title(), 11, color, FontWeights.SemiBold), Ui.Auto),
+                (n.Source is null ? null : StackUi.FixedGlyph("\uE756", 10, "muted"), Ui.Auto),
                 (StackUi.Fixed(n.Text.Replace('\n', ' '), 12), Ui.Star));
             line.ColumnSpacing = 5;
             stack.Children.Add(line);

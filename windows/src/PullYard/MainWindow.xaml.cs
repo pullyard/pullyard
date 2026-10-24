@@ -64,7 +64,7 @@ public sealed partial class MainWindow : Window
 
     private async Task HoldSplash()
     {
-        await Task.Delay(750);
+        await Task.Delay(SplashView.Hold);
         splashHold = false;
         UpdateContent();
         await model.Updater.CheckOnLaunch();
