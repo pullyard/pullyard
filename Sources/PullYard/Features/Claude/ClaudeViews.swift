@@ -115,10 +115,10 @@ struct ClaudeProjectsColumn: View {
         }
         .task {
             await ClaudeAccountStore.shared.refresh()
-            await ws.reloadProjects()
+            await ws.reloadProjects(force: false)
             if expanded.isEmpty, let first = ws.projects.first { expanded.insert(first.id) }
         }
-        .onChange(of: app.refreshTick) { Task { await ws.reloadProjects() } }
+        .onChange(of: app.refreshTick) { Task { await ws.reloadProjects(force: false) } }
     }
 
     private var cascadeIDs: [String] {
@@ -736,7 +736,7 @@ struct ClaudeControlBar: View {
                 Button("Continue in Terminal") {
                     try? ClaudeLauncher.launch(prompt: "", folder: tab.folder, target: .terminal, mode: .standard, sessionName: tab.title, resumeId: tab.sessionId, configDir: tab.configDir)
                 }
-                if DesktopSessionIndex.isInstalled, let local = ws.projects.lazy.flatMap(\.sessions).first(where: { $0.id == tab.sessionId })?.desktopId {
+                if DesktopSessionIndex.isInstalled, let local = ws.sessionsByID[tab.sessionId]?.desktopId {
                     Button("Open in Claude Desktop") { DesktopSessionIndex.open(localID: local) }
                 }
                 Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: tab.folder)]) }

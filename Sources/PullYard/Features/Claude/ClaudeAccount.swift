@@ -63,7 +63,8 @@ final class ClaudeAccountStore {
         return env
     }
 
-    func refresh() async {
+    func refresh(force: Bool = false) async {
+        if !force, isLoggedIn, let last = lastChecked, Date().timeIntervalSince(last) < 60 { return }
         guard let bin = ClaudeLauncher.claudeBinary else {
             status = .notInstalled
             return
@@ -186,8 +187,8 @@ final class ClaudeAccountStore {
         reauthWatch?.cancel()
         loginInTerminal(method: method, email: nil)
         reauthWatch = Task { [weak self] in
-            for _ in 0..<200 {
-                try? await Task.sleep(for: .seconds(3))
+            for attempt in 0..<90 {
+                try? await Task.sleep(for: .seconds(min(3 + attempt, 10)))
                 guard let self, !Task.isCancelled else { return }
                 await self.refresh()
                 if self.isLoggedIn {
@@ -210,7 +211,7 @@ final class ClaudeAccountStore {
             let tail = output.components(separatedBy: "\n").filter { !$0.contains("http") && !$0.trimmingCharacters(in: .whitespaces).isEmpty }.suffix(3).joined(separator: "\n")
             loginError = tail.isEmpty ? "Sign-in failed (code \(code))" : tail
         }
-        Task { await refresh() }
+        Task { await refresh(force: true) }
     }
 
     func logout(configDir: String? = nil) async {
@@ -287,7 +288,7 @@ struct ClaudeAuthView: View {
                 Button("Copy command") { copyToPasteboard(Self.installCommand) }
                 Button("Docs") { openInBrowser("https://code.claude.com/docs/en/setup") }
                 Spacer()
-                Button("Check again") { Task { await store.refresh() } }.buttonStyle(.borderedProminent).tint(.syAgentAccent)
+                Button("Check again") { Task { await store.refresh(force: true) } }.buttonStyle(.borderedProminent).tint(.syAgentAccent)
             }
         }
     }
@@ -392,7 +393,7 @@ struct ClaudeAccountCard: View {
                 Button("Sign out of this account…", role: .destructive) { confirmLogout = true }
                 Divider()
                 Button("Usage page") { openInBrowser("https://claude.ai/settings/usage") }
-                Button("Refresh status") { Task { await store.refresh() } }
+                Button("Refresh status") { Task { await store.refresh(force: true) } }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }

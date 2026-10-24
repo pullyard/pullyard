@@ -177,6 +177,7 @@ final class ClaudeWorkspace {
     var loadingProjects = false
     var projectsUpdated: Date?
     @ObservationIgnored private var indexTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var sessionsByID: [String: ClaudeSessionInfo] = [:]
     let sessionRows = RowAppearTracker()
     var showInspector = true
     var ciFixes: [ItemRef: CIFixLaunch] = [:]
@@ -269,7 +270,9 @@ final class ClaudeWorkspace {
         return g
     }
 
-    func reloadProjects() async {
+    func reloadProjects(force: Bool = true) async {
+        if loadingProjects { return }
+        if !force, let last = projectsUpdated, Date().timeIntervalSince(last) < 10 { return }
         loadingProjects = true
         defer { loadingProjects = false }
         let root = URL(fileURLWithPath: ClaudeProfiles.shared.configDir()).appendingPathComponent("projects", isDirectory: true)
@@ -277,12 +280,15 @@ final class ClaudeWorkspace {
         let loaded = await Task.detached(priority: .userInitiated) { ClaudeSessionParser.loadAll(root: root) }.value
         guard profileID == ClaudeProfiles.shared.activeID else { return }
         let next = Demo.folder.map { f in loaded.filter { $0.path.hasPrefix(f) } } ?? loaded
+        projectsUpdated = Date()
+        guard next != projects else { return }
         sessionRows.ingest(next.flatMap { $0.sessions.map(\.id) }, mode: .refresh)
         projects = next
-        projectsUpdated = Date()
+        sessionsByID = Dictionary(next.flatMap { $0.sessions.map { ($0.id, $0) } }, uniquingKeysWith: { a, _ in a })
+        guard indexTask == nil else { return }
         let files = next.flatMap { $0.sessions.map(\.file) }
-        indexTask?.cancel()
-        indexTask = Task.detached(priority: .background) {
+        indexTask = Task.detached(priority: .background) { [weak self] in
+            defer { Task { @MainActor in self?.indexTask = nil } }
             try? await Task.sleep(for: .seconds(8))
             for start in stride(from: 0, to: files.count, by: 10) {
                 guard !Task.isCancelled else { return }
@@ -293,10 +299,8 @@ final class ClaudeWorkspace {
 
     func pullRequest(for tab: ClaudeTab) -> (number: Int, url: String)? {
         guard !tab.sessionId.isEmpty else { return nil }
-        for project in projects {
-            if let s = project.sessions.first(where: { $0.id == tab.sessionId }), let n = s.prNumber, let url = s.prURL { return (n, url) }
-        }
-        return nil
+        guard let s = sessionsByID[tab.sessionId], let n = s.prNumber, let url = s.prURL else { return nil }
+        return (n, url)
     }
 
     func cycleTab(_ delta: Int) {
