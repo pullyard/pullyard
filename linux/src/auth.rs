@@ -6,6 +6,12 @@ use crate::api::{http_client, ApiError, ApiResult};
 use crate::git_accounts::{GitCredential, GitProvider};
 use crate::host::{self, HostCmd};
 
+pub const BUILT_IN_CLIENT_ID: &str = env!("BRAND_GITHUB_CLIENT_ID");
+
+pub fn built_in_client_id() -> Option<&'static str> {
+    Some(BUILT_IN_CLIENT_ID.trim()).filter(|s| !s.is_empty())
+}
+
 pub fn gh_available() -> bool {
     host::gh_binary().is_some()
 }

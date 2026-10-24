@@ -48,7 +48,11 @@ pub enum Saved {
 }
 
 pub async fn save(config_dir: PathBuf, key: String, token: String) -> Saved {
-    let label = if key == DEFAULT_KEY { format!("{} GitHub token", brand::APP_NAME) } else { format!("{} Git account token", brand::APP_NAME) };
+    let label = match key.as_str() {
+        DEFAULT_KEY => format!("{} GitHub token", brand::APP_NAME),
+        "jira-token" => format!("{} Jira API token", brand::APP_NAME),
+        _ => format!("{} Git account token", brand::APP_NAME),
+    };
     let stored = match keyring().await {
         Ok(k) => k.create_item(&label, &attributes(&key), token.as_str(), true).await.is_ok(),
         Err(_) => false,

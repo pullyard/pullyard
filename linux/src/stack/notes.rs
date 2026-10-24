@@ -7,6 +7,9 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use gtk::gio;
+use gtk::gio::prelude::*;
+
 use crate::api::models::RepoRef;
 use crate::signal::Signal;
 
@@ -45,11 +48,13 @@ pub struct StackNote {
     pub kind: NoteKind,
     pub text: String,
     pub updated: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 impl StackNote {
     pub fn new(kind: NoteKind, text: &str) -> Self {
-        StackNote { id: uuid::Uuid::new_v4().to_string(), kind, text: text.to_string(), updated: Utc::now() }
+        StackNote { id: uuid::Uuid::new_v4().to_string(), kind, text: text.to_string(), updated: Utc::now(), source: None }
     }
 
     fn blank(&self) -> bool {
@@ -58,7 +63,11 @@ impl StackNote {
 }
 
 pub fn key(account: &str, host: &str, repo: &RepoRef, number: i64) -> String {
-    format!("{}|{host}|{}#{number}", account.to_lowercase(), repo.full().to_lowercase())
+    key_for(account, host, &repo.full(), number)
+}
+
+pub fn key_for(account: &str, host: &str, repo: &str, number: i64) -> String {
+    format!("{}|{host}|{}#{number}", account.to_lowercase(), repo.to_lowercase())
 }
 
 pub struct NotesStore {
@@ -106,6 +115,18 @@ impl NotesStore {
         true
     }
 
+    pub fn import(&self, entries: &[super::mcp::Entry]) -> Vec<String> {
+        let mut keys: Vec<String> = vec![];
+        let mut by_pr = self.by_pr.borrow_mut();
+        for e in entries {
+            by_pr.entry(e.key.clone()).or_default().push(e.note());
+            if !keys.contains(&e.key) {
+                keys.push(e.key.clone());
+            }
+        }
+        keys
+    }
+
     fn snapshot(&self) -> Option<Vec<u8>> {
         let by_pr = self.by_pr.borrow();
         let kept: HashMap<&String, &Vec<StackNote>> = by_pr.iter().filter(|(_, v)| !v.is_empty()).collect();
@@ -147,9 +168,11 @@ fn write_file(file: &Path, data: &[u8]) -> std::io::Result<()> {
 }
 
 thread_local! {
-    static SHARED: Rc<NotesStore> = Rc::new(NotesStore::open(crate::settings::data_dir().join("stack-notes.json")));
+    static SHARED: Rc<NotesStore> = Rc::new(NotesStore::open(super::mcp::notes_file()));
     static SAVE: RefCell<Option<gtk::glib::SourceId>> = const { RefCell::new(None) };
     static CHANGED: Signal<String> = const { Signal::new() };
+    static INBOX: RefCell<Option<gio::FileMonitor>> = const { RefCell::new(None) };
+    static IMPORT: RefCell<Option<gtk::glib::SourceId>> = const { RefCell::new(None) };
 }
 
 pub fn shared() -> Rc<NotesStore> {
@@ -165,6 +188,44 @@ pub fn commit(key: &str, drafts: &[StackNote]) {
         return;
     }
     CHANGED.with(|s| s.emit(&key.to_string()));
+    schedule_save();
+}
+
+pub fn import_inbox() {
+    let entries = super::mcp::drain(&super::mcp::inbox_dir());
+    if entries.is_empty() {
+        return;
+    }
+    for key in shared().import(&entries) {
+        CHANGED.with(|s| s.emit(&key));
+    }
+    schedule_save();
+}
+
+pub fn watch_inbox() {
+    if INBOX.with(|m| m.borrow().is_some()) {
+        return;
+    }
+    let dir = super::mcp::inbox_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    import_inbox();
+    let Ok(monitor) = gio::File::for_path(&dir).monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE) else { return };
+    monitor.connect_changed(|_, _, _, _| {
+        IMPORT.with(|s| {
+            if let Some(id) = s.borrow_mut().take() {
+                id.remove();
+            }
+            let id = gtk::glib::timeout_add_local_once(Duration::from_millis(300), || {
+                IMPORT.with(|s| s.borrow_mut().take());
+                import_inbox();
+            });
+            *s.borrow_mut() = Some(id);
+        });
+    });
+    INBOX.with(|m| *m.borrow_mut() = Some(monitor));
+}
+
+fn schedule_save() {
     SAVE.with(|s| {
         if let Some(id) = s.borrow_mut().take() {
             id.remove();
@@ -218,6 +279,21 @@ mod tests {
     #[test]
     fn key_separates_accounts() {
         assert_ne!(key("alice", "github.com", &RepoRef::new("acme", "app"), 1), key("bob", "github.com", &RepoRef::new("acme", "app"), 1));
+    }
+
+    #[test]
+    fn sourced_notes_round_trip_and_old_files_still_load() {
+        let file = temp_file();
+        let store = NotesStore::open(file.clone());
+        let entry = super::super::mcp::Entry { key: "k".into(), kind: NoteKind::Question, text: "Why?".into(), created: Utc::now() };
+        assert_eq!(store.import(std::slice::from_ref(&entry)), vec!["k".to_string()]);
+        store.flush_blocking().unwrap();
+        let reloaded = NotesStore::open(file.clone());
+        assert_eq!(reloaded.notes("k")[0].source.as_deref(), Some("Claude"));
+        let _ = std::fs::remove_file(&file);
+        std::fs::write(&file, r#"{"k":[{"id":"a","kind":"note","text":"old","updated":"2024-01-01T00:00:00Z"}]}"#).unwrap();
+        assert_eq!(NotesStore::open(file.clone()).notes("k")[0].source, None);
+        let _ = std::fs::remove_file(file);
     }
 
     #[test]

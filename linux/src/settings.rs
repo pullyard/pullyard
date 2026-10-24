@@ -79,6 +79,11 @@ pub struct Settings {
     pub stack_view: String,
     pub stack_support_asked: bool,
     pub text_zoom: f64,
+    pub jira_site: String,
+    pub jira_email: String,
+    pub jira_name: Option<String>,
+    pub jira_has_token: bool,
+    pub jira_links: HashMap<String, Vec<String>>,
 }
 
 impl Default for Settings {
@@ -118,6 +123,11 @@ impl Default for Settings {
             stack_view: "list".into(),
             stack_support_asked: false,
             text_zoom: 1.0,
+            jira_site: String::new(),
+            jira_email: String::new(),
+            jira_name: None,
+            jira_has_token: false,
+            jira_links: HashMap::new(),
         }
     }
 }

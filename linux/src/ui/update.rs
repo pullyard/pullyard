@@ -15,7 +15,7 @@ thread_local! {
 struct View {
     title: gtk::Label,
     date: gtk::Label,
-    spinner: gtk::Spinner,
+    spinner: Loader,
     notes: gtk::Box,
     progress: gtk::ProgressBar,
     progress_label: gtk::Label,

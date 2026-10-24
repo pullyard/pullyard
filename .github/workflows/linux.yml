@@ -65,6 +65,8 @@ jobs:
         run: cargo test
 
       - name: Build
+        env:
+          PULLYARD_GITHUB_CLIENT_ID: ${{ vars.PULLYARD_GITHUB_CLIENT_ID }}
         run: cargo build --release
 
       - name: Launch checks
@@ -72,6 +74,10 @@ jobs:
           set -a; . ./brand.env; set +a
           "./target/release/${BIN_NAME}" --version
           "./target/release/${BIN_NAME}" --help
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | "./target/release/${BIN_NAME}" --mcp-stack-notes --host github.com --account ci | tee mcp.out
+          grep -q '"protocolVersion":"2025-06-18"' mcp.out
+          grep -q '"add_stack_note"' mcp.out
           export WEBKIT_DISABLE_COMPOSITING_MODE=1
           export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
           export GTK_A11Y=none

@@ -23,6 +23,7 @@ pub enum PrTab {
     Checks,
     Files,
     Stack,
+    Jira,
 }
 
 impl PrTab {
@@ -33,6 +34,7 @@ impl PrTab {
             PrTab::Checks => "checks",
             PrTab::Files => "files",
             PrTab::Stack => "stack",
+            PrTab::Jira => "jira",
         }
     }
 
@@ -42,6 +44,7 @@ impl PrTab {
             "checks" => PrTab::Checks,
             "files" => PrTab::Files,
             "stack" => PrTab::Stack,
+            "jira" => PrTab::Jira,
             _ => PrTab::Conversation,
         }
     }

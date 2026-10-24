@@ -162,6 +162,42 @@ pub fn run(_app: Rc<App>) {
     step(next(400), "commits tab", move || pr().set_tab(crate::ui::pr::model::PrTab::Commits));
     step(next(300), "checks tab", move || pr().set_tab(crate::ui::pr::model::PrTab::Checks));
     step(next(300), "conversation tab", move || pr().set_tab(crate::ui::pr::model::PrTab::Conversation));
+    step(next(300), "jira connect form", move || pr().set_tab(PrTab::Jira));
+    step(next(300), "jira ticket card", move || {
+        let url = pr().pr.borrow().as_ref().map(|p| p.url.clone()).unwrap_or_default();
+        crate::settings::update(|s| {
+            s.jira_site = "smoke.invalid".into();
+            s.jira_has_token = true;
+            s.jira_name = Some("Smoke".into());
+        });
+        crate::jira::remember(&crate::jira::JiraIssue {
+            key: "SMOKE-1".into(),
+            summary: "Smoke ticket".into(),
+            status: "In Progress".into(),
+            status_category: "indeterminate".into(),
+            kind: Some("Story".into()),
+            priority: Some("High".into()),
+            assignee: Some("Smoke Test".into()),
+            assignee_avatar: None,
+            reporter: Some("Octocat".into()),
+            description: "First line\n\n• second".repeat(40),
+            url: "https://smoke.invalid/browse/SMOKE-1".into(),
+            updated: Some(chrono::Utc::now()),
+        });
+        crate::jira::set_linked(&url, vec!["SMOKE-1".into()]);
+        crate::jira::changed();
+    });
+    step(next(400), "jira cleanup", move || {
+        let url = pr().pr.borrow().as_ref().map(|p| p.url.clone()).unwrap_or_default();
+        crate::jira::set_linked(&url, vec![]);
+        crate::settings::update(|s| {
+            s.jira_site.clear();
+            s.jira_has_token = false;
+            s.jira_name = None;
+        });
+        crate::jira::changed();
+        pr().set_tab(PrTab::Conversation);
+    });
     step(next(300), "stack fixture", move || {
         let n = inject_stack(&pr(), 40);
         println!("smoke: stack tree {n} nodes, rss before stack tab {} kB", rss_kb());
@@ -174,6 +210,13 @@ pub fn run(_app: Rc<App>) {
         pr().set_tab(PrTab::Stack);
     });
     step(next(700), "stack list rss", || println!("smoke: stack list open, rss {} kB", rss_kb()));
+    step(next(200), "agent stack note", move || {
+        let Some(t) = stack_tab::last() else { return };
+        let key = pr().stack_note_key(t.current());
+        let entry = crate::stack::mcp::Entry { key, kind: crate::stack::notes::NoteKind::Question, text: "Added through MCP".into(), created: chrono::Utc::now() };
+        let _ = crate::stack::mcp::drop_entry(&crate::stack::mcp::inbox_dir(), &entry);
+        crate::stack::notes::import_inbox();
+    });
     step(next(200), "stack notes", move || {
         let Some(t) = stack_tab::last() else { return };
         let n = t.current();

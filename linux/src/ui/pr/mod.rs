@@ -28,7 +28,7 @@ pub struct PrPage {
     page: gtk::glib::WeakRef<adw::NavigationPage>,
     title: adw::WindowTitle,
     actions: gtk::Box,
-    busy: gtk::Spinner,
+    busy: Loader,
     status: Rc<RefreshStatus>,
     header_box: gtk::Box,
     banners: gtk::Box,
@@ -41,6 +41,7 @@ pub struct PrPage {
     checks: RefCell<Option<gtk::ListBox>>,
     files: RefCell<Option<Rc<files::FilesTab>>>,
     stack_tab: RefCell<Option<Rc<stack_tab::StackTab>>>,
+    jira_tab: RefCell<Option<Rc<super::jira::JiraTab>>>,
     rerequested: RefCell<Option<Vec<String>>>,
     sending_rerequest: Cell<bool>,
     replaced: Cell<bool>,
@@ -73,8 +74,10 @@ impl PrPage {
             TabItem { id: "checks", title: "Checks".into(), icon: "sy-checklist-symbolic" },
             TabItem { id: "files", title: "Files changed".into(), icon: "sy-file-symbolic" },
             TabItem { id: "stack", title: "Stack".into(), icon: "sy-stack-symbolic" },
+            TabItem { id: "jira", title: "Jira".into(), icon: "sy-tag-symbolic" },
         ]);
         tabs.set_visible("stack", false);
+        tabs.set_visible("jira", false);
         let tab_stack = gtk::Stack::new();
         tab_stack.set_transition_type(gtk::StackTransitionType::Crossfade);
         tab_stack.set_transition_duration(120);
@@ -106,6 +109,7 @@ impl PrPage {
                 me.model.load(true);
             }
         });
+        hb.pack_end(&status.header_button());
         hb.pack_end(&actions);
         hb.pack_end(&status.widget);
         hb.pack_end(&busy);
@@ -128,6 +132,7 @@ impl PrPage {
             checks: RefCell::new(None),
             files: RefCell::new(None),
             stack_tab: RefCell::new(None),
+            jira_tab: RefCell::new(None),
             rerequested: RefCell::new(None),
             sending_rerequest: Cell::new(false),
             replaced: Cell::new(false),
@@ -149,6 +154,14 @@ impl PrPage {
             });
         }
 
+        let w = Rc::downgrade(&me);
+        crate::jira::on_change(move |_| match w.upgrade() {
+            Some(me) => {
+                me.render_jira_badge();
+                true
+            }
+            None => false,
+        });
         let w = Rc::downgrade(&me);
         me.tabs.on_change(move |id| {
             if let Some(me) = w.upgrade() {
@@ -285,6 +298,12 @@ impl PrPage {
                         }
                         None => loading(),
                     }
+                }
+                PrTab::Jira => {
+                    let t = super::jira::JiraTab::new(self.model.clone());
+                    let w = t.widget.clone().upcast();
+                    *self.jira_tab.borrow_mut() = Some(t);
+                    w
                 }
             };
             self.tab_stack.add_named(&w, Some(tab.id()));
@@ -452,9 +471,19 @@ impl PrPage {
         self.render_tabs();
     }
 
+    fn render_jira_badge(&self) {
+        let keys = super::jira::keys(&self.model);
+        self.tabs.set_visible("jira", crate::jira::is_configured() || !keys.is_empty());
+        self.tabs.set_badge("jira", keys.first().map(String::as_str), None);
+        if let Some(t) = self.jira_tab.borrow().as_ref() {
+            t.update();
+        }
+    }
+
     fn render_tabs(self: &Rc<Self>) {
         let _span = crate::diagnostics::ui_span("pr.tabs");
         self.render_stack_badge();
+        self.render_jira_badge();
         let pr = self.model.pr.borrow().clone();
         let Some(pr) = pr else { return };
         let unresolved = pr.review_threads.nodes.iter().filter(|t| !t.is_resolved && !t.is_outdated).count();

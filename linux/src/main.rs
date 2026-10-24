@@ -16,6 +16,7 @@ mod forge;
 mod git_accounts;
 mod host;
 mod icons;
+mod jira;
 mod list_cache;
 mod local_repo;
 mod rt;
@@ -59,6 +60,9 @@ fn webkit_sandbox_guard() {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some(stack::mcp::FLAG) {
+        std::process::exit(stack::mcp::run(&args));
+    }
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("{} {}", brand::APP_NAME, brand::VERSION);
         return;
