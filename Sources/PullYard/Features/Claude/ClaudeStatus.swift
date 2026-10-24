@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -226,17 +227,7 @@ struct SessionIndicatorDot: View {
             case .none:
                 EmptyView()
             case .working:
-                TimelineView(.animation(minimumInterval: 1 / 60, paused: Motion.reduced)) { context in
-                    let angle = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1) * 360
-                    ZStack {
-                        Circle().stroke(BrandMark.violet.opacity(0.2), lineWidth: 2)
-                        Circle()
-                            .trim(from: 0, to: 0.34)
-                            .stroke(LinearGradient(colors: [BrandMark.sky, BrandMark.violet], startPoint: .leading, endPoint: .trailing), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                            .rotationEffect(.degrees(angle))
-                    }
-                }
-                .frame(width: 10, height: 10)
+                IndicatorLayerView(kind: .spinner).frame(width: 10, height: 10)
             case .done:
                 ZStack {
                     Circle().strokeBorder(BrandMark.branches, lineWidth: 2)
@@ -244,17 +235,10 @@ struct SessionIndicatorDot: View {
                 }
                 .frame(width: 10, height: 10)
             case .waiting:
-                TimelineView(.animation(minimumInterval: 1 / 60, paused: Motion.reduced)) { context in
-                    let t = Motion.reduced ? 0 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
-                    let eased = 1 - pow(1 - t, 3)
-                    ZStack {
-                        Circle()
-                            .fill(BrandMark.hullTop.opacity(0.3))
-                            .scaleEffect(1 + 0.7 * eased)
-                            .opacity(1 - eased)
-                        Circle().fill(LinearGradient(colors: [BrandMark.hullTop, BrandMark.hullBottom], startPoint: .top, endPoint: .bottom))
-                        Text("?").font(.system(size: 8, weight: .heavy, design: .rounded)).foregroundStyle(.white)
-                    }
+                ZStack {
+                    IndicatorLayerView(kind: .pulse).frame(width: 12, height: 12)
+                    Circle().fill(LinearGradient(colors: [BrandMark.hullTop, BrandMark.hullBottom], startPoint: .top, endPoint: .bottom))
+                    Text("?").font(.system(size: 8, weight: .heavy, design: .rounded)).foregroundStyle(.white)
                 }
                 .frame(width: 12, height: 12)
             }
@@ -262,6 +246,103 @@ struct SessionIndicatorDot: View {
         .frame(width: 14, height: 14)
         .help(indicator.help)
         .accessibilityLabel(indicator.help)
+    }
+}
+
+struct IndicatorLayerView: NSViewRepresentable {
+    enum Kind { case spinner, pulse }
+    let kind: Kind
+
+    func makeNSView(context: Context) -> IndicatorLayerNSView { IndicatorLayerNSView(kind: kind) }
+    func updateNSView(_ view: IndicatorLayerNSView, context: Context) {}
+}
+
+final class IndicatorLayerNSView: NSView {
+    private let kind: IndicatorLayerView.Kind
+    private let content = CALayer()
+
+    init(kind: IndicatorLayerView.Kind) {
+        self.kind = kind
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.addSublayer(content)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        build()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        build()
+    }
+
+    private func build() {
+        guard bounds.width > 0 else { return }
+        content.sublayers?.forEach { $0.removeFromSuperlayer() }
+        content.removeAllAnimations()
+        content.frame = bounds
+        let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        switch kind {
+        case .spinner:
+            let rect = bounds.insetBy(dx: 1, dy: 1)
+            let track = CAShapeLayer()
+            track.path = CGPath(ellipseIn: rect, transform: nil)
+            track.fillColor = nil
+            track.strokeColor = NSColor(BrandMark.violet).withAlphaComponent(0.2).cgColor
+            track.lineWidth = 2
+            content.addSublayer(track)
+            let arc = CAShapeLayer()
+            arc.path = CGPath(ellipseIn: rect, transform: nil)
+            arc.fillColor = nil
+            arc.strokeColor = NSColor.black.cgColor
+            arc.lineWidth = 2
+            arc.lineCap = .round
+            arc.strokeEnd = 0.34
+            let gradient = CAGradientLayer()
+            gradient.frame = bounds
+            gradient.colors = [NSColor(BrandMark.sky).cgColor, NSColor(BrandMark.violet).cgColor]
+            gradient.startPoint = CGPoint(x: 0, y: 0.5)
+            gradient.endPoint = CGPoint(x: 1, y: 0.5)
+            gradient.mask = arc
+            let spinner = CALayer()
+            spinner.frame = bounds
+            spinner.addSublayer(gradient)
+            content.addSublayer(spinner)
+            guard !reduced else { return }
+            let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+            spin.fromValue = 0
+            spin.toValue = -2 * Double.pi
+            spin.duration = 1
+            spin.repeatCount = .infinity
+            spin.isRemovedOnCompletion = false
+            spinner.add(spin, forKey: "spin")
+        case .pulse:
+            let ring = CAShapeLayer()
+            ring.frame = bounds
+            ring.path = CGPath(ellipseIn: bounds, transform: nil)
+            ring.fillColor = NSColor(BrandMark.hullTop).withAlphaComponent(0.3).cgColor
+            content.addSublayer(ring)
+            guard !reduced else { return }
+            let scale = CABasicAnimation(keyPath: "transform.scale")
+            scale.fromValue = 1
+            scale.toValue = 1.7
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 1
+            fade.toValue = 0
+            let group = CAAnimationGroup()
+            group.animations = [scale, fade]
+            group.duration = 1.4
+            group.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.7, 0.3, 1)
+            group.repeatCount = .infinity
+            group.isRemovedOnCompletion = false
+            ring.add(group, forKey: "pulse")
+        }
     }
 }
 

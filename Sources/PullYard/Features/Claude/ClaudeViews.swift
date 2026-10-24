@@ -379,6 +379,7 @@ struct SessionRow: View {
     var depth = 0
     var last = false
     var onToggle: () -> Void = {}
+    @State private var expired = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -408,13 +409,13 @@ struct SessionRow: View {
             if childCount > 0 {
                 Text("\(childCount)").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
             }
-            if indicator == .working && !open {
-                TimelineView(.periodic(from: .now, by: 2)) { context in
-                    SessionIndicatorDot(indicator: SessionIndicator(closed: session, now: context.date))
+            SessionIndicatorDot(indicator: expired ? SessionIndicator(closed: session) : indicator)
+                .task(id: indicator == .working && !open) {
+                    guard indicator == .working && !open else { return }
+                    let left = 15 - Date().timeIntervalSince(session.modified)
+                    if left > 0 { try? await Task.sleep(for: .seconds(left + 0.2)) }
+                    expired = true
                 }
-            } else {
-                SessionIndicatorDot(indicator: indicator)
-            }
         }
         .padding(.vertical, 7)
         .padding(.leading, 4)
