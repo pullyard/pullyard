@@ -174,6 +174,13 @@ pub fn run(_app: Rc<App>) {
         pr().set_tab(PrTab::Stack);
     });
     step(next(700), "stack list rss", || println!("smoke: stack list open, rss {} kB", rss_kb()));
+    step(next(200), "agent stack note", move || {
+        let Some(t) = stack_tab::last() else { return };
+        let key = pr().stack_note_key(t.current());
+        let entry = crate::stack::mcp::Entry { key, kind: crate::stack::notes::NoteKind::Question, text: "Added through MCP".into(), created: chrono::Utc::now() };
+        let _ = crate::stack::mcp::drop_entry(&crate::stack::mcp::inbox_dir(), &entry);
+        crate::stack::notes::import_inbox();
+    });
     step(next(200), "stack notes", move || {
         let Some(t) = stack_tab::last() else { return };
         let n = t.current();

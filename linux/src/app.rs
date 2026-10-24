@@ -1502,6 +1502,7 @@ pub fn run(smoke: bool) -> glib::ExitCode {
             me.render_phase();
         });
         crate::rt::spawn_local(a.clone().restore());
+        glib::timeout_add_local_once(Duration::from_secs(3), crate::stack::notes::watch_inbox);
         if crate::tour::active() {
             crate::tour::run(a.clone());
             return;

@@ -363,6 +363,7 @@ impl ChatSession {
                 *self.session_id.borrow_mut() = Some(r);
             }
         }
+        args.extend(crate::stack::mcp::chat_args());
         let cmd = accounts::command(&bin, self.config_dir.as_deref()).args(args).cwd(&self.folder);
         let mut c = cmd.command();
         std::os::unix::process::CommandExt::process_group(&mut c, 0);

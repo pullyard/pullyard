@@ -29,6 +29,9 @@ pub fn sticky(list: &[StackNote], on_path: bool) -> gtk::Box {
         let dot = fixed_box(&["stack-dot", &format!("edge-{}", n.kind.color())], 6, 6);
         row.append(&dot);
         row.append(&label_with(n.kind.title(), &[&format!("fg-{}", n.kind.color()), "sy-bold", "sy-tiny"]));
+        if let Some(source) = &n.source {
+            row.append(&tooltip(colored_icon("sy-terminal-symbolic", 10, "muted"), &format!("Added by {source}")));
+        }
         let text = ellipsized(&n.text.replace('\n', " "), &["sy-text", "sy-small"]);
         text.set_hexpand(true);
         row.append(&text);
@@ -41,6 +44,10 @@ pub fn sticky(list: &[StackNote], on_path: bool) -> gtk::Box {
     b
 }
 
+pub fn source_chip(source: &str) -> gtk::Box {
+    chip(source, "violet", Some("sy-terminal-symbolic"), false)
+}
+
 struct Draft {
     note: RefCell<StackNote>,
 }
@@ -49,6 +56,7 @@ pub struct NotesEditor {
     pub widget: gtk::Box,
     key: String,
     drafts: RefCell<Vec<Rc<Draft>>>,
+    known: RefCell<std::collections::HashSet<String>>,
     rows: gtk::Box,
     pending: RefCell<Option<glib::SourceId>>,
 }
@@ -89,7 +97,7 @@ impl NotesEditor {
         foot.append(&spacer());
         foot.append(&label_with("Only on this computer", &["sy-dim", "sy-small"]));
         widget.append(&foot);
-        let me = Rc::new(NotesEditor { widget, key: key.clone(), drafts: RefCell::new(vec![]), rows, pending: RefCell::new(None) });
+        let me = Rc::new(NotesEditor { widget, key: key.clone(), drafts: RefCell::new(vec![]), known: RefCell::new(Default::default()), rows, pending: RefCell::new(None) });
         let mut existing = notes::shared().notes(&key);
         if existing.is_empty() {
             existing.push(StackNote::new(NoteKind::Note, ""));
@@ -114,6 +122,7 @@ impl NotesEditor {
     }
 
     fn add_row(self: &Rc<Self>, note: StackNote, focus: bool) {
+        self.known.borrow_mut().insert(note.id.clone());
         let draft = Rc::new(Draft { note: RefCell::new(note.clone()) });
         self.drafts.borrow_mut().push(draft.clone());
         let row = vbox(6);
@@ -144,6 +153,9 @@ impl NotesEditor {
             kinds.append(&t);
         }
         top.append(&kinds);
+        if let Some(source) = &note.source {
+            top.append(&tooltip(source_chip(source), &format!("Added by {source}")));
+        }
         top.append(&spacer());
         let delete = icon_button("user-trash-symbolic", "Delete note");
         top.append(&delete);
@@ -196,7 +208,9 @@ impl NotesEditor {
         if let Some(id) = self.pending.borrow_mut().take() {
             id.remove();
         }
-        let drafts: Vec<StackNote> = self.drafts.borrow().iter().map(|d| d.note.borrow().clone()).collect();
+        let mut drafts: Vec<StackNote> = self.drafts.borrow().iter().map(|d| d.note.borrow().clone()).collect();
+        let known = self.known.borrow();
+        drafts.extend(notes::shared().notes(&self.key).into_iter().filter(|n| !known.contains(&n.id)));
         notes::commit(&self.key, &drafts);
     }
 
