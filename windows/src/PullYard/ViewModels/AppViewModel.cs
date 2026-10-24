@@ -69,6 +69,9 @@ public sealed partial class AppViewModel : ObservableObject
         Claude = new ClaudeWorkspace();
         context = SynchronizationContext.Current;
         ClaudeAccountStore.Shared.Attach(SynchronizationContext.Current!);
+        StackNotesMcp.Command = Environment.ProcessPath;
+        StackNotesMcp.Target = () => Api is { } api ? (Account, api.Host) : null;
+        Task.Run(() => _ = StackNotes.Shared).Forget();
         Task.Run(ListSnapshotStore.Shared.Prune).Forget();
         WindowsHello.Refresh().Forget();
         Restore().Forget();

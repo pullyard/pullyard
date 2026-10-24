@@ -25,6 +25,12 @@ public static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Contains(PullYard.Core.Stacks.StackNotesMcp.Flag))
+        {
+            var input = new StreamReader(Console.OpenStandardInput(), new System.Text.UTF8Encoding(false));
+            var output = new StreamWriter(Console.OpenStandardOutput(), new System.Text.UTF8Encoding(false)) { AutoFlush = false };
+            return PullYard.Core.Stacks.StackNotesMcpServer.Run(args, input, output);
+        }
         if (args.Contains("--version"))
         {
             ConsoleOutput.Attach();

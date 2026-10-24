@@ -21,6 +21,7 @@ public static class AppInfo
     public static string Publisher => Get("Publisher", "PullYard");
     public static string GitHubOwner => Get("GitHubOwner", "pullyard");
     public static string GitHubRepo => Get("GitHubRepo", "pullyard");
+    public static string GitHubOAuthClientId => Get("GitHubOAuthClientId", "");
 
     public static string Version
     {
