@@ -350,6 +350,11 @@ public sealed class BranchPRPanel : Grid
 
     private void OnGit(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(Core.Git.GitWorkingCopy.Changes) && selected is null)
+        {
+            Render();
+            return;
+        }
         if (e.PropertyName is nameof(Core.Git.GitWorkingCopy.Repo) or nameof(Core.Git.GitWorkingCopy.Branch) or nameof(Core.Git.GitWorkingCopy.Ahead))
         {
             var key = $"{Repo?.Full}|{tab.Git.Branch}|{tab.Git.Ahead}";
@@ -464,8 +469,13 @@ public sealed class BranchPRPanel : Grid
         {
             items.Add(new TextRowItem(L.F("Inspector_NoPR", "No PR for branch {0}", branchName)));
             if (tab.Git.Branch is { } b && b != "HEAD" && Repo is { } repo)
+            {
+                items.Add(new ActionRowItem(L.T("Inspector_OpenPRAgent", "Open PR with agent"), () => app.Claude.Send(AgentShip.OpenPRPrompt(b, null, tab.Git.Changes.Count > 0, tab.Git.Ahead), tab, submit: true), "\uE8F2"));
                 items.Add(new ActionRowItem(L.T("Inspector_CreatePR", "Create PR in browser"), () => LinkBrowser.Open($"https://github.com/{repo.Full}/pull/new/{b}")));
+            }
         }
+        if (branchPRs.FirstOrDefault(p => p.PrState == "OPEN") is { } open && tab.Git.Changes.Count > 0)
+            items.Add(new ActionRowItem(L.F("Inspector_CommitAgent", "Commit and push to #{0} with agent", open.Number), () => app.Claude.Send(AgentShip.CommitPrompt(open.Number), tab, submit: true), "\uE898"));
         items.AddRange(branchPRs.Select(p => new PRRowItem(p, null)));
         if (linked is { } l && !branchPRs.Any(p => p.Number == l.Number)) items.Add(new PRRowItem(l, L.T("Inspector_FromSession", "from this session")));
         var bar = new SelectorBar();

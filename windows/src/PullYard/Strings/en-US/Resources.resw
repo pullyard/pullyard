@@ -33,11 +33,40 @@
   <data name="Changes_Help" xml:space="preserve"><value>Changes Claude makes will show up here automatically</value></data>
   <data name="Changes_None" xml:space="preserve"><value>No uncommitted changes</value></data>
   <data name="Changes_Unpushed" xml:space="preserve"><value>Unpushed commits · {0}</value></data>
+  <data name="ChatWeb_Changed" xml:space="preserve"><value>{0} changed</value></data>
+  <data name="ChatWeb_Copied" xml:space="preserve"><value>Copied</value></data>
+  <data name="ChatWeb_Copy" xml:space="preserve"><value>Copy</value></data>
+  <data name="ChatWeb_CopyLink" xml:space="preserve"><value>Copy link</value></data>
+  <data name="ChatWeb_EditFromHere" xml:space="preserve"><value>Edit from here — continues in a new branch of this session</value></data>
+  <data name="ChatWeb_Failed" xml:space="preserve"><value>{0} failed</value></data>
+  <data name="ChatWeb_Hint" xml:space="preserve"><value>/ commands · @ files · Shift+Enter new line · paste a screenshot Ctrl+V</value></data>
+  <data name="ChatWeb_JumpLatest" xml:space="preserve"><value>Jump to the latest message</value></data>
+  <data name="ChatWeb_JumpNew" xml:space="preserve"><value>{0} new — jump to the latest message</value></data>
+  <data name="ChatWeb_OpenInApp" xml:space="preserve"><value>Open in PullYard</value></data>
+  <data name="ChatWeb_PROpen" xml:space="preserve"><value>Pull request #{0} is open</value></data>
+  <data name="ChatWeb_Recent" xml:space="preserve"><value>Recent in this project</value></data>
+  <data name="ChatWeb_RestartSession" xml:space="preserve"><value>Restart session</value></data>
+  <data name="ChatWeb_Running" xml:space="preserve"><value>Running:</value></data>
+  <data name="ChatWeb_SignInAgain" xml:space="preserve"><value>Sign in again</value></data>
+  <data name="ChatWeb_SignInExpired" xml:space="preserve"><value>Claude sign-in expired</value></data>
+  <data name="ChatWeb_SignInHint" xml:space="preserve"><value>Sign in again and the session resumes where it stopped.</value></data>
+  <data name="ChatWeb_SignInWaitingHint" xml:space="preserve"><value>Finish signing in in the terminal. The session picks up where it stopped.</value></data>
+  <data name="ChatWeb_SugAddress" xml:space="preserve"><value>Address review on #{0}</value></data>
+  <data name="ChatWeb_SugBugs" xml:space="preserve"><value>Find bugs in recent changes</value></data>
+  <data name="ChatWeb_SugExplain" xml:space="preserve"><value>Explain the project structure</value></data>
+  <data name="ChatWeb_SugOpenPR" xml:space="preserve"><value>Open a pull request</value></data>
+  <data name="ChatWeb_SugReview" xml:space="preserve"><value>Review my uncommitted changes</value></data>
+  <data name="ChatWeb_SugTests" xml:space="preserve"><value>Write tests for changed code</value></data>
+  <data name="ChatWeb_Thinking" xml:space="preserve"><value>Thinking</value></data>
+  <data name="ChatWeb_Unpushed" xml:space="preserve"><value>{0} unpushed</value></data>
+  <data name="ChatWeb_WaitingSignIn" xml:space="preserve"><value>Waiting for sign-in…</value></data>
+  <data name="ChatWeb_WelcomeIntro" xml:space="preserve"><value>Describe a task. The agent reads the code, proposes changes and asks before acting.</value></data>
   <data name="Chat_Allow" xml:space="preserve"><value>Allow</value></data>
   <data name="Chat_AskedQuestion" xml:space="preserve"><value>Claude asked a question — answer above</value></data>
   <data name="Chat_AttachImage" xml:space="preserve"><value>Attach image</value></data>
   <data name="Chat_ContextHelp" xml:space="preserve"><value>Context {0}% — click for usage and limits</value></data>
   <data name="Chat_Deny" xml:space="preserve"><value>Deny</value></data>
+  <data name="Chat_EditTitle" xml:space="preserve"><value>Edit · {0}</value></data>
   <data name="Chat_ModeHelp" xml:space="preserve"><value>Permission mode (Shift+Tab to cycle)</value></data>
   <data name="Chat_NeedsPermission" xml:space="preserve"><value>Claude needs permission: {0}</value></data>
   <data name="Chat_Placeholder" xml:space="preserve"><value>Ask Claude or describe a task…</value></data>
@@ -283,6 +312,7 @@
   <data name="Inline_Title" xml:space="preserve"><value>Comment on line</value></data>
   <data name="Inspector_AskReview" xml:space="preserve"><value>Ask Claude to review this PR</value></data>
   <data name="Inspector_Changes" xml:space="preserve"><value>Changes</value></data>
+  <data name="Inspector_CommitAgent" xml:space="preserve"><value>Commit and push to #{0} with agent</value></data>
   <data name="Inspector_CreatePR" xml:space="preserve"><value>Create PR in browser</value></data>
   <data name="Inspector_Files" xml:space="preserve"><value>Files</value></data>
   <data name="Inspector_FilesChanged" xml:space="preserve"><value>Files changed · {0}</value></data>
@@ -292,6 +322,7 @@
   <data name="Inspector_NoRepo" xml:space="preserve"><value>Folder isn't linked to a GitHub repository</value></data>
   <data name="Inspector_OpenFull" xml:space="preserve"><value>Open full</value></data>
   <data name="Inspector_OpenInPRs" xml:space="preserve"><value>Open in PR section</value></data>
+  <data name="Inspector_OpenPRAgent" xml:space="preserve"><value>Open PR with agent</value></data>
   <data name="Inspector_PR" xml:space="preserve"><value>PR</value></data>
   <data name="Inspector_SendToSession" xml:space="preserve"><value>Send to this session</value></data>
   <data name="Inspector_ThisBranch" xml:space="preserve"><value>This branch</value></data>

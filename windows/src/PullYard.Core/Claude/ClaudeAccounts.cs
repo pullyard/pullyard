@@ -265,7 +265,7 @@ public sealed partial class ClaudeAccountStore : ObservableObject
 
     private CancellationTokenSource? reauthWatch;
 
-    public void Reauthenticate(Action onSuccess)
+    public bool Reauthenticate(Action onSuccess)
     {
         var method = (Info?.Method ?? "").Contains("console", StringComparison.OrdinalIgnoreCase) ? ClaudeLoginMethod.Console : ClaudeLoginMethod.ClaudeAi;
         reauthWatch?.Cancel();
@@ -279,10 +279,11 @@ public sealed partial class ClaudeAccountStore : ObservableObject
         {
             LoginError = e.Message;
             cts.Cancel();
-            return;
+            return false;
         }
         Status = ClaudeAccountStatus.LoggedOut;
         WatchSignIn(cts.Token, onSuccess).Forget();
+        return true;
     }
 
     public void CancelReauthentication() => reauthWatch?.Cancel();
