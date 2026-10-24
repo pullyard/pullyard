@@ -8,7 +8,7 @@ use std::time::Instant;
 use base64::Engine;
 use serde_json::{json, Map, Value};
 
-use super::accounts;
+use super::{accounts, payload, ship};
 use crate::host;
 use crate::signal::Signal;
 
@@ -56,7 +56,7 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
-    fn new(id: &str, name: &str) -> Rc<Self> {
+    pub(crate) fn new(id: &str, name: &str) -> Rc<Self> {
         Rc::new(ToolCall {
             id: id.into(),
             name: name.into(),
@@ -190,6 +190,9 @@ pub struct ChatSession {
     pub sleeping: Cell<bool>,
     pub last_activity: Cell<Instant>,
     pub memory_bytes: Cell<i64>,
+    pub created_pr: RefCell<Option<String>>,
+    pub draft: RefCell<Option<String>>,
+    pub expanded: RefCell<HashMap<String, bool>>,
     pid: Cell<u32>,
     stdin: RefCell<Option<ChildStdin>>,
     stderr_tail: RefCell<String>,
@@ -197,7 +200,7 @@ pub struct ChatSession {
     stream_texts: RefCell<HashMap<String, Rc<ChatText>>>,
     tool_streams: RefCell<HashMap<String, String>>,
     message_texts: RefCell<HashMap<String, Vec<Rc<ChatText>>>>,
-    queued_prompt: RefCell<Option<String>>,
+    queued: RefCell<Vec<(String, Vec<ChatImage>)>>,
     request_counter: Cell<u64>,
     intentional_stop: Cell<bool>,
     generation: Cell<u64>,
@@ -245,6 +248,9 @@ impl ChatSession {
             sleeping: Cell::new(false),
             last_activity: Cell::new(Instant::now()),
             memory_bytes: Cell::new(0),
+            created_pr: RefCell::new(None),
+            draft: RefCell::new(None),
+            expanded: RefCell::new(HashMap::new()),
             pid: Cell::new(0),
             stdin: RefCell::new(None),
             stderr_tail: RefCell::new(String::new()),
@@ -252,7 +258,7 @@ impl ChatSession {
             stream_texts: RefCell::new(HashMap::new()),
             tool_streams: RefCell::new(HashMap::new()),
             message_texts: RefCell::new(HashMap::new()),
-            queued_prompt: RefCell::new(None),
+            queued: RefCell::new(vec![]),
             request_counter: Cell::new(0),
             intentional_stop: Cell::new(false),
             generation: Cell::new(0),
@@ -461,6 +467,11 @@ impl ChatSession {
         self.busy.set(false);
         *self.stdin.borrow_mut() = None;
         self.memory_bytes.set(0);
+        let stuck: Vec<Rc<ToolCall>> = self.tools.borrow().values().filter(|t| t.status.get() == ToolStatus::Running).cloned().collect();
+        for t in stuck {
+            t.status.set(if intentional { ToolStatus::Done } else { ToolStatus::Error });
+            self.emit(Event::Updated(format!("c{}", t.id)));
+        }
         if intentional {
             self.sleeping.set(self.session_id.borrow().is_some());
             self.pending.borrow_mut().clear();
@@ -500,12 +511,31 @@ impl ChatSession {
         if trimmed.is_empty() && images.is_empty() {
             return;
         }
-        if !self.running.get() {
-            *self.queued_prompt.borrow_mut() = Some(text.to_string());
-            return;
-        }
         self.last_activity.set(Instant::now());
         self.items.borrow_mut().push(ChatItem::User { id: uuid::Uuid::new_v4().to_string(), text: trimmed.clone(), images: images.clone() });
+        if !self.running.get() {
+            self.queued.borrow_mut().push((trimmed, images));
+            self.emit(Event::Appended);
+            self.emit(Event::State);
+            return;
+        }
+        self.deliver(&trimmed, &images);
+        self.emit(Event::Appended);
+        self.emit(Event::State);
+    }
+
+    pub fn queued_count(&self) -> usize {
+        self.queued.borrow().len()
+    }
+
+    fn flush_queue(&self) {
+        let queued = std::mem::take(&mut *self.queued.borrow_mut());
+        for (text, images) in queued {
+            self.deliver(&text, &images);
+        }
+    }
+
+    fn deliver(&self, trimmed: &str, images: &[ChatImage]) {
         let mut content: Vec<Value> = images
             .iter()
             .map(|i| json!({ "type": "image", "source": { "type": "base64", "media_type": i.media_type, "data": base64::engine::general_purpose::STANDARD.encode(&i.data) } }))
@@ -517,8 +547,6 @@ impl ChatSession {
         self.busy.set(true);
         *self.status.borrow_mut() = None;
         self.turn_started.set(Some(Instant::now()));
-        self.emit(Event::Appended);
-        self.emit(Event::State);
     }
 
     pub fn interrupt(&self) {
@@ -618,10 +646,7 @@ impl ChatSession {
                 if let Some(pm) = s(o, "permissionMode") {
                     *self.permission_mode.borrow_mut() = pm;
                 }
-                let q = self.queued_prompt.borrow_mut().take();
-                if let Some(q) = q {
-                    self.send(&q, vec![]);
-                }
+                self.flush_queue();
                 self.emit(Event::State);
             }
             Some("status") => {
@@ -797,8 +822,14 @@ impl ChatSession {
             if tool.status.get() != ToolStatus::Denied {
                 tool.status.set(if block.get("is_error").and_then(|v| v.as_bool()) == Some(true) { ToolStatus::Error } else { ToolStatus::Done });
             }
-            *tool.result_text.borrow_mut() = result_text(block.get("content"));
-            *tool.structured.borrow_mut() = o.get("tool_use_result").and_then(|v| v.as_object()).cloned();
+            *tool.result_text.borrow_mut() = result_text(block.get("content")).map(payload::cap_text);
+            *tool.structured.borrow_mut() = payload::trimmed(o.get("tool_use_result").and_then(|v| v.as_object()).cloned());
+            if tool.name == "Bash" && tool.string("command").map(|c| ship::is_pr_create(&c)).unwrap_or(false) {
+                if let Some(url) = tool.result_text.borrow().as_deref().and_then(ship::pull_request_url) {
+                    *self.created_pr.borrow_mut() = Some(url);
+                    self.emit(Event::State);
+                }
+            }
             self.emit(Event::Updated(format!("c{id}")));
         }
     }
@@ -817,8 +848,12 @@ impl ChatSession {
         if o.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
             let sub = s(o, "subtype").unwrap_or_default();
             let text = if sub == "error_during_execution" { "Stopped".to_string() } else { s(o, "result").unwrap_or(sub.clone()) };
-            self.items.borrow_mut().push(ChatItem::Notice { id: uuid::Uuid::new_v4().to_string(), text, is_error: sub != "error_during_execution" });
-            self.emit(Event::Appended);
+            if sub != "error_during_execution" && payload::is_auth_error(&text) {
+                *self.last_error.borrow_mut() = Some(text);
+            } else {
+                self.items.borrow_mut().push(ChatItem::Notice { id: uuid::Uuid::new_v4().to_string(), text, is_error: sub != "error_during_execution" });
+                self.emit(Event::Appended);
+            }
         }
         self.control("get_context_usage", Map::new());
         self.emit(Event::State);
@@ -1038,8 +1073,8 @@ impl ChatSession {
                                 Some("tool_result") => {
                                     if let Some(tool) = s(b, "tool_use_id").and_then(|id| map.get(&id).cloned()) {
                                         tool.status.set(if b.get("is_error").and_then(|v| v.as_bool()) == Some(true) { ToolStatus::Error } else { ToolStatus::Done });
-                                        *tool.result_text.borrow_mut() = result_text(b.get("content"));
-                                        *tool.structured.borrow_mut() = o.get("toolUseResult").and_then(|v| v.as_object()).cloned();
+                                        *tool.result_text.borrow_mut() = result_text(b.get("content")).map(payload::cap_text);
+                                        *tool.structured.borrow_mut() = payload::trimmed(o.get("toolUseResult").and_then(|v| v.as_object()).cloned());
                                     }
                                 }
                                 Some("text") => {

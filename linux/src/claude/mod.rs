@@ -3,7 +3,12 @@ pub mod chat;
 pub mod git;
 pub mod launcher;
 pub mod memory;
+pub mod payload;
+pub mod relogin;
+pub mod rewind;
 pub mod sessions;
+pub mod ship;
+pub mod tool_groups;
 pub mod workspace;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
