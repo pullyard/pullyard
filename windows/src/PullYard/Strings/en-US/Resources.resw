@@ -23,6 +23,47 @@
   <data name="Accounts_SwitchTitle" xml:space="preserve"><value>Switch to {0}?</value></data>
   <data name="Accounts_ThisAccount" xml:space="preserve"><value>this account</value></data>
   <data name="Accounts_Title" xml:space="preserve"><value>Accounts</value></data>
+  <data name="Agents_AnotherApp" xml:space="preserve"><value>another app</value></data>
+  <data name="Agents_Archive" xml:space="preserve"><value>Archive</value></data>
+  <data name="Agents_BadgeDescription" xml:space="preserve"><value>{0} agent sessions need attention</value></data>
+  <data name="Agents_BranchDetail" xml:space="preserve"><value>Branch: {0}</value></data>
+  <data name="Agents_Editors" xml:space="preserve"><value>Editors</value></data>
+  <data name="Agents_HideArchived" xml:space="preserve"><value>Hide archived sessions</value></data>
+  <data name="Agents_HideSubsessions" xml:space="preserve"><value>Hide sub-sessions</value></data>
+  <data name="Agents_HintClose" xml:space="preserve"><value>close</value></data>
+  <data name="Agents_HintOpen" xml:space="preserve"><value>open</value></data>
+  <data name="Agents_HintSelect" xml:space="preserve"><value>select</value></data>
+  <data name="Agents_IndicatorDone" xml:space="preserve"><value>Finished — not viewed yet</value></data>
+  <data name="Agents_IndicatorWaiting" xml:space="preserve"><value>Waiting for you</value></data>
+  <data name="Agents_IndicatorWorking" xml:space="preserve"><value>Working</value></data>
+  <data name="Agents_NewSessionIn" xml:space="preserve"><value>New session in</value></data>
+  <data name="Agents_Notify" xml:space="preserve"><value>Notify when a session finishes or needs you</value></data>
+  <data name="Agents_NotifyFinished" xml:space="preserve"><value>Finished · {0}</value></data>
+  <data name="Agents_NotifyPermission" xml:space="preserve"><value>Claude needs permission: {0}</value></data>
+  <data name="Agents_NotifyPlan" xml:space="preserve"><value>Claude has a plan ready for review</value></data>
+  <data name="Agents_NotifyQuestion" xml:space="preserve"><value>Claude has a question for you</value></data>
+  <data name="Agents_OpenIn" xml:space="preserve"><value>Open in</value></data>
+  <data name="Agents_OpenInDesktop" xml:space="preserve"><value>Open in Claude Desktop</value></data>
+  <data name="Agents_OpenInHelp" xml:space="preserve"><value>Open the project in {0} — the arrow lists more apps</value></data>
+  <data name="Agents_OpenInName" xml:space="preserve"><value>Open in {0}</value></data>
+  <data name="Agents_Pin" xml:space="preserve"><value>Pin to top</value></data>
+  <data name="Agents_Pinned" xml:space="preserve"><value>Pinned</value></data>
+  <data name="Agents_QuickOpenEmpty" xml:space="preserve"><value>Nothing matches “{0}”</value></data>
+  <data name="Agents_QuickOpenPlaceholder" xml:space="preserve"><value>Go to a session, search conversations, or start one in a project…</value></data>
+  <data name="Agents_QuickOpenTab" xml:space="preserve"><value>open · {0}</value></data>
+  <data name="Agents_QuickOpenTitle" xml:space="preserve"><value>Go to session</value></data>
+  <data name="Agents_Rename" xml:space="preserve"><value>Rename…</value></data>
+  <data name="Agents_RenameButton" xml:space="preserve"><value>Rename</value></data>
+  <data name="Agents_RenameHelp" xml:space="preserve"><value>The new name is only shown in {0}.</value></data>
+  <data name="Agents_RenameTitle" xml:space="preserve"><value>Rename session</value></data>
+  <data name="Agents_ShowArchived" xml:space="preserve"><value>Show archived sessions</value></data>
+  <data name="Agents_ShowSubsessions" xml:space="preserve"><value>Show sub-sessions</value></data>
+  <data name="Agents_SleepAll" xml:space="preserve"><value>Sleep all</value></data>
+  <data name="Agents_Terminals" xml:space="preserve"><value>Terminals</value></data>
+  <data name="Agents_Unarchive" xml:space="preserve"><value>Unarchive</value></data>
+  <data name="Agents_Unpin" xml:space="preserve"><value>Unpin</value></data>
+  <data name="Agents_Updated" xml:space="preserve"><value>Updated {0}</value></data>
+  <data name="Agents_WorktreeDetail" xml:space="preserve"><value>Worktree: {0}</value></data>
   <data name="App_Tagline" xml:space="preserve"><value>Pull requests, without the browser</value></data>
   <data name="Board_All" xml:space="preserve"><value>All</value></data>
   <data name="Board_Draft" xml:space="preserve"><value>Draft</value></data>

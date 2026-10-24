@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using PullYard.Core;
+using PullYard.Core.Claude;
 using PullYard.Core.Util;
 using PullYard.Services;
 using PullYard.ViewModels;
@@ -158,6 +159,10 @@ public sealed partial class MainWindow : Window
         Add(VirtualKey.Number5, VirtualKeyModifiers.Control, () => model.Section = Section.Projects);
         Add(VirtualKey.Number6, VirtualKeyModifiers.Control, () => model.Section = Section.Claude);
         Add(VirtualKey.Left, VirtualKeyModifiers.Menu, () => ShellView.Current?.GoBack());
+        Add(VirtualKey.K, VirtualKeyModifiers.Control, () => { if (model.Phase == Phase.LoggedIn) AgentQuickOpen.Show(RootGrid.XamlRoot).Forget(); });
+        Add(VirtualKey.N, VirtualKeyModifiers.Control, () => NewAgentSession().Forget());
+        Add((VirtualKey)221, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => CycleAgent(1));
+        Add((VirtualKey)219, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => CycleAgent(-1));
         Add(VirtualKey.Q, VirtualKeyModifiers.Control, App.Quit);
         Add((VirtualKey)187, VirtualKeyModifiers.Control, TextZoom.ZoomIn);
         Add((VirtualKey)187, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, TextZoom.ZoomIn);
@@ -166,6 +171,24 @@ public sealed partial class MainWindow : Window
         Add(VirtualKey.Subtract, VirtualKeyModifiers.Control, TextZoom.ZoomOut);
         Add(VirtualKey.Number0, VirtualKeyModifiers.Control, TextZoom.Reset);
         Add(VirtualKey.NumberPad0, VirtualKeyModifiers.Control, TextZoom.Reset);
+    }
+
+    private void CycleAgent(int delta)
+    {
+        if (model.Phase != Phase.LoggedIn || model.Claude.Tabs.Count == 0) return;
+        model.Section = Section.Claude;
+        model.Claude.CycleTab(delta);
+    }
+
+    private async Task NewAgentSession()
+    {
+        if (model.Phase != Phase.LoggedIn) return;
+        model.Section = Section.Claude;
+        if (!ClaudeAccountStore.Shared.IsLoggedIn) return;
+        var ws = model.Claude;
+        var folder = ws.SelectedTab?.Folder ?? ws.Projects.FirstOrDefault(p => p.Exists)?.Path;
+        folder ??= await WindowInterop.PickFolder(this);
+        if (folder is not null) ws.NewSession(folder);
     }
 
     private void OnTextZoom()

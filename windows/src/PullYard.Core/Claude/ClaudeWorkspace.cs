@@ -51,6 +51,7 @@ public sealed partial class ClaudeTab : ObservableObject
     [ObservableProperty] private long terminalMemory;
     [ObservableProperty] private int? exitCode;
     [ObservableProperty] private ClaudeTabState state = ClaudeTabState.Stopped;
+    [ObservableProperty] private bool unread;
 
     public TerminalSession? Terminal { get; set; }
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.Now;
@@ -69,6 +70,14 @@ public sealed partial class ClaudeTab : ObservableObject
             Chat.PropertyChanged += (_, _) => UpdateState();
         }
     }
+
+    public SessionIndicator Indicator => SessionIndicators.ForTab(State, Unread);
+
+    partial void OnStateChanged(ClaudeTabState value) => OnPropertyChanged(nameof(Indicator));
+
+    partial void OnUnreadChanged(bool value) => OnPropertyChanged(nameof(Indicator));
+
+    public string? LastAssistantText => Chat?.Items.OfType<TextItem>().LastOrDefault(t => !t.Thinking && t.Text.Length > 0)?.Text;
 
     public string ProjectName => System.IO.Path.GetFileName(Folder.TrimEnd('\\', '/')) is { Length: > 0 } n ? n : Folder;
 
@@ -124,6 +133,8 @@ public sealed partial class ClaudeTab : ObservableObject
     }
 }
 
+public enum AgentEvent { Finished, Question, Plan, Permission }
+
 public sealed partial class ClaudeWorkspace : ObservableObject
 {
     public ObservableCollection<ClaudeTab> Tabs { get; } = new();
@@ -136,6 +147,7 @@ public sealed partial class ClaudeWorkspace : ObservableObject
     [ObservableProperty] private int attentionCount;
     [ObservableProperty] private int runningCount;
     [ObservableProperty] private long totalMemory;
+    [ObservableProperty] private int badgeCount;
 
     private readonly Dictionary<string, GitWorkingCopy> gits = new(StringComparer.OrdinalIgnoreCase);
     private Timer? monitor;
@@ -143,6 +155,14 @@ public sealed partial class ClaudeWorkspace : ObservableObject
 
     public event Action<ClaudeTab>? TabOpened;
     public event Action<ClaudeTab>? AttentionRequested;
+    public event Action<ClaudeTab, AgentEvent, string?>? Notify;
+
+    public Func<ClaudeTab, bool>? IsWatching { get; set; }
+
+    public IReadOnlyDictionary<string, ClaudeSessionInfo> SessionsById { get; private set; } = new Dictionary<string, ClaudeSessionInfo>();
+
+    private DateTimeOffset lastReload = DateTimeOffset.MinValue;
+    private bool indexWarmed;
 
     public ClaudeWorkspace()
     {
@@ -209,6 +229,69 @@ public sealed partial class ClaudeWorkspace : ObservableObject
         AttentionCount = Tabs.Count(t => t.NeedsAttention);
         RunningCount = Tabs.Count(t => t.Running);
         TotalMemory = Tabs.Sum(t => t.MemoryBytes);
+        BadgeCount = Tabs.Count(t => t.State == ClaudeTabState.Waiting || t.Unread);
+    }
+
+    partial void OnSelectedTabChanged(ClaudeTab? value) => MarkViewed(value);
+
+    partial void OnProjectsChanged(List<ClaudeProject> value)
+    {
+        var map = new Dictionary<string, ClaudeSessionInfo>();
+        foreach (var p in value)
+            foreach (var s in p.Sessions) map.TryAdd(s.Id, s);
+        SessionsById = map;
+    }
+
+    public void MarkViewed(ClaudeTab? tab)
+    {
+        if (tab is null) return;
+        tab.Unread = false;
+        SessionSeen.Shared.Mark(tab.SessionId);
+    }
+
+    public void CycleTab(int delta)
+    {
+        if (Tabs.Count == 0) return;
+        var i = SelectedTab is { } t ? Tabs.IndexOf(t) : -1;
+        if (i < 0) i = delta > 0 ? -1 : 0;
+        SelectedTab = Tabs[((i + delta) % Tabs.Count + Tabs.Count) % Tabs.Count];
+    }
+
+    public SessionIndicator Indicator(ClaudeSessionInfo session) =>
+        TabForSession(session.Id) is { } tab ? tab.Indicator : SessionIndicators.ForClosed(session, SessionSeen.Shared, DateTimeOffset.Now);
+
+    private bool Watching(ClaudeTab tab) => IsWatching?.Invoke(tab) ?? SelectedTab == tab;
+
+    private void OnTurnFinished(ClaudeTab tab)
+    {
+        if (!Tabs.Contains(tab)) return;
+        if (Watching(tab))
+        {
+            SessionSeen.Shared.Mark(tab.SessionId);
+            return;
+        }
+        tab.Unread = true;
+        Notify?.Invoke(tab, AgentEvent.Finished, tab.LastAssistantText);
+    }
+
+    private void OnNeedsInput(ClaudeTab tab)
+    {
+        if (!Tabs.Contains(tab) || Watching(tab)) return;
+        var tool = tab.Chat?.PendingPermissions.LastOrDefault(p => !p.Resolved)?.ToolName ?? "";
+        var kind = tool switch
+        {
+            "AskUserQuestion" => AgentEvent.Question,
+            "ExitPlanMode" => AgentEvent.Plan,
+            _ => AgentEvent.Permission
+        };
+        Notify?.Invoke(tab, kind, tool);
+    }
+
+    public static string Snippet(string? text, int max = 140)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "";
+        var flat = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+        return flat.Length > max ? flat[..max] + "…" : flat;
     }
 
     private void Ui(Action a)
@@ -284,18 +367,21 @@ public sealed partial class ClaudeWorkspace : ObservableObject
         return g;
     }
 
-    public async Task ReloadProjects()
+    public async Task ReloadProjects(bool force = true)
     {
+        if (!force && (LoadingProjects || DateTimeOffset.Now - lastReload < TimeSpan.FromSeconds(10))) return;
+        lastReload = DateTimeOffset.Now;
         LoadingProjects = true;
         try
         {
             var root = Path.Combine(ClaudeProfiles.Shared.ConfigDir(), "projects");
             var profileId = ClaudeProfiles.Shared.ActiveId;
-            var loaded = await Task.Run(() => ClaudeSessionParser.LoadAll(root));
+            var loaded = await Task.Run(() => ClaudeSessionParser.LoadAll(root, DesktopSessionIndex.Load()));
             if (profileId != ClaudeProfiles.Shared.ActiveId) return;
             if (Demo.Folder is { } f) loaded = loaded.Where(p => p.Path.StartsWith(f, StringComparison.OrdinalIgnoreCase)).ToList();
             Projects = loaded;
             ProjectsUpdated = DateTimeOffset.Now;
+            WarmIndex();
         }
         finally
         {
@@ -304,6 +390,20 @@ public sealed partial class ClaudeWorkspace : ObservableObject
     }
 
     public IEnumerable<ClaudeSessionInfo> AllSessions => Projects.SelectMany(p => p.Sessions);
+
+    public List<string> SessionFiles() => Projects.SelectMany(p => p.Sessions).Select(s => s.File).ToList();
+
+    private void WarmIndex()
+    {
+        if (indexWarmed) return;
+        indexWarmed = true;
+        var files = SessionFiles();
+        Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(20));
+            SessionIndex.Shared.Warm(files);
+        }).Forget();
+    }
 
     public ClaudeTab? TabForSession(string id) => Tabs.FirstOrDefault(t => t.SessionId == id);
 
@@ -364,7 +464,7 @@ public sealed partial class ClaudeWorkspace : ObservableObject
         if (string.IsNullOrEmpty(tab.SessionId)) return;
         tab.Terminal?.Dispose();
         var c = MakeTab(tab.Folder, ClaudeTabKind.Chat, tab.Title, tab.SessionId, select: false);
-        if (AllSessions.FirstOrDefault(s => s.Id == tab.SessionId) is { } info) c.Chat?.LoadHistory(info.File);
+        if (SessionsById.TryGetValue(tab.SessionId, out var info)) c.Chat?.LoadHistory(info.File);
         StartChat(c, tab.SessionId, false, null, null);
         Replace(tab, c);
     }
@@ -526,11 +626,16 @@ public sealed partial class ClaudeWorkspace : ObservableObject
         var tab = new ClaudeTab(folder, kind, title, sessionId, GitFor(folder));
         tab.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(ClaudeTab.State) or nameof(ClaudeTab.MemoryBytes)) UpdateCounts();
+            if (e.PropertyName is nameof(ClaudeTab.State) or nameof(ClaudeTab.MemoryBytes) or nameof(ClaudeTab.Unread)) UpdateCounts();
         };
         if (tab.Chat is { } chat)
         {
-            chat.AttentionRequested += () => AttentionRequested?.Invoke(tab);
+            chat.AttentionRequested += () =>
+            {
+                AttentionRequested?.Invoke(tab);
+                Ui(() => OnNeedsInput(tab));
+            };
+            chat.OnTurnFinished += () => Ui(() => OnTurnFinished(tab));
         }
         Tabs.Add(tab);
         if (select) SelectedTab = tab;

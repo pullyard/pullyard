@@ -179,4 +179,11 @@ public static class Keys
     public const string TextZoom = "text.zoom";
     public const string StackView = "stack.view";
     public const string StackSupportAsked = "stack.graphSupportAsked";
+    public const string AgentsPinned = "agents.pinned";
+    public const string AgentsTitles = "agents.titles";
+    public const string AgentsArchived = "agents.archived";
+    public const string AgentsSeen = "agents.seen";
+    public const string AgentsSeenBaseline = "agents.seenBaseline";
+    public const string AgentsNotify = "agents.notify";
+    public const string AgentsOpenIn = "agents.openIn";
 }

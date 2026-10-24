@@ -1,5 +1,6 @@
 using Microsoft.Windows.AppNotifications;
 using Microsoft.Windows.AppNotifications.Builder;
+using PullYard.Core.Util;
 
 namespace PullYard.Services;
 
@@ -27,7 +28,7 @@ public static class Notifications
         }
     }
 
-    public static void Show(string title, string body, string action)
+    public static void Show(string title, string body, string action, string? tag = null, string? group = null)
     {
         if (!registered) return;
         try
@@ -37,7 +38,21 @@ public static class Notifications
                 .AddText(title)
                 .AddText(body)
                 .BuildNotification();
+            if (tag is not null) n.Tag = tag.Length > 64 ? tag[..64] : tag;
+            if (group is not null) n.Group = group;
             AppNotificationManager.Default.Show(n);
+        }
+        catch
+        {
+        }
+    }
+
+    public static void Remove(string tag, string group)
+    {
+        if (!registered) return;
+        try
+        {
+            AppNotificationManager.Default.RemoveByTagAndGroupAsync(tag, group).AsTask().Forget();
         }
         catch
         {

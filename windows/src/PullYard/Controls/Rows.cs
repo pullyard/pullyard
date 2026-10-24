@@ -254,29 +254,99 @@ public sealed class SessionRow : CodeRow
             SessionListItem s => Session(s),
             ProjectHeaderItem p => ProjectHeader(p),
             OpenTabItem t => OpenTab(t),
-            SectionLabelItem l => Ui.Text(l.Text, 11.5, "muted", FontWeights.SemiBold),
+            SectionLabelItem l => SectionLabel(l),
+            ArchivedToggleItem a => ArchivedToggle(a),
             _ => null
         };
+    }
+
+    private static UIElement SectionLabel(SectionLabelItem item)
+    {
+        var label = Ui.H(5);
+        if (item.Glyph is { } g) label.Children.Add(Ui.Glyph(g, 10, "muted"));
+        label.Children.Add(Ui.Text(item.Text, 11.5, "muted", FontWeights.SemiBold));
+        var grid = Ui.Columns((label, Ui.Star), (item.OnAction is { } act && item.ActionText is { } text ? Ui.Link(text, act, 11.5) : null, Ui.Auto));
+        grid.Padding = new Thickness(0, 12, 0, 4);
+        return grid;
+    }
+
+    private static UIElement ArchivedToggle(ArchivedToggleItem item)
+    {
+        var t = Ui.Text(item.Showing ? L.T("Agents_HideArchived", "Hide archived sessions") : L.T("Agents_ShowArchived", "Show archived sessions"), 12, "accent");
+        t.Margin = new Thickness(0, 10, 0, 12);
+        return t;
     }
 
     private static UIElement Session(SessionListItem item)
     {
         var s = item.Session;
-        var bar = new Border { Width = 3, CornerRadius = new CornerRadius(1.5), Background = Palette.Brush(Palette.ProjectKey(ClaudeSessionParser.ProjectRoot(s.Cwd)), item.Open ? 1 : 0.45) };
-        var title = Ui.H(6);
-        if (item.Open) title.Children.Add(Ui.Glyph("", 10, "green"));
-        title.Children.Add(Ui.Text(s.Title, 13, "text", item.Open ? FontWeights.SemiBold : FontWeights.Normal, maxLines: 2));
-        var meta = Ui.H(5);
-        if (s.Branch is { } b) meta.Children.Add(BranchTag(b));
-        if (s.WorktreeName is { } w) meta.Children.Add(Ui.H(3, Ui.Glyph("", 10, "teal"), Ui.Text(w, 12, "teal")));
-        if (s.PrNumber is { } n) meta.Children.Add(Ui.Chip($"#{n}", "violet", ""));
-        var right = Ui.H(5);
-        if (s.HasDiff) right.Children.Add(Ui.DiffStat(s.LinesAdded ?? 0, s.LinesRemoved ?? 0, 11.5));
-        right.Children.Add(Ui.Caption(Fmt.Rel(s.Modified), "dim"));
-        var body = Ui.V(4, title, Ui.Columns((meta, Ui.Star), (right, Ui.Auto)));
-        var grid = Ui.Columns((bar, Ui.Auto), (body, Ui.Star));
-        grid.Padding = new Thickness(0, 3, 0, 3);
+        var ws = AppViewModel.Shared.Claude;
+        var cols = new List<(UIElement? Element, GridLength Width)>();
+        if (item.Depth > 0) cols.Add((TreeGuide(item.Last), Ui.Auto));
+        if (item.ChildCount > 0)
+        {
+            var chevron = new Button
+            {
+                Content = Ui.Glyph(item.Collapsed ? "\uE76C" : "\uE70D", 9, "dim"),
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(3),
+                MinWidth = 0,
+                MinHeight = 0,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            chevron.Click += (_, _) => item.OnToggle?.Invoke();
+            Ui.Tip(chevron, item.Collapsed ? L.T("Agents_ShowSubsessions", "Show sub-sessions") : L.T("Agents_HideSubsessions", "Hide sub-sessions"));
+            cols.Add((chevron, Ui.Auto));
+        }
+        else if (item.Depth == 0)
+        {
+            cols.Add((new Border { Width = 0 }, Ui.Auto));
+        }
+        var title = Ui.Text(s.Title, 13, item.Depth > 0 ? "muted" : "text", item.Open ? FontWeights.SemiBold : FontWeights.Normal);
+        cols.Add((title, Ui.Star));
+        if (s.PrNumber is not null) cols.Add((Ui.Glyph("", 11, "violet"), Ui.Auto));
+        if (item.ChildCount > 0) cols.Add((Ui.Text(item.ChildCount.ToString(Fmt.Culture), 11.5, "dim"), Ui.Auto));
+        cols.Add((Ui.Text(Fmt.Rel(s.Modified), 11.5, "dim"), Ui.Auto));
+        cols.Add((SessionDot.ForSession(s, ws), Ui.Auto));
+        var grid = Ui.Columns(cols.ToArray());
+        grid.ColumnSpacing = 6;
+        grid.MinHeight = 34;
+        grid.Padding = new Thickness(2, 7, 0, 7);
+        Ui.Tip(grid, Details(s));
         return grid;
+    }
+
+    private static string Details(ClaudeSessionInfo s)
+    {
+        var parts = new List<string> { s.Title, L.F("Agents_Updated", "Updated {0}", Fmt.Rel(s.Modified)) };
+        if (s.Branch is { } b) parts.Add(L.F("Agents_BranchDetail", "Branch: {0}", b));
+        if (s.WorktreeName is { } w) parts.Add(L.F("Agents_WorktreeDetail", "Worktree: {0}", w));
+        if (s.PrNumber is { } n) parts.Add($"PR #{n}");
+        if (s.HasDiff) parts.Add($"+{s.LinesAdded ?? 0} −{s.LinesRemoved ?? 0}");
+        return string.Join("\n", parts);
+    }
+
+    private static FrameworkElement TreeGuide(bool last)
+    {
+        var brush = Palette.Brush("text", ThemeService.IsDark ? 0.22 : 0.18);
+        var g = new Grid { Width = 12, Margin = new Thickness(8, 0, 0, 0) };
+        g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        if (last)
+        {
+            var elbow = new Border { BorderBrush = brush, BorderThickness = new Thickness(1, 0, 0, 1), CornerRadius = new CornerRadius(0, 0, 0, 6), Margin = new Thickness(0, -7, 0, 0) };
+            g.Children.Add(elbow);
+        }
+        else
+        {
+            var line = new Border { BorderBrush = brush, BorderThickness = new Thickness(1, 0, 0, 0), Margin = new Thickness(0, -7, 0, -7) };
+            Grid.SetRowSpan(line, 2);
+            g.Children.Add(line);
+            var tick = new Border { BorderBrush = brush, BorderThickness = new Thickness(0, 0, 0, 1) };
+            g.Children.Add(tick);
+        }
+        return g;
     }
 
     public static Border BranchTag(string name)
@@ -294,7 +364,7 @@ public sealed class SessionRow : CodeRow
             Background = Palette.Brush(color, 0.14),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(6, 0, 6, 1),
-            Child = Ui.Text(p.Sessions.Count.ToString(), 11, color, FontWeights.SemiBold),
+            Child = Ui.Text(item.Count.ToString(Fmt.Culture), 11, color, FontWeights.SemiBold),
             VerticalAlignment = VerticalAlignment.Center
         };
         var plus = Ui.IconButton("", L.T("Claude_NewSession", "New session"), () => item.OnNew?.Invoke(), "coral");
@@ -306,18 +376,25 @@ public sealed class SessionRow : CodeRow
             (count, Ui.Auto),
             (plus, Ui.Auto));
         grid.Opacity = p.Exists ? 1 : 0.6;
-        grid.Padding = new Thickness(0, 4, 0, 2);
+        grid.Padding = new Thickness(0, 8, 0, 4);
         return grid;
     }
 
     private static UIElement OpenTab(OpenTabItem item)
     {
         var tab = item.Tab;
-        var bar = new Border { Width = 3, CornerRadius = new CornerRadius(1.5), Background = Palette.Brush(Palette.ProjectKey(tab.Folder)) };
-        var title = Ui.H(6, Ui.Glyph(tab.Kind == ClaudeTabKind.Chat ? "" : "", 10), Ui.Text(tab.Title, 13, "text", item.Selected ? FontWeights.SemiBold : FontWeights.Normal));
-        var meta = Ui.Columns((StateBadge(tab.State, tab.MemoryBytes), Ui.Star), (Ui.Text(tab.ProjectName, 12, Palette.ProjectKey(tab.Folder)), Ui.Auto));
-        var grid = Ui.Columns((bar, Ui.Auto), (Ui.V(3, title, meta), Ui.Star));
-        grid.Padding = new Thickness(0, 3, 0, 3);
+        var bar = new Border { Width = 3, Height = 14, CornerRadius = new CornerRadius(1.5), Background = Palette.Brush(Palette.ProjectKey(tab.Folder)), VerticalAlignment = VerticalAlignment.Center };
+        var title = Ui.Text(tab.Title, 13, "text", item.Selected ? FontWeights.SemiBold : FontWeights.Normal);
+        var project = Ui.Text(tab.ProjectName, 12, "dim");
+        project.MaxWidth = 120;
+        var grid = Ui.Columns((bar, Ui.Auto), (title, Ui.Star), (project, Ui.Auto), (SessionDot.ForTab(tab), Ui.Auto));
+        grid.ColumnSpacing = 8;
+        grid.MinHeight = 34;
+        grid.Padding = new Thickness(6, 7, 4, 7);
+        grid.CornerRadius = new CornerRadius(7);
+        if (item.Selected) grid.Background = Palette.Brush("accent", 0.12);
+        var memory = tab.MemoryBytes;
+        Ui.Tip(grid, tab.State.Help() + (memory > 0 ? " — " + Fmt.Memory(memory) : ""));
         return grid;
     }
 
@@ -343,16 +420,31 @@ public sealed class SessionRow : CodeRow
     }
 }
 
-public sealed record SessionListItem(ClaudeSessionInfo Session, bool Open);
+public sealed record SessionListItem(ClaudeSessionInfo Session, bool Open)
+{
+    public int Depth { get; init; }
+    public bool Last { get; init; }
+    public int ChildCount { get; init; }
+    public bool Collapsed { get; init; }
+    public Action? OnToggle { get; init; }
+}
 
 public sealed record ProjectHeaderItem(ClaudeProject Project, bool Expanded)
 {
     public Action? OnNew { get; init; }
+    public int Count { get; init; }
 }
 
 public sealed record OpenTabItem(ClaudeTab Tab, bool Selected);
 
-public sealed record SectionLabelItem(string Text);
+public sealed record SectionLabelItem(string Text)
+{
+    public string? Glyph { get; init; }
+    public string? ActionText { get; init; }
+    public Action? OnAction { get; init; }
+}
+
+public sealed record ArchivedToggleItem(bool Showing);
 
 public interface IRowContent
 {
