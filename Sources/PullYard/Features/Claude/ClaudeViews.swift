@@ -699,6 +699,7 @@ struct ClaudeControlBar: View {
             } else if let chat = tab.chat, chat.totalCost > 0 || chat.sessionId != nil {
                 Text(chat.model.replacingOccurrences(of: "claude-", with: "")).font(.syCaption).foregroundStyle(Color.syMuted)
             }
+            OpenInMenu(folder: tab.folder)
             Picker("", selection: Binding(get: { tab.kind }, set: { k in
                 if k == .terminal && tab.kind == .chat { ws.openInTerminal(tab) }
                 if k == .chat && tab.kind == .terminal { ws.openInChat(tab) }
