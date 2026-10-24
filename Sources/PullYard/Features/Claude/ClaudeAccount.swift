@@ -40,6 +40,7 @@ final class ClaudeAccountStore {
     @ObservationIgnored private var loginProcess: Process?
     @ObservationIgnored private var loginInput: FileHandle?
     @ObservationIgnored private var output = ""
+    @ObservationIgnored private var reauthWatch: Task<Void, Never>?
 
     var isLoggedIn: Bool {
         if case .loggedIn = status { return true }
@@ -176,6 +177,24 @@ final class ClaudeAccountStore {
             NSWorkspace.shared.open([scriptURL], withApplicationAt: appURL, configuration: config)
         } catch {
             loginError = error.localizedDescription
+        }
+    }
+
+    func reauthenticate(onSuccess: @escaping @MainActor () -> Void) {
+        let method: ClaudeLoginMethod = (info?.method ?? "").lowercased().contains("console") ? .console : .claudeai
+        status = .loggedOut
+        reauthWatch?.cancel()
+        loginInTerminal(method: method, email: nil)
+        reauthWatch = Task { [weak self] in
+            for _ in 0..<200 {
+                try? await Task.sleep(for: .seconds(3))
+                guard let self, !Task.isCancelled else { return }
+                await self.refresh()
+                if self.isLoggedIn {
+                    onSuccess()
+                    return
+                }
+            }
         }
     }
 

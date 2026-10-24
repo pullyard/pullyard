@@ -36,7 +36,7 @@ struct ChatView: View {
                                 .transition(.opacity)
                         }
                         if let e = chat.lastError {
-                            ErrorBanner(text: e) { app.claude.restart(tab) }
+                            ErrorBanner(text: e, retry: { app.claude.restart(tab) }, reconnect: { app.claude.reconnect(tab) })
                                 .transition(.pop)
                         }
                         Color.clear.frame(height: 1).id("bottom")
@@ -455,25 +455,44 @@ struct WorkingIndicator: View {
 struct ErrorBanner: View {
     let text: String
     let retry: () -> Void
+    var reconnect: (() -> Void)?
+    @State private var waiting = false
 
-    private var looksLikeAuth: Bool {
-        let s = text.lowercased()
-        return ["login", "log in", "logged in", "auth", "api key", "credential", "401", "oauth", "token"].contains { s.contains($0) }
-    }
+    private var looksLikeAuth: Bool { ChatSession.isAuthError(text) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(text, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.syAmber).textSelection(.enabled)
+            if looksLikeAuth {
+                Label("Claude sign-in expired", systemImage: "person.crop.circle.badge.exclamationmark")
+                    .font(.syBody.weight(.semibold))
+                    .foregroundStyle(Color.syAmber)
+                Text(waiting ? "Finish signing in in Terminal. The session picks up where it stopped." : "Sign in again and the session resumes where it stopped.")
+                    .font(.syCallout)
+                    .foregroundStyle(Color.syMuted)
+                Text(text).font(.syCaption).foregroundStyle(Color.syDim).textSelection(.enabled).lineLimit(3)
+            } else {
+                Label(text, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.syAmber).textSelection(.enabled)
+            }
             HStack {
-                Button("Restart session", action: retry).controlSize(.small)
                 if looksLikeAuth {
-                    Button("Check Claude sign-in") {
-                        Task { await ClaudeAccountStore.shared.refresh() }
+                    Button {
+                        waiting = true
+                        ClaudeAccountStore.shared.reauthenticate {
+                            waiting = false
+                            (reconnect ?? retry)()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if waiting { WakeLoader() }
+                            Text(waiting ? "Waiting for sign-in…" : "Sign in again")
+                        }
                     }
                     .controlSize(.small)
                     .buttonStyle(.borderedProminent)
                     .tint(.syAgentAccent)
+                    .disabled(waiting)
                 }
+                Button("Restart session", action: reconnect ?? retry).controlSize(.small)
             }
         }
         .padding(12)

@@ -380,6 +380,17 @@ final class ClaudeWorkspace {
         projects.flatMap(\.sessions).first { $0.id == id }?.file
     }
 
+    func reconnect(_ tab: ClaudeTab) {
+        guard let chat = tab.chat else { return restart(tab) }
+        chat.lastError = nil
+        guard chat.running else { return restart(tab) }
+        chat.stop()
+        Task { @MainActor [weak self] in
+            for _ in 0..<40 where chat.running { try? await Task.sleep(for: .milliseconds(100)) }
+            self?.restart(tab)
+        }
+    }
+
     func restart(_ tab: ClaudeTab) {
         guard !tab.running else { return }
         if tab.kind == .chat {

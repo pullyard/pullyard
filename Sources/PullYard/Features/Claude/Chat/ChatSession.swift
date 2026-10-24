@@ -174,7 +174,7 @@ final class ChatSession {
     @ObservationIgnored private var tools: [String: ChatToolCall] = [:]
     @ObservationIgnored private var streamTexts: [String: ChatText] = [:]
     @ObservationIgnored private var messageTexts: [String: [ChatText]] = [:]
-    @ObservationIgnored private var queuedPrompt: String?
+    @ObservationIgnored private var queuedPrompts: [(text: String, images: [ChatImage])] = []
     @ObservationIgnored private var requestCounter = 0
     @ObservationIgnored private var intentionalStop = false
     @ObservationIgnored var onSessionId: ((String) -> Void)?
@@ -339,20 +339,35 @@ final class ChatSession {
     func send(_ text: String, images: [ChatImage] = []) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !images.isEmpty else { return }
-        guard running else {
-            queuedPrompt = text
-            return
-        }
         lastActivity = Date()
         items.append(.user(id: UUID().uuidString, text: trimmed, images: images))
+        guard running else {
+            queuedPrompts.append((trimmed, images))
+            return
+        }
+        deliver(trimmed, images: images)
+    }
+
+    private func deliver(_ text: String, images: [ChatImage]) {
         var content: [[String: Any]] = images.map {
             ["type": "image", "source": ["type": "base64", "media_type": $0.mediaType, "data": $0.data.base64EncodedString()]]
         }
-        if !trimmed.isEmpty { content.append(["type": "text", "text": trimmed]) }
+        if !text.isEmpty { content.append(["type": "text", "text": text]) }
         write(["type": "user", "message": ["role": "user", "content": content]])
         busy = true
         status = nil
         turnStartedAt = Date()
+    }
+
+    private func flushQueue() {
+        let queued = queuedPrompts
+        queuedPrompts = []
+        for q in queued { deliver(q.text, images: q.images) }
+    }
+
+    static func isAuthError(_ text: String) -> Bool {
+        let s = text.lowercased()
+        return ["/login", "log in", "logged in", "not logged", "authentication", "invalid api key", "api key", "oauth", "401", "credential", "token has expired", "token expired"].contains { s.contains($0) }
     }
 
     func interrupt() {
@@ -433,10 +448,7 @@ final class ChatSession {
             }
             if let m = o["model"] as? String { model = m }
             if let pm = o["permissionMode"] as? String { permissionMode = pm }
-            if let q = queuedPrompt {
-                queuedPrompt = nil
-                send(q)
-            }
+            flushQueue()
         case "status":
             let s = o["status"] as? String
             status = s == "compacting" ? "Compacting context…" : (s == "requesting" ? nil : s)
@@ -584,7 +596,11 @@ final class ChatSession {
         if o["is_error"] as? Bool == true {
             let sub = o["subtype"] as? String ?? ""
             let text = sub == "error_during_execution" ? "Stopped" : (o["result"] as? String ?? sub)
-            items.append(.notice(id: UUID().uuidString, text: text, isError: sub != "error_during_execution"))
+            if sub != "error_during_execution" && Self.isAuthError(text) {
+                lastError = text
+            } else {
+                items.append(.notice(id: UUID().uuidString, text: text, isError: sub != "error_during_execution"))
+            }
         }
         control("get_context_usage", [:])
         onTurnFinished?()
