@@ -20,6 +20,7 @@ enum MarkdownParser {
     private static let cache: NSCache<NSString, MDBox> = {
         let c = NSCache<NSString, MDBox>()
         c.countLimit = 500
+        c.totalCostLimit = 8 << 20
         return c
     }()
 
@@ -32,7 +33,7 @@ enum MarkdownParser {
         if let hit = cache.object(forKey: text as NSString) { return hit.blocks }
         guard streaming else {
             let blocks = parseUncached(text)
-            if text.count < 200_000 { cache.setObject(MDBox(blocks), forKey: text as NSString) }
+            if text.utf8.count < 200_000 { cache.setObject(MDBox(blocks), forKey: text as NSString, cost: text.utf8.count) }
             return blocks
         }
         guard let split = stableSplit(text) else { return parseUncached(text) }
@@ -173,19 +174,21 @@ private final class AttributedBox {
 private let inlineCache: NSCache<NSString, AttributedBox> = {
     let c = NSCache<NSString, AttributedBox>()
     c.countLimit = 4000
+    c.totalCostLimit = 8 << 20
     return c
 }()
 
 private let highlightCache: NSCache<NSString, AttributedBox> = {
     let c = NSCache<NSString, AttributedBox>()
     c.countLimit = 300
+    c.totalCostLimit = 8 << 20
     return c
 }()
 
 func inlineMarkdown(_ text: String) -> AttributedString {
     if let hit = inlineCache.object(forKey: text as NSString) { return hit.value }
     let attr = parseInlineMarkdown(text)
-    if text.count < 20_000 { inlineCache.setObject(AttributedBox(attr), forKey: text as NSString) }
+    if text.utf8.count < 20_000 { inlineCache.setObject(AttributedBox(attr), forKey: text as NSString, cost: text.utf8.count) }
     return attr
 }
 
@@ -227,7 +230,7 @@ struct MarkdownView: View {
         case .paragraph(let s):
             Text(inlineMarkdown(s)).fixedSize(horizontal: false, vertical: true)
         case .code(let lang, let code):
-            CodeBlockView(language: lang, code: code)
+            CodeBlockView(language: lang, code: code, streaming: streaming)
         case .bullet(let items):
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
@@ -267,6 +270,7 @@ struct MarkdownView: View {
 struct CodeBlockView: View {
     let language: String
     let code: String
+    var streaming = false
     @State private var copied = false
 
     var body: some View {
@@ -303,8 +307,9 @@ struct CodeBlockView: View {
     private var highlighted: AttributedString {
         let key = "\(language)\u{0}\(code)" as NSString
         if let hit = highlightCache.object(forKey: key) { return hit.value }
+        guard !streaming else { return AttributedString(code) }
         let value = highlight()
-        highlightCache.setObject(AttributedBox(value), forKey: key)
+        highlightCache.setObject(AttributedBox(value), forKey: key, cost: code.utf8.count)
         return value
     }
 

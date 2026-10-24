@@ -34,7 +34,28 @@ extension ClaudeSessionInfo {
 }
 
 enum DesktopSessionIndex {
-    @MainActor static var isInstalled: Bool { NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.anthropic.claudefordesktop") != nil }
+    @MainActor static let isInstalled = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.anthropic.claudefordesktop") != nil
+
+    private struct Record {
+        let local: String
+        let cli: String
+        let parentLocal: String?
+        let title: String?
+        let archived: Bool
+    }
+
+    private struct Fields: Decodable {
+        struct Spawned: Decodable { let sessionId: String? }
+        let sessionId: String?
+        let cliSessionId: String?
+        let spawnedFrom: Spawned?
+        let forkedFromSessionId: String?
+        let title: String?
+        let isArchived: Bool?
+    }
+
+    private static var cache: [String: (Date, Record?)] = [:]
+    private static let lock = NSLock()
 
     @MainActor static func open(localID: String) {
         var c = URLComponents()
@@ -60,25 +81,47 @@ enum DesktopSessionIndex {
     static func load(directory: URL = directory) -> [String: Link] {
         let fm = FileManager.default
         var records: [(local: String, cli: String, parentLocal: String?, title: String?, archived: Bool)] = []
+        var seen = Set<String>()
         let accounts = (try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         for account in accounts {
             for org in (try? fm.contentsOfDirectory(at: account, includingPropertiesForKeys: nil)) ?? [] {
-                for file in (try? fm.contentsOfDirectory(at: org, includingPropertiesForKeys: nil)) ?? [] where file.pathExtension == "json" {
-                    guard let data = try? Data(contentsOf: file),
-                          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          let local = obj["sessionId"] as? String, let cli = obj["cliSessionId"] as? String else { continue }
-                    let spawned = obj["spawnedFrom"] as? [String: Any]
-                    let parent = (spawned?["sessionId"] as? String) ?? (obj["forkedFromSessionId"] as? String)
-                    records.append((local, cli, parent, obj["title"] as? String, obj["isArchived"] as? Bool ?? false))
+                for file in (try? fm.contentsOfDirectory(at: org, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] where file.pathExtension == "json" {
+                    seen.insert(file.path)
+                    guard let r = record(file) else { continue }
+                    records.append((r.local, r.cli, r.parentLocal, r.title, r.archived))
                 }
             }
         }
+        lock.lock()
+        cache = cache.filter { seen.contains($0.key) }
+        lock.unlock()
         let cliByLocal = Dictionary(records.map { ($0.local, $0.cli) }, uniquingKeysWith: { a, _ in a })
         var out: [String: Link] = [:]
         for r in records {
             out[r.cli] = Link(local: r.local, parent: r.parentLocal.flatMap { cliByLocal[$0] }, title: r.title, archived: r.archived)
         }
         return out
+    }
+}
+
+extension DesktopSessionIndex {
+    private static func record(_ file: URL) -> Record? {
+        let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        lock.lock()
+        if let hit = cache[file.path], hit.0 == mtime {
+            lock.unlock()
+            return hit.1
+        }
+        lock.unlock()
+        var r: Record?
+        if let data = try? Data(contentsOf: file), let f = try? JSONDecoder().decode(Fields.self, from: data),
+           let local = f.sessionId, let cli = f.cliSessionId {
+            r = Record(local: local, cli: cli, parentLocal: f.spawnedFrom?.sessionId ?? f.forkedFromSessionId, title: f.title, archived: f.isArchived ?? false)
+        }
+        lock.lock()
+        cache[file.path] = (mtime, r)
+        lock.unlock()
+        return r
     }
 }
 
