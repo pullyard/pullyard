@@ -22,6 +22,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Helpers"
 cp "$BIN" "$APP/Contents/MacOS/PullYard"
 cp "$HELPER" "$APP/Contents/Helpers/pullyard-mcp"
+strip -x "$APP/Contents/MacOS/PullYard" "$APP/Contents/Helpers/pullyard-mcp"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 GITHUB_CLIENT_ID="${PULLYARD_GITHUB_CLIENT_ID:-$(cat .github-oauth-client-id 2>/dev/null || true)}"
 if [ -n "$GITHUB_CLIENT_ID" ]; then

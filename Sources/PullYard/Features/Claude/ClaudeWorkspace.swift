@@ -263,7 +263,10 @@ final class ClaudeWorkspace {
     var attentionCount: Int { tabs.filter(\.needsAttention).count }
 
     func git(for folder: String) -> GitWorkingCopy {
-        if let g = gits[folder] { return g }
+        if let g = gits[folder] {
+            g.startWatching()
+            return g
+        }
         let g = GitWorkingCopy(path: folder)
         gits[folder] = g
         g.startWatching()
@@ -444,11 +447,20 @@ final class ClaudeWorkspace {
         }
     }
 
+    func releaseUnusedGits() {
+        let used = Set(tabs.map(\.folder))
+        for (folder, g) in gits where !used.contains(folder) {
+            g.stopWatching()
+            gits[folder] = nil
+        }
+    }
+
     func close(_ tab: ClaudeTab) {
         tab.chat?.stop()
         if tab.terminalRunning { tab.terminal.terminate() }
         tabs.removeAll { $0.id == tab.id }
         if selectedTabID == tab.id { selectedTabID = tabs.last?.id }
+        releaseUnusedGits()
     }
 
     func applyModelToCurrent() {

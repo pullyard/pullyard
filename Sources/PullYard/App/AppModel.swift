@@ -160,7 +160,7 @@ final class AppModel {
             guard let self, let api = self.api else { return nil }
             return (self.cacheAccount, api.host)
         }
-        _ = StackNotes.shared
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { _ = StackNotes.shared }
         Task { await restore() }
     }
 

@@ -105,6 +105,8 @@ final class GitWorkingCopy {
     var lastRefresh: Date?
 
     @ObservationIgnored private var stream: FSEventStreamRef?
+    @ObservationIgnored private var changesSignature = 0
+    @ObservationIgnored var branchesStale = true
     @ObservationIgnored private var pending: DispatchWorkItem?
 
     init(path: String) {
@@ -123,22 +125,37 @@ final class GitWorkingCopy {
         loading = true
         defer { loading = false }
         let dir = path
-        let result = await Task.detached(priority: .utility) { () -> (Bool, String?, RepoRef?, [DiffFile], [GitCommitLine], String?, [String]) in
-            guard Git.run(["rev-parse", "--is-inside-work-tree"], in: dir).ok else { return (false, nil, nil, [], [], nil, []) }
-            let branch = Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: dir).out.trimmingCharacters(in: .whitespacesAndNewlines)
-            let dirs = Git.run(["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "--show-toplevel"], in: dir).out.split(separator: "\n").map(String.init)
-            let worktree = dirs.count == 3 && dirs[0] != dirs[1] ? (dirs[2] as NSString).lastPathComponent : nil
-            let branches = Git.run(["for-each-ref", "--format=%(refname:short)", "--sort=-committerdate", "--count=30", "refs/heads"], in: dir).out.split(separator: "\n").map(String.init)
-            let repo = Git.remoteRepo(dir)
-            var files = Git.parseUnifiedDiff(Git.run(["diff", "HEAD", "--no-color", "-M"], in: dir).out)
-            if files.isEmpty {
-                files = Git.parseUnifiedDiff(Git.run(["diff", "--no-color", "-M"], in: dir).out)
+        let wantBranches = localBranches.isEmpty || branchesStale
+        let result = await Task.detached(priority: .utility) { () -> (Bool, String?, RepoRef?, [DiffFile], [GitCommitLine], String?, [String]?, Int) in
+            let info = Git.run(["rev-parse", "--is-inside-work-tree", "--abbrev-ref", "HEAD", "--path-format=absolute", "--git-dir", "--git-common-dir", "--show-toplevel"], in: dir)
+            var lines = info.out.split(separator: "\n").map(String.init)
+            if !info.ok {
+                guard Git.run(["rev-parse", "--is-inside-work-tree"], in: dir).ok else { return (false, nil, nil, [], [], nil, nil, 0) }
+                let dirs = Git.run(["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "--show-toplevel"], in: dir).out.split(separator: "\n").map(String.init)
+                lines = ["true", ""] + dirs
             }
+            guard lines.first == "true" else { return (false, nil, nil, [], [], nil, nil, 0) }
+            let branch = lines.count > 1 ? lines[1] : ""
+            let dirs = Array(lines.dropFirst(2))
+            let worktree = dirs.count == 3 && dirs[0] != dirs[1] ? (dirs[2] as NSString).lastPathComponent : nil
+            let branches = wantBranches ? Git.run(["for-each-ref", "--format=%(refname:short)", "--sort=-committerdate", "--count=30", "refs/heads"], in: dir).out.split(separator: "\n").map(String.init) : nil
+            let repo = Git.remoteRepo(dir)
+            var diffText = Git.run(["diff", "HEAD", "--no-color", "-M"], in: dir).out
+            var files = Git.parseUnifiedDiff(diffText)
+            if files.isEmpty {
+                diffText = Git.run(["diff", "--no-color", "-M"], in: dir).out
+                files = Git.parseUnifiedDiff(diffText)
+            }
+            var hasher = Hasher()
+            hasher.combine(diffText)
             let untracked = Git.run(["ls-files", "--others", "--exclude-standard"], in: dir).out.split(separator: "\n").prefix(200)
             for name in untracked {
                 let full = dir + "/" + name
                 let attrs = try? FileManager.default.attributesOfItem(atPath: full)
                 let size = (attrs?[.size] as? Int) ?? 0
+                hasher.combine(String(name))
+                hasher.combine(size)
+                hasher.combine(attrs?[.modificationDate] as? Date)
                 var patch: String?
                 var adds = 0
                 if size < 300_000, let text = try? String(contentsOfFile: full, encoding: .utf8) {
@@ -156,16 +173,27 @@ final class GitWorkingCopy {
                     return parts.count == 3 ? GitCommitLine(id: parts[0], short: parts[1], subject: parts[2]) : nil
                 }
             }
-            return (true, branch.isEmpty ? nil : branch, repo, files.map(DiffFile.init), commits, worktree, branches)
+            return (true, branch.isEmpty ? nil : branch, repo, files.map(DiffFile.init), commits, worktree, branches, hasher.finalize())
         }.value
-        isRepo = result.0
-        branch = result.1
-        repo = result.2
-        changes = result.3
-        unpushed = result.4
-        ahead = result.4.count
-        worktree = result.5
-        localBranches = result.6
+        if isRepo != result.0 { isRepo = result.0 }
+        if branch != result.1 {
+            branch = result.1
+            branchesStale = true
+        }
+        if repo != result.2 { repo = result.2 }
+        if changesSignature != result.7 {
+            changesSignature = result.7
+            changes = result.3
+        }
+        if unpushed != result.4 {
+            unpushed = result.4
+            ahead = result.4.count
+        }
+        if worktree != result.5 { worktree = result.5 }
+        if let branches = result.6 {
+            branchesStale = false
+            if localBranches != branches { localBranches = branches }
+        }
         lastRefresh = Date()
     }
 
@@ -185,9 +213,7 @@ final class GitWorkingCopy {
             guard let info else { return }
             let me = Unmanaged<GitWorkingCopy>.fromOpaque(info).takeUnretainedValue()
             let list = Unmanaged<CFArray>.fromOpaque(paths).takeUnretainedValue() as? [String] ?? []
-            let relevant = list.contains { p in
-                !(p.contains("/.git/objects") || p.contains("/.git/logs") || p.contains("/node_modules/") || p.contains("/.dart_tool/") || p.contains("/build/"))
-            }
+            let relevant = list.contains(where: GitWorkingCopy.isRelevant)
             guard relevant, count > 0 else { return }
             DispatchQueue.main.async { me.scheduleRefresh() }
         }
@@ -197,6 +223,25 @@ final class GitWorkingCopy {
         FSEventStreamSetDispatchQueue(s, DispatchQueue.global(qos: .utility))
         FSEventStreamStart(s)
         stream = s
+    }
+
+    nonisolated static let ignoredSegments = ["/node_modules/", "/.dart_tool/", "/build/", "/.build/", "/DerivedData/", "/target/", "/.next/", "/dist/", "/.gradle/", "/Pods/", "/.venv/", "/__pycache__/", "/.idea/", "/.swiftpm/", "/.cache/", "/.turbo/", "/coverage/"]
+
+    nonisolated static func isRelevant(_ path: String) -> Bool {
+        if let r = path.range(of: "/.git/") {
+            let inside = path[r.upperBound...]
+            return inside == "HEAD" || inside == "index" || inside.hasPrefix("refs/")
+        }
+        return !ignoredSegments.contains { path.contains($0) }
+    }
+
+    func stopWatching() {
+        pending?.cancel()
+        guard let stream else { return }
+        FSEventStreamStop(stream)
+        FSEventStreamInvalidate(stream)
+        FSEventStreamRelease(stream)
+        self.stream = nil
     }
 
     private func scheduleRefresh() {
