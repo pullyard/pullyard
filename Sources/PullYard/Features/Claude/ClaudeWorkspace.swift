@@ -176,6 +176,7 @@ final class ClaudeWorkspace {
     var projects: [ClaudeProject] = []
     var loadingProjects = false
     var projectsUpdated: Date?
+    @ObservationIgnored private var indexTask: Task<Void, Never>?
     let sessionRows = RowAppearTracker()
     var showInspector = true
     var ciFixes: [ItemRef: CIFixLaunch] = [:]
@@ -279,6 +280,15 @@ final class ClaudeWorkspace {
         sessionRows.ingest(next.flatMap { $0.sessions.map(\.id) }, mode: .refresh)
         projects = next
         projectsUpdated = Date()
+        let files = next.flatMap { $0.sessions.map(\.file) }
+        indexTask?.cancel()
+        indexTask = Task.detached(priority: .background) {
+            try? await Task.sleep(for: .seconds(8))
+            for start in stride(from: 0, to: files.count, by: 10) {
+                guard !Task.isCancelled else { return }
+                await SessionIndex.shared.update(Array(files[start..<min(start + 10, files.count)]))
+            }
+        }
     }
 
     func pullRequest(for tab: ClaudeTab) -> (number: Int, url: String)? {
@@ -359,7 +369,7 @@ final class ClaudeWorkspace {
 
     func rewind(_ tab: ClaudeTab, to text: String, occurrenceFromEnd: Int) {
         guard let chat = tab.chat, let sid = chat.sessionId, !sid.isEmpty,
-              let file = SessionRewind.sessionFile(id: sid, configDir: chat.configDir) else {
+              let file = SessionRewind.sessionFile(id: sid, configDir: chat.configDir ?? ClaudeProfiles.shared.configDir()) else {
             tab.chat?.draftRequest = text
             return
         }

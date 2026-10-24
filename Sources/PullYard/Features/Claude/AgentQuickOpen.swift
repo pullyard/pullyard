@@ -6,16 +6,20 @@ struct AgentQuickOpen: View {
     @State private var query = ""
     @State private var selection = 0
     @FocusState private var focused: Bool
+    @State private var matches: [String: String] = [:]
+    @State private var searching = false
 
     enum Entry: Identifiable {
         case tab(ClaudeTab)
         case session(ClaudeSessionInfo, project: String)
         case newSession(ClaudeProject)
+        case match(ClaudeSessionInfo, project: String, snippet: String)
 
         var id: String {
             switch self {
             case .tab(let t): return "t" + t.id.uuidString
             case .session(let s, _): return "s" + s.id
+            case .match(let s, _, _): return "m" + s.id
             case .newSession(let p): return "n" + p.id
             }
         }
@@ -37,15 +41,24 @@ struct AgentQuickOpen: View {
             .prefix(q.isEmpty ? 12 : 40)
             .map { Entry.session($0.0, project: $0.1) }
         let projects = ws.projects.filter { $0.exists && hit($0.name, "new") }.prefix(q.isEmpty ? 4 : 8).map(Entry.newSession)
-        return tabs + sessions + projects
+        let shown = Set(sessions.compactMap { e -> String? in if case .session(let s, _) = e { return s.id }; return nil })
+        let found = q.count < 3 ? [] : ws.projects
+            .flatMap { p in p.sessions.compactMap { s -> (ClaudeSessionInfo, String, String)? in
+                guard !shown.contains(s.id), let snippet = matches[s.file.path] else { return nil }
+                return (s.retitled(AgentSessionPrefs.shared.title(s)), p.name, snippet)
+            } }
+            .sorted { $0.0.modified > $1.0.modified }
+            .prefix(30)
+            .map { Entry.match($0.0, project: $0.1, snippet: $0.2) }
+        return tabs + sessions + found + projects
     }
 
     var body: some View {
         let list = entries
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Color.syMuted)
-                TextField("Go to a session or start one in a project…", text: $query)
+                if searching { WakeLoader() } else { Image(systemName: "magnifyingglass").foregroundStyle(Color.syMuted) }
+                TextField("Go to a session, search conversations, or start one in a project…", text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 16))
                     .focused($focused)
@@ -92,6 +105,7 @@ struct AgentQuickOpen: View {
         .background(Color.syPanel)
         .onAppear { focused = true }
         .onChange(of: query) { selection = 0 }
+        .task(id: query) { await searchContent() }
     }
 
     private func hint(_ key: String, _ text: String) -> some View {
@@ -117,6 +131,16 @@ struct AgentQuickOpen: View {
                 Text(s.title).foregroundStyle(Color.syText).lineLimit(1)
                 Spacer(minLength: 8)
                 Text(project + " · " + Fmt.rel(s.modified)).font(.syCaption).foregroundStyle(Color.syDim)
+            case .match(let s, let project, let snippet):
+                Image(systemName: "text.magnifyingglass").foregroundStyle(Color.syAgentAccent).frame(width: 14)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(s.title).foregroundStyle(Color.syText).lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(project + " · " + Fmt.rel(s.modified)).font(.syCaption).foregroundStyle(Color.syDim)
+                    }
+                    Text(snippet).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.middle)
+                }
             case .newSession(let p):
                 Image(systemName: "plus").foregroundStyle(Color.syAgentAccent).frame(width: 14)
                 Text("New session in ") .foregroundStyle(Color.syMuted) + Text(p.name).foregroundStyle(Color.syText)
@@ -129,6 +153,23 @@ struct AgentQuickOpen: View {
         .background(RoundedRectangle(cornerRadius: 7).fill(selected ? Color.syAgentAccent.opacity(0.16) : .clear))
     }
 
+    private func searchContent() async {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard q.count >= 3 else {
+            matches = [:]
+            searching = false
+            return
+        }
+        try? await Task.sleep(for: .milliseconds(250))
+        guard !Task.isCancelled else { return }
+        searching = true
+        let files = ws.projects.flatMap { $0.sessions.map(\.file) }
+        let found = await SessionIndex.shared.search(q, files: files)
+        guard !Task.isCancelled else { return }
+        matches = found
+        searching = false
+    }
+
     private func move(_ delta: Int, _ count: Int) {
         guard count > 0 else { return }
         selection = (selection + delta + count) % count
@@ -139,9 +180,10 @@ struct AgentQuickOpen: View {
         app.section = .claude
         switch list[selection] {
         case .tab(let t): ws.selectedTabID = t.id
-        case .session(let s, _): ws.resume(s)
+        case .session(let s, _), .match(let s, _, _): ws.resume(s)
         case .newSession(let p): ws.newSession(folder: p.path)
         }
         dismiss()
     }
 }
+

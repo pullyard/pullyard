@@ -16,7 +16,7 @@ enum SessionRewind {
         return nil
     }
 
-    static func promptText(_ o: [String: Any]) -> String? {
+    nonisolated static func promptText(_ o: [String: Any]) -> String? {
         guard o["type"] as? String == "user", o["isSidechain"] as? Bool != true, o["isMeta"] as? Bool != true,
               o["isCompactSummary"] as? Bool != true, let msg = o["message"] as? [String: Any] else { return nil }
         let raw: String
