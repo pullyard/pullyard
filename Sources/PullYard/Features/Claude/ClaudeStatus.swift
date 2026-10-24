@@ -372,6 +372,7 @@ final class SessionSeen {
 
     func mark(_ id: String) {
         guard !id.isEmpty else { return }
+        if let last = seen[id], Date().timeIntervalSince(last) < 5 { return }
         seen[id] = Date()
         if seen.count > 600 {
             for (k, _) in seen.sorted(by: { $0.value < $1.value }).prefix(seen.count - 500) { seen[k] = nil }

@@ -227,6 +227,8 @@ final class ClaudeWorkspace {
             let snap = await Task.detached(priority: .utility) { ProcessMemory.snapshot() }.value
             for tab in live {
                 let bytes = ProcessMemory.treeBytes(tab.pid, in: snap)
+                let current = tab.chat?.memoryBytes ?? tab.terminalMemory
+                guard abs(current - bytes) > 4 << 20 else { continue }
                 if let chat = tab.chat { chat.memoryBytes = bytes } else { tab.terminalMemory = bytes }
             }
         }
