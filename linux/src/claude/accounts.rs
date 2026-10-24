@@ -1,7 +1,6 @@
-use std::cell::RefCell;
-use std::io::{BufRead, BufReader, Write};
-use std::process::Stdio;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use crate::host::{self, HostCmd};
 use crate::settings::{self, ClaudeProfile};
@@ -299,26 +298,53 @@ impl LoginMethod {
 
 pub struct AccountStore {
     pub status: RefCell<Status>,
-    pub logging_in: std::cell::Cell<bool>,
-    pub fallback_url: RefCell<Option<String>>,
+    pub logging_in: Cell<bool>,
     pub login_error: RefCell<Option<String>>,
-    login_input: RefCell<Option<std::process::ChildStdin>>,
-    login_pid: RefCell<Option<u32>>,
-    output: RefCell<String>,
+    login_generation: Cell<u64>,
     pub changed: Signal<()>,
 }
 
 thread_local! {
     static STORE: Rc<AccountStore> = Rc::new(AccountStore {
         status: RefCell::new(Status::Unknown),
-        logging_in: std::cell::Cell::new(false),
-        fallback_url: RefCell::new(None),
+        logging_in: Cell::new(false),
         login_error: RefCell::new(None),
-        login_input: RefCell::new(None),
-        login_pid: RefCell::new(None),
-        output: RefCell::new(String::new()),
+        login_generation: Cell::new(0),
         changed: Signal::new(),
     });
+}
+
+const LOGIN_POLL_FIRST: Duration = Duration::from_secs(2);
+const LOGIN_POLL_MAX: Duration = Duration::from_secs(15);
+const LOGIN_POLL_LIMIT: Duration = Duration::from_secs(15 * 60);
+
+pub fn next_poll_delay(current: Duration) -> Duration {
+    (current.mul_f64(1.5)).min(LOGIN_POLL_MAX)
+}
+
+pub fn login_script(bin: &str, method: LoginMethod, email: &str, env: &Env) -> String {
+    let mut lines = vec!["#!/bin/bash".to_string()];
+    for (k, v) in &env.set {
+        lines.push(format!("export {k}={}", util::shell_quote(v)));
+    }
+    let unset: Vec<String> = env.unset.iter().map(|k| util::shell_quote(k)).collect();
+    if !unset.is_empty() {
+        lines.push(format!("unset {}", unset.join(" ")));
+    }
+    lines.push("unset $(env | grep -o '^CLAUDE_CODE_[A-Z_]*') CLAUDECODE".to_string());
+    lines.push(format!("unset {}", crate::brand::env_key("TOKEN")));
+    lines.push("rm -f \"$0\"".to_string());
+    lines.push("clear".to_string());
+    let mut cmd = format!("{} auth login {}", util::shell_quote(bin), method.flag());
+    let email = email.trim();
+    if !email.is_empty() {
+        cmd.push_str(&format!(" --email {}", util::shell_quote(email)));
+    }
+    lines.push(cmd);
+    lines.push("echo".to_string());
+    lines.push(format!("echo {}", util::shell_quote(&format!("You can close this window and return to {}.", crate::brand::APP_NAME))));
+    lines.push("read -r -s -n 1 -t 600".to_string());
+    lines.join("\n") + "\n"
 }
 
 pub fn store() -> Rc<AccountStore> {
@@ -373,105 +399,65 @@ impl AccountStore {
         }
     }
 
-    pub fn login(self: &Rc<Self>, method: LoginMethod, email: &str) {
-        if self.logging_in.get() {
+    pub fn login_in_terminal(self: &Rc<Self>, method: LoginMethod, email: &str) {
+        *self.login_error.borrow_mut() = None;
+        let generation = self.login_generation.get() + 1;
+        self.login_generation.set(generation);
+        match spawn_terminal_login(method, email) {
+            Ok(()) => self.logging_in.set(true),
+            Err(e) => {
+                self.logging_in.set(false);
+                *self.login_error.borrow_mut() = Some(e);
+            }
+        }
+        self.changed.emit(&());
+        if !self.logging_in.get() {
             return;
         }
-        let Some(bin) = host::claude_binary() else { return };
-        *self.login_error.borrow_mut() = None;
-        *self.fallback_url.borrow_mut() = None;
-        self.output.borrow_mut().clear();
-        let mut cmd = command(&bin, active_override().as_deref()).args(["auth", "login", method.flag()]).cwd(&host::home());
-        if !email.trim().is_empty() {
-            cmd = cmd.args(["--email", email.trim()]);
-        }
-        let mut c = cmd.command();
-        c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut child = match c.spawn() {
-            Ok(ch) => ch,
-            Err(e) => {
-                *self.login_error.borrow_mut() = Some(e.to_string());
-                self.changed.emit(&());
-                return;
-            }
-        };
-        *self.login_input.borrow_mut() = child.stdin.take();
-        *self.login_pid.borrow_mut() = Some(child.id());
-        self.logging_in.set(true);
-        self.changed.emit(&());
-        let (tx, rx) = async_channel::unbounded::<Option<String>>();
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-        let tx2 = tx.clone();
-        if let Some(out) = stdout {
-            std::thread::spawn(move || {
-                for line in BufReader::new(out).lines().map_while(Result::ok) {
-                    let _ = tx2.send_blocking(Some(line));
-                }
-            });
-        }
-        let tx3 = tx.clone();
-        if let Some(err) = stderr {
-            std::thread::spawn(move || {
-                for line in BufReader::new(err).lines().map_while(Result::ok) {
-                    let _ = tx3.send_blocking(Some(line));
-                }
-            });
-        }
-        let (done_tx, done_rx) = async_channel::bounded::<i32>(1);
-        std::thread::spawn(move || {
-            let code = child.wait().map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
-            let _ = done_tx.send_blocking(code);
-            drop(tx);
-        });
         let me = self.clone();
         crate::rt::spawn_local(async move {
-            while let Ok(Some(line)) = rx.recv().await {
-                me.output.borrow_mut().push_str(&line);
-                me.output.borrow_mut().push('\n');
-                if me.fallback_url.borrow().is_none() {
-                    if let Some(m) = regex::Regex::new(r"https://[^\s]+").ok().and_then(|re| re.find(&line).map(|m| m.as_str().to_string())) {
-                        *me.fallback_url.borrow_mut() = Some(m);
-                        me.changed.emit(&());
-                    }
+            let started = Instant::now();
+            let mut delay = LOGIN_POLL_FIRST;
+            loop {
+                crate::rt::sleep(delay).await;
+                if me.login_generation.get() != generation || !me.logging_in.get() {
+                    return;
                 }
+                me.clone().refresh().await;
+                if me.login_generation.get() != generation {
+                    return;
+                }
+                if me.is_logged_in() {
+                    me.logging_in.set(false);
+                    me.changed.emit(&());
+                    return;
+                }
+                if started.elapsed() >= LOGIN_POLL_LIMIT {
+                    me.logging_in.set(false);
+                    *me.login_error.borrow_mut() = Some("Still not signed in. Finish the sign-in in the terminal, then press “Check again”.".into());
+                    me.changed.emit(&());
+                    return;
+                }
+                delay = next_poll_delay(delay);
             }
-        });
-        let me = self.clone();
-        crate::rt::spawn_local(async move {
-            let code = done_rx.recv().await.unwrap_or(-1);
-            me.logging_in.set(false);
-            *me.login_input.borrow_mut() = None;
-            *me.login_pid.borrow_mut() = None;
-            if code != 0 && code != 15 && code != -1 {
-                let out = me.output.borrow().clone();
-                let tail: Vec<&str> = out.lines().filter(|l| !l.contains("http") && !l.trim().is_empty()).collect();
-                let start = tail.len().saturating_sub(3);
-                let t = tail[start..].join("\n");
-                *me.login_error.borrow_mut() = Some(if t.is_empty() { format!("Sign-in failed (code {code})") } else { t });
-            }
-            me.changed.emit(&());
-            me.refresh().await;
         });
     }
 
-    pub fn submit_code(&self, code: &str) {
-        let t = code.trim();
-        if t.is_empty() {
-            return;
-        }
-        if let Some(input) = self.login_input.borrow_mut().as_mut() {
-            let _ = input.write_all(format!("{t}\n").as_bytes());
-            let _ = input.flush();
-        }
+    pub fn check_login_now(self: &Rc<Self>) {
+        let me = self.clone();
+        crate::rt::spawn_local(async move {
+            me.clone().refresh().await;
+            if me.is_logged_in() && me.logging_in.get() {
+                me.logging_in.set(false);
+                me.changed.emit(&());
+            }
+        });
     }
 
     pub fn cancel_login(&self) {
-        if let Some(pid) = *self.login_pid.borrow() {
-            unsafe {
-                libc::kill(pid as i32, libc::SIGTERM);
-            }
-        }
+        self.login_generation.set(self.login_generation.get() + 1);
+        self.logging_in.set(false);
+        self.changed.emit(&());
     }
 
     pub async fn logout(self: Rc<Self>, config_dir: Option<String>) {
@@ -498,9 +484,60 @@ impl AccountStore {
     }
 }
 
+fn spawn_terminal_login(method: LoginMethod, email: &str) -> Result<(), String> {
+    let bin = host::claude_binary().ok_or_else(|| "Claude Code isn't installed".to_string())?;
+    let (term, term_args) = super::launcher::terminal_emulator().ok_or_else(|| "No terminal emulator found".to_string())?;
+    let dir = format!("{}/.cache/{}/claude", host::home(), crate::brand::BIN_NAME);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
+    let id: String = uuid::Uuid::new_v4().to_string().chars().take(8).collect();
+    let script_path = format!("{dir}/login-{id}.sh");
+    let script = login_script(&bin, method, email, &env(active_override().as_deref(), &bin));
+    super::launcher::write_private(&script_path, &script, 0o700)?;
+    let home = host::home();
+    let mut cmd = HostCmd::new(&term).cwd(&home);
+    for a in term_args {
+        cmd = cmd.arg(a);
+    }
+    cmd = cmd.arg("/bin/bash").arg(script_path.clone());
+    cmd.command().spawn().map(|_| ()).map_err(|e| {
+        let _ = std::fs::remove_file(&script_path);
+        e.to_string()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn login_script_runs_auth_login_with_method() {
+        let e = Env { set: vec![("CLAUDE_CONFIG_DIR".into(), "/p/work dir".into())], unset: vec!["CLAUDECODE".into()] };
+        let script = login_script("/usr/bin/claude", LoginMethod::Console, " me@x.io ", &e);
+        assert!(script.starts_with("#!/bin/bash\n"));
+        assert!(script.contains("export CLAUDE_CONFIG_DIR='/p/work dir'"));
+        assert!(script.contains("'/usr/bin/claude' auth login --console --email 'me@x.io'\n"));
+        let sso = login_script("claude", LoginMethod::Sso, "", &Env { set: vec![], unset: vec![] });
+        assert!(sso.contains("auth login --sso\n"));
+        assert!(!sso.contains("--email"));
+        assert!(login_script("claude", LoginMethod::ClaudeAi, "", &Env { set: vec![], unset: vec![] }).contains("auth login --claudeai\n"));
+    }
+
+    #[test]
+    fn login_poll_backs_off_to_a_cap() {
+        let mut d = LOGIN_POLL_FIRST;
+        let mut seen = vec![d];
+        for _ in 0..10 {
+            d = next_poll_delay(d);
+            seen.push(d);
+        }
+        assert!(seen.windows(2).all(|w| w[1] >= w[0]));
+        assert_eq!(*seen.last().unwrap(), LOGIN_POLL_MAX);
+        assert_eq!(next_poll_delay(LOGIN_POLL_FIRST), Duration::from_secs(3));
+    }
 
     fn profile(id: &str, owner: Option<&str>) -> ClaudeProfile {
         ClaudeProfile { id: id.into(), label: id.into(), config_dir: if id == DEFAULT_ID { None } else { Some(format!("/p/{id}")) }, email: None, plan: None, owner: owner.map(|o| o.into()) }

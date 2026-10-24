@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -8,7 +8,7 @@ use crate::settings::ClaudeProfile;
 use crate::ui::dialogs::{self, Sheet};
 use crate::ui::menu::Menu;
 use crate::ui::widgets::*;
-use crate::{app, util};
+use crate::{app, brand, util};
 
 pub const INSTALL_COMMAND: &str = "curl -fsSL https://claude.ai/install.sh | bash";
 
@@ -213,9 +213,12 @@ pub fn build() -> gtk::Widget {
     column.set_halign(gtk::Align::Center);
     let tile = icon_tile("sy-sparkles-symbolic", "coral", 56);
     column.append(&tile);
-    let t = label_with("Claude Code", &["login-title", "sy-text"]);
+    let t = label_with("Agents", &["login-title", "sy-text"]);
     t.set_xalign(0.5);
     column.append(&t);
+    let sub = label_with("Runs Claude Code, installed on this computer", &["sy-muted"]);
+    sub.set_xalign(0.5);
+    column.append(&sub);
     let switcher = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     switcher.set_halign(gtk::Align::Center);
     column.append(&switcher);
@@ -227,10 +230,12 @@ pub fn build() -> gtk::Widget {
     let scroll = scrolled(&clamp);
     scroll.add_css_class("sy-panel-pane");
     let method = Rc::new(Cell::new(LoginMethod::ClaudeAi));
+    let email = Rc::new(RefCell::new(String::new()));
     let render = {
         let content_w = content.downgrade();
         let switcher_w = switcher.downgrade();
         let method = method.clone();
+        let email = email.clone();
         Rc::new(move || -> bool {
             let (Some(content), Some(switcher)) = (content_w.upgrade(), switcher_w.upgrade()) else { return false };
             clear(&switcher);
@@ -241,7 +246,7 @@ pub fn build() -> gtk::Widget {
             match status {
                 Status::NotInstalled => content.append(&install_card()),
                 Status::Unknown | Status::Checking => content.append(&spinner(18)),
-                Status::LoggedOut => content.append(&login_card(method.clone())),
+                Status::LoggedOut => content.append(&login_card(method.clone(), email.clone())),
                 Status::LoggedIn(info) => content.append(&account_card(&info, false)),
             }
             true
@@ -285,49 +290,38 @@ fn install_card() -> gtk::Box {
     c
 }
 
-fn login_card(method: Rc<Cell<LoginMethod>>) -> gtk::Box {
+fn login_card(method: Rc<Cell<LoginMethod>>, email: Rc<RefCell<String>>) -> gtk::Box {
     let store = accounts::store();
     let c = card();
     c.append(&label_with("Sign in to Claude", &["heading"]));
-    c.append(&wrap_label("Sign-in opens in your browser. The account is shared with Claude Code in the terminal.", &["sy-muted"]));
+    c.append(&wrap_label(
+        &format!(
+            "Sign-in runs in a terminal window, so the code from the sign-in page goes straight to Claude Code, never through {}. The account is shared with Claude Code in the terminal.",
+            brand::APP_NAME
+        ),
+        &["sy-muted"],
+    ));
     if store.logging_in.get() {
         let row = hbox(8);
         row.append(&spinner(14));
-        row.append(&label_with("Confirm the sign-in in your browser…", &["sy-text"]));
+        row.append(&wrap_label("Finish the sign-in in the terminal window…", &["sy-text"]));
         c.append(&row);
-        if let Some(url) = store.fallback_url.borrow().clone() {
-            c.append(&label_with("Browser didn't open, or the page shows a code?", &["sy-muted", "sy-small"]));
-            let links = hbox(6);
-            let open = button("Open sign-in link");
-            let u = url.clone();
-            open.connect_clicked(move |_| util::open_url(&u));
-            let copy = button("Copy link");
-            copy.connect_clicked(move |_| util::copy(&url));
-            links.append(&open);
-            links.append(&copy);
-            c.append(&links);
-            let code_row = hbox(6);
-            let code = gtk::PasswordEntry::new();
-            code.set_placeholder_text(Some("Paste the code from the page"));
-            code.set_hexpand(true);
-            let submit = tinted("Submit", "coral");
-            let cc = code.clone();
-            submit.connect_clicked(move |_| {
-                accounts::store().submit_code(&cc.text());
-                cc.set_text("");
-            });
-            code.connect_activate(|e| {
-                accounts::store().submit_code(&e.text());
-                e.set_text("");
-            });
-            code_row.append(&code);
-            code_row.append(&submit);
-            c.append(&code_row);
-        }
+        let actions = hbox(6);
+        let again = button("Open terminal again");
+        let (m, e) = (method.clone(), email.clone());
+        again.connect_clicked(move |_| {
+            let address = e.borrow().clone();
+            accounts::store().login_in_terminal(m.get(), &address);
+        });
+        let check = button("Check again");
+        check.connect_clicked(|_| accounts::store().check_login_now());
         let cancel = button("Cancel");
-        cancel.set_halign(gtk::Align::Start);
         cancel.connect_clicked(|_| accounts::store().cancel_login());
-        c.append(&cancel);
+        actions.append(&again);
+        actions.append(&check);
+        actions.append(&spacer());
+        actions.append(&cancel);
+        c.append(&actions);
     } else {
         let mut first: Option<gtk::CheckButton> = None;
         for m in LoginMethod::ALL {
@@ -346,13 +340,24 @@ fn login_card(method: Rc<Cell<LoginMethod>>) -> gtk::Box {
             });
             c.append(&r);
         }
-        let email = gtk::Entry::new();
-        email.set_placeholder_text(Some("Email (optional)"));
-        c.append(&email);
+        let entry = gtk::Entry::new();
+        entry.set_placeholder_text(Some("Email (optional)"));
+        entry.set_text(&email.borrow());
+        let e = email.clone();
+        entry.connect_changed(move |en| *e.borrow_mut() = en.text().to_string());
+        c.append(&entry);
         let row = hbox(0);
         row.append(&spacer());
-        let go = tinted("Sign in with browser", "coral");
-        go.connect_clicked(move |_| accounts::store().login(method.get(), &email.text()));
+        let go = tinted("Sign in", "coral");
+        go.set_tooltip_text(Some("Opens “claude auth login” in a terminal"));
+        let (m, e) = (method.clone(), email.clone());
+        let start = Rc::new(move || {
+            let address = e.borrow().clone();
+            accounts::store().login_in_terminal(m.get(), &address);
+        });
+        let st = start.clone();
+        go.connect_clicked(move |_| st());
+        entry.connect_activate(move |_| start());
         row.append(&go);
         c.append(&row);
     }
