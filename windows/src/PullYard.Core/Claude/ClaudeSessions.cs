@@ -19,6 +19,27 @@ public sealed class ClaudeSessionInfo
     public string? Model { get; init; }
     public int? LinesAdded { get; init; }
     public int? LinesRemoved { get; init; }
+    public string? ParentId { get; init; }
+    public string? DesktopId { get; init; }
+    public bool Archived { get; init; }
+
+    public ClaudeSessionInfo With(string? title = null, DesktopLink? link = null) => new()
+    {
+        Id = Id,
+        File = File,
+        Cwd = Cwd,
+        Title = title ?? (link?.Title is { Length: > 0 } t ? t : Title),
+        Branch = Branch,
+        Modified = Modified,
+        PrUrl = PrUrl,
+        PrNumber = PrNumber,
+        Model = Model,
+        LinesAdded = LinesAdded,
+        LinesRemoved = LinesRemoved,
+        ParentId = link is null ? ParentId : link.Parent,
+        DesktopId = link is null ? DesktopId : link.Local,
+        Archived = link?.Archived ?? Archived
+    };
 
     public string? WorktreeName
     {
@@ -58,7 +79,7 @@ public static class ClaudeSessionParser
         return cwd;
     }
 
-    public static List<ClaudeProject> LoadAll(string root)
+    public static List<ClaudeProject> LoadAll(string root, IReadOnlyDictionary<string, DesktopLink>? desktop = null)
     {
         if (!Directory.Exists(root)) return new();
         var byProject = new Dictionary<string, List<ClaudeSessionInfo>>(StringComparer.OrdinalIgnoreCase);
@@ -85,6 +106,7 @@ public static class ClaudeSessionParser
             foreach (var file in files)
             {
                 if (Parse(file) is not { } info) continue;
+                if (desktop is not null && desktop.TryGetValue(info.Id, out var link)) info = info.With(link: link);
                 var key = ProjectRoot(info.Cwd);
                 if (!byProject.TryGetValue(key, out var list)) byProject[key] = list = new();
                 list.Add(info);
