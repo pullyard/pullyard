@@ -513,10 +513,26 @@ struct ChatItemView: View {
     let chat: ChatSession
     let folder: String
 
+    @Environment(AppModel.self) private var app
+
+    private func edit(id: String, text: String) {
+        guard !chat.busy, chat.sessionId?.isEmpty == false,
+              let tab = app.claude.tabs.first(where: { $0.chat === chat }),
+              let index = chat.items.firstIndex(where: { $0.id == id }) else {
+            chat.draftRequest = text
+            return
+        }
+        let later = chat.items[(index + 1)...].filter {
+            if case .user(_, let t, _) = $0 { return t == text }
+            return false
+        }.count
+        app.claude.rewind(tab, to: text, occurrenceFromEnd: later)
+    }
+
     var body: some View {
         switch item {
-        case .user(_, let text, let images):
-            UserBubble(text: text, images: images) { chat.draftRequest = text }
+        case .user(let id, let text, let images):
+            UserBubble(text: text, images: images) { edit(id: id, text: text) }
         case .text(let t):
             AssistantText(text: t)
         case .thinking(let t):
@@ -588,7 +604,7 @@ struct UserBubble: View {
             MessageActions(visible: hover && !text.isEmpty) {
                 MessageActionButton(icon: "doc.on.doc", help: "Copy") { copyToPasteboard(text) }
                 if let onEdit {
-                    MessageActionButton(icon: "pencil", help: "Edit and send again") { onEdit() }
+                    MessageActionButton(icon: "arrow.uturn.backward.circle", help: "Edit from here — continues in a new branch of this session") { onEdit() }
                 }
             }
         }

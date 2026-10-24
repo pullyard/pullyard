@@ -357,6 +357,29 @@ final class ClaudeWorkspace {
         return tab
     }
 
+    func rewind(_ tab: ClaudeTab, to text: String, occurrenceFromEnd: Int) {
+        guard let chat = tab.chat, let sid = chat.sessionId, !sid.isEmpty,
+              let file = SessionRewind.sessionFile(id: sid, configDir: chat.configDir) else {
+            tab.chat?.draftRequest = text
+            return
+        }
+        do {
+            let forked = try SessionRewind.fork(file: file, text: text, occurrenceFromEnd: occurrenceFromEnd)
+            let new: ClaudeTab
+            if let info = ClaudeSessionParser.parse(forked.file) {
+                new = resume(info.retitled("Edit · " + tab.title), kind: .chat)
+            } else {
+                try? FileManager.default.removeItem(at: forked.file)
+                new = newSession(folder: tab.folder, name: "Edit · " + tab.title, kind: .chat)
+            }
+            new.chat?.draftRequest = text
+            selectedTabID = new.id
+        } catch {
+            chat.draftRequest = text
+            chat.lastError = error.localizedDescription
+        }
+    }
+
     func openInTerminal(_ tab: ClaudeTab) {
         guard !tab.sessionId.isEmpty else { return }
         tab.chat?.stop()

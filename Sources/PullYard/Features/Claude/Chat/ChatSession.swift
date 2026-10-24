@@ -572,7 +572,7 @@ final class ChatSession {
 
     static let maxResultLength = 64_000
 
-    static func historyUserItem(id: String, text raw: String) -> ChatItem? {
+    nonisolated static func historyUserItem(id: String, text raw: String) -> ChatItem? {
         var text = raw.replacingOccurrences(of: "<system-reminder>[\\s\\S]*?</system-reminder>", with: "", options: .regularExpression)
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.hasPrefix("[Request interrupted by user") { return .notice(id: id, text: "Interrupted", isError: false) }
