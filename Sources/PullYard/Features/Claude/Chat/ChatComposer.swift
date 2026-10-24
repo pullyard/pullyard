@@ -150,6 +150,7 @@ struct ChatComposer: View {
     @State private var selected = 0
     @State private var files: [String] = []
     @State private var focusToken = 0
+    @State private var completionMemo = CompletionMemo()
     @State private var dropTarget = false
 
     var body: some View {
@@ -413,6 +414,15 @@ struct ChatComposer: View {
     }
 
     private var completionItems: [CompletionItem] {
+        let key = "\(String(describing: completion))|\(query)|\(files.count)|\(chat.commands.count)"
+        if completionMemo.key == key { return completionMemo.items }
+        let items = buildCompletionItems()
+        completionMemo.key = key
+        completionMemo.items = items
+        return items
+    }
+
+    private func buildCompletionItems() -> [CompletionItem] {
         switch completion {
         case .slash:
             let builtin: [ChatCommand] = [ChatCommand(name: "compact", description: "Compact the conversation"), ChatCommand(name: "clear", description: "Start a new session")]
@@ -616,4 +626,9 @@ struct TodoProgressBar: View {
             .transition(.opacity)
         }
     }
+}
+
+final class CompletionMemo {
+    var key = ""
+    var items: [CompletionItem] = []
 }
