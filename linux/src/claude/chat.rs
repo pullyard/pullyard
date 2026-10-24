@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{ChildStdin, Stdio};
 use std::rc::Rc;
-use std::time::Instant;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use serde_json::{json, Map, Value};
@@ -162,9 +163,71 @@ pub enum Event {
 }
 
 enum Incoming {
-    Line(String),
+    Values(Vec<Value>),
     Stderr(String),
     Exit(i32),
+}
+
+enum Raw {
+    Value(Value),
+    Exit(i32),
+}
+
+const BATCH_WINDOW: Duration = Duration::from_millis(50);
+const EXIT_DRAIN_WAIT: Duration = Duration::from_secs(2);
+
+fn parse_line(buf: &[u8]) -> Option<Value> {
+    let line = String::from_utf8_lossy(buf);
+    let line = line.trim_end();
+    if line.is_empty() {
+        return None;
+    }
+    serde_json::from_str::<Value>(line).ok()
+}
+
+fn flush<F: FnMut(Incoming) -> bool>(batch: &mut Vec<Value>, emit: &mut F) -> bool {
+    batch.is_empty() || emit(Incoming::Values(std::mem::take(batch)))
+}
+
+fn pump(raw: mpsc::Receiver<Raw>, window: Duration, mut emit: impl FnMut(Incoming) -> bool) {
+    let mut batch: Vec<Value> = Vec::new();
+    let mut deadline: Option<Instant> = None;
+    loop {
+        let next = match deadline {
+            None => raw.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+            Some(d) => raw.recv_timeout(d.saturating_duration_since(Instant::now())),
+        };
+        match next {
+            Ok(Raw::Value(v)) => {
+                if batch.is_empty() {
+                    deadline = Some(Instant::now() + window);
+                }
+                batch.push(v);
+                if deadline.is_some_and(|d| Instant::now() >= d) {
+                    deadline = None;
+                    if !flush(&mut batch, &mut emit) {
+                        return;
+                    }
+                }
+            }
+            Ok(Raw::Exit(code)) => {
+                if flush(&mut batch, &mut emit) {
+                    emit(Incoming::Exit(code));
+                }
+                return;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                deadline = None;
+                if !flush(&mut batch, &mut emit) {
+                    return;
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                flush(&mut batch, &mut emit);
+                return;
+            }
+        }
+    }
 }
 
 pub struct ChatSession {
@@ -380,9 +443,12 @@ impl ChatSession {
         self.pid.set(child.id());
         *self.stdin.borrow_mut() = child.stdin.take();
         let (tx, rx) = async_channel::unbounded::<Incoming>();
+        let (raw_tx, raw_rx) = mpsc::channel::<Raw>();
+        let (eof_tx, eof_rx) = mpsc::channel::<()>();
         if let Some(out) = child.stdout.take() {
-            let tx = tx.clone();
+            let raw_tx = raw_tx.clone();
             std::thread::spawn(move || {
+                let _eof = eof_tx;
                 let mut reader = BufReader::with_capacity(1 << 16, out);
                 let mut buf = Vec::new();
                 loop {
@@ -390,14 +456,21 @@ impl ChatSession {
                     match reader.read_until(b'\n', &mut buf) {
                         Ok(0) | Err(_) => break,
                         Ok(_) => {
-                            let line = String::from_utf8_lossy(&buf).trim_end().to_string();
-                            if !line.is_empty() && tx.send_blocking(Incoming::Line(line)).is_err() {
-                                break;
+                            if let Some(v) = parse_line(&buf) {
+                                if raw_tx.send(Raw::Value(v)).is_err() {
+                                    break;
+                                }
                             }
                         }
                     }
                 }
             });
+        } else {
+            drop(eof_tx);
+        }
+        {
+            let tx = tx.clone();
+            std::thread::spawn(move || pump(raw_rx, BATCH_WINDOW, |msg| tx.send_blocking(msg).is_ok()));
         }
         if let Some(mut err) = child.stderr.take() {
             let tx = tx.clone();
@@ -411,9 +484,11 @@ impl ChatSession {
                 }
             });
         }
+        drop(tx);
         std::thread::spawn(move || {
             let code = child.wait().map(|s| s.code().unwrap_or(15)).unwrap_or(-1);
-            let _ = tx.send_blocking(Incoming::Exit(code));
+            let _ = eof_rx.recv_timeout(EXIT_DRAIN_WAIT);
+            let _ = raw_tx.send(Raw::Exit(code));
         });
         self.running.set(true);
         self.sleeping.set(false);
@@ -428,9 +503,12 @@ impl ChatSession {
                     return;
                 }
                 match msg {
-                    Incoming::Line(l) => {
-                        if let Ok(v) = serde_json::from_str::<Value>(&l) {
-                            me.handle(&v);
+                    Incoming::Values(values) => {
+                        for v in &values {
+                            if me.generation.get() != gen {
+                                return;
+                            }
+                            me.handle(v);
                         }
                     }
                     Incoming::Stderr(s) => {
@@ -1097,5 +1175,75 @@ impl ChatSession {
         }
         *self.items.borrow_mut() = items;
         self.emit(Event::Reset);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn collect(raw: mpsc::Receiver<Raw>, window: Duration) -> Vec<Incoming> {
+        let mut out = Vec::new();
+        pump(raw, window, |m| {
+            out.push(m);
+            true
+        });
+        out
+    }
+
+    #[test]
+    fn parses_lines_like_before() {
+        assert_eq!(parse_line(b"{\"type\":\"system\"}\r\n"), Some(json!({ "type": "system" })));
+        assert_eq!(parse_line(b"   \n"), None);
+        assert_eq!(parse_line(b"not json\n"), None);
+    }
+
+    #[test]
+    fn batches_values_and_flushes_before_exit() {
+        let (tx, rx) = mpsc::channel();
+        for i in 0..5 {
+            tx.send(Raw::Value(json!(i))).unwrap();
+        }
+        tx.send(Raw::Exit(3)).unwrap();
+        let out = collect(rx, Duration::from_secs(5));
+        assert_eq!(out.len(), 2);
+        match &out[0] {
+            Incoming::Values(v) => assert_eq!(v, &(0..5).map(|i| json!(i)).collect::<Vec<_>>()),
+            _ => panic!("expected values"),
+        }
+        assert!(matches!(out[1], Incoming::Exit(3)));
+    }
+
+    #[test]
+    fn flushes_when_the_window_passes() {
+        let (tx, rx) = mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            tx.send(Raw::Value(json!(1))).unwrap();
+            std::thread::sleep(Duration::from_millis(120));
+            tx.send(Raw::Value(json!(2))).unwrap();
+        });
+        let out = collect(rx, Duration::from_millis(20));
+        handle.join().unwrap();
+        let batches: Vec<Vec<Value>> = out
+            .into_iter()
+            .map(|m| match m {
+                Incoming::Values(v) => v,
+                _ => panic!("expected values"),
+            })
+            .collect();
+        assert_eq!(batches, vec![vec![json!(1)], vec![json!(2)]]);
+    }
+
+    #[test]
+    fn stops_when_the_receiver_is_gone() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(Raw::Value(json!(1))).unwrap();
+        tx.send(Raw::Exit(0)).unwrap();
+        let mut calls = 0;
+        pump(rx, Duration::from_secs(5), |_| {
+            calls += 1;
+            false
+        });
+        assert_eq!(calls, 1);
     }
 }

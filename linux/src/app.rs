@@ -177,7 +177,7 @@ impl Section {
             Section::Issues(f) => format!("Issues: {}", f.title()),
             Section::Repos => "Repositories".into(),
             Section::Projects => "Projects".into(),
-            Section::Claude => "Claude Code".into(),
+            Section::Claude => "Agents".into(),
         }
     }
 }
@@ -244,6 +244,16 @@ pub fn get() -> Rc<App> {
 
 pub fn try_get() -> Option<Rc<App>> {
     APP.with(|a| a.borrow().clone())
+}
+
+pub const MAX_LINK_PROMPT_CHARS: usize = 8000;
+
+pub fn link_prompt_too_long(prompt: &str) -> bool {
+    prompt.chars().count() > MAX_LINK_PROMPT_CHARS
+}
+
+pub fn link_prompt_too_long_message(prompt: &str) -> String {
+    format!("The link's prompt is {} characters long, which is more than {} accepts from a link ({MAX_LINK_PROMPT_CHARS}).", prompt.chars().count(), brand::APP_NAME)
 }
 
 pub fn main_window() -> Option<gtk::Window> {
@@ -364,7 +374,7 @@ pub fn claude_attention(tab: &crate::claude::workspace::Tab) {
     if is_active() {
         return;
     }
-    let n = gio::Notification::new("Claude Code needs your permission");
+    let n = gio::Notification::new("An agent needs your permission");
     n.set_body(Some(&format!("{} · {}", tab.title.borrow(), tab.project_name())));
     n.set_default_action_and_target_value("app.open-url", Some(&format!("{}://section/claude", brand::URL_SCHEME).to_variant()));
     a.gtk_app.send_notification(Some(&format!("claude-{}", tab.id)), &n);
@@ -1225,6 +1235,55 @@ impl App {
         });
     }
 
+    fn confirm_link_session(self: &Rc<Self>, folder: String, prompt: Option<String>, name: Option<String>) {
+        let window = main_window();
+        if let Some(p) = prompt.as_deref().filter(|p| link_prompt_too_long(p)) {
+            let d = adw::AlertDialog::new(Some("Start a Claude session from a link?"), Some(&link_prompt_too_long_message(p)));
+            d.add_response("ok", "OK");
+            d.set_default_response(Some("ok"));
+            d.set_close_response("ok");
+            d.present(window.as_ref());
+            return;
+        }
+        let body = format!("Folder: {folder}\n\nThe session starts in Plan mode: Claude can read files but asks before it edits anything or runs commands. Read the whole prompt before you start it.");
+        let d = adw::AlertDialog::new(Some("Start a Claude session from a link?"), Some(&body));
+        if let Some(p) = prompt.as_deref().filter(|p| !p.is_empty()) {
+            let view = gtk::TextView::new();
+            view.set_editable(false);
+            view.set_cursor_visible(false);
+            view.set_monospace(true);
+            view.set_wrap_mode(gtk::WrapMode::WordChar);
+            view.set_left_margin(8);
+            view.set_right_margin(8);
+            view.set_top_margin(6);
+            view.set_bottom_margin(6);
+            view.buffer().set_text(p);
+            let scroll = gtk::ScrolledWindow::new();
+            scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
+            scroll.set_min_content_height(220);
+            scroll.set_max_content_height(320);
+            scroll.set_min_content_width(420);
+            scroll.add_css_class("card");
+            scroll.set_child(Some(&view));
+            d.set_extra_child(Some(&scroll));
+        }
+        d.add_response("cancel", "Cancel");
+        d.add_response("start", "Start in Plan Mode");
+        d.set_response_appearance("start", adw::ResponseAppearance::Suggested);
+        d.set_default_response(Some("cancel"));
+        d.set_close_response("cancel");
+        let weak = Rc::downgrade(self);
+        d.connect_response(None, move |_, r| {
+            if r != "start" {
+                return;
+            }
+            let Some(me) = weak.upgrade() else { return };
+            set_section(Section::Claude);
+            me.claude.new_session(&folder, prompt.clone(), name.clone(), Some(crate::claude::ClaudeMode::Plan), None);
+        });
+        d.present(window.as_ref());
+    }
+
     pub fn handle_url(self: &Rc<Self>, uri: &str) {
         if self.state.borrow().phase != Phase::LoggedIn {
             return;
@@ -1281,8 +1340,8 @@ impl App {
             let path = url.path().to_string();
             if path == "/new" {
                 if let Some(folder) = query("folder").filter(|f| std::path::Path::new(f).exists()) {
-                    let mode = query("mode").and_then(|m| crate::claude::ClaudeMode::from_key(&m));
-                    self.claude.new_session(&folder, query("prompt"), query("name"), mode, None);
+                    self.present();
+                    self.confirm_link_session(folder, query("prompt"), query("name"));
                 }
             }
             if path == "/resume" {
@@ -1575,4 +1634,18 @@ pub fn set_smoke_locked(account: GitAccount) {
     let a = get();
     a.splash_done.set(true);
     a.lock(account);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn link_prompts_are_capped() {
+        assert!(!link_prompt_too_long(""));
+        assert!(!link_prompt_too_long(&"a".repeat(MAX_LINK_PROMPT_CHARS)));
+        assert!(link_prompt_too_long(&"a".repeat(MAX_LINK_PROMPT_CHARS + 1)));
+        assert!(!link_prompt_too_long(&"é".repeat(MAX_LINK_PROMPT_CHARS)));
+        assert!(link_prompt_too_long_message(&"a".repeat(9000)).contains("9000 characters"));
+    }
 }
