@@ -158,7 +158,7 @@ struct IssueDetailView: View {
         .navigationTitle(issue.title)
         .navigationSubtitle("\(ref.repo.full) #\(issue.number)")
         .task(id: issue.url) { app.noteCanonical(ref, url: issue.url) }
-        .toolbar {
+        .panelToolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 if model.busy { ProgressView().controlSize(.small) }
                 RefreshStatus(updated: model.lastUpdated, refreshing: model.loading, error: model.refreshError, compact: true) {

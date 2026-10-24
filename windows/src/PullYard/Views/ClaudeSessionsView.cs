@@ -4,6 +4,7 @@ using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using PullYard.Controls;
+using PullYard.Core;
 using PullYard.Core.Api;
 using PullYard.Core.Claude;
 using PullYard.Core.Util;
@@ -15,13 +16,17 @@ namespace PullYard.Views;
 public sealed class ClaudeSessionsView : ListPane
 {
     private ClaudeWorkspace Ws => Model.Claude;
+    private static AgentSessionPrefs Prefs => AgentSessionPrefs.Shared;
     private readonly HashSet<string> expanded = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> collapsedParents = new();
+    private bool showArchived;
     private string query = "";
     private readonly ContentControl accountHost = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, IsTabStop = false };
     private readonly DispatcherTimer stateTimer = new() { Interval = TimeSpan.FromSeconds(3) };
-    private bool syncing;
+    private string? lastSignature;
+    private bool renderQueued;
 
-    public ClaudeSessionsView() : base(L.T("Section_Claude", "Claude Code"), "SessionRowTemplate")
+    public ClaudeSessionsView() : base(L.T("Section_Claude", "Agents"), "SessionRowTemplate")
     {
         FilterRow.Children.Add(accountHost);
         FilterRow.Children.Add(SearchBox(L.T("Claude_SearchSessions", "Search sessions"), t =>
@@ -29,7 +34,7 @@ public sealed class ClaudeSessionsView : ListPane
             query = t.Trim();
             Render();
         }, 200));
-        var open = Ui.IconButton("", L.T("Claude_OpenFolder", "New session in folder…"), () => OpenFolder().Forget(), "text");
+        var open = Ui.IconButton("\uE8F4", L.T("Claude_OpenFolder", "New session in folder…"), () => OpenFolder().Forget(), "text");
         Tools.Children.Add(open);
         List.SelectionMode = ListViewSelectionMode.None;
         List.ItemClick += (_, e) =>
@@ -45,6 +50,10 @@ public sealed class ClaudeSessionsView : ListPane
                     break;
                 case OpenTabItem t:
                     Ws.SelectedTab = t.Tab;
+                    break;
+                case ArchivedToggleItem:
+                    showArchived = !showArchived;
+                    Render();
                     break;
             }
         };
@@ -73,8 +82,10 @@ public sealed class ClaudeSessionsView : ListPane
         Ws.Tabs.CollectionChanged += OnTabs;
         ClaudeAccountStore.Shared.PropertyChanged += OnAccount;
         ClaudeProfiles.Shared.PropertyChanged += OnAccount;
+        Prefs.Changed += QueueRender;
         Unloaded += Detach;
         stateTimer.Start();
+        lastSignature = null;
         RenderAccount();
         Render();
         Initial().Forget();
@@ -86,6 +97,7 @@ public sealed class ClaudeSessionsView : ListPane
         Ws.Tabs.CollectionChanged -= OnTabs;
         ClaudeAccountStore.Shared.PropertyChanged -= OnAccount;
         ClaudeProfiles.Shared.PropertyChanged -= OnAccount;
+        Prefs.Changed -= QueueRender;
         Unloaded -= Detach;
         stateTimer.Stop();
     }
@@ -93,7 +105,7 @@ public sealed class ClaudeSessionsView : ListPane
     private async Task Initial()
     {
         await ClaudeAccountStore.Shared.Refresh();
-        await Ws.ReloadProjects();
+        await Ws.ReloadProjects(force: Ws.Projects.Count == 0);
         if (expanded.Count == 0 && Ws.Projects.FirstOrDefault() is { } first)
         {
             expanded.Add(first.Id);
@@ -107,7 +119,23 @@ public sealed class ClaudeSessionsView : ListPane
         await Ws.ReloadProjects();
     }
 
-    private void OnTabs(object? sender, NotifyCollectionChangedEventArgs e) => Render();
+    protected override void OnLiveTick()
+    {
+        if (ClaudeAccountStore.Shared.IsLoggedIn) Ws.ReloadProjects(force: false).Forget();
+    }
+
+    private void OnTabs(object? sender, NotifyCollectionChangedEventArgs e) => QueueRender();
+
+    private void QueueRender()
+    {
+        if (renderQueued) return;
+        renderQueued = true;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            renderQueued = false;
+            Render();
+        });
+    }
 
     private void OnWs(object? sender, PropertyChangedEventArgs e)
     {
@@ -115,12 +143,13 @@ public sealed class ClaudeSessionsView : ListPane
         {
             case nameof(ClaudeWorkspace.Projects):
             case nameof(ClaudeWorkspace.SelectedTab):
-                Render();
+            case nameof(ClaudeWorkspace.TotalMemory):
+                QueueRender();
                 break;
             case nameof(ClaudeWorkspace.LoadingProjects):
             case nameof(ClaudeWorkspace.ProjectsUpdated):
                 Footer.Update(Ws.ProjectsUpdated, Ws.LoadingProjects);
-                if (Ws.Projects.Count == 0) Render();
+                if (Ws.Projects.Count == 0) QueueRender();
                 break;
         }
     }
@@ -128,6 +157,7 @@ public sealed class ClaudeSessionsView : ListPane
     private void OnAccount(object? sender, PropertyChangedEventArgs e)
     {
         RenderAccount();
+        lastSignature = null;
         Render();
     }
 
@@ -137,45 +167,123 @@ public sealed class ClaudeSessionsView : ListPane
         accountHost.Content = store.Status switch
         {
             ClaudeAccountStatus.LoggedIn when store.Info is { } info => ClaudeAccountCard.Create(info, compact: true),
-            ClaudeAccountStatus.LoggedOut => Ui.V(6, Ui.H(6, Ui.Glyph("", 12, "amber"), Ui.Text(L.T("Claude_SignInRight", "Not signed in to Claude — sign in on the right"), 12.5, "amber", wrap: true)),
+            ClaudeAccountStatus.LoggedOut => Ui.V(6, Ui.H(6, Ui.Glyph("\uE7BA", 12, "amber"), Ui.Text(L.T("Claude_SignInRight", "Not signed in to Claude — sign in on the right"), 12.5, "amber", wrap: true)),
                 ClaudeProfiles.Shared.Visible.Count > 1 ? ClaudeAccountCard.Switcher() : null),
-            ClaudeAccountStatus.NotInstalled => Ui.H(6, Ui.Glyph("", 12, "amber"), Ui.Text(L.T("Claude_NotFound", "claude CLI not found — see the right side"), 12.5, "amber", wrap: true)),
+            ClaudeAccountStatus.NotInstalled => Ui.H(6, Ui.Glyph("\uE7BA", 12, "amber"), Ui.Text(L.T("Claude_NotFound", "claude CLI not found — see the right side"), 12.5, "amber", wrap: true)),
             _ => null
         };
     }
 
-    private void Render()
+    private bool Matches(ClaudeSessionInfo s) =>
+        query.Length == 0 || Prefs.Title(s).Contains(query, StringComparison.OrdinalIgnoreCase) || (s.Branch ?? "").Contains(query, StringComparison.OrdinalIgnoreCase);
+
+    private List<object> BuildItems()
     {
-        syncing = true;
-        var store = ClaudeAccountStore.Shared;
         var items = new List<object>();
-        if (store.IsLoggedIn)
+        if (Ws.Tabs.Count > 0)
         {
-            if (Ws.Tabs.Count > 0)
+            var mem = Ws.TotalMemory > 0 ? Fmt.Memory(Ws.TotalMemory) : "0 MB";
+            var awake = Ws.Tabs.Any(t => t.Running && t.State is not (ClaudeTabState.Working or ClaudeTabState.Waiting));
+            items.Add(new SectionLabelItem($"{L.T("Claude_Open", "Open")}  ·  {mem}")
             {
-                var mem = Ws.TotalMemory > 0 ? Fmt.Memory(Ws.TotalMemory) : "0 MB";
-                items.Add(new SectionLabelItem($"{L.T("Claude_Open", "Open")}  ·  {mem}"));
-                foreach (var t in Ws.Tabs) items.Add(new OpenTabItem(t, Ws.SelectedTab == t));
-            }
-            foreach (var project in Filtered())
+                Glyph = "\uE8BD",
+                ActionText = awake ? L.T("Agents_SleepAll", "Sleep all") : null,
+                OnAction = awake ? Ws.SleepAll : null
+            });
+            foreach (var t in Ws.Tabs) items.Add(new OpenTabItem(t, Ws.SelectedTab == t));
+        }
+        var pinned = new List<ClaudeSessionInfo>();
+        foreach (var id in Prefs.Pinned)
+            if (Ws.SessionsById.TryGetValue(id, out var s) && Matches(s) && !Prefs.IsArchived(s)) pinned.Add(Prefs.Apply(s));
+        if (pinned.Count > 0)
+        {
+            items.Add(new SectionLabelItem(L.T("Agents_Pinned", "Pinned")) { Glyph = "\uE718" });
+            foreach (var s in pinned) items.Add(new SessionListItem(s, Ws.TabForSession(s.Id) is not null));
+        }
+        var any = false;
+        foreach (var project in Ws.Projects)
+        {
+            var nameHit = query.Length > 0 && project.Name.Contains(query, StringComparison.OrdinalIgnoreCase);
+            var visible = project.Sessions.Where(s => (showArchived || !Prefs.IsArchived(s)) && !Prefs.IsPinned(s.Id) && (nameHit || Matches(s))).ToList();
+            if (query.Length > 0 && visible.Count == 0 && !nameHit) continue;
+            any = true;
+            var isOpen = expanded.Contains(project.Id) || query.Length > 0;
+            var path = project.Path;
+            items.Add(new ProjectHeaderItem(project, isOpen) { OnNew = () => Ws.NewSession(path), Count = project.Sessions.Count(s => !Prefs.IsArchived(s)) });
+            if (!isOpen) continue;
+            foreach (var node in SessionTree.Build(visible.Take(query.Length == 0 ? 40 : 200)))
             {
-                var isOpen = expanded.Contains(project.Id) || query.Length > 0;
-                var path = project.Path;
-                items.Add(new ProjectHeaderItem(project, isOpen) { OnNew = () => Ws.NewSession(path) });
-                if (!isOpen) continue;
-                foreach (var s in project.Sessions.Take(query.Length == 0 ? 30 : 200)) items.Add(new SessionListItem(s, Ws.TabForSession(s.Id) is not null));
+                var parentId = node.Id;
+                var collapsed = collapsedParents.Contains(parentId);
+                items.Add(new SessionListItem(Prefs.Apply(node.Session), Ws.TabForSession(parentId) is not null)
+                {
+                    ChildCount = node.Children.Count,
+                    Collapsed = collapsed,
+                    OnToggle = () =>
+                    {
+                        if (!collapsedParents.Remove(parentId)) collapsedParents.Add(parentId);
+                        Render();
+                    }
+                });
+                if (collapsed) continue;
+                for (var i = 0; i < node.Children.Count; i++)
+                {
+                    var child = node.Children[i];
+                    items.Add(new SessionListItem(Prefs.Apply(child), Ws.TabForSession(child.Id) is not null) { Depth = 1, Last = i == node.Children.Count - 1 });
+                }
             }
         }
-        List.ItemsSource = items;
-        syncing = false;
+        if (any || showArchived) items.Add(new ArchivedToggleItem(showArchived));
+        return items;
+    }
+
+    private static string Signature(List<object> items)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var item in items)
+        {
+            switch (item)
+            {
+                case SectionLabelItem l:
+                    sb.Append("L|").Append(l.Text).Append('|').Append(l.ActionText);
+                    break;
+                case OpenTabItem t:
+                    sb.Append("T|").Append(t.Tab.Id).Append('|').Append(t.Selected).Append('|').Append(t.Tab.Title).Append('|').Append(t.Tab.Kind);
+                    break;
+                case ProjectHeaderItem p:
+                    sb.Append("P|").Append(p.Project.Id).Append('|').Append(p.Expanded).Append('|').Append(p.Count).Append('|').Append(p.Project.Exists);
+                    break;
+                case SessionListItem s:
+                    sb.Append("S|").Append(s.Session.Id).Append('|').Append(s.Session.Title).Append('|').Append(s.Open).Append('|').Append(s.Depth).Append('|').Append(s.Last)
+                        .Append('|').Append(s.ChildCount).Append('|').Append(s.Collapsed).Append('|').Append(s.Session.Modified.Ticks).Append('|').Append(s.Session.PrNumber);
+                    break;
+                case ArchivedToggleItem a:
+                    sb.Append("A|").Append(a.Showing);
+                    break;
+            }
+            sb.Append('\n');
+        }
+        return sb.ToString();
+    }
+
+    private void Render()
+    {
+        var store = ClaudeAccountStore.Shared;
+        var items = store.IsLoggedIn ? BuildItems() : new List<object>();
+        var signature = store.IsLoggedIn + "\n" + Signature(items);
+        if (signature != lastSignature)
+        {
+            lastSignature = signature;
+            List.ItemsSource = items;
+        }
         Footer.Update(Ws.ProjectsUpdated, Ws.LoadingProjects);
         if (!store.IsLoggedIn)
         {
-            ShowOverlay(store.Status is ClaudeAccountStatus.Checking or ClaudeAccountStatus.Unknown ? Ui.Loading() : Ui.Empty("", "slate", L.T("Claude_HistoryAfterSignIn", "Session history and projects appear after you sign in to Claude.")));
+            ShowOverlay(store.Status is ClaudeAccountStatus.Checking or ClaudeAccountStatus.Unknown ? Ui.Loading() : Ui.Empty("\uE72E", "slate", L.T("Claude_HistoryAfterSignIn", "Session history and projects appear after you sign in to Claude.")));
         }
-        else if (items.Count == 0)
+        else if (items.Count == 0 || (items.Count == 1 && items[0] is ArchivedToggleItem && Ws.Projects.Count == 0))
         {
-            ShowOverlay(Ws.LoadingProjects ? Ui.Loading() : Ui.Empty("", "coral", L.T("Claude_NoSessions", "No Claude Code sessions yet")));
+            ShowOverlay(Ws.LoadingProjects ? Ui.Loading() : Ui.Empty("\uE945", "coral", L.T("Claude_NoSessions", "No Claude Code sessions yet")));
         }
         else
         {
@@ -183,30 +291,40 @@ public sealed class ClaudeSessionsView : ListPane
         }
     }
 
-    private IEnumerable<ClaudeProject> Filtered()
-    {
-        if (query.Length == 0) return Ws.Projects;
-        return Ws.Projects.Select(p =>
-        {
-            if (p.Name.Contains(query, StringComparison.OrdinalIgnoreCase)) return p;
-            var s = p.Sessions.Where(x => x.Title.Contains(query, StringComparison.OrdinalIgnoreCase) || (x.Branch ?? "").Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
-            return s.Count == 0 ? null : new ClaudeProject { Id = p.Id, Path = p.Path, Sessions = s };
-        }).Where(p => p is not null)!;
-    }
-
     private MenuFlyout SessionMenu(ClaudeSessionInfo s)
     {
+        var archived = Prefs.IsArchived(s);
         var menu = Ui.Menu(
-            Ui.MenuItem(L.T("Claude_ResumeChat", "Resume as chat"), () => Ws.Resume(s, kind: ClaudeTabKind.Chat), ""),
-            Ui.MenuItem(L.T("Claude_ResumeTerminal", "Resume in terminal"), () => Ws.Resume(s, kind: ClaudeTabKind.Terminal), ""),
-            Ui.MenuItem(L.T("Claude_Fork", "Fork session"), () => Ws.Resume(s, fork: true), ""),
+            Ui.MenuItem(Prefs.IsPinned(s.Id) ? L.T("Agents_Unpin", "Unpin") : L.T("Agents_Pin", "Pin to top"), () => Prefs.TogglePin(s.Id), "\uE718", enabled: !archived),
+            Ui.MenuItem(L.T("Agents_Rename", "Rename…"), () => Rename(s).Forget(), "\uE8AC"),
+            Ui.MenuItem(archived ? L.T("Agents_Unarchive", "Unarchive") : L.T("Agents_Archive", "Archive"), () => Prefs.SetArchived(s.Id, !archived), "\uE7B8"),
             Ui.Separator(),
-            Ui.MenuItem(L.T("Claude_CopyId", "Copy session ID"), () => WindowInterop.Copy(s.Id)),
-            Ui.MenuItem(L.T("Claude_CopyResume", "Copy resume command"), () => WindowInterop.Copy($"cd {Proc.QuoteArg(s.Cwd)} && claude --resume {s.Id}")),
-            Ui.MenuItem(L.T("Claude_Reveal", "Show transcript in Explorer"), () => Proc.Reveal(s.File)));
+            Ui.MenuItem(L.T("Claude_ResumeChat", "Resume as chat"), () => Ws.Resume(s, kind: ClaudeTabKind.Chat), "\uE8BD"),
+            Ui.MenuItem(L.T("Claude_ResumeTerminal", "Resume in terminal"), () => Ws.Resume(s, kind: ClaudeTabKind.Terminal), "\uE756"),
+            Ui.MenuItem(L.T("Claude_Fork", "Fork session"), () => Ws.Resume(s, fork: true), "\uE8C8"));
+        if (s.DesktopId is { } local && DesktopSessionIndex.IsInstalled)
+            menu.Items.Add(Ui.MenuItem(L.T("Agents_OpenInDesktop", "Open in Claude Desktop"), () => Proc.OpenUrl(DesktopSessionIndex.ContinueUrl(local))));
+        menu.Items.Add(Ui.Separator());
+        menu.Items.Add(Ui.MenuItem(L.T("Claude_CopyId", "Copy session ID"), () => WindowInterop.Copy(s.Id)));
+        menu.Items.Add(Ui.MenuItem(L.T("Claude_CopyResume", "Copy resume command"), () => WindowInterop.Copy($"cd {Proc.QuoteArg(s.Cwd)} && claude --resume {s.Id}")));
+        menu.Items.Add(Ui.MenuItem(L.T("Claude_Reveal", "Show transcript in Explorer"), () => Proc.Reveal(s.File)));
         if (s.PrUrl is { } pr && GitHubUrl.Parse(pr) is { } route)
             menu.Items.Add(Ui.MenuItem(L.T("Claude_OpenPR", "Open PR"), () => Model.Open(route)));
         return menu;
+    }
+
+    private async Task Rename(ClaudeSessionInfo s)
+    {
+        if (XamlRoot is null) return;
+        var box = new TextBox { Text = Prefs.Title(s), MinWidth = 360 };
+        var panel = Ui.V(8, Ui.Text(L.F("Agents_RenameHelp", "The new name is only shown in {0}.", AppInfo.DisplayName), 13, "muted", wrap: true), box);
+        var d = Dialogs.Create(XamlRoot, L.T("Agents_RenameTitle", "Rename session"), panel, L.T("Agents_RenameButton", "Rename"));
+        d.Opened += (_, _) =>
+        {
+            box.Focus(FocusState.Programmatic);
+            box.SelectAll();
+        };
+        if (await Dialogs.ShowAsync(d) == ContentDialogResult.Primary) Prefs.Rename(s.Id, box.Text);
     }
 
     private MenuFlyout TabMenu(ClaudeTab tab)

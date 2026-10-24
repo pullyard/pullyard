@@ -94,7 +94,7 @@ pub fn terminal_emulator() -> Option<(String, Vec<String>)> {
     None
 }
 
-fn write_private(path: &str, content: &str, mode: u32) -> Result<(), String> {
+pub(crate) fn write_private(path: &str, content: &str, mode: u32) -> Result<(), String> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(mode).open(path).map_err(|e| e.to_string())?;

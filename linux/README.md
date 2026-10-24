@@ -75,6 +75,8 @@ Packaging, the same steps CI runs:
 
 ```bash
 ./packaging/render.sh                      # desktop file, AppStream metadata, icons, Flatpak manifest → dist/
+cargo install cargo-about --locked --features cli --version 0.9.2
+./packaging/notices.sh                     # THIRD-PARTY-NOTICES.txt for every compiled crate → dist/
 cargo install cargo-deb && cargo deb --no-build
 flatpak-builder --user --install build-dir dist/flatpak/io.github.pullyard.PullYard.yml
 ```

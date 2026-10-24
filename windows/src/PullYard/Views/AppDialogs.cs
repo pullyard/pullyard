@@ -175,7 +175,9 @@ public static class SettingsDialog
         tray.Toggled += (_, _) => Settings.Shared.Set(Keys.CloseToTray, tray.IsOn);
         panel.Children.Add(Group(L.T("Settings_Refresh", "Refresh"), "", "green", Row(L.T("Settings_AutoRefresh", "Auto-refresh pull requests"), poll), Row(L.T("Settings_CloseToTray", "Keep running in the notification area when the window is closed"), tray)));
 
-        if (app.Phase == Phase.LoggedIn) panel.Children.Add(Group(L.T("Section_Claude", "Claude Code"), "", "coral", ClaudeSettings(app)));
+        if (app.Phase == Phase.LoggedIn) panel.Children.Add(Group(L.T("Section_Claude", "Agents"), "", "coral", ClaudeSettings(app)));
+
+        panel.Children.Add(Group(L.T("Jira_Title", "Jira"), "\uE8EC", "sky", new JiraConnectForm()));
 
         var auto = new ToggleSwitch { IsOn = UpdaterViewModel.AutoCheck, OnContent = "", OffContent = "" };
         auto.Toggled += (_, _) => UpdaterViewModel.AutoCheck = auto.IsOn;
@@ -211,7 +213,34 @@ public static class SettingsDialog
         Ui.Tip(pizza, AppInfo.DonateUrl);
         pizza.Click += (_, _) => LinkBrowser.OpenDonation();
         panel.Children.Add(Group(L.F("Support_Title", "Support {0}", AppInfo.DisplayName), "\uEB51", "coral", pizza));
+        panel.Children.Add(Group(L.T("Settings_About", "About"), "\uE946", "slate", AboutSection()));
         return panel;
+    }
+
+    private static FrameworkElement AboutSection()
+    {
+        var notices = Path.Combine(AppContext.BaseDirectory, "THIRD-PARTY-NOTICES.txt");
+        var license = Path.Combine(AppContext.BaseDirectory, "LICENSE.txt");
+        var licenses = Path.Combine(AppContext.BaseDirectory, "licenses");
+        var links = Ui.H(16);
+        if (File.Exists(notices)) links.Children.Add(Ui.Link(L.T("About_ThirdPartyLicenses", "Third-party licenses"), () => OpenPath(notices), 13));
+        if (Directory.Exists(licenses)) links.Children.Add(Ui.Link(L.T("About_LicenseFiles", "License files"), () => OpenPath(licenses), 13));
+        if (File.Exists(license)) links.Children.Add(Ui.Link(L.T("About_License", "MIT License"), () => OpenPath(license), 13));
+        return Ui.V(8,
+            Ui.Text(L.F("About_Acknowledgements", "{0} is open source and builds on the .NET runtime, the Windows App SDK, WebView2, CommunityToolkit.Mvvm, xterm.js and marked. Their licenses and copyright notices are listed in the third-party notices.", AppInfo.DisplayName), 12.5, "muted", wrap: true),
+            Ui.Text(L.F("About_Disclaimer", "{0} is an independent project and is not affiliated with or endorsed by GitHub, Inc., Anthropic, PBC or Atlassian. GitHub, Claude, Claude Code and Jira are trademarks of their respective owners.", AppInfo.DisplayName), 12.5, "muted", wrap: true),
+            links);
+    }
+
+    private static void OpenPath(string path)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch
+        {
+        }
     }
 
     private static ContentDialog? openDialog;
@@ -314,7 +343,7 @@ public static class SettingsDialog
         CloseOpenDialog();
         var root = App.MainWindow?.Content?.XamlRoot;
         if (!await Dialogs.Confirm(root, L.T("Claude_SignOutQ", "Sign out of Claude Code?"), L.T("Settings_SignOut", "Sign out"), true,
-                L.T("Claude_SignOutHelp", "This also signs out Claude Code in the terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Claude Code section."))) return;
+                L.T("Claude_SignOutHelp", "This also signs out Claude Code in the terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Agents section."))) return;
         app.Claude.SleepAll();
         await ClaudeAccountStore.Shared.Logout();
     }

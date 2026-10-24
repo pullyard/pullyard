@@ -11,8 +11,11 @@ struct FilesTab: View {
             if model.filesLoaded {
                 HStack(spacing: 0) {
                     if showList {
-                        fileList.frame(width: 260).surface(.list)
-                        Divider()
+                        HStack(spacing: 0) {
+                            fileList.frame(width: 260).surface(.list)
+                            Divider()
+                        }
+                        .transition(.move(edge: .leading).combined(with: .opacity))
                     }
                     diff
                         .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false) { await model.load(full: true) }
@@ -158,7 +161,7 @@ struct FileHeader: View {
                 if file.status != "removed", let onBlame {
                     Button("Blame") { onBlame(file) }
                 }
-                Button(showList ? "Hide file list" : "Show file list") { showList.toggle() }
+                Button(showList ? "Hide file list" : "Show file list") { withAnimation(Motion.smooth) { showList.toggle() } }
                 Button("Collapse all") { model.collapsed = Set(model.files.map(\.id)) }
                 Button("Expand all") { model.collapsed = [] }
             } label: {
@@ -251,7 +254,7 @@ struct InlineThreadView: View {
         let open = expanded ?? !thread.isResolved
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
-                Button { expanded = !open } label: {
+                Button { withAnimation(Motion.quick) { expanded = !open } } label: {
                     Image(systemName: open ? "chevron.down" : "chevron.right").frame(width: 10)
                 }
                 .buttonStyle(.plain)
@@ -269,48 +272,51 @@ struct InlineThreadView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             if open {
-                Divider()
-                ForEach(thread.comments.nodes) { c in
-                    HStack(alignment: .top, spacing: 8) {
-                        Avatar(url: c.author?.avatarUrl, size: 20)
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 4) {
-                                Text(c.author?.login ?? "ghost").fontWeight(.semibold)
-                                Text("· \(Fmt.rel(c.createdAt))").foregroundStyle(Color.syMuted)
-                            }
-                            .font(.syCaption)
-                            MarkdownText(text: c.body).font(.syCallout)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                }
-                if thread.viewerCanReply {
+                VStack(alignment: .leading, spacing: 0) {
                     Divider()
-                    if replying {
-                        VStack(alignment: .trailing, spacing: 6) {
-                            ComposerBox(text: $reply, placeholder: "Reply", minHeight: 50).frame(maxHeight: 120)
-                            HStack {
-                                Button("Cancel") { replying = false; reply = "" }
-                                Button("Reply") {
-                                    let body = reply
-                                    Task { if await model.reply(thread.id, body: body) { reply = ""; replying = false } }
+                    ForEach(thread.comments.nodes) { c in
+                        HStack(alignment: .top, spacing: 8) {
+                            Avatar(url: c.author?.avatarUrl, size: 20)
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 4) {
+                                    Text(c.author?.login ?? "ghost").fontWeight(.semibold)
+                                    Text("· \(Fmt.rel(c.createdAt))").foregroundStyle(Color.syMuted)
                                 }
-                                .buttonStyle(.borderedProminent)
-                                .keyboardShortcut(.return, modifiers: .command)
-                                .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy)
+                                .font(.syCaption)
+                                MarkdownText(text: c.body).font(.syCallout)
                             }
-                            .controlSize(.small)
+                            Spacer(minLength: 0)
                         }
-                        .padding(8)
-                    } else {
-                        Button("Reply…") { replying = true }
-                            .buttonStyle(.borderless)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                    }
+                    if thread.viewerCanReply {
+                        Divider()
+                        if replying {
+                            VStack(alignment: .trailing, spacing: 6) {
+                                ComposerBox(text: $reply, placeholder: "Reply", minHeight: 50).frame(maxHeight: 120)
+                                HStack {
+                                    Button("Cancel") { replying = false; reply = "" }
+                                    Button("Reply") {
+                                        let body = reply
+                                        Task { if await model.reply(thread.id, body: body) { reply = ""; replying = false } }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .keyboardShortcut(.return, modifiers: .command)
+                                    .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy)
+                                }
+                                .controlSize(.small)
+                            }
+                            .padding(8)
+                        } else {
+                            Button("Reply…") { replying = true }
+                                .buttonStyle(.borderless)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                        }
                     }
                 }
+                .transition(.reveal)
             }
         }
         .font(.syCallout)

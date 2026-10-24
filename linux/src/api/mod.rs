@@ -140,18 +140,94 @@ struct Exchange {
 }
 
 static RATE_LIMITED_UNTIL: AtomicI64 = AtomicI64::new(0);
+static BUCKET_BLOCKS: [AtomicI64; 3] = [AtomicI64::new(0), AtomicI64::new(0), AtomicI64::new(0)];
 
-pub fn rate_limited_until() -> Option<DateTime<Utc>> {
-    let until = RATE_LIMITED_UNTIL.load(Ordering::Relaxed);
-    if until > Utc::now().timestamp() {
-        DateTime::from_timestamp(until, 0)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bucket {
+    Core,
+    Graphql,
+    Search,
+}
+
+impl Bucket {
+    fn index(self) -> usize {
+        match self {
+            Bucket::Core => 0,
+            Bucket::Graphql => 1,
+            Bucket::Search => 2,
+        }
+    }
+
+    pub fn from_resource(resource: &str) -> Option<Bucket> {
+        match resource.trim() {
+            "core" => Some(Bucket::Core),
+            "graphql" => Some(Bucket::Graphql),
+            "search" => Some(Bucket::Search),
+            _ => None,
+        }
+    }
+}
+
+pub fn request_bucket(path: &str, graphql: bool) -> Bucket {
+    if graphql {
+        Bucket::Graphql
+    } else if path.contains("/search/") {
+        Bucket::Search
+    } else {
+        Bucket::Core
+    }
+}
+
+fn response_bucket(headers: &HeaderMap, fallback: Bucket) -> Bucket {
+    headers.get("x-ratelimit-resource").and_then(|v| v.to_str().ok()).and_then(Bucket::from_resource).unwrap_or(fallback)
+}
+
+fn future(ts: i64) -> Option<DateTime<Utc>> {
+    if ts > Utc::now().timestamp() {
+        DateTime::from_timestamp(ts, 0)
     } else {
         None
     }
 }
 
+pub fn bucket_blocked_until(bucket: Bucket) -> Option<DateTime<Utc>> {
+    future(BUCKET_BLOCKS[bucket.index()].load(Ordering::Relaxed))
+}
+
+fn block_bucket(bucket: Bucket, ts: i64) {
+    let now = Utc::now().timestamp();
+    let ts = ts.min(now + RATE_LIMIT_MAX_PAUSE_SECS);
+    let _ = BUCKET_BLOCKS[bucket.index()].fetch_update(Ordering::Relaxed, Ordering::Relaxed, |cur| if cur > now && cur >= ts { None } else { Some(ts) });
+}
+
+pub fn rate_limited_until() -> Option<DateTime<Utc>> {
+    let until = [RATE_LIMITED_UNTIL.load(Ordering::Relaxed), BUCKET_BLOCKS[Bucket::Core.index()].load(Ordering::Relaxed), BUCKET_BLOCKS[Bucket::Graphql.index()].load(Ordering::Relaxed)]
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+    future(until)
+}
+
 pub fn reset_rate_limit() {
     RATE_LIMITED_UNTIL.store(0, Ordering::Relaxed);
+    for block in &BUCKET_BLOCKS {
+        block.store(0, Ordering::Relaxed);
+    }
+}
+
+pub fn blocked_read_message(until: DateTime<Utc>) -> String {
+    format!("GitHub rate limit reached. Requests resume at {}.", until.with_timezone(&chrono::Local).format("%H:%M"))
+}
+
+pub fn guard_read(bucket: Bucket) -> ApiResult<()> {
+    match bucket_blocked_until(bucket) {
+        Some(until) => Err(ApiError::with_status(blocked_read_message(until), 429).with_kind(ErrorKind::RateLimited)),
+        None => Ok(()),
+    }
+}
+
+pub fn is_graphql_read(query: &str) -> bool {
+    !query.trim_start().starts_with("mutation")
 }
 
 fn pause_until(ts: i64) {
@@ -198,6 +274,24 @@ pub fn rate_limit_resume(status: u16, headers: &HeaderMap, body: &[u8], now: i64
     resume.map(|ts| ts.min(now + RATE_LIMIT_MAX_PAUSE_SECS))
 }
 
+pub fn bucket_resume(status: u16, headers: &HeaderMap, body: &[u8], now: i64) -> Option<i64> {
+    let remaining = header_i64(headers, "x-ratelimit-remaining");
+    let reset = header_i64(headers, "x-ratelimit-reset").filter(|r| *r > now);
+    let retry_after = header_i64(headers, "retry-after");
+    let exhausted = remaining == Some(0);
+    let resume = match status {
+        403 | 429 => match (retry_after, exhausted, reset) {
+            (Some(secs), _, _) => Some(now + secs.max(1)),
+            (None, true, Some(r)) => Some(r),
+            _ if status == 429 || mentions_rate_limit(body) => Some(now + RATE_LIMIT_FALLBACK_SECS),
+            _ => None,
+        },
+        _ if exhausted => reset,
+        _ => None,
+    };
+    resume.map(|ts| ts.min(now + RATE_LIMIT_MAX_PAUSE_SECS))
+}
+
 pub const GITHUB_HOST: &str = "github.com";
 
 pub fn rest_base(host: &str) -> String {
@@ -234,12 +328,18 @@ pub fn check_status(status: StatusCode, body: &[u8]) -> ApiResult<()> {
     Err(ApiError::with_status(format!("GitHub {}: {}", status.as_u16(), msg), status.as_u16()))
 }
 
-fn checked(status: StatusCode, headers: &HeaderMap, body: &[u8]) -> ApiResult<()> {
-    let resume = rate_limit_resume(status.as_u16(), headers, body, Utc::now().timestamp());
+fn checked(status: StatusCode, headers: &HeaderMap, body: &[u8], bucket: Bucket) -> ApiResult<()> {
+    let now = Utc::now().timestamp();
+    let resume = rate_limit_resume(status.as_u16(), headers, body, now);
     if let Some(ts) = resume {
         pause_until(ts);
     }
-    check_status(status, body).map_err(|e| if resume.is_some() && matches!(e.status, 403 | 429) { e.with_kind(ErrorKind::RateLimited) } else { e })
+    let blocked = bucket_resume(status.as_u16(), headers, body, now);
+    if let Some(ts) = blocked {
+        block_bucket(response_bucket(headers, bucket), ts);
+    }
+    let limited = resume.is_some() || blocked.is_some();
+    check_status(status, body).map_err(|e| if limited && matches!(e.status, 403 | 429) { e.with_kind(ErrorKind::RateLimited) } else { e })
 }
 
 fn describe_graphql_error(e: &Value) -> String {
@@ -270,7 +370,9 @@ fn graphql_error(e: &Value, headers: &HeaderMap) -> ApiError {
     let kind = graphql_error_kind(e);
     if kind == ErrorKind::RateLimited {
         let now = Utc::now().timestamp();
-        pause_until(header_i64(headers, "x-ratelimit-reset").filter(|r| *r > now).unwrap_or(now + RATE_LIMIT_FALLBACK_SECS));
+        let resume = header_i64(headers, "x-ratelimit-reset").filter(|r| *r > now).unwrap_or(now + RATE_LIMIT_FALLBACK_SECS);
+        pause_until(resume);
+        block_bucket(Bucket::Graphql, resume);
     }
     ApiError::new(describe_graphql_error(e)).with_kind(kind)
 }
@@ -358,6 +460,9 @@ impl GitHubApi {
     }
 
     pub async fn graphql<T: DeserializeOwned>(&self, name: &'static str, query: &str, variables: Value, strict: bool) -> ApiResult<T> {
+        if is_graphql_read(query) {
+            guard_read(Bucket::Graphql)?;
+        }
         let body = serde_json::json!({ "query": query, "variables": strip_nulls(variables) });
         match self.graphql_probed(diagnostics::begin_graphql(|| name.to_string()), &body, strict).await {
             Err(e) if e.is_transient() => {
@@ -386,7 +491,7 @@ impl GitHubApi {
         probe.response(status.as_u16(), &headers);
         let bytes = net(&mut probe, resp.bytes().await)?;
         probe.body(bytes.len());
-        probe.track(checked(status, &headers, &bytes))?;
+        probe.track(checked(status, &headers, &bytes, Bucket::Graphql))?;
         let value: Value = probe.track(serde_json::from_slice(&bytes).map_err(|e| ApiError::new(format!("Failed to parse response: {e}"))))?;
         let errors = value.get("errors").and_then(|e| e.as_array()).cloned().unwrap_or_default();
         let data = value.get("data").cloned().unwrap_or(Value::Null);
@@ -415,6 +520,10 @@ impl GitHubApi {
     }
 
     async fn attempt(&self, method: &Method, path: &str, body: Option<&Value>, since: Option<&Validators>, retry: bool) -> ApiResult<Exchange> {
+        let bucket = request_bucket(path, false);
+        if method == Method::GET {
+            guard_read(bucket)?;
+        }
         let mut probe = retry_probe(diagnostics::begin_rest(method.as_str(), path), retry);
         let mut req = self.inner.client.request(method.clone(), self.url(path)).header(AUTHORIZATION, self.auth()).header(ACCEPT, "application/vnd.github+json");
         if let Some(etag) = since.and_then(|v| v.etag.as_deref()) {
@@ -433,7 +542,7 @@ impl GitHubApi {
         let bytes = net(&mut probe, resp.bytes().await)?.to_vec();
         probe.body(bytes.len());
         if status != StatusCode::NOT_MODIFIED {
-            probe.track(checked(status, &headers, &bytes))?;
+            probe.track(checked(status, &headers, &bytes, bucket))?;
         }
         Ok(Exchange { status, bytes, headers, probe })
     }
@@ -504,6 +613,8 @@ impl GitHubApi {
     }
 
     pub async fn redirect_target(&self, path: &str) -> ApiResult<String> {
+        let bucket = request_bucket(path, false);
+        guard_read(bucket)?;
         let mut probe = diagnostics::begin_rest("GET", path);
         let resp = net(
             &mut probe,
@@ -526,7 +637,7 @@ impl GitHubApi {
         }
         let bytes = net(&mut probe, resp.bytes().await)?;
         probe.body(bytes.len());
-        probe.track(checked(status, &headers, &bytes))?;
+        probe.track(checked(status, &headers, &bytes, bucket))?;
         probe.track(Err(ApiError::new("Log unavailable")))
     }
 
@@ -580,6 +691,8 @@ impl GitHubApi {
     }
 
     async fn fetch_attempt(&self, path: &str, accept: &str, retry: bool) -> ApiResult<Option<Vec<u8>>> {
+        let bucket = request_bucket(path, false);
+        guard_read(bucket)?;
         let mut probe = retry_probe(diagnostics::begin_rest("GET", path), retry);
         let resp = net(&mut probe, self.inner.client.get(self.url(path)).header(AUTHORIZATION, self.auth()).header(ACCEPT, accept).send().await)?;
         let status = resp.status();
@@ -591,7 +704,7 @@ impl GitHubApi {
         }
         if !status.is_success() {
             let bytes = resp.bytes().await.map(|b| b.to_vec()).unwrap_or_default();
-            let err = match checked(status, &headers, &bytes) {
+            let err = match checked(status, &headers, &bytes, bucket) {
                 Err(e) if e.kind == ErrorKind::RateLimited => e,
                 _ => ApiError::with_status(format!("GitHub {}", status.as_u16()), status.as_u16()),
             };
@@ -673,11 +786,51 @@ mod tests {
     #[test]
     fn checked_marks_rate_limited() {
         let h = headers(&[("retry-after", "5")]);
-        let err = checked(StatusCode::FORBIDDEN, &h, br#"{"message":"secondary rate limit"}"#).expect_err("limited");
+        let err = checked(StatusCode::FORBIDDEN, &h, br#"{"message":"secondary rate limit"}"#, Bucket::Core).expect_err("limited");
         assert_eq!(err.kind, ErrorKind::RateLimited);
         assert!(!err.is_transient());
         assert!(rate_limited_until().is_some());
+        let blocked = guard_read(Bucket::Core).expect_err("reads refused");
+        assert_eq!(blocked.kind, ErrorKind::RateLimited);
+        assert!(blocked.message.starts_with("GitHub rate limit reached. Requests resume at "));
+        assert!(guard_read(Bucket::Search).is_ok());
+        let search = headers(&[("x-ratelimit-remaining", "0"), ("x-ratelimit-reset", &(Utc::now().timestamp() + 120).to_string()), ("x-ratelimit-resource", "search")]);
+        let err = checked(StatusCode::FORBIDDEN, &search, br#"{"message":"API rate limit exceeded"}"#, Bucket::Core).expect_err("limited");
+        assert_eq!(err.kind, ErrorKind::RateLimited);
+        assert!(guard_read(Bucket::Search).is_err());
+        assert!(guard_read(Bucket::Graphql).is_ok());
         reset_rate_limit();
+        assert!(guard_read(Bucket::Core).is_ok());
+        assert!(guard_read(Bucket::Search).is_ok());
+        assert!(rate_limited_until().is_none());
+    }
+
+    #[test]
+    fn requests_map_to_buckets() {
+        assert_eq!(request_bucket("/repos/o/r/pulls", false), Bucket::Core);
+        assert_eq!(request_bucket("/search/issues?q=x", false), Bucket::Search);
+        assert_eq!(request_bucket("https://ghe.corp/api/v3/search/code", false), Bucket::Search);
+        assert_eq!(request_bucket("/search/issues", true), Bucket::Graphql);
+        assert_eq!(Bucket::from_resource("search"), Some(Bucket::Search));
+        assert_eq!(Bucket::from_resource("code_scanning_upload"), None);
+    }
+
+    #[test]
+    fn mutations_are_not_reads() {
+        assert!(is_graphql_read("query { viewer { login } }"));
+        assert!(is_graphql_read("{ viewer { login } }"));
+        assert!(!is_graphql_read("  mutation Merge($id: ID!) { mergePullRequest(input: {}) { clientMutationId } }"));
+    }
+
+    #[test]
+    fn bucket_resume_follows_limit_headers() {
+        let exhausted = headers(&[("x-ratelimit-remaining", "0"), ("x-ratelimit-reset", "1000"), ("x-ratelimit-resource", "search")]);
+        assert_eq!(bucket_resume(403, &exhausted, b"{}", 900), Some(1000));
+        assert_eq!(bucket_resume(200, &exhausted, b"{}", 900), Some(1000));
+        assert_eq!(bucket_resume(429, &headers(&[("retry-after", "10")]), b"", 900), Some(910));
+        assert_eq!(bucket_resume(403, &headers(&[]), br#"{"message":"secondary rate limit"}"#, 900), Some(900 + RATE_LIMIT_FALLBACK_SECS));
+        assert_eq!(bucket_resume(403, &headers(&[("x-ratelimit-remaining", "10")]), br#"{"message":"Must have admin rights"}"#, 900), None);
+        assert_eq!(bucket_resume(200, &headers(&[("x-ratelimit-remaining", "10")]), b"", 900), None);
     }
 
     #[test]

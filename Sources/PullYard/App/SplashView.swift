@@ -2,18 +2,13 @@ import SwiftUI
 
 struct SplashView: View {
     @State private var appeared = false
-    @State private var breathing = false
 
     var body: some View {
         ZStack {
             Color(nsColor: Theme.isBrand ? .syWindow : .windowBackgroundColor)
             VStack(spacing: 20) {
-                Image(nsImage: NSApp.applicationIconImage)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 136, height: 136)
-                    .shadow(color: .black.opacity(0.32), radius: 26, y: 16)
-                    .scaleEffect(appeared ? (breathing ? 1.025 : 1) : 0.84)
+                SplashLogo()
+                    .scaleEffect(appeared ? 1 : 0.92)
                 VStack(spacing: 6) {
                     Text("PullYard")
                         .font(.sy(size: 32, weight: .bold))
@@ -23,17 +18,34 @@ struct SplashView: View {
                 }
                 .opacity(appeared ? 1 : 0)
                 .offset(y: appeared || Motion.reduced ? 0 : 10)
-                ProgressView()
-                    .controlSize(.small)
-                    .opacity(appeared ? 0.7 : 0)
             }
             .opacity(appeared ? 1 : 0)
         }
         .ignoresSafeArea()
         .onAppear {
             withAnimation(Motion.reduced ? nil : .spring(response: 0.6, dampingFraction: 0.72)) { appeared = true }
-            guard !Motion.reduced else { return }
-            withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true).delay(0.6)) { breathing = true }
+        }
+    }
+}
+
+struct SplashLogo: View {
+    static let duration: Double = 0.9
+    static var hold: Double { Motion.reduced ? 0.6 : duration + 0.15 }
+    @State private var start = Date()
+    @State private var done = false
+
+    var body: some View {
+        if Motion.reduced || done {
+            PullYardLogoMark(progress: 1, size: 200)
+        } else {
+            TimelineView(.animation(minimumInterval: 1 / 60)) { context in
+                let t = context.date.timeIntervalSince(start) / Self.duration
+                PullYardLogoMark(progress: min(1, t), size: 200)
+            }
+            .task {
+                try? await Task.sleep(for: .seconds(Self.duration))
+                done = true
+            }
         }
     }
 }

@@ -36,7 +36,8 @@ public abstract class ListPane : Grid
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var header = Ui.Columns((Ui.H(8, TitleText, CountText), Ui.Star), (Tools, Ui.Auto));
+        var header = Ui.Columns((Ui.H(8, TitleText, CountText), Ui.Star), (Tools, Ui.Auto), (Ui.RefreshButton(OnPullRefresh), Ui.Auto));
+        header.ColumnSpacing = 2;
         header.Padding = new Thickness(14, 10, 8, 6);
         Children.Add(header);
 

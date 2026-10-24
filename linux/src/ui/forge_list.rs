@@ -95,7 +95,7 @@ struct ForgeList {
     list: gtk::ListBox,
     keys: RefCell<Vec<Option<Route>>>,
     title: adw::WindowTitle,
-    spinner: gtk::Spinner,
+    spinner: Loader,
     status: Rc<RefreshStatus>,
     stack: gtk::Stack,
     rendered: RefCell<String>,
@@ -357,6 +357,7 @@ pub fn build(kind: Kind) -> gtk::Widget {
     let hb = adw::HeaderBar::new();
     hb.set_show_end_title_buttons(false);
     hb.set_title_widget(Some(&title));
+    hb.pack_end(&me.status.header_button());
     hb.pack_end(&spinner);
     let search_bar = gtk::SearchBar::new();
     search_bar.set_child(Some(&search));

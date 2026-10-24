@@ -347,6 +347,85 @@ public class RequestPolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task PausedBucketRefusesReadsUntilReset()
+    {
+        var (api, h) = Make();
+        var reset = DateTimeOffset.UtcNow.AddMinutes(5);
+        h.Then(HttpStatusCode.Forbidden, "{\"message\":\"API rate limit exceeded\"}", r =>
+        {
+            r.Headers.TryAddWithoutValidation("X-RateLimit-Remaining", "0");
+            r.Headers.TryAddWithoutValidation("X-RateLimit-Reset", reset.ToUnixTimeSeconds().ToString());
+            r.Headers.TryAddWithoutValidation("X-RateLimit-Resource", "core");
+        });
+        await Assert.ThrowsAsync<ApiException>(() => api.Rest<RestUser>("GET", "/user"));
+        var refused = await Assert.ThrowsAsync<ApiException>(() => api.Rest<RestUser>("GET", "/user"));
+        Assert.Equal(429, refused.Status);
+        Assert.Equal(reset.ToUnixTimeSeconds(), refused.RateLimitedUntil?.ToUnixTimeSeconds());
+        Assert.Contains("rate limit", refused.Message);
+        Assert.Contains("resume", refused.Message);
+        Assert.Single(h.Seen);
+        Assert.Equal(reset.ToUnixTimeSeconds(), api.RateLimit.BlockedUntil(RateLimitPause.Core, DateTimeOffset.Now)?.ToUnixTimeSeconds());
+        Assert.Null(api.RateLimit.BlockedUntil(RateLimitPause.Core, reset.AddSeconds(1)));
+    }
+
+    [Fact]
+    public async Task PausedBucketStillAllowsWritesAndOtherBuckets()
+    {
+        var (api, h) = Make();
+        api.RateLimit.PauseUntil(DateTimeOffset.Now.AddMinutes(5), RateLimitPause.Core);
+        h.Then(HttpStatusCode.NoContent)
+            .Then(HttpStatusCode.OK, "{\"data\":{}}")
+            .Then(HttpStatusCode.OK, "{\"total_count\":0,\"items\":[]}");
+        await api.Send("POST", "/repos/o/r/issues/7/comments", new { body = "x" });
+        await api.GraphQL<GitHubApi.EmptyData>("query Badges { viewer { login } }");
+        await api.Fetch("/search/issues?q=x", "application/vnd.github+json");
+        Assert.Equal(3, h.Seen.Count);
+        await Assert.ThrowsAsync<ApiException>(() => api.Fetch("/repos/o/r", "application/vnd.github+json"));
+        Assert.Equal(3, h.Seen.Count);
+    }
+
+    [Fact]
+    public async Task GraphQLRateLimitRefusesQueriesButNotMutations()
+    {
+        var (api, h) = Make();
+        var reset = DateTimeOffset.UtcNow.AddMinutes(3);
+        h.Then(HttpStatusCode.OK, "{\"data\":null,\"errors\":[{\"type\":\"RATE_LIMITED\",\"message\":\"API rate limit exceeded\"}]}", r =>
+        {
+            r.Headers.TryAddWithoutValidation("X-RateLimit-Remaining", "0");
+            r.Headers.TryAddWithoutValidation("X-RateLimit-Reset", reset.ToUnixTimeSeconds().ToString());
+        });
+        await Assert.ThrowsAsync<ApiException>(() => api.GraphQL<GitHubApi.EmptyData>("query Badges { viewer { login } }"));
+        var refused = await Assert.ThrowsAsync<ApiException>(() => api.GraphQL<GitHubApi.EmptyData>("query Badges { viewer { login } }"));
+        Assert.Equal(429, refused.Status);
+        Assert.Single(h.Seen);
+        Assert.NotNull(api.RateLimit.BlockedUntil(RateLimitPause.GraphQL, DateTimeOffset.Now));
+        Assert.Null(api.RateLimit.BlockedUntil(RateLimitPause.Core, DateTimeOffset.Now));
+        h.Then(HttpStatusCode.OK, "{\"data\":{}}");
+        await api.Mutate(Q.ResolveThread, new Dictionary<string, object?> { ["id"] = "x" });
+        Assert.Equal(2, h.Seen.Count);
+    }
+
+    [Fact]
+    public void CarriesActiveBucketsToANewClient()
+    {
+        var now = DateTimeOffset.Now;
+        var old = new RateLimitPause();
+        old.PauseUntil(now.AddMinutes(2), RateLimitPause.GraphQL);
+        old.PauseUntil(now.AddMinutes(-1), RateLimitPause.Core);
+        var next = new RateLimitPause();
+        DateTimeOffset? paused = null;
+        next.Paused += u => paused = u;
+        next.CarryFrom(old, now);
+        Assert.Equal(now.AddMinutes(2), next.BlockedUntil(RateLimitPause.GraphQL, now));
+        Assert.Null(next.BlockedUntil(RateLimitPause.Core, now));
+        Assert.Equal(now.AddMinutes(2), paused);
+        Assert.Equal(now.AddMinutes(2), next.Until);
+        Assert.Equal(RateLimitPause.Search, RateLimitPause.Bucket(new Uri("https://api.github.com/search/issues?q=x"), false));
+        Assert.Equal(RateLimitPause.Core, RateLimitPause.Bucket(new Uri("https://api.github.com/user"), false));
+        Assert.Equal(RateLimitPause.GraphQL, RateLimitPause.Bucket(new Uri("https://api.github.com/graphql"), true));
+    }
+
+    [Fact]
     public void SecondaryLimitUsesRetryAfter()
     {
         var now = DateTimeOffset.UtcNow;

@@ -53,6 +53,8 @@ final class ChatToolCall: Identifiable {
     var structured: [String: Any]?
     var permission: PermissionRequest?
     var parentToolUseId: String?
+    var children: [ChatToolCall] = []
+    var agentText: String?
 
     init(id: String, name: String) {
         self.id = id
@@ -66,7 +68,22 @@ struct ChatImage: Identifiable {
     let id = UUID()
     let data: Data
     let mediaType: String
-    var image: NSImage? { NSImage(data: data) }
+    var image: NSImage? {
+        if let hit = Self.decoded.object(forKey: id as NSUUID) { return hit }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 1200, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) else {
+            return NSImage(data: data)
+        }
+        let image = NSImage(cgImage: cg, size: NSSize(width: CGFloat(cg.width) / 2, height: CGFloat(cg.height) / 2))
+        Self.decoded.setObject(image, forKey: id as NSUUID)
+        return image
+    }
+
+    private static let decoded: NSCache<NSUUID, NSImage> = {
+        let c = NSCache<NSUUID, NSImage>()
+        c.countLimit = 60
+        return c
+    }()
 }
 
 enum ChatItem: Identifiable {
@@ -156,23 +173,65 @@ final class ChatSession {
     var contextPercent: Int?
     var context: ContextUsage?
     var lastError: String?
+    var createdPR: String?
     var turnStartedAt: Date?
     var sleeping = false
-    var lastActivity = Date()
+    @ObservationIgnored var lastActivity = Date()
     var memoryBytes = 0
+    var expandedTools: Set<String> = []
+    var draftRequest: String?
 
     @ObservationIgnored private var process: Process?
     @ObservationIgnored private var stdin: FileHandle?
-    @ObservationIgnored private var buffer = Data()
+    @ObservationIgnored private var decoder = StreamLineDecoder()
+    @ObservationIgnored private var pending: [[String: Any]] = []
+    @ObservationIgnored private var flushScheduled = false
     @ObservationIgnored private var stderrTail = ""
     @ObservationIgnored private var tools: [String: ChatToolCall] = [:]
     @ObservationIgnored private var streamTexts: [String: ChatText] = [:]
     @ObservationIgnored private var messageTexts: [String: [ChatText]] = [:]
-    @ObservationIgnored private var queuedPrompt: String?
+    @ObservationIgnored private var queuedPrompts: [(text: String, images: [ChatImage])] = []
     @ObservationIgnored private var requestCounter = 0
+    @ObservationIgnored private var todoCache: (count: Int, todos: [[String: Any]]) = (-1, [])
+    @ObservationIgnored private var displayCache: (key: DisplayKey, items: [ChatDisplayItem])?
+    var resolvedPermissions = 0
     @ObservationIgnored private var intentionalStop = false
     @ObservationIgnored var onSessionId: ((String) -> Void)?
     @ObservationIgnored var onTurnFinished: (() -> Void)?
+    @ObservationIgnored var onNeedsInput: ((PermissionRequest) -> Void)?
+
+    var currentTodos: [[String: Any]] {
+        let count = items.count
+        if todoCache.count == count { return todoCache.todos }
+        var found: [[String: Any]] = []
+        for item in items.reversed() {
+            if case .tool(let c) = item, c.name == "TodoWrite", let todos = c.input["todos"] as? [[String: Any]] { found = todos; break }
+        }
+        todoCache = (count, found)
+        return found
+    }
+
+    var displayItems: [ChatDisplayItem] {
+        let key = DisplayKey(count: items.count, pending: pendingCount, resolved: resolvedPermissions, last: items.last?.id)
+        if let cached = displayCache, cached.key == key { return cached.items }
+        let built = ChatDisplayItem.build(items)
+        displayCache = (key, built)
+        return built
+    }
+
+    private struct DisplayKey: Equatable {
+        let count: Int
+        let pending: Int
+        let resolved: Int
+        let last: String?
+    }
+
+    var lastAssistantText: String? {
+        for item in items.reversed() {
+            if case .text(let t) = item, !t.text.isEmpty { return t.text }
+        }
+        return nil
+    }
 
     init(folder: String, configDir: String?) {
         self.folder = folder
@@ -216,6 +275,7 @@ final class ChatSession {
             args += ["--resume", resume]
             if fork { args.append("--fork-session") } else { sessionId = resume }
         }
+        args += StackNotesMCP.args
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: bin)
@@ -232,11 +292,16 @@ final class ChatSession {
         p.standardInput = inPipe
         p.standardOutput = outPipe
         p.standardError = errPipe
-        buffer = Data()
+        let decoder = StreamLineDecoder()
+        self.decoder = decoder
+        pending = []
         outPipe.fileHandleForReading.readabilityHandler = { [weak self] h in
             let data = h.availableData
             guard !data.isEmpty else { h.readabilityHandler = nil; return }
-            DispatchQueue.main.async { self?.consume(data) }
+            let objects = decoder.decode(data)
+            guard !objects.isEmpty else { return }
+            let batch = StreamBatch(objects: objects)
+            DispatchQueue.main.async { self?.enqueue(batch, from: decoder) }
         }
         errPipe.fileHandleForReading.readabilityHandler = { [weak self] h in
             let data = h.availableData
@@ -273,6 +338,7 @@ final class ChatSession {
     }
 
     private func terminated(code: Int32) {
+        flush()
         let wasIntentional = intentionalStop
         intentionalStop = false
         running = false
@@ -281,12 +347,14 @@ final class ChatSession {
         process = nil
         stdin = nil
         memoryBytes = 0
+        for t in tools.values where t.status == .running { t.status = wasIntentional ? .done : .error }
         if wasIntentional {
             sleeping = sessionId != nil
             pendingPermissions.removeAll()
             return
         }
         for p in pendingPermissions where !p.resolved { p.resolved = true }
+        resolvedPermissions += 1
         pendingPermissions.removeAll()
         if code != 0 && code != 15 {
             let tail = stderrTail.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -311,24 +379,40 @@ final class ChatSession {
     func send(_ text: String, images: [ChatImage] = []) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !images.isEmpty else { return }
-        guard running else {
-            queuedPrompt = text
-            return
-        }
         lastActivity = Date()
         items.append(.user(id: UUID().uuidString, text: trimmed, images: images))
+        guard running else {
+            queuedPrompts.append((trimmed, images))
+            return
+        }
+        deliver(trimmed, images: images)
+    }
+
+    private func deliver(_ text: String, images: [ChatImage]) {
         var content: [[String: Any]] = images.map {
             ["type": "image", "source": ["type": "base64", "media_type": $0.mediaType, "data": $0.data.base64EncodedString()]]
         }
-        if !trimmed.isEmpty { content.append(["type": "text", "text": trimmed]) }
+        if !text.isEmpty { content.append(["type": "text", "text": text]) }
         write(["type": "user", "message": ["role": "user", "content": content]])
         busy = true
         status = nil
         turnStartedAt = Date()
     }
 
+    private func flushQueue() {
+        let queued = queuedPrompts
+        queuedPrompts = []
+        for q in queued { deliver(q.text, images: q.images) }
+    }
+
+    nonisolated static func isAuthError(_ text: String) -> Bool {
+        let s = text.lowercased()
+        return ["/login", "log in", "logged in", "not logged", "authentication", "invalid api key", "api key", "oauth", "401", "credential", "token has expired", "token expired"].contains { s.contains($0) }
+    }
+
     func interrupt() {
         control("interrupt", [:])
+        if busy { items.append(.notice(id: UUID().uuidString, text: "Interrupted", isError: false)) }
     }
 
     func setModel(_ value: String) {
@@ -349,6 +433,7 @@ final class ChatSession {
     func respond(_ req: PermissionRequest, allow: Bool, always: PermissionSuggestion? = nil, message: String? = nil, updatedInput: [String: Any]? = nil) {
         guard !req.resolved else { return }
         req.resolved = true
+        resolvedPermissions += 1
         lastActivity = Date()
         var response: [String: Any]
         if allow {
@@ -362,18 +447,26 @@ final class ChatSession {
         if !allow, let id = req.toolUseId, let tool = tools[id] { tool.status = .denied }
     }
 
-    private func consume(_ data: Data) {
-        buffer.append(data)
-        while let nl = buffer.firstIndex(of: 0x0A) {
-            let line = buffer[buffer.startIndex..<nl]
-            buffer.removeSubrange(buffer.startIndex...nl)
-            guard !line.isEmpty, let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else { continue }
-            handle(obj)
-        }
+    private static let flushInterval: TimeInterval = 0.05
+
+    private func enqueue(_ batch: StreamBatch, from source: StreamLineDecoder) {
+        guard source === decoder else { return }
+        pending += batch.objects
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.flushInterval) { [weak self] in self?.flush() }
+    }
+
+    private func flush() {
+        flushScheduled = false
+        let objects = pending
+        pending = []
+        guard !objects.isEmpty else { return }
+        lastActivity = Date()
+        for o in objects { handle(o) }
     }
 
     private func handle(_ o: [String: Any]) {
-        lastActivity = Date()
         switch o["type"] as? String {
         case "system": handleSystem(o)
         case "stream_event": handleStream(o)
@@ -396,10 +489,7 @@ final class ChatSession {
             }
             if let m = o["model"] as? String { model = m }
             if let pm = o["permissionMode"] as? String { permissionMode = pm }
-            if let q = queuedPrompt {
-                queuedPrompt = nil
-                send(q)
-            }
+            flushQueue()
         case "status":
             let s = o["status"] as? String
             status = s == "compacting" ? "Compacting context…" : (s == "requesting" ? nil : s)
@@ -445,7 +535,7 @@ final class ChatSession {
                 call.parentToolUseId = parent
                 tools[id] = call
                 streamTexts[key] = ChatText(id: "tool:" + id, text: "")
-                if parent == nil { items.append(.tool(call)) }
+                if let parent { tools[parent]?.children.append(call) } else { items.append(.tool(call)) }
             default:
                 break
             }
@@ -475,8 +565,11 @@ final class ChatSession {
         for block in content {
             switch block["type"] as? String {
             case "text":
-                guard parent == nil else { continue }
                 let full = block["text"] as? String ?? ""
+                if let parent {
+                    if !full.isEmpty { tools[parent]?.agentText = full }
+                    continue
+                }
                 if let existing = messageTexts[mid]?.first(where: { !$0.finalized }) {
                     existing.text = full
                     existing.finalized = true
@@ -492,7 +585,7 @@ final class ChatSession {
                     let c = ChatToolCall(id: id, name: name)
                     c.parentToolUseId = parent
                     tools[id] = c
-                    if parent == nil { items.append(.tool(c)) }
+                    if let parent { tools[parent]?.children.append(c) } else { items.append(.tool(c)) }
                     return c
                 }()
                 call.input = block["input"] as? [String: Any] ?? [:]
@@ -509,27 +602,63 @@ final class ChatSession {
             guard let id = block["tool_use_id"] as? String, let tool = tools[id] else { continue }
             if tool.status != .denied { tool.status = (block["is_error"] as? Bool == true) ? .error : .done }
             tool.resultText = ChatSession.resultText(block["content"])
-            tool.structured = o["tool_use_result"] as? [String: Any]
+            tool.structured = ChatSession.trimmed(o["tool_use_result"] as? [String: Any])
+            if tool.name == "Bash", (tool.input["command"] as? String)?.contains("gh pr create") == true,
+               let url = tool.resultText.flatMap(AgentShip.pullRequestURL) {
+                createdPR = url
+            }
         }
     }
 
-    static func resultText(_ content: Any?) -> String? {
-        if let s = content as? String { return s }
-        if let arr = content as? [[String: Any]] {
-            return arr.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined(separator: "\n")
+    static let maxResultLength = 64_000
+
+    nonisolated static func trimmed(_ structured: [String: Any]?) -> [String: Any]? {
+        guard var s = structured else { return nil }
+        s.removeValue(forKey: "originalFile")
+        for key in ["stdout", "stderr", "content"] {
+            if let v = s[key] as? String, v.utf8.count > maxResultLength { s[key] = String(v.prefix(maxResultLength)) }
         }
-        return nil
+        if var file = s["file"] as? [String: Any], let c = file["content"] as? String, c.utf8.count > maxResultLength {
+            file["content"] = String(c.prefix(maxResultLength))
+            s["file"] = file
+        }
+        return s
+    }
+
+    nonisolated static func historyUserItem(id: String, text raw: String) -> ChatItem? {
+        var text = raw.replacingOccurrences(of: "<system-reminder>[\\s\\S]*?</system-reminder>", with: "", options: .regularExpression)
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.hasPrefix("[Request interrupted by user") { return .notice(id: id, text: "Interrupted", isError: false) }
+        if text.isEmpty || text.hasPrefix("<command-name>") || text.hasPrefix("<local-command") || text.hasPrefix("<command-message>") || text.hasPrefix("Caveat:") { return nil }
+        return .user(id: id, text: text, images: [])
+    }
+
+    static func resultText(_ content: Any?) -> String? {
+        let text: String
+        if let s = content as? String {
+            text = s
+        } else if let arr = content as? [[String: Any]] {
+            text = arr.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined(separator: "\n")
+        } else {
+            return nil
+        }
+        guard text.utf8.count > maxResultLength else { return text }
+        return String(text.prefix(maxResultLength)) + "\n… output truncated (\(ByteCountFormatter.string(fromByteCount: Int64(text.utf8.count), countStyle: .file)) total)"
     }
 
     private func handleResult(_ o: [String: Any]) {
         busy = false
         status = nil
         if let c = o["total_cost_usd"] as? Double { totalCost += c }
-        for t in tools.values where t.status == .running && t.parentToolUseId == nil { t.status = .done }
+        for t in tools.values where t.status == .running { t.status = .done }
         if o["is_error"] as? Bool == true {
             let sub = o["subtype"] as? String ?? ""
             let text = sub == "error_during_execution" ? "Stopped" : (o["result"] as? String ?? sub)
-            items.append(.notice(id: UUID().uuidString, text: text, isError: sub != "error_during_execution"))
+            if sub != "error_during_execution" && Self.isAuthError(text) {
+                lastError = text
+            } else {
+                items.append(.notice(id: UUID().uuidString, text: text, isError: sub != "error_during_execution"))
+            }
         }
         control("get_context_usage", [:])
         onTurnFinished?()
@@ -580,6 +709,7 @@ final class ChatSession {
         }
         pendingPermissions.append(p)
         NSApp.requestUserAttention(.informationalRequest)
+        onNeedsInput?(p)
     }
 
     private func handleRateLimit(_ o: [String: Any]) {
@@ -643,8 +773,22 @@ final class ChatSession {
         }
     }
 
+    nonisolated static func readTail(_ file: URL, maxBytes: Int = 6 << 20) -> (data: Data, truncated: Bool)? {
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return nil }
+        guard size > UInt64(maxBytes) else {
+            try? handle.seek(toOffset: 0)
+            return (handle.readDataToEndOfFile(), false)
+        }
+        try? handle.seek(toOffset: size - UInt64(maxBytes))
+        var data = handle.readDataToEndOfFile()
+        if let newline = data.firstIndex(of: 0x0A) { data = data[data.index(after: newline)...] }
+        return (Data(data), true)
+    }
+
     func loadHistory(from file: URL, limit: Int = 600) {
-        guard let data = try? Data(contentsOf: file) else { return }
+        guard let (data, truncated) = Self.readTail(file) else { return }
         var loaded: [ChatItem] = []
         var map: [String: ChatToolCall] = [:]
         for line in data.split(separator: 0x0A) {
@@ -655,21 +799,19 @@ final class ChatSession {
             if type == "user" {
                 if let s = msg["content"] as? String {
                     if o["isCompactSummary"] as? Bool == true { continue }
-                    let clean = s.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if clean.hasPrefix("<command-name>") || clean.hasPrefix("<local-command") || clean.hasPrefix("Caveat:") || clean.isEmpty { continue }
-                    loaded.append(.user(id: (o["uuid"] as? String) ?? UUID().uuidString, text: clean, images: []))
+                    if let item = ChatSession.historyUserItem(id: (o["uuid"] as? String) ?? UUID().uuidString, text: s) { loaded.append(item) }
                 } else if let blocks = msg["content"] as? [[String: Any]] {
                     var texts: [String] = []
                     for b in blocks {
                         if b["type"] as? String == "tool_result", let id = b["tool_use_id"] as? String, let tool = map[id] {
                             tool.status = (b["is_error"] as? Bool == true) ? .error : .done
                             tool.resultText = ChatSession.resultText(b["content"])
-                            tool.structured = o["toolUseResult"] as? [String: Any]
+                            tool.structured = ChatSession.trimmed(o["toolUseResult"] as? [String: Any])
                         } else if b["type"] as? String == "text", let s = b["text"] as? String, !s.hasPrefix("<") {
                             texts.append(s)
                         }
                     }
-                    if !texts.isEmpty { loaded.append(.user(id: (o["uuid"] as? String) ?? UUID().uuidString, text: texts.joined(separator: "\n"), images: [])) }
+                    if !texts.isEmpty, let item = ChatSession.historyUserItem(id: (o["uuid"] as? String) ?? UUID().uuidString, text: texts.joined(separator: "\n")) { loaded.append(item) }
                 }
             } else if type == "assistant", let blocks = msg["content"] as? [[String: Any]] {
                 let uuid = (o["uuid"] as? String) ?? UUID().uuidString
@@ -696,13 +838,38 @@ final class ChatSession {
         }
         let tail = Array(loaded.suffix(limit))
         for case .tool(let c) in tail { tools[c.id] = c }
-        if loaded.count > limit {
-            items = [.notice(id: "older", text: "Showing the last \(limit) messages", isError: false)] + tail
+        if loaded.count > limit || truncated {
+            items = [.notice(id: "older", text: "Showing the latest messages", isError: false)] + tail
         } else {
             items = tail
         }
         if !items.isEmpty {
             items.append(.notice(id: "resumed", text: "Session resumed", isError: false))
         }
+        DispatchQueue.global(qos: .utility).async { MemoryRelief.release() }
+    }
+}
+
+struct StreamBatch: @unchecked Sendable {
+    let objects: [[String: Any]]
+}
+
+final class StreamLineDecoder: @unchecked Sendable {
+    private var buffer = Data()
+    private let lock = NSLock()
+
+    func decode(_ data: Data) -> [[String: Any]] {
+        lock.lock()
+        defer { lock.unlock() }
+        buffer.append(data)
+        var out: [[String: Any]] = []
+        while let nl = buffer.firstIndex(of: 0x0A) {
+            let line = buffer[buffer.startIndex..<nl]
+            buffer.removeSubrange(buffer.startIndex...nl)
+            guard !line.isEmpty, let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else { continue }
+            out.append(obj)
+        }
+        if buffer.startIndex > 0 { buffer = Data(buffer) }
+        return out
     }
 }

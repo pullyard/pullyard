@@ -24,7 +24,7 @@ Everything from the macOS app, adapted to Windows:
 | Sidebar, list and detail columns | `NavigationView` + resizable list column + detail pane with back navigation (Alt+Left) |
 | PR conversation (`WKWebView`) | WebView2 with the same HTML renderer, links open inside the app |
 | Diff table (`NSTableView`) | WebView2 diff with sticky file headers, lazy bodies for big files, inline threads, pending comments, "viewed" checkboxes |
-| Review, merge, edit, reviewers, reply, job log, Fix with Claude sheets | `ContentDialog`s |
+| Review, merge, edit, reviewers, reply, job log, Fix with agent sheets | `ContentDialog`s |
 | Menu bar extra with review requests | Notification-area (tray) icon with the same menu content; closing the window keeps it running there (can be turned off in Settings) |
 | Keychain | Windows Credential Manager |
 | `UserDefaults` | `%LOCALAPPDATA%\PullYard\settings.json` |
@@ -94,6 +94,8 @@ windows/
 ```
 
 Localized strings are in `src/PullYard/Strings/<language>/Resources.resw`. Code calls `L.T("Key", "English default")`; `python windows/tools/strings.py` regenerates the English file from those defaults (CI checks it is up to date). To add a language, copy `en-US` to another folder and translate the values.
+
+Third-party notices: `src/PullYard/THIRD-PARTY-NOTICES.txt` and `LICENSE.txt` are copied into the app folder on build. After `dotnet publish`, `pwsh windows/tools/collect-notices.ps1 -AppDir <publish folder>` copies the license files of every NuGet package listed in the published `.deps.json` into `licenses\` and appends the package inventory (CI does this before building the installer and the portable zip).
 
 The app icon is `src/PullYard/Assets/AppIcon.ico`, generated from `Resources/Brand/icon.svg` with `scripts/make_icon.swift` and `tools/make-ico.py`.
 

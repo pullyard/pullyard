@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PullYard: pull requests without the browser</title>
-<meta name="description" content="PullYard is a tiny native client for GitHub, GitLab and Bitbucket pull requests on macOS, Windows and Linux, with a built-in Claude Code workspace.">
+<meta name="description" content="PullYard is a tiny native client for GitHub, GitLab and Bitbucket pull requests on macOS, Windows and Linux, with a built-in agent workspace that runs Claude Code.">
 <meta property="og:title" content="PullYard: pull requests without the browser">
-<meta property="og:description" content="A tiny native client for GitHub, GitLab and Bitbucket pull requests on macOS, Windows and Linux, with a built-in Claude Code workspace.">
+<meta property="og:description" content="A tiny native client for GitHub, GitLab and Bitbucket pull requests on macOS, Windows and Linux, with a built-in agent workspace that runs Claude Code.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="PullYard">
 <meta property="og:url" content="https://pullyard.github.io/pullyard/">
@@ -193,7 +193,7 @@ footer a:hover{color:var(--text)}
     <a class="brand" href="#"><img src="icon.svg" alt="">PullYard</a>
     <div class="links">
       <a href="#features">Features</a>
-      <a href="#claude">Claude Code</a>
+      <a href="#claude">Agents</a>
       <a href="#tour">Tour</a>
       <a href="#install">Install</a>
       <a href="changelog.html">Changelog</a>
@@ -250,7 +250,7 @@ footer a:hover{color:var(--text)}
       <noscript><img src="img/pullyard-web-poster.jpg" width="1920" height="1080" alt="PullYard product tour"></noscript>
       <span class="sr-only">Click the video to play or pause it.</span>
     </figure>
-    <p class="demo-hint tour-hint" data-platform-text='{"mac":"A one-minute tour: diffs, review, merge, Fix with Claude Code and accounts.","windows":"A one-minute tour on Windows: diffs, review, merge, Fix with Claude Code and repositories.","linux":"A one-minute tour on Linux: diffs, review, merge, Fix with Claude Code and repositories."}'>A one-minute tour: diffs, review, merge, Fix with Claude Code and accounts.</p>
+    <p class="demo-hint tour-hint" data-platform-text='{"mac":"A one-minute tour: diffs, review, merge, Fix with agent and accounts.","windows":"A one-minute tour on Windows: diffs, review, merge, Fix with agent and repositories.","linux":"A one-minute tour on Linux: diffs, review, merge, Fix with agent and repositories."}'>A one-minute tour: diffs, review, merge, Fix with agent and accounts.</p>
     <div class="os-tabs platform-switch" role="group" aria-label="Show the app on">
       <button type="button" data-platform="mac" aria-pressed="true">macOS</button>
       <button type="button" data-platform="windows" aria-pressed="false">Windows</button>
@@ -261,7 +261,7 @@ footer a:hover{color:var(--text)}
       <div id="demo" class="demo" role="application" aria-label="Interactive PullYard demo">
         <noscript><img src="img/pr-files.webp" width="1600" height="958" alt="PullYard showing a pull request's changed files"></noscript>
       </div>
-      <p class="demo-hint"><i></i>Live demo. Click around, then try “Fix with Claude Code”</p>
+      <p class="demo-hint"><i></i>Live demo. Click around, then try “Fix with agent”</p>
     </div>
   </div>
 </header>
@@ -286,7 +286,7 @@ footer a:hover{color:var(--text)}
       </div>
       <div class="card reveal">
         <div class="ic" style="background:rgba(238,111,95,.14);color:var(--coral)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg></div>
-        <h4>Fix with Claude Code</h4>
+        <h4>Fix with agent</h4>
         <p>One click sends review feedback to Claude Code. If the reviewer left a “Fix prompt”, PullYard uses it; otherwise it writes one from the comments.</p>
       </div>
       <div class="card reveal">
@@ -311,7 +311,7 @@ footer a:hover{color:var(--text)}
 <section id="claude" style="background:linear-gradient(180deg,transparent,rgba(15,23,42,.6) 30%,rgba(15,23,42,.6) 70%,transparent)">
   <div class="wrap split">
     <div class="reveal">
-      <div class="eyebrow" style="color:var(--coral)">Claude Code workspace</div>
+      <div class="eyebrow" style="color:var(--coral)">Agents</div>
       <h2>Review and fix in the same window.</h2>
       <p class="sub">PullYard has a chat for the official Claude Code CLI built in, right next to the PR, its changed files and the branch Claude is working on.</p>
       <ul class="checks">
@@ -416,7 +416,7 @@ footer a:hover{color:var(--text)}
     <div class="faq">
       <div class="faq-col">
         <details class="reveal"><summary>Is this an official GitHub or Anthropic app?</summary><p>No. PullYard is an independent open-source project. It uses the public GitHub API and runs the official Claude Code CLI, which you install yourself.</p></details>
-        <details class="reveal"><summary>Do I need Claude Code?</summary><p>No. All the GitHub features work without it. The Claude Code workspace and “Fix with Claude Code” turn on once the CLI is installed and signed in.</p></details>
+        <details class="reveal"><summary>Do I need Claude Code?</summary><p>No. All the GitHub features work without it. The agent workspace and “Fix with agent” turn on once the CLI is installed and signed in.</p></details>
         <details class="reveal"><summary>How does sign-in to Claude work?</summary><p>PullYard never sees your Claude credentials. It runs <code>claude auth login</code>, which opens the official sign-in page in your browser.</p></details>
       </div>
       <div class="faq-col">

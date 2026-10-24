@@ -272,7 +272,7 @@ pub struct SearchList {
     text: RefCell<String>,
     state: Rc<Cell<StateFilter>>,
     title: adw::WindowTitle,
-    spinner: gtk::Spinner,
+    spinner: Loader,
     status: Rc<RefreshStatus>,
     overlay_stack: gtk::Stack,
     debounce: RefCell<Option<glib::SourceId>>,
@@ -414,6 +414,7 @@ impl SearchList {
         let hb = adw::HeaderBar::new();
         hb.set_show_end_title_buttons(false);
         hb.set_title_widget(Some(&title_w));
+        hb.pack_end(&me.status.header_button());
         hb.pack_end(&spinner);
         let search_bar = gtk::SearchBar::new();
         search_bar.set_child(Some(&search));

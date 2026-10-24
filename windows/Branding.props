@@ -10,6 +10,7 @@
     <BrandGitHubOwner>pullyard</BrandGitHubOwner>
     <BrandGitHubRepo>pullyard</BrandGitHubRepo>
     <BrandDonateUrl>https://checkout.dodopayments.com/buy/pdt_0NpmyolvMAwxrA4eQBgpO?quantity=1</BrandDonateUrl>
-    <BrandVersion>2.12.0</BrandVersion>
+    <BrandVersion>2.13.0</BrandVersion>
+    <BrandGitHubOAuthClientId Condition="'$(BrandGitHubOAuthClientId)' == ''">$(PULLYARD_GITHUB_CLIENT_ID)</BrandGitHubOAuthClientId>
   </PropertyGroup>
 </Project>

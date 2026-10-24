@@ -1,9 +1,18 @@
 pub mod accounts;
 pub mod chat;
+pub mod desktop;
 pub mod git;
 pub mod launcher;
 pub mod memory;
+pub mod notifier;
+pub mod payload;
+pub mod prefs;
+pub mod relogin;
+pub mod rewind;
+pub mod session_index;
 pub mod sessions;
+pub mod ship;
+pub mod tool_groups;
 pub mod workspace;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -156,6 +165,34 @@ impl TabState {
             TabState::Sleeping => "Process stopped, memory freed. A new message resumes the session.",
             TabState::Active => "Process is running and uses memory. Sleeps after idle time.",
             _ => self.title(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Indicator {
+    None,
+    Working,
+    Done,
+    Waiting,
+}
+
+impl Indicator {
+    pub fn for_state(state: TabState, unread: bool) -> Self {
+        match state {
+            TabState::Waiting => Indicator::Waiting,
+            TabState::Working => Indicator::Working,
+            _ if unread => Indicator::Done,
+            _ => Indicator::None,
+        }
+    }
+
+    pub fn help(&self) -> &'static str {
+        match self {
+            Indicator::None => "",
+            Indicator::Working => "Claude is working",
+            Indicator::Done => "Finished — not viewed yet",
+            Indicator::Waiting => "Claude is waiting for you",
         }
     }
 }

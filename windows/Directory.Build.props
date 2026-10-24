@@ -22,5 +22,6 @@
     <AssemblyMetadata Include="GitHubOwner" Value="$(BrandGitHubOwner)" />
     <AssemblyMetadata Include="GitHubRepo" Value="$(BrandGitHubRepo)" />
     <AssemblyMetadata Include="DonateUrl" Value="$(BrandDonateUrl)" />
+    <AssemblyMetadata Include="GitHubOAuthClientId" Value="$(BrandGitHubOAuthClientId)" />
   </ItemGroup>
 </Project>

@@ -1,5 +1,6 @@
 import XCTest
 @testable import PullYard
+import StackNotesKit
 
 @MainActor
 final class StackNotesTests: XCTestCase {

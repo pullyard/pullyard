@@ -31,7 +31,11 @@ struct StackEntry: Identifiable, Equatable {
                 byRoot[tree.root] = StackEntry(repo: repo, tree: tree, mine: mineHere, updated: updated)
             }
         }
-        return byRoot.values.sorted { $0.updated > $1.updated }
+        return byRoot.values.sorted(by: newestFirst)
+    }
+
+    static func newestFirst(_ a: StackEntry, _ b: StackEntry) -> Bool {
+        a.updated != b.updated ? a.updated > b.updated : a.id < b.id
     }
 }
 
@@ -88,12 +92,36 @@ final class StacksModel {
                 }
             }
             let picked = (repos.filter(\.stacked) + repos.filter { !$0.stacked }).prefix(Self.maxRepos)
-            var found: [StackEntry] = []
-            for r in picked {
-                guard let nodes = await StackStore.nodes(api: api, repo: r.repo, account: account, force: force) else { continue }
-                found += StackEntry.collect(repo: r.repo, mine: r.numbers, open: nodes)
+            let previous = entries
+            let results = await withTaskGroup(of: (Int, [StackNode]?).self) { group in
+                let list = Array(picked.enumerated())
+                var next = 0
+                func add() {
+                    guard next < list.count else { return }
+                    let (i, r) = list[next]
+                    next += 1
+                    group.addTask { @MainActor in
+                        if let nodes = await StackStore.nodes(api: api, repo: r.repo, account: account, force: force) { return (i, nodes) }
+                        return (i, await StackStore.cached(api: api, repo: r.repo, account: account)?.nodes)
+                    }
+                }
+                for _ in 0..<3 { add() }
+                var out = [[StackNode]?](repeating: nil, count: picked.count)
+                for await (i, nodes) in group {
+                    out[i] = nodes
+                    add()
+                }
+                return out
             }
-            found.sort { $0.updated > $1.updated }
+            var found: [StackEntry] = []
+            for (r, nodes) in zip(picked, results) {
+                if let nodes {
+                    found += StackEntry.collect(repo: r.repo, mine: r.numbers, open: nodes)
+                } else {
+                    found += previous.filter { $0.repo == r.repo }
+                }
+            }
+            found.sort(by: StackEntry.newestFirst)
             guard !Task.isCancelled, generation == mine else { return }
             if found != entries { entries = found }
             error = nil
@@ -133,7 +161,7 @@ struct StacksListView: View {
             }
         }
         .overlay {
-            if model.loading && model.entries.isEmpty { ProgressView().controlSize(.small) }
+            if model.loading && model.entries.isEmpty { PullYardLoader(size: 44) }
         }
         .liveRefresh(updated: model.lastUpdated, refreshing: model.refreshing, error: model.entries.isEmpty ? nil : model.error) {
             await model.load(api: app.api, account: app.cacheAccount, force: true)

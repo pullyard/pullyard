@@ -1,42 +1,24 @@
 import Foundation
+import StackNotesKit
 import SwiftUI
-
-struct StackNote: Codable, Identifiable, Hashable {
-    enum Kind: String, Codable, CaseIterable, Identifiable {
-        case note, question, decision
-        var id: String { rawValue }
-        var title: String {
-            switch self {
-            case .note: return "Note"
-            case .question: return "Question"
-            case .decision: return "Decision"
-            }
-        }
-    }
-
-    let id: UUID
-    var kind: Kind
-    var text: String
-    var updated: Date
-
-    init(id: UUID = UUID(), kind: Kind = .note, text: String = "", updated: Date = Date()) {
-        self.id = id
-        self.kind = kind
-        self.text = text
-        self.updated = updated
-    }
-}
 
 @Observable
 @MainActor
 final class StackNotes {
-    static let shared = StackNotes(file: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("PullYard", isDirectory: true)
-        .appendingPathComponent("stack-notes.json"))
+    nonisolated static var defaultFile: URL { StackNotesFile.defaultFile }
+
+    static let shared: StackNotes = {
+        let store = StackNotes(file: defaultFile)
+        store.watchInbox()
+        return store
+    }()
+
+    nonisolated static func read(key: String) -> [StackNote] { StackNotesFile.read(key: key) }
 
     private(set) var byPR: [String: [StackNote]] = [:]
     @ObservationIgnored private let file: URL
     @ObservationIgnored private var saveTask: Task<Void, Never>?
+    @ObservationIgnored private var inboxSource: DispatchSourceFileSystemObject?
 
     init(file: URL) {
         self.file = file
@@ -45,8 +27,8 @@ final class StackNotes {
         }
     }
 
-    static func key(account: String?, host: String, repo: RepoRef, number: Int) -> String {
-        "\(account?.lowercased() ?? "")|\(host)|\(repo.full.lowercased())#\(number)"
+    nonisolated static func key(account: String?, host: String, repo: RepoRef, number: Int) -> String {
+        StackNotesFile.key(account: account, host: host, repo: repo.full, number: number)
     }
 
     func notes(_ key: String) -> [StackNote] {
@@ -69,6 +51,30 @@ final class StackNotes {
         guard kept != (byPR[key] ?? []) else { return }
         byPR[key] = kept.isEmpty ? nil : kept
         scheduleSave()
+    }
+
+    func importInbox() {
+        let entries = StackNotesInbox.drain()
+        guard !entries.isEmpty else { return }
+        for e in entries {
+            byPR[e.key, default: []].append(StackNote(kind: e.kind, text: e.text, updated: e.created, source: "Claude"))
+        }
+        scheduleSave()
+    }
+
+    private func watchInbox() {
+        let dir = StackNotesInbox.directory
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        importInbox()
+        let fd = open(dir.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.importInbox() }
+        }
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        inboxSource = source
     }
 
     func flush() {
@@ -126,6 +132,9 @@ struct StickyNote: View {
                 HStack(spacing: 5) {
                     Circle().fill(n.kind.color).frame(width: 6, height: 6)
                     Text(n.kind.title).font(.syCaption2.weight(.semibold)).foregroundStyle(n.kind.color)
+                    if n.source != nil {
+                        Image(systemName: "terminal").font(.syCaption2).foregroundStyle(Color.syMuted).help("Added by Claude")
+                    }
                     Text(n.text.replacingOccurrences(of: "\n", with: " "))
                         .font(.syCaption)
                         .foregroundStyle(Color.syText)
@@ -153,6 +162,7 @@ struct StackNotesEditor: View {
     let title: String
     let store: StackNotes
     let onClose: () -> Void
+    @State private var seen: Set<UUID> = []
     @State private var drafts: [StackNote] = []
     @State private var commitTask: Task<Void, Never>?
 
@@ -203,8 +213,18 @@ struct StackNotesEditor: View {
         .onAppear {
             drafts = store.notes(key)
             if drafts.isEmpty { drafts = [StackNote()] }
+            seen = Set(drafts.map(\.id))
         }
-        .onChange(of: drafts) { scheduleCommit() }
+        .onChange(of: drafts) {
+            seen.formUnion(drafts.map(\.id))
+            scheduleCommit()
+        }
+        .onChange(of: store.notes(key)) { _, stored in
+            let arrived = stored.filter { !seen.contains($0.id) }
+            guard !arrived.isEmpty else { return }
+            drafts.removeAll { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            drafts += arrived
+        }
         .onDisappear {
             commit()
             store.flush()

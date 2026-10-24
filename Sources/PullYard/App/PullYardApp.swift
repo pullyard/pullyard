@@ -1,10 +1,13 @@
+import StackNotesKit
 import SwiftUI
 
 @main
 enum Main {
     static func main() {
         signal(SIGPIPE, SIG_IGN)
-        if CommandLine.arguments.contains("--selftest") {
+        if CommandLine.arguments.contains(StackNotesMCP.flag) {
+            StackNotesMCPServer.run(arguments: CommandLine.arguments)
+        } else if CommandLine.arguments.contains("--selftest") {
             SelfTest.run()
         } else {
             LegacyMigration.run()
@@ -38,13 +41,21 @@ struct PullYardApp: App {
                     .keyboardShortcut("r")
                 Button("Open by Link…") { app.showOpenLink = true }
                     .keyboardShortcut("l")
+                Button("Go to Session…") { app.showQuickOpen = true }
+                    .keyboardShortcut("k")
+                Button("New Agent Session") { app.newAgentSession() }
+                    .keyboardShortcut("n")
+                Button("Next Session") { app.claude.cycleTab(1) }
+                    .keyboardShortcut("]", modifiers: [.command, .shift])
+                Button("Previous Session") { app.claude.cycleTab(-1) }
+                    .keyboardShortcut("[", modifiers: [.command, .shift])
                 Divider()
                 Button("Review Requests") { app.section = .prs(.reviewRequested) }.keyboardShortcut("1")
                 Button("My Pull Requests") { app.section = .prs(.mine) }.keyboardShortcut("2")
                 Button("Notifications") { app.section = .notifications }.keyboardShortcut("3")
                 Button("Repositories") { app.section = .repos }.keyboardShortcut("4")
                 Button("Projects") { app.section = .projects }.keyboardShortcut("5")
-                Button("Claude Code") { app.section = .claude }.keyboardShortcut("6")
+                Button("Agents") { app.section = .claude }.keyboardShortcut("6")
                 Divider()
                 Button("Copy Short Link") { if let ref = app.frontItem { app.copyShortLink(ref) } }
                     .keyboardShortcut("c", modifiers: [.command, .shift])

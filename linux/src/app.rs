@@ -177,7 +177,7 @@ impl Section {
             Section::Issues(f) => format!("Issues: {}", f.title()),
             Section::Repos => "Repositories".into(),
             Section::Projects => "Projects".into(),
-            Section::Claude => "Claude Code".into(),
+            Section::Claude => "Agents".into(),
         }
     }
 }
@@ -244,6 +244,16 @@ pub fn get() -> Rc<App> {
 
 pub fn try_get() -> Option<Rc<App>> {
     APP.with(|a| a.borrow().clone())
+}
+
+pub const MAX_LINK_PROMPT_CHARS: usize = 8000;
+
+pub fn link_prompt_too_long(prompt: &str) -> bool {
+    prompt.chars().count() > MAX_LINK_PROMPT_CHARS
+}
+
+pub fn link_prompt_too_long_message(prompt: &str) -> String {
+    format!("The link's prompt is {} characters long, which is more than {} accepts from a link ({MAX_LINK_PROMPT_CHARS}).", prompt.chars().count(), brand::APP_NAME)
 }
 
 pub fn main_window() -> Option<gtk::Window> {
@@ -358,16 +368,16 @@ pub fn notify_update(version: &str) {
     a.gtk_app.send_notification(Some(&format!("update-{version}")), &n);
 }
 
-pub fn claude_attention(tab: &crate::claude::workspace::Tab) {
-    let Some(a) = try_get() else { return };
-    a.claude.emit(crate::claude::workspace::WsEvent::TabState);
-    if is_active() {
-        return;
+fn forward_to_terminal(byte: u8) -> bool {
+    let Some(focus) = try_get().and_then(|a| a.window.borrow().clone()).and_then(|w| gtk::prelude::GtkWindowExt::focus(&w)) else { return false };
+    let term = focus.clone().downcast::<vte4::Terminal>().ok().or_else(|| focus.ancestor(vte4::Terminal::static_type()).and_then(|w| w.downcast::<vte4::Terminal>().ok()));
+    match term {
+        Some(t) => {
+            vte4::prelude::TerminalExt::feed_child(&t, &[byte]);
+            true
+        }
+        None => false,
     }
-    let n = gio::Notification::new("Claude Code needs your permission");
-    n.set_body(Some(&format!("{} · {}", tab.title.borrow(), tab.project_name())));
-    n.set_default_action_and_target_value("app.open-url", Some(&format!("{}://section/claude", brand::URL_SCHEME).to_variant()));
-    a.gtk_app.send_notification(Some(&format!("claude-{}", tab.id)), &n);
 }
 
 pub fn section() -> Section {
@@ -381,6 +391,9 @@ pub fn set_section(s: Section) {
     }
     a.state.borrow_mut().section = s;
     a.section_changed.emit(&s);
+    if s == Section::Claude {
+        a.claude.window_activated();
+    }
 }
 
 pub fn select(route: Option<Route>) {
@@ -1225,6 +1238,55 @@ impl App {
         });
     }
 
+    fn confirm_link_session(self: &Rc<Self>, folder: String, prompt: Option<String>, name: Option<String>) {
+        let window = main_window();
+        if let Some(p) = prompt.as_deref().filter(|p| link_prompt_too_long(p)) {
+            let d = adw::AlertDialog::new(Some("Start a Claude session from a link?"), Some(&link_prompt_too_long_message(p)));
+            d.add_response("ok", "OK");
+            d.set_default_response(Some("ok"));
+            d.set_close_response("ok");
+            d.present(window.as_ref());
+            return;
+        }
+        let body = format!("Folder: {folder}\n\nThe session starts in Plan mode: Claude can read files but asks before it edits anything or runs commands. Read the whole prompt before you start it.");
+        let d = adw::AlertDialog::new(Some("Start a Claude session from a link?"), Some(&body));
+        if let Some(p) = prompt.as_deref().filter(|p| !p.is_empty()) {
+            let view = gtk::TextView::new();
+            view.set_editable(false);
+            view.set_cursor_visible(false);
+            view.set_monospace(true);
+            view.set_wrap_mode(gtk::WrapMode::WordChar);
+            view.set_left_margin(8);
+            view.set_right_margin(8);
+            view.set_top_margin(6);
+            view.set_bottom_margin(6);
+            view.buffer().set_text(p);
+            let scroll = gtk::ScrolledWindow::new();
+            scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
+            scroll.set_min_content_height(220);
+            scroll.set_max_content_height(320);
+            scroll.set_min_content_width(420);
+            scroll.add_css_class("card");
+            scroll.set_child(Some(&view));
+            d.set_extra_child(Some(&scroll));
+        }
+        d.add_response("cancel", "Cancel");
+        d.add_response("start", "Start in Plan Mode");
+        d.set_response_appearance("start", adw::ResponseAppearance::Suggested);
+        d.set_default_response(Some("cancel"));
+        d.set_close_response("cancel");
+        let weak = Rc::downgrade(self);
+        d.connect_response(None, move |_, r| {
+            if r != "start" {
+                return;
+            }
+            let Some(me) = weak.upgrade() else { return };
+            set_section(Section::Claude);
+            me.claude.new_session(&folder, prompt.clone(), name.clone(), Some(crate::claude::ClaudeMode::Plan), None);
+        });
+        d.present(window.as_ref());
+    }
+
     pub fn handle_url(self: &Rc<Self>, uri: &str) {
         if self.state.borrow().phase != Phase::LoggedIn {
             return;
@@ -1281,8 +1343,8 @@ impl App {
             let path = url.path().to_string();
             if path == "/new" {
                 if let Some(folder) = query("folder").filter(|f| std::path::Path::new(f).exists()) {
-                    let mode = query("mode").and_then(|m| crate::claude::ClaudeMode::from_key(&m));
-                    self.claude.new_session(&folder, query("prompt"), query("name"), mode, None);
+                    self.present();
+                    self.confirm_link_session(folder, query("prompt"), query("name"));
                 }
             }
             if path == "/resume" {
@@ -1362,6 +1424,65 @@ impl App {
         for (i, (name, s)) in sections.into_iter().enumerate() {
             add(name, &[&format!("<Control>{}", i + 1)], Box::new(move || set_section(s)));
         }
+        let claude_ready = || try_get().is_some_and(|a| a.state.borrow().phase == Phase::LoggedIn && section_allowed(Section::Claude));
+        add(
+            "agents-quick-open",
+            &["<Control>k"],
+            Box::new(move || {
+                if forward_to_terminal(0x0b) || !claude_ready() {
+                    return;
+                }
+                ui::claude::quick_open::show();
+            }),
+        );
+        let me = self.clone();
+        add(
+            "agents-new-session",
+            &["<Control>n"],
+            Box::new(move || {
+                if forward_to_terminal(0x0e) || !claude_ready() {
+                    return;
+                }
+                set_section(Section::Claude);
+                ui::claude::column::new_session_here(&me.claude);
+            }),
+        );
+        let me = self.clone();
+        add(
+            "agents-next-session",
+            &["<Control><Shift>bracketright", "<Control>braceright"],
+            Box::new(move || {
+                if claude_ready() && !me.claude.tabs.borrow().is_empty() {
+                    set_section(Section::Claude);
+                    me.claude.cycle_tab(1);
+                }
+            }),
+        );
+        let me = self.clone();
+        add(
+            "agents-previous-session",
+            &["<Control><Shift>bracketleft", "<Control>braceleft"],
+            Box::new(move || {
+                if claude_ready() && !me.claude.tabs.borrow().is_empty() {
+                    set_section(Section::Claude);
+                    me.claude.cycle_tab(-1);
+                }
+            }),
+        );
+        let agent_tab = gio::SimpleAction::new(crate::claude::notifier::TAB_ACTION, Some(glib::VariantTy::UINT64));
+        let me = self.clone();
+        agent_tab.connect_activate(move |_, v| {
+            me.present();
+            let Some(id) = v.and_then(|v| v.get::<u64>()) else { return };
+            if me.state.borrow().phase != Phase::LoggedIn {
+                return;
+            }
+            set_section(Section::Claude);
+            if me.claude.tabs.borrow().iter().any(|t| t.id == id) {
+                me.claude.select(id);
+            }
+        });
+        app.add_action(&agent_tab);
         let open_url = gio::SimpleAction::new("open-url", Some(glib::VariantTy::STRING));
         let me = self.clone();
         open_url.connect_activate(move |_, v| {
@@ -1398,6 +1519,7 @@ impl App {
         window.connect_is_active_notify(move |w| {
             if w.is_active() {
                 if let Some(me) = weak.upgrade() {
+                    me.claude.window_activated();
                     me.did_become_active();
                 }
             }
@@ -1496,11 +1618,13 @@ pub fn run(smoke: bool) -> glib::ExitCode {
             return;
         }
         let me = a.clone();
-        glib::timeout_add_local_once(Duration::from_millis(750), move || {
+        let splash = if ui::logo::animations_enabled() { ui::logo::ONCE + 0.15 } else { 0.6 };
+        glib::timeout_add_local_once(Duration::from_secs_f64(splash), move || {
             me.splash_done.set(true);
             me.render_phase();
         });
         crate::rt::spawn_local(a.clone().restore());
+        glib::timeout_add_local_once(Duration::from_secs(3), crate::stack::notes::watch_inbox);
         if crate::tour::active() {
             crate::tour::run(a.clone());
             return;
@@ -1575,4 +1699,18 @@ pub fn set_smoke_locked(account: GitAccount) {
     let a = get();
     a.splash_done.set(true);
     a.lock(account);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn link_prompts_are_capped() {
+        assert!(!link_prompt_too_long(""));
+        assert!(!link_prompt_too_long(&"a".repeat(MAX_LINK_PROMPT_CHARS)));
+        assert!(link_prompt_too_long(&"a".repeat(MAX_LINK_PROMPT_CHARS + 1)));
+        assert!(!link_prompt_too_long(&"é".repeat(MAX_LINK_PROMPT_CHARS)));
+        assert!(link_prompt_too_long_message(&"a".repeat(9000)).contains("9000 characters"));
+    }
 }

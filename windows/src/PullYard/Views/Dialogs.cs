@@ -310,7 +310,7 @@ public static class Dialogs
         top.Children.Add(toolbar);
         if (fix is not null && CiFailures.IsFixable(check))
         {
-            var fixButton = Ui.Button(L.T("Fix_Button", "Fix with Claude Code"), () =>
+            var fixButton = Ui.Button(L.T("Fix_Button", "Fix with agent"), () =>
             {
                 fixRequested = true;
                 dialog?.Hide();
@@ -470,7 +470,7 @@ public static class Dialogs
         };
 
         var panel = Ui.V(10);
-        panel.Children.Add(Ui.H(10, Ui.IconTile("", "coral", 30), Ui.V(1, Ui.Text(L.T("Fix_Button", "Fix with Claude Code"), 15, "text", FontWeights.SemiBold), Ui.H(6, Ui.Text($"#{pr.Number}", 13, "violet", FontWeights.SemiBold), Ui.Text(pr.Title, 13, "muted")))));
+        panel.Children.Add(Ui.H(10, Ui.IconTile("", "coral", 30), Ui.V(1, Ui.Text(L.T("Fix_Button", "Fix with agent"), 15, "text", FontWeights.SemiBold), Ui.H(6, Ui.Text($"#{pr.Number}", 13, "violet", FontWeights.SemiBold), Ui.Text(pr.Title, 13, "muted")))));
 
         var threadPanel = Ui.V(4);
         var composedBox = Ui.V(4);

@@ -172,7 +172,7 @@ fn pin_row(account: GitAccount) -> adw::SwitchRow {
 }
 
 fn claude_group(dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
-    let g = group("Claude Code", "sy-sparkles-symbolic", "coral");
+    let g = group("Agents", "sy-sparkles-symbolic", "coral");
     let profiles = accounts::visible();
     let active = accounts::active_id();
     let names: Vec<String> = profiles.iter().map(|p| format!("{}{}", p.label, p.email.as_ref().map(|e| format!(" — {e}")).unwrap_or_default())).collect();
@@ -203,7 +203,7 @@ fn claude_group(dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
             out.connect_clicked(|_| {
                 dialogs::confirm(
                     "Sign out of Claude Code?",
-                    Some("This also signs out Claude Code in the terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Claude Code section."),
+                    Some("This also signs out Claude Code in the terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Agents section."),
                     "Sign out",
                     true,
                     || {
@@ -340,7 +340,14 @@ pub fn show() {
     updates.add(&ver);
     page.add(&updates);
 
-    let oauth = group("OAuth Device Flow", "sy-key-symbolic", "amber");
+    let jira_group = group("Jira", "sy-tag-symbolic", "sky");
+    let jira_form = super::jira::connect_form();
+    jira_form.add_css_class("card");
+    pad(&jira_form, 12);
+    jira_group.add(&jira_form);
+    page.add(&jira_group);
+
+    let oauth = group(if auth::built_in_client_id().is_some() { "Use your own OAuth App" } else { "OAuth Device Flow" }, "sy-key-symbolic", "amber");
     let entry = adw::EntryRow::new();
     entry.set_title("Client ID");
     entry.set_text(&settings::read(|s| s.oauth_client_id.clone()));

@@ -77,6 +77,8 @@ jobs:
 
       - name: Publish
         shell: pwsh
+        env:
+          PULLYARD_GITHUB_CLIENT_ID: ${{ vars.PULLYARD_GITHUB_CLIENT_ID }}
         run: |
           dotnet publish windows/src/PullYard/PullYard.csproj `
             -c Release `
@@ -86,6 +88,17 @@ jobs:
             -o windows/dist/${{ matrix.arch }}/app
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem windows/dist/${{ matrix.arch }}/app | Select-Object -First 40 Name, Length | Format-Table | Out-String | Write-Host
+
+      - name: Third-party notices
+        shell: pwsh
+        run: |
+          $app = "windows/dist/${{ matrix.arch }}/app"
+          ./windows/tools/collect-notices.ps1 -AppDir $app -ExeName "${{ steps.brand.outputs.exe }}"
+          foreach ($f in @('THIRD-PARTY-NOTICES.txt', 'LICENSE.txt', 'Web/vendor/THIRD-PARTY-NOTICES.txt')) {
+            if (-not (Test-Path (Join-Path $app $f))) { throw "Missing $f in publish output" }
+          }
+          if (-not (Get-ChildItem (Join-Path $app 'licenses') -Directory -Filter 'Microsoft.WindowsAppSDK*')) { throw 'Windows App SDK license terms were not collected' }
+          Get-ChildItem (Join-Path $app 'licenses') -Recurse -File | Select-Object FullName, Length | Format-Table | Out-String | Write-Host
 
       - name: Smoke test (version and self test)
         if: matrix.arch == 'x64'
@@ -176,10 +189,12 @@ jobs:
           $personalize = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
           if (-not (Test-Path $personalize)) { New-Item -Path $personalize -Force | Out-Null }
           $codes = @{}
-          foreach ($mode in @("dark", "light")) {
+          foreach ($run in @("brand-dark", "brand-light", "system-dark", "system-light")) {
+            $style, $mode = $run -split "-"
+            Set-Item "env:${prefix}_TOUR_STYLE" $style
             Set-ItemProperty -Path $personalize -Name AppsUseLightTheme -Value ([int]($mode -eq "light")) -Type DWord
             Remove-Item $log -ErrorAction SilentlyContinue
-            $shots = New-Item -ItemType Directory -Force -Path "windows/dist/shots/$mode"
+            $shots = New-Item -ItemType Directory -Force -Path "windows/dist/shots/$run"
             $p = Start-Process -FilePath $exe -ArgumentList @('--smoke-tour', $link) -PassThru
             $seen = 0
             $deadline = (Get-Date).AddMinutes(4)
@@ -192,11 +207,11 @@ jobs:
             }
             if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
             $p.WaitForExit()
-            foreach ($f in @('tour.log', 'errors.log')) { $path = Join-Path $data $f; if (Test-Path $path) { Write-Host "--- $mode $f"; Get-Content $path | Write-Host } }
-            Write-Host "Exit code ($mode): $($p.ExitCode)"
-            $codes[$mode] = $p.ExitCode
+            foreach ($f in @('tour.log', 'errors.log')) { $path = Join-Path $data $f; if (Test-Path $path) { Write-Host "--- $run $f"; Get-Content $path | Write-Host } }
+            Write-Host "Exit code ($run): $($p.ExitCode)"
+            $codes[$run] = $p.ExitCode
           }
-          foreach ($mode in $codes.Keys) { if ($codes[$mode] -ne 0) { throw "UI tour ($mode) exited with $($codes[$mode])" } }
+          foreach ($run in $codes.Keys) { if ($codes[$run] -ne 0) { throw "UI tour ($run) exited with $($codes[$run])" } }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: matrix.arch == 'x64' && always()
@@ -252,6 +267,7 @@ jobs:
           $dir = Join-Path $env:LOCALAPPDATA "Programs\${{ steps.brand.outputs.name }}"
           $exe = Join-Path $dir "${{ steps.brand.outputs.exe }}.exe"
           if (-not (Test-Path $exe)) { throw "Installed exe not found at $exe" }
+          if (-not (Test-Path (Join-Path $dir 'THIRD-PARTY-NOTICES.txt'))) { throw "Installed notices not found in $dir" }
           $v = Start-Process -FilePath $exe -ArgumentList '--version' -Wait -PassThru -NoNewWindow -RedirectStandardOutput installed.txt
           Get-Content installed.txt | Write-Host
           if ($v.ExitCode -ne 0) { throw "Installed app failed" }

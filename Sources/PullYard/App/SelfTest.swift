@@ -85,7 +85,7 @@ enum SelfTest {
                     let html = ConversationHTML.render(pr: p, conflicts: state, repo: pr.repo)
                     let prompt = ConflictPrompt.build(pr: p, repo: pr.repo, files: state.files, push: true)
                     if ProcessInfo.processInfo.environment["PULLYARD_SHOWFIX"] != nil { print("----- CONFLICT PROMPT -----\n" + prompt) }
-                    return "\(state) html=\(html.contains("Resolve Conflicts with Claude Code")) prompt=\(prompt.count)ch"
+                    return "\(state) html=\(html.contains("Resolve conflicts with agent")) prompt=\(prompt.count)ch"
                 }
                 await step("files") {
                     let f = try await api.pullRequestFiles(pr)

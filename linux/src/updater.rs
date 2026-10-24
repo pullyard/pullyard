@@ -19,6 +19,7 @@ pub struct Release {
     pub published_at: Option<chrono::DateTime<Utc>>,
     pub asset_url: Option<String>,
     pub asset_size: i64,
+    pub signature_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -156,6 +157,8 @@ pub fn parse_release(data: &[u8]) -> Result<Release, ApiError> {
     let p: Payload = serde_json::from_slice(data).map_err(|e| ApiError::new(format!("Couldn't read the release: {e}")))?;
     let wanted = brand::tarball_asset_name();
     let asset = p.assets.iter().find(|a| a.name == wanted);
+    let signature_name = format!("{wanted}.sig");
+    let signature = p.assets.iter().find(|a| a.name == signature_name);
     let version = p.tag_name.trim().trim_start_matches(['v', 'V']).to_string();
     let name = p.name.unwrap_or_default().trim().to_string();
     Ok(Release {
@@ -166,7 +169,64 @@ pub fn parse_release(data: &[u8]) -> Result<Release, ApiError> {
         published_at: p.published_at,
         asset_url: asset.map(|a| a.browser_download_url.clone()),
         asset_size: asset.map(|a| a.size).unwrap_or(0),
+        signature_url: signature.map(|a| a.browser_download_url.clone()),
     })
+}
+
+pub const UPDATE_PUBLIC_KEY: &str = "m0UbLdp60TGrr4oQs1p3pqNTXQQOqOZM2oRtf3jnJlM=";
+
+pub fn signature_is_configured() -> bool {
+    !UPDATE_PUBLIC_KEY.trim().is_empty()
+}
+
+pub fn unsigned_message() -> String {
+    format!("The release has no signature, so {} won't install it. Download it from the release page instead.", brand::APP_NAME)
+}
+
+pub fn bad_signature_message() -> String {
+    format!("The update's signature doesn't match. It may have been tampered with, so {} didn't install it.", brand::APP_NAME)
+}
+
+pub fn signature_is_valid(signature: &str, payload: &[u8], public_key: &str) -> bool {
+    use base64::Engine;
+    use openssl::pkey::{Id, PKey};
+    use openssl::sign::Verifier;
+    let engine = base64::engine::general_purpose::STANDARD;
+    let Ok(key_bytes) = engine.decode(public_key.trim()) else { return false };
+    let Ok(sig) = engine.decode(signature.trim()) else { return false };
+    if key_bytes.len() != 32 || sig.len() != 64 {
+        return false;
+    }
+    let Ok(key) = PKey::public_key_from_raw_bytes(&key_bytes, Id::ED25519) else { return false };
+    let Ok(mut verifier) = Verifier::new_without_digest(&key) else { return false };
+    verifier.verify_oneshot(&sig, payload).unwrap_or(false)
+}
+
+async fn fetch_signature(url: &str) -> Result<String, String> {
+    if !url.starts_with("https://") {
+        return Err(unsigned_message());
+    }
+    let mut probe = crate::diagnostics::begin_rest("GET", url);
+    let request = http_client().get(url).header("Accept", "application/octet-stream").timeout(std::time::Duration::from_secs(20));
+    let (status, bytes) = probed_get(&mut probe, request).await.map_err(|_| unsigned_message())?;
+    if !status.is_success() {
+        return probe.track(Err(unsigned_message()));
+    }
+    Ok(String::from_utf8_lossy(&bytes).trim().to_string())
+}
+
+async fn verify_archive(archive: PathBuf, signature_url: Option<String>) -> Result<(), String> {
+    if !signature_is_configured() {
+        return Ok(());
+    }
+    let Some(url) = signature_url else { return Err(unsigned_message()) };
+    let signature = fetch_signature(&url).await?;
+    let payload = tokio::fs::read(&archive).await.map_err(|e| e.to_string())?;
+    if signature_is_valid(&signature, &payload, UPDATE_PUBLIC_KEY) {
+        Ok(())
+    } else {
+        Err(bad_signature_message())
+    }
 }
 
 async fn fetch_latest() -> Result<Release, ApiError> {
@@ -382,6 +442,12 @@ pub async fn download_and_install() {
         }
     };
     set_state(State::Installing);
+    if let Err(e) = crate::rt::run(verify_archive(archive.clone(), release.signature_url.clone())).await {
+        let _ = std::fs::remove_dir_all(staging_dir());
+        set_state(State::Failed(e));
+        present();
+        return;
+    }
     let version = release.version.clone();
     match crate::rt::blocking(move || stage(archive, version)).await {
         Ok(bin) => {
@@ -432,5 +498,57 @@ mod tests {
         let r = parse_release(json.as_bytes()).unwrap();
         assert_eq!(r.version, "9.0.0");
         assert_eq!(r.asset_url.as_deref(), Some("https://d"));
+        assert_eq!(r.signature_url, None);
+    }
+
+    #[test]
+    fn parses_signature_asset() {
+        let name = brand::tarball_asset_name();
+        let json = format!("{{\"tag_name\":\"v9.0.0\",\"html_url\":\"https://x\",\"assets\":[{{\"name\":\"{name}\",\"browser_download_url\":\"https://d\",\"size\":10}},{{\"name\":\"{name}.sig\",\"browser_download_url\":\"https://d.sig\",\"size\":88}}]}}");
+        let r = parse_release(json.as_bytes()).unwrap();
+        assert_eq!(r.signature_url.as_deref(), Some("https://d.sig"));
+    }
+
+    fn b64(hex: &str) -> String {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(hex_bytes(hex))
+    }
+
+    fn hex_bytes(hex: &str) -> Vec<u8> {
+        (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect()
+    }
+
+    const RFC_KEY_1: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+    const RFC_SIG_1: &str = "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b";
+    const RFC_KEY_2: &str = "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c";
+    const RFC_SIG_2: &str = "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00";
+    const RFC_KEY_3: &str = "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025";
+    const RFC_SIG_3: &str = "6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a";
+
+    #[test]
+    fn verifies_rfc8032_vectors() {
+        assert!(signature_is_valid(&b64(RFC_SIG_1), &[], &b64(RFC_KEY_1)));
+        assert!(signature_is_valid(&b64(RFC_SIG_2), &hex_bytes("72"), &b64(RFC_KEY_2)));
+        assert!(signature_is_valid(&b64(RFC_SIG_3), &hex_bytes("af82"), &b64(RFC_KEY_3)));
+    }
+
+    #[test]
+    fn rejects_tampered_or_malformed_signatures() {
+        assert!(!signature_is_valid(&b64(RFC_SIG_2), &hex_bytes("73"), &b64(RFC_KEY_2)));
+        assert!(!signature_is_valid(&b64(RFC_SIG_1), &[], &b64(RFC_KEY_2)));
+        assert!(!signature_is_valid(&b64(RFC_SIG_3), &hex_bytes("af82"), &b64(RFC_KEY_2)));
+        assert!(!signature_is_valid("not base64!", &[], &b64(RFC_KEY_1)));
+        assert!(!signature_is_valid(&b64(RFC_SIG_1), &[], ""));
+        assert!(!signature_is_valid(&b64(&RFC_SIG_1[..64]), &[], &b64(RFC_KEY_1)));
+    }
+
+    #[test]
+    fn shipped_key_requires_a_signature() {
+        use base64::Engine;
+        assert!(signature_is_configured());
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(UPDATE_PUBLIC_KEY).unwrap().len(), 32);
+        let dir = std::env::temp_dir().join(format!("{}-sig-test-{}", brand::BIN_NAME, std::process::id()));
+        let result = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(verify_archive(dir, None));
+        assert!(result.is_err());
     }
 }

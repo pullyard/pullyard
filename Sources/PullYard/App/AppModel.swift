@@ -107,6 +107,7 @@ final class AppModel {
     var refreshTick = 0
     var liveTick = 0
     var showOpenLink = false
+    var showQuickOpen = false
     var clipboardRoute: Route?
     var toast: String?
     var pendingCode: CodeOpenRequest?
@@ -136,6 +137,30 @@ final class AppModel {
     init() {
         URLCache.shared = URLCache(memoryCapacity: 40 << 20, diskCapacity: 200 << 20)
         Diagnostics.shared.start()
+        DispatchQueue.main.async { [weak self] in
+            self?.claude.observeBadge()
+            ForegroundActivity.start()
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.section == .claude, let tab = self.claude.selectedTab else { return }
+                tab.unread = false
+                SessionSeen.shared.mark(tab.sessionId)
+            }
+        }
+        NotificationCenter.default.addObserver(forName: .openAgentTab, object: nil, queue: .main) { [weak self] note in
+            guard let id = note.object as? UUID else { return }
+            MainActor.assumeIsolated {
+                guard let self, self.claude.tabs.contains(where: { $0.id == id }) else { return }
+                self.section = .claude
+                self.claude.selectedTabID = id
+            }
+        }
+                StackNotesMCP.target = { [weak self] in
+            guard let self, let api = self.api else { return nil }
+            return (self.cacheAccount, api.host)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { _ = StackNotes.shared }
         Task { await restore() }
     }
 
@@ -508,6 +533,15 @@ final class AppModel {
         phase = .loggedOut
     }
 
+    func newAgentSession() {
+        section = .claude
+        if let folder = claude.selectedTab?.folder ?? claude.projects.first(where: \.exists)?.path {
+            claude.newSession(folder: folder)
+        } else {
+            showQuickOpen = true
+        }
+    }
+
     func refresh() {
         lastLiveRefresh = Date()
         refreshTick += 1
@@ -533,6 +567,22 @@ final class AppModel {
             select(route)
         }
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    static let maxLinkPromptLength = 8000
+
+    private static func promptPreview(_ prompt: String) -> NSView {
+        let scroll = NSTextView.scrollableTextView()
+        scroll.frame = NSRect(x: 0, y: 0, width: 420, height: 220)
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        if let text = scroll.documentView as? NSTextView {
+            text.isEditable = false
+            text.isSelectable = true
+            text.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            text.string = prompt
+        }
+        return scroll
     }
 
     func handle(url: URL) {
@@ -563,18 +613,26 @@ final class AppModel {
                 NSApp.activate(ignoringOtherApps: true)
                 let alert = NSAlert()
                 alert.messageText = "Start a Claude session from a link?"
-                alert.informativeText = "Folder: \(folder)" + (prompt.map { "\n\nPrompt:\n\($0.prefix(600))" } ?? "")
-                alert.addButton(withTitle: "Start Session")
+                if let prompt, prompt.count > Self.maxLinkPromptLength {
+                    alert.alertStyle = .warning
+                    alert.informativeText = "The link's prompt is \(prompt.count) characters long, which is more than PullYard accepts from a link (\(Self.maxLinkPromptLength))."
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                    return
+                }
+                alert.informativeText = "Folder: \(folder)\n\nThe session starts in Plan mode: Claude can read files but asks before it edits anything or runs commands. Read the whole prompt before you start it."
+                if let prompt, !prompt.isEmpty { alert.accessoryView = Self.promptPreview(prompt) }
+                alert.addButton(withTitle: "Start in Plan Mode")
                 alert.addButton(withTitle: "Cancel")
                 if alert.runModal() == .alertFirstButtonReturn {
-                    claude.newSession(folder: folder, prompt: prompt, name: value("name"))
+                    claude.newSession(folder: folder, prompt: prompt, name: value("name"), mode: .plan)
                 }
             }
             if url.path == "/resume", let id = value("id") {
                 let kind = value("kind").flatMap(ClaudeTabKind.init(rawValue:))
                 Task {
-                    if !claude.projects.flatMap(\.sessions).contains(where: { $0.id == id }) { await claude.reloadProjects() }
-                    if let s = claude.projects.flatMap(\.sessions).first(where: { $0.id == id }) { claude.resume(s, kind: kind) }
+                    if claude.sessionsByID[id] == nil { await claude.reloadProjects() }
+                    if let s = claude.sessionsByID[id] { claude.resume(s, kind: kind) }
                 }
             }
             NSApp.activate(ignoringOtherApps: true)

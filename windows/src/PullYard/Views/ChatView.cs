@@ -49,6 +49,7 @@ public sealed class ChatView : Grid
     private List<string> files = new();
     private bool filesLoading;
     private string? completionKind;
+    private bool reauthWaiting;
 
     private sealed record Completion(string Title, string Detail, string Insert) : IRowContent
     {
@@ -83,12 +84,72 @@ public sealed class ChatView : Grid
         chat.PropertyChanged += OnChat;
         ClaudeUsageStore.Shared.PropertyChanged += OnUsage;
         ThemeService.Changed += SendVars;
+        Loaded += (_, _) =>
+        {
+            tab.Git.PropertyChanged -= OnContext;
+            tab.Git.PropertyChanged += OnContext;
+            AppViewModel.Shared.Claude.PropertyChanged -= OnContext;
+            AppViewModel.Shared.Claude.PropertyChanged += OnContext;
+        };
         Unloaded += (_, _) =>
         {
             ThemeService.Changed -= SendVars;
+            tab.Git.PropertyChanged -= OnContext;
+            AppViewModel.Shared.Claude.PropertyChanged -= OnContext;
         };
         UpdateChrome();
+        ApplyDraft();
     }
+
+    private void OnContext(object? sender, PropertyChangedEventArgs e)
+    {
+        if (chat.Items.Count > 0 || e.PropertyName is not (nameof(GitWorkingCopy.Branch) or nameof(GitWorkingCopy.Changes) or nameof(GitWorkingCopy.Ahead) or nameof(GitWorkingCopy.Repo) or nameof(ClaudeWorkspace.Projects))) return;
+        DispatcherQueue.TryEnqueue(SendMeta);
+    }
+
+    private void SendMeta()
+    {
+        if (ready) web.Send(new JsonObject { ["op"] = "meta", ["meta"] = Meta() });
+    }
+
+    private void ApplyDraft()
+    {
+        if (chat.DraftRequest is not { } draft) return;
+        chat.DraftRequest = null;
+        input.Text = draft;
+        input.SelectionStart = draft.Length;
+        input.Focus(FocusState.Programmatic);
+    }
+
+    private void SendStrings() => web.Send(new JsonObject
+    {
+        ["op"] = "strings",
+        ["strings"] = new JsonObject
+        {
+            ["ChatWeb_Copy"] = L.T("ChatWeb_Copy", "Copy"),
+            ["ChatWeb_Copied"] = L.T("ChatWeb_Copied", "Copied"),
+            ["ChatWeb_EditFromHere"] = L.T("ChatWeb_EditFromHere", "Edit from here — continues in a new branch of this session"),
+            ["ChatWeb_Thinking"] = L.T("ChatWeb_Thinking", "Thinking"),
+            ["ChatWeb_Running"] = L.T("ChatWeb_Running", "Running:"),
+            ["ChatWeb_Failed"] = L.T("ChatWeb_Failed", "{0} failed"),
+            ["ChatWeb_JumpLatest"] = L.T("ChatWeb_JumpLatest", "Jump to the latest message"),
+            ["ChatWeb_JumpNew"] = L.T("ChatWeb_JumpNew", "{0} new — jump to the latest message"),
+            ["ChatWeb_SignInExpired"] = L.T("ChatWeb_SignInExpired", "Claude sign-in expired"),
+            ["ChatWeb_SignInHint"] = L.T("ChatWeb_SignInHint", "Sign in again and the session resumes where it stopped."),
+            ["ChatWeb_SignInWaitingHint"] = L.T("ChatWeb_SignInWaitingHint", "Finish signing in in the terminal. The session picks up where it stopped."),
+            ["ChatWeb_SignInAgain"] = L.T("ChatWeb_SignInAgain", "Sign in again"),
+            ["ChatWeb_WaitingSignIn"] = L.T("ChatWeb_WaitingSignIn", "Waiting for sign-in…"),
+            ["ChatWeb_RestartSession"] = L.T("ChatWeb_RestartSession", "Restart session"),
+            ["ChatWeb_PROpen"] = L.T("ChatWeb_PROpen", "Pull request #{0} is open"),
+            ["ChatWeb_OpenInApp"] = L.T("ChatWeb_OpenInApp", "Open in PullYard"),
+            ["ChatWeb_CopyLink"] = L.T("ChatWeb_CopyLink", "Copy link"),
+            ["ChatWeb_WelcomeIntro"] = L.T("ChatWeb_WelcomeIntro", "Describe a task. The agent reads the code, proposes changes and asks before acting."),
+            ["ChatWeb_Changed"] = L.T("ChatWeb_Changed", "{0} changed"),
+            ["ChatWeb_Unpushed"] = L.T("ChatWeb_Unpushed", "{0} unpushed"),
+            ["ChatWeb_Recent"] = L.T("ChatWeb_Recent", "Recent in this project"),
+            ["ChatWeb_Hint"] = L.T("ChatWeb_Hint", "/ commands · @ files · Shift+Enter new line · paste a screenshot Ctrl+V")
+        }
+    });
 
     private void OnUsage(object? sender, PropertyChangedEventArgs e) => DispatcherQueue.TryEnqueue(RenderBottomBar);
 
@@ -102,6 +163,7 @@ public sealed class ChatView : Grid
             case "ready":
                 ready = true;
                 SendVars();
+                SendStrings();
                 chat.MarkAllDirty();
                 Flush();
                 break;
@@ -115,15 +177,38 @@ public sealed class ChatView : Grid
                 chat.Interrupt();
                 break;
             case "restart":
-                AppViewModel.Shared.Claude.Restart(tab);
+                reauthWaiting = false;
+                ClaudeAccountStore.Shared.CancelReauthentication();
+                AppViewModel.Shared.Claude.Reconnect(tab);
                 break;
-            case "checkAuth":
-                ClaudeAccountStore.Shared.Refresh().Forget();
+            case "reauth":
+                StartReauth();
+                break;
+            case "copy":
+                if (msg.Str("text") is { } copied) WindowInterop.Copy(copied);
+                break;
+            case "rewind":
+                if (msg.Str("id") is { } itemId) AppViewModel.Shared.Claude.Rewind(tab, itemId, L.F("Chat_EditTitle", "Edit · {0}", tab.Title));
+                break;
+            case "resume":
+                if (msg.Str("id") is { } sid && AppViewModel.Shared.Claude.AllSessions.FirstOrDefault(s => s.Id == sid) is { } info) AppViewModel.Shared.Claude.Resume(info);
                 break;
             case "open":
                 if (msg.Str("path") is { } path) PathGuard.OpenWithinWorkspace(tab.Folder, path);
                 break;
         }
+    }
+
+    private void StartReauth()
+    {
+        if (reauthWaiting) return;
+        reauthWaiting = ClaudeAccountStore.Shared.Reauthenticate(() =>
+        {
+            reauthWaiting = false;
+            AppViewModel.Shared.Claude.Reconnect(tab);
+            SendMeta();
+        });
+        SendMeta();
     }
 
     private void HandlePermission(JsonObject msg)
@@ -178,8 +263,50 @@ public sealed class ChatView : Grid
         ["pendingCount"] = chat.PendingCount,
         ["lastError"] = chat.LastError,
         ["folder"] = chat.Folder,
-        ["turnStartedAt"] = chat.TurnStartedAt?.ToUnixTimeMilliseconds()
+        ["turnStartedAt"] = chat.TurnStartedAt?.ToUnixTimeMilliseconds(),
+        ["authExpired"] = chat.AuthExpired,
+        ["reauthWaiting"] = reauthWaiting && chat.AuthExpired,
+        ["createdPR"] = chat.CreatedPR is { } url && AgentShip.ParsePullRequestUrl(url) is { } pr ? new JsonObject { ["url"] = url, ["number"] = pr.Number, ["repo"] = pr.Repo } : null,
+        ["todos"] = TodoProgress.Latest(chat.Items) is { Finished: false } todos ? todos.ToJson() : null,
+        ["welcome"] = Welcome()
     };
+
+    private JsonObject? Welcome()
+    {
+        if (chat.Items.Count > 0) return null;
+        var git = tab.Git;
+        var workspace = AppViewModel.Shared.Claude;
+        var root = ClaudeSessionParser.ProjectRoot(tab.Folder).TrimEnd('\\', '/');
+        var sessions = workspace.Projects.FirstOrDefault(p => string.Equals(p.Path.TrimEnd('\\', '/'), root, StringComparison.OrdinalIgnoreCase))?.Sessions ?? new List<ClaudeSessionInfo>();
+        var sid = string.IsNullOrEmpty(chat.SessionId) ? tab.SessionId : chat.SessionId;
+        var linked = sessions.FirstOrDefault(s => s.PrNumber is not null && (s.Id == sid || (git.Branch is { Length: > 0 } b && b != "HEAD" && s.Branch == b)));
+        var suggestions = new JsonArray();
+        foreach (var s in AgentWelcome.Suggestions(git.Changes.Count, git.Branch, git.Repo is not null, git.Ahead, linked?.PrNumber, linked?.PrUrl))
+        {
+            var (icon, title) = s.Kind switch
+            {
+                WelcomeSuggestionKind.ReviewChanges => ("review", L.T("ChatWeb_SugReview", "Review my uncommitted changes")),
+                WelcomeSuggestionKind.OpenPR => ("pr", L.T("ChatWeb_SugOpenPR", "Open a pull request")),
+                WelcomeSuggestionKind.AddressReview => ("chat", L.F("ChatWeb_SugAddress", "Address review on #{0}", s.PullRequest ?? 0)),
+                WelcomeSuggestionKind.ExplainStructure => ("map", L.T("ChatWeb_SugExplain", "Explain the project structure")),
+                WelcomeSuggestionKind.FindBugs => ("bug", L.T("ChatWeb_SugBugs", "Find bugs in recent changes")),
+                _ => ("test", L.T("ChatWeb_SugTests", "Write tests for changed code"))
+            };
+            suggestions.Add(new JsonObject { ["icon"] = icon, ["title"] = title, ["prompt"] = s.Prompt });
+        }
+        var recent = new JsonArray(sessions.Where(s => s.Id != sid).Take(3)
+            .Select(s => (JsonNode)new JsonObject { ["id"] = s.Id, ["title"] = s.Title, ["ago"] = Fmt.Rel(s.Modified) }).ToArray());
+        return new JsonObject
+        {
+            ["project"] = tab.ProjectName,
+            ["folder"] = tab.Folder,
+            ["branch"] = git.Branch is "HEAD" ? null : git.Branch,
+            ["changed"] = git.Changes.Count,
+            ["ahead"] = git.Ahead,
+            ["suggestions"] = suggestions,
+            ["recent"] = recent
+        };
+    }
 
     private void Flush()
     {
@@ -206,8 +333,12 @@ public sealed class ChatView : Grid
             case nameof(ChatSession.Sleeping):
             case nameof(ChatSession.Running):
             case nameof(ChatSession.TurnStartedAt):
-                if (ready) web.Send(new JsonObject { ["op"] = "meta", ["meta"] = Meta() });
+            case nameof(ChatSession.CreatedPR):
+                SendMeta();
                 UpdateChrome();
+                break;
+            case nameof(ChatSession.DraftRequest):
+                ApplyDraft();
                 break;
             case nameof(ChatSession.Models):
             case nameof(ChatSession.ModelValue):
@@ -295,7 +426,7 @@ public sealed class ChatView : Grid
             e.Handled = true;
             CycleMode();
         };
-        var focus = new KeyboardAccelerator { Key = VirtualKey.K, Modifiers = VirtualKeyModifiers.Control };
+        var focus = new KeyboardAccelerator { Key = VirtualKey.J, Modifiers = VirtualKeyModifiers.Control };
         focus.Invoked += (_, e) =>
         {
             e.Handled = true;

@@ -250,7 +250,7 @@ struct SearchListView: View {
                             }
                         } header: {
                             RepoGroupHeader(group: group, expanded: open) {
-                                if collapsed.contains(group.id) { collapsed.remove(group.id) } else { collapsed.insert(group.id) }
+                                withAnimation(Motion.quick) { if collapsed.contains(group.id) { collapsed.remove(group.id) } else { collapsed.insert(group.id) } }
                             }
                         }
                     }
@@ -264,13 +264,13 @@ struct SearchListView: View {
             .opacity(model.loading && !model.showingCached && !model.items.isEmpty ? 0.55 : 1)
             .animation(.easeOut(duration: 0.15), value: model.loading)
             .overlay {
-                if model.loading && !model.checkingCache && model.items.isEmpty { ProgressView().controlSize(.small) }
+                if model.loading && !model.checkingCache && model.items.isEmpty { PullYardLoader(size: 44) }
             }
             .liveRefresh(updated: model.lastUpdated, refreshing: model.refreshing, error: model.items.isEmpty ? nil : model.error) {
                 await reload(silent: true)
             }
         }
-        .searchable(text: $text, placement: .toolbar, prompt: "Filter: text, repo:org/name, label:bug")
+        .toolbarSearch(text: $text, prompt: "Filter: text, repo:org/name, label:bug")
         .navigationTitle(title)
         .navigationSubtitle(model.total > 0 ? "\(model.total)" : "")
         .task(id: "\(query)|\(app.cacheAccount ?? "")|\(app.api != nil)") {

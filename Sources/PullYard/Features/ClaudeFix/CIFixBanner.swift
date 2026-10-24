@@ -49,7 +49,7 @@ struct CIFailureBanner: View {
                     }
                     .controlSize(.small)
                 }
-                Button(launch == nil ? "Fix with Claude Code" : "Fix again", action: onFix)
+                Button(launch == nil ? "Fix with agent" : "Fix again", action: onFix)
                     .controlSize(.small)
                     .buttonStyle(.borderedProminent)
                     .tint(Color.syCoral)
@@ -67,7 +67,7 @@ struct CIFailureBanner: View {
     private func status(_ launch: CIFixLaunch, tab: ClaudeTab?) -> some View {
         if let tab {
             let state = tab.state
-            ChipView(text: label(state), color: state.color, icon: state == .working ? "sparkles" : state.icon)
+            ChipView(text: label(state), color: state.color, icon: state.icon)
                 .help("Claude Code session started \(Fmt.rel(launch.at))")
         } else if launch.tabID != nil {
             Text("· Fix session closed").foregroundStyle(Color.syDim)

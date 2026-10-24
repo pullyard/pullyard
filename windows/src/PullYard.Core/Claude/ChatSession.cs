@@ -29,6 +29,8 @@ public sealed partial class ChatSession : ObservableObject
     [ObservableProperty] private bool sleeping;
     [ObservableProperty] private long memoryBytes;
     [ObservableProperty] private int pendingCount;
+    [ObservableProperty] private string? createdPR;
+    [ObservableProperty] private string? draftRequest;
 
     public List<ChatItem> Items { get; } = new();
     public List<PermissionRequest> PendingPermissions { get; } = new();
@@ -43,7 +45,7 @@ public sealed partial class ChatSession : ObservableObject
     private readonly Dictionary<string, List<TextItem>> messageTexts = new();
     private readonly HashSet<string> dirty = new();
     private bool resetPending = true;
-    private string? queuedPrompt;
+    private readonly List<(string Text, IReadOnlyList<ChatImage> Images)> queuedPrompts = new();
     private int requestCounter;
     private bool intentionalStop;
 
@@ -166,6 +168,7 @@ public sealed partial class ChatSession : ObservableObject
             if (fork) args.Add("--fork-session");
             else SessionId = resume;
         }
+        args.AddRange(Stacks.StackNotesMcp.LaunchArgs());
         var psi = new ProcessStartInfo(cmd.File)
         {
             UseShellExecute = false,
@@ -232,8 +235,29 @@ public sealed partial class ChatSession : ObservableObject
         LastActivity = DateTimeOffset.Now;
         LastError = null;
         Control("initialize", new JsonObject());
+        FlushQueue();
         if (!string.IsNullOrEmpty(initialPrompt)) Send(initialPrompt);
     }
+
+    public bool HasQueuedPrompts => queuedPrompts.Count > 0;
+
+    private void FlushQueue()
+    {
+        if (queuedPrompts.Count == 0 || !Running) return;
+        var queued = queuedPrompts.ToList();
+        queuedPrompts.Clear();
+        foreach (var (text, images) in queued) Deliver(text, images);
+    }
+
+    public static bool IsAuthError(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        var s = text.ToLowerInvariant();
+        return new[] { "/login", "log in", "logged in", "not logged", "authentication", "invalid api key", "api key", "oauth", "401", "credential", "token has expired", "token expired" }
+            .Any(s.Contains);
+    }
+
+    public bool AuthExpired => IsAuthError(LastError);
 
     public void Stop()
     {
@@ -262,6 +286,11 @@ public sealed partial class ChatSession : ObservableObject
         process = null;
         MemoryBytes = 0;
         p.Dispose();
+        foreach (var t in tools.Values.Where(t => t.Status == ToolStatus.Running))
+        {
+            t.Status = wasIntentional ? ToolStatus.Done : ToolStatus.Error;
+            if (t.ParentToolUseId is null) Touch(t);
+        }
         if (wasIntentional)
         {
             Sleeping = SessionId is not null;
@@ -309,13 +338,18 @@ public sealed partial class ChatSession : ObservableObject
         images ??= Array.Empty<ChatImage>();
         var trimmed = text.Trim();
         if (trimmed.Length == 0 && images.Count == 0) return;
-        if (!Running)
-        {
-            queuedPrompt = text;
-            return;
-        }
         LastActivity = DateTimeOffset.Now;
         Append(new UserItem(Guid.NewGuid().ToString(), trimmed, images));
+        if (!Running)
+        {
+            queuedPrompts.Add((trimmed, images));
+            return;
+        }
+        Deliver(trimmed, images);
+    }
+
+    private void Deliver(string trimmed, IReadOnlyList<ChatImage> images)
+    {
         var content = new JsonArray();
         foreach (var img in images)
             content.Add(new JsonObject
@@ -438,11 +472,7 @@ public sealed partial class ChatSession : ObservableObject
                 }
                 if (o.Str("model") is { } m) Model = m;
                 if (o.Str("permissionMode") is { } pm) PermissionMode = pm;
-                if (queuedPrompt is { } q)
-                {
-                    queuedPrompt = null;
-                    Send(q);
-                }
+                FlushQueue();
                 break;
             case "status":
                 var s = o.Str("status");
@@ -597,6 +627,7 @@ public sealed partial class ChatSession : ObservableObject
             if (tool.Status != ToolStatus.Denied) tool.Status = block.Bool("is_error") == true ? ToolStatus.Error : ToolStatus.Done;
             tool.ResultText = ResultText(block["content"]);
             tool.Structured = o.Obj("tool_use_result")?.DeepClone() as JsonObject;
+            if (tool.ParentToolUseId is null && AgentShip.CreatedPullRequest(tool) is { } url) CreatedPR = url;
             if (tool.ParentToolUseId is null) Touch(tool);
         }
     }
@@ -622,7 +653,8 @@ public sealed partial class ChatSession : ObservableObject
         {
             var sub = o.Str("subtype") ?? "";
             var text = sub == "error_during_execution" ? "Stopped" : o.Str("result") ?? sub;
-            Append(new NoticeItem(Guid.NewGuid().ToString(), text, sub != "error_during_execution"));
+            if (sub != "error_during_execution" && IsAuthError(text)) LastError = text;
+            else Append(new NoticeItem(Guid.NewGuid().ToString(), text, sub != "error_during_execution"));
         }
         Control("get_context_usage", new JsonObject());
         OnTurnFinished?.Invoke();
@@ -782,31 +814,19 @@ public sealed partial class ChatSession : ObservableObject
             if (o.Obj("message") is not { } msg) continue;
             if (type == "user")
             {
-                if (msg["content"] is JsonValue sv && sv.TryGetValue<string>(out var s))
+                foreach (var b in msg.Arr("content").Objects())
                 {
-                    if (o.Bool("isCompactSummary") == true) continue;
-                    var clean = s.Trim();
-                    if (clean.StartsWith("<command-name>") || clean.StartsWith("<local-command") || clean.StartsWith("Caveat:") || clean.Length == 0) continue;
-                    loaded.Add(new UserItem(o.Str("uuid") ?? Guid.NewGuid().ToString(), clean, Array.Empty<ChatImage>()));
-                }
-                else if (msg.Arr("content") is { } blocks)
-                {
-                    var texts = new List<string>();
-                    foreach (var b in blocks.Objects())
+                    if (b.Str("type") == "tool_result" && b.Str("tool_use_id") is { } id && map.TryGetValue(id, out var tool))
                     {
-                        if (b.Str("type") == "tool_result" && b.Str("tool_use_id") is { } id && map.TryGetValue(id, out var tool))
-                        {
-                            tool.Status = b.Bool("is_error") == true ? ToolStatus.Error : ToolStatus.Done;
-                            tool.ResultText = ResultText(b["content"]);
-                            tool.Structured = o.Obj("toolUseResult")?.DeepClone() as JsonObject;
-                        }
-                        else if (b.Str("type") == "text" && b.Str("text") is { } t && !t.StartsWith('<'))
-                        {
-                            texts.Add(t);
-                        }
+                        tool.Status = b.Bool("is_error") == true ? ToolStatus.Error : ToolStatus.Done;
+                        tool.ResultText = ResultText(b["content"]);
+                        tool.Structured = o.Obj("toolUseResult")?.DeepClone() as JsonObject;
                     }
-                    if (texts.Count > 0) loaded.Add(new UserItem(o.Str("uuid") ?? Guid.NewGuid().ToString(), string.Join("\n", texts), Array.Empty<ChatImage>()));
                 }
+                if (SessionRewind.PromptText(o) is { } prompt)
+                    loaded.Add(new UserItem(o.Str("uuid") ?? Guid.NewGuid().ToString(), prompt, Array.Empty<ChatImage>()));
+                else if (SessionRewind.RawPrompt(o)?.Trim().StartsWith(SessionRewind.InterruptedMarker) == true)
+                    loaded.Add(new NoticeItem(o.Str("uuid") ?? Guid.NewGuid().ToString(), "Interrupted", false));
             }
             else if (type == "assistant" && msg.Arr("content") is { } blocks)
             {

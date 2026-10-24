@@ -168,7 +168,7 @@ extension AppModel {
         ClaudeUsageStore.shared.subscription = nil
         ClaudeAccountStore.shared.status = .checking
         Task {
-            await ClaudeAccountStore.shared.refresh()
+            await ClaudeAccountStore.shared.refresh(force: true)
             await claude.reloadProjects()
         }
     }

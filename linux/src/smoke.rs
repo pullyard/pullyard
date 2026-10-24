@@ -66,6 +66,36 @@ fn diff_round(m: Rc<PrModel>, middle: String, i: usize, mut sync: Vec<f64>, mut 
     });
 }
 
+fn agent_projects() -> Vec<crate::claude::sessions::Project> {
+    let now = chrono::Utc::now();
+    let session = |id: &str, title: &str, parent: Option<&str>, mins: i64| crate::claude::sessions::SessionInfo {
+        id: id.into(),
+        file: std::path::PathBuf::from(format!("/nonexistent/{id}.jsonl")),
+        cwd: "/tmp".into(),
+        title: title.into(),
+        branch: Some("feat-smoke".into()),
+        modified: now - chrono::Duration::minutes(mins),
+        pr_url: None,
+        pr_number: if mins == 0 { Some(7) } else { None },
+        model: None,
+        lines_added: Some(3),
+        lines_removed: Some(1),
+        parent_id: parent.map(|p| p.to_string()),
+        desktop_id: None,
+        archived: false,
+    };
+    vec![crate::claude::sessions::Project {
+        id: "/tmp".into(),
+        path: "/tmp".into(),
+        sessions: vec![
+            session("smoke-root", "Smoke parent session", None, 0),
+            session("smoke-child-a", "Smoke sub-session A", Some("smoke-root"), 2),
+            session("smoke-child-b", "Smoke sub-session B", Some("smoke-root"), 3),
+            session("smoke-old", "Smoke old session", None, 90),
+        ],
+    }]
+}
+
 pub fn run(_app: Rc<App>) {
     println!("smoke: window built ({} {})", crate::brand::APP_NAME, crate::brand::VERSION);
     let mut t = 200;
@@ -162,6 +192,42 @@ pub fn run(_app: Rc<App>) {
     step(next(400), "commits tab", move || pr().set_tab(crate::ui::pr::model::PrTab::Commits));
     step(next(300), "checks tab", move || pr().set_tab(crate::ui::pr::model::PrTab::Checks));
     step(next(300), "conversation tab", move || pr().set_tab(crate::ui::pr::model::PrTab::Conversation));
+    step(next(300), "jira connect form", move || pr().set_tab(PrTab::Jira));
+    step(next(300), "jira ticket card", move || {
+        let url = pr().pr.borrow().as_ref().map(|p| p.url.clone()).unwrap_or_default();
+        crate::settings::update(|s| {
+            s.jira_site = "smoke.invalid".into();
+            s.jira_has_token = true;
+            s.jira_name = Some("Smoke".into());
+        });
+        crate::jira::remember(&crate::jira::JiraIssue {
+            key: "SMOKE-1".into(),
+            summary: "Smoke ticket".into(),
+            status: "In Progress".into(),
+            status_category: "indeterminate".into(),
+            kind: Some("Story".into()),
+            priority: Some("High".into()),
+            assignee: Some("Smoke Test".into()),
+            assignee_avatar: None,
+            reporter: Some("Octocat".into()),
+            description: "First line\n\n• second".repeat(40),
+            url: "https://smoke.invalid/browse/SMOKE-1".into(),
+            updated: Some(chrono::Utc::now()),
+        });
+        crate::jira::set_linked(&url, vec!["SMOKE-1".into()]);
+        crate::jira::changed();
+    });
+    step(next(400), "jira cleanup", move || {
+        let url = pr().pr.borrow().as_ref().map(|p| p.url.clone()).unwrap_or_default();
+        crate::jira::set_linked(&url, vec![]);
+        crate::settings::update(|s| {
+            s.jira_site.clear();
+            s.jira_has_token = false;
+            s.jira_name = None;
+        });
+        crate::jira::changed();
+        pr().set_tab(PrTab::Conversation);
+    });
     step(next(300), "stack fixture", move || {
         let n = inject_stack(&pr(), 40);
         println!("smoke: stack tree {n} nodes, rss before stack tab {} kB", rss_kb());
@@ -174,6 +240,13 @@ pub fn run(_app: Rc<App>) {
         pr().set_tab(PrTab::Stack);
     });
     step(next(700), "stack list rss", || println!("smoke: stack list open, rss {} kB", rss_kb()));
+    step(next(200), "agent stack note", move || {
+        let Some(t) = stack_tab::last() else { return };
+        let key = pr().stack_note_key(t.current());
+        let entry = crate::stack::mcp::Entry { key, kind: crate::stack::notes::NoteKind::Question, text: "Added through MCP".into(), created: chrono::Utc::now() };
+        let _ = crate::stack::mcp::drop_entry(&crate::stack::mcp::inbox_dir(), &entry);
+        crate::stack::notes::import_inbox();
+    });
     step(next(200), "stack notes", move || {
         let Some(t) = stack_tab::last() else { return };
         let n = t.current();
@@ -300,6 +373,79 @@ pub fn run(_app: Rc<App>) {
         if let Some(id) = first {
             ws.select(id);
         }
+    });
+    step(next(400), "claude chat states", || {
+        let ws = app::get().claude.clone();
+        let chat = ws.tabs.borrow().iter().find_map(|t| t.chat.clone());
+        if let Some(chat) = chat {
+            *chat.last_error.borrow_mut() = Some("OAuth token has expired. Please run /login".into());
+            chat.expanded.borrow_mut().insert("gtool-5".into(), true);
+            chat.expanded.borrow_mut().insert("km4:0".into(), true);
+            chat.changed.emit(&crate::claude::chat::Event::Updated("ctool-5".into()));
+            chat.changed.emit(&crate::claude::chat::Event::State);
+        }
+    });
+    step(next(400), "claude welcome", || {
+        let ws = app::get().claude.clone();
+        ws.new_session("/tmp", None, Some("Smoke welcome".into()), None, Some(crate::claude::TabKind::Chat));
+    });
+    step(next(300), "agents sidebar fixtures", || {
+        let store = crate::claude::accounts::store();
+        *store.status.borrow_mut() = crate::claude::accounts::Status::LoggedIn(crate::claude::accounts::AccountInfo {
+            email: Some("smoke@example.invalid".into()),
+            org_name: None,
+            subscription: Some("pro".into()),
+            method: None,
+            provider: None,
+        });
+        store.changed.emit(&());
+        let ws = app::get().claude.clone();
+        *ws.projects.borrow_mut() = agent_projects();
+        ws.emit(crate::claude::workspace::WsEvent::Projects);
+    });
+    step(next(400), "agents pin and archive", || {
+        crate::claude::prefs::update(|p| {
+            p.toggle_pin("smoke-root");
+            p.set_archived("smoke-old", true);
+        });
+        app::get().claude.emit(crate::claude::workspace::WsEvent::Projects);
+    });
+    step(next(300), "agents unpin and unarchive", || {
+        crate::claude::prefs::update(|p| {
+            p.toggle_pin("smoke-root");
+            p.set_archived("smoke-old", false);
+        });
+        app::get().claude.emit(crate::claude::workspace::WsEvent::Projects);
+    });
+    step(next(300), "agents unread indicator", || {
+        let ws = app::get().claude.clone();
+        if let Some(t) = ws.tabs.borrow().last() {
+            t.unread.set(true);
+        }
+        ws.emit(crate::claude::workspace::WsEvent::TabState);
+        println!("smoke: agents attention badge {}", ws.attention_badge());
+    });
+    step(next(300), "agents cycle tabs", || {
+        let ws = app::get().claude.clone();
+        ws.cycle_tab(1);
+        ws.cycle_tab(-1);
+    });
+    step(next(300), "agents notifications", || {
+        let id = app::get().claude.tabs.borrow().first().map(|t| t.id).unwrap_or(0);
+        crate::claude::notifier::post(id, "Smoke finished", "Body");
+        crate::claude::notifier::withdraw(id);
+        crate::claude::notifier::set_badge(2);
+        crate::claude::notifier::set_badge(0);
+    });
+    step(next(300), "agents quick open", crate::ui::claude::quick_open::show);
+    step(next(300), "agents quick open filter", || crate::ui::claude::quick_open::set_query("smoke"));
+    step(next(600), "agents quick open search", || {
+        println!("smoke: quick open shows {} entries", crate::ui::claude::quick_open::shown_count());
+        crate::ui::claude::quick_open::set_query("migrate the schema");
+    });
+    step(next(900), "agents quick open close", crate::ui::claude::quick_open::close);
+    step(next(200), "agents open in", || {
+        crate::ui::claude::open_in::when_ready(|| println!("smoke: open in apps {}", crate::ui::claude::open_in::installed().map(|a| a.len()).unwrap_or(0)));
     });
     step(next(400), "deep link", || app::get().handle_url(&format!("{}://section/repos", crate::brand::URL_SCHEME)));
     step(next(300), "gitlab account", || {

@@ -15,6 +15,7 @@ struct LoginView: View {
     @State private var deviceTask: Task<Void, Never>?
     @State private var showDevice = false
     @State private var prefilled: GitAccount?
+    @State private var deviceUsesBundled = false
 
     private var provider: GitProvider { GitProvider(rawValue: providerRaw) ?? .github }
 
@@ -27,6 +28,13 @@ struct LoginView: View {
     }
 
     private var supportsDevice: Bool { provider.isGitHub || provider == .gitlab }
+
+    static var bundledGitHubClientID: String? {
+        let id = (Bundle.main.object(forInfoDictionaryKey: "PYGitHubOAuthClientID") as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+        return id.isEmpty ? nil : id
+    }
+
+    private var oneClick: Bool { provider == .github && Self.bundledGitHubClientID != nil }
 
     private var cliBinary: String? {
         switch provider {
@@ -63,6 +71,25 @@ struct LoginView: View {
                         cardTitle("\(provider.title) server", icon: "server.rack", color: .syTeal)
                         TextField(provider.hostPlaceholder, text: $host)
                             .textFieldStyle(.roundedBorder)
+                    }
+                }
+
+                if oneClick {
+                    card {
+                        cardTitle("Sign in with GitHub", icon: "globe", color: .syIndigo)
+                        Text("Opens github.com in your browser. Enter the code shown here and you're in — no token to copy.")
+                            .font(.syCallout).foregroundStyle(Color.syMuted)
+                        if let device, deviceUsesBundled {
+                            deviceCodeRow(device)
+                        } else {
+                            Button {
+                                startDevice(clientOverride: Self.bundledGitHubClientID)
+                            } label: {
+                                Label("Sign in with GitHub", systemImage: "arrow.up.forward.app").frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                        }
                     }
                 }
 
@@ -110,7 +137,7 @@ struct LoginView: View {
                         DisclosureGroup(isExpanded: $showDevice) {
                             deviceContent.padding(.top, 6)
                         } label: {
-                            cardTitle("Sign in via browser (OAuth Device Flow)", icon: "globe", color: .syIndigo)
+                            cardTitle(oneClick ? "Use your own OAuth App" : "Sign in via browser (OAuth Device Flow)", icon: oneClick ? "gearshape" : "globe", color: .syIndigo)
                         }
                     }
                 }
@@ -173,27 +200,39 @@ struct LoginView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(deviceHelp).font(.syCallout).foregroundStyle(Color.syMuted)
             TextField(provider == .gitlab ? "Application ID" : "Client ID", text: $clientID).textFieldStyle(.roundedBorder)
-            if let device {
-                HStack(spacing: 12) {
-                    Text(device.userCode)
-                        .font(.syTitle.monospaced().weight(.bold))
-                        .foregroundStyle(Color.syText)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .card(radius: 8, fill: .sySunken)
-                    Button("Copy and open") {
-                        copyToPasteboard(device.userCode)
-                        openInBrowser(device.verificationUri)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    ProgressView().controlSize(.small)
-                }
-                Text("Enter the code at \(device.verificationUri) — you'll be signed in automatically.").font(.syCaption).foregroundStyle(Color.syMuted)
+            if let device, !deviceUsesBundled {
+                deviceCodeRow(device)
             } else {
                 Button("Get code") { startDevice() }
                     .disabled(clientID.trimmingCharacters(in: .whitespaces).isEmpty || effectiveHost.isEmpty)
             }
+        }
+    }
+
+    private func deviceCodeRow(_ device: DeviceCode) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text(device.userCode)
+                    .font(.syTitle.monospaced().weight(.bold))
+                    .foregroundStyle(Color.syText)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .card(radius: 8, fill: .sySunken)
+                Button("Copy and open") {
+                    copyToPasteboard(device.userCode)
+                    openInBrowser(device.verificationUri)
+                }
+                .buttonStyle(.borderedProminent)
+                WakeLoader()
+                Spacer(minLength: 0)
+                Button("Cancel") {
+                    deviceTask?.cancel()
+                    self.device = nil
+                }
+                .buttonStyle(.link)
+            }
+            Text("The code is copied. Paste it at \(device.verificationUri) — you'll be signed in automatically.").font(.syCaption).foregroundStyle(Color.syMuted)
         }
     }
 
@@ -278,8 +317,9 @@ struct LoginView: View {
         run { try await finish(GitCredential(token: t)) }
     }
 
-    private func startDevice() {
-        let id = clientID.trimmingCharacters(in: .whitespaces)
+    private func startDevice(clientOverride: String? = nil) {
+        let id = clientOverride ?? clientID.trimmingCharacters(in: .whitespaces)
+        deviceUsesBundled = clientOverride != nil
         let endpoint = provider == .gitlab ? DeviceFlow.gitlab(host: effectiveHost) : DeviceFlow.github(host: effectiveHost)
         let keepRefresh = provider == .gitlab
         error = nil

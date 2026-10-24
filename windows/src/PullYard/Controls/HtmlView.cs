@@ -25,7 +25,7 @@ public sealed class HtmlView : Grid
     public HtmlView(string page = "shell.html")
     {
         this.page = page;
-        web.DefaultBackgroundColor = Microsoft.UI.Colors.Transparent;
+        ApplyBackground();
         Children.Add(web);
         Loaded += (_, _) => EnsureInitialized().Forget();
         ThemeService.Changed += OnTheme;
@@ -64,8 +64,12 @@ public sealed class HtmlView : Grid
 
     public WebView2 WebView => web;
 
+    private void ApplyBackground() =>
+        web.DefaultBackgroundColor = ThemeService.IsBrand ? Palette.Get("panel") : Microsoft.UI.Colors.Transparent;
+
     private void OnTheme()
     {
+        ApplyBackground();
         WebViewEnvironment.ApplyScheme(web);
         if (lastRender is not null)
         {
@@ -132,6 +136,9 @@ public sealed class HtmlView : Grid
             case "key":
                 Shortcuts.Dispatch(this, id);
                 break;
+            case "app":
+                MainWindow.AppShortcut?.Invoke(id);
+                break;
             default:
                 ActionInvoked?.Invoke(type, id);
                 break;
@@ -160,12 +167,12 @@ public sealed class HtmlView : Grid
 
     public void Send(JsonObject msg) => Send(msg.ToJsonString());
 
-    public static string CssFor(string kind) => kind switch
+    public static string CssFor(string kind) => (kind switch
     {
         "diff" => ConversationHtml.Css + DiffHtml.Css,
         "code" => ConversationHtml.Css + CodeHtml.Css,
         _ => ConversationHtml.Css
-    };
+    }) + (ThemeService.IsBrand ? $"html,body{{background:{Palette.CssHex("panel")}}}" : "");
 
     public void Render(string html, string kind = "conversation", string? scroll = null, string bodyClass = "")
     {

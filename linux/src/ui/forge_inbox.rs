@@ -38,6 +38,7 @@ fn shell(title: &adw::WindowTitle, list: &gtk::ListBox, stack: &gtk::Stack, stat
     let hb = adw::HeaderBar::new();
     hb.set_show_end_title_buttons(false);
     hb.set_title_widget(Some(title));
+    hb.pack_end(&status.header_button());
     tv.add_top_bar(&hb);
     if let Some(search) = search {
         let search_bar = gtk::SearchBar::new();

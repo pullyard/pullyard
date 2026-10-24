@@ -34,11 +34,11 @@ struct ReposView: View {
                     .onAppear { if r.id == repos.last?.id { Task { await loadMore() } } }
             }
         }
-        .overlay { if loading && !checkingCache && repos.isEmpty { ProgressView().controlSize(.small) } }
+        .overlay { if loading && !checkingCache && repos.isEmpty { PullYardLoader(size: 44) } }
         .liveRefresh(updated: lastUpdated, refreshing: refreshing, error: repos.isEmpty ? nil : error) { await load() }
-        .searchable(text: $text, placement: .toolbar, prompt: "Filter repositories")
+        .toolbarSearch(text: $text, prompt: "Filter repositories")
         .navigationTitle("Repositories")
-        .toolbar {
+        .panelToolbar {
             ToolbarItem {
                 Toggle(isOn: $hideArchived) { Label("Hide archived", systemImage: "archivebox") }
                     .help("Hide archived")
@@ -202,7 +202,7 @@ struct RepoDetailView: View {
         }
         .navigationTitle(repo.name)
         .navigationSubtitle(repo.owner)
-        .toolbar {
+        .panelToolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { copyToPasteboard("gh repo clone \(repo.full)") } label: { Label("Copy clone", systemImage: "terminal") }
                     .help("Copy “gh repo clone”")
@@ -292,7 +292,7 @@ struct RepoDetailView: View {
             }
             if model.items.isEmpty, !model.loading { Text("Nothing here").font(.syBody).foregroundStyle(Color.syMuted) }
         }
-        .overlay { if model.loading && model.items.isEmpty { ProgressView().controlSize(.small) } }
+        .overlay { if model.loading && model.items.isEmpty { PullYardLoader(size: 44) } }
         .liveRefresh(updated: model.lastUpdated, refreshing: model.refreshing, error: model.items.isEmpty ? nil : model.error) {
             await model.load(api: app.api, account: app.cacheAccount, query: query, silent: true)
         }

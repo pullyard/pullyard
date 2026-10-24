@@ -40,6 +40,7 @@ final class ClaudeAccountStore {
     @ObservationIgnored private var loginProcess: Process?
     @ObservationIgnored private var loginInput: FileHandle?
     @ObservationIgnored private var output = ""
+    @ObservationIgnored private var reauthWatch: Task<Void, Never>?
 
     var isLoggedIn: Bool {
         if case .loggedIn = status { return true }
@@ -62,7 +63,8 @@ final class ClaudeAccountStore {
         return env
     }
 
-    func refresh() async {
+    func refresh(force: Bool = false) async {
+        if !force, isLoggedIn, let last = lastChecked, Date().timeIntervalSince(last) < 60 { return }
         guard let bin = ClaudeLauncher.claudeBinary else {
             status = .notInstalled
             return
@@ -143,10 +145,58 @@ final class ClaudeAccountStore {
         }
     }
 
-    func submitCode(_ code: String) {
-        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let loginInput else { return }
-        try? loginInput.write(contentsOf: Data((trimmed + "\n").utf8))
+    func loginInTerminal(method: ClaudeLoginMethod, email: String?) {
+        cancelLogin()
+        do {
+            let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("PullYard/claude", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let scriptURL = dir.appendingPathComponent("login-\(UUID().uuidString.prefix(8)).command")
+            let configExport = ClaudeProfiles.shared.activeOverride.map { "export CLAUDE_CONFIG_DIR=\(ClaudeLauncher.shellQuote($0))" } ?? ""
+            var args = "auth login \(method.flag)"
+            if let email = email?.trimmingCharacters(in: .whitespaces), !email.isEmpty { args += " --email \(ClaudeLauncher.shellQuote(email))" }
+            let script = """
+            #!/bin/bash
+            export PATH="$HOME/.local/bin:$HOME/.claude/local:/opt/homebrew/bin:/usr/local/bin:$PATH"
+            unset CLAUDECODE PULLYARD_TOKEN $(env | grep -o '^CLAUDE_CODE_[A-Z_]*')
+            \(configExport)
+            rm -f "$0"
+            clear
+            if ! command -v claude >/dev/null 2>&1; then echo "claude CLI not found in PATH"; exit 1; fi
+            claude \(args)
+            echo
+            echo "You can close this window and return to PullYard."
+
+            """
+            try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
+            guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else {
+                loginError = "Terminal app not found"
+                return
+            }
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.open([scriptURL], withApplicationAt: appURL, configuration: config)
+        } catch {
+            loginError = error.localizedDescription
+        }
+    }
+
+    func reauthenticate(onSuccess: @escaping @MainActor () -> Void) {
+        let method: ClaudeLoginMethod = (info?.method ?? "").lowercased().contains("console") ? .console : .claudeai
+        status = .loggedOut
+        reauthWatch?.cancel()
+        loginInTerminal(method: method, email: nil)
+        reauthWatch = Task { [weak self] in
+            for attempt in 0..<90 {
+                try? await Task.sleep(for: .seconds(min(3 + attempt, 10)))
+                guard let self, !Task.isCancelled else { return }
+                await self.refresh()
+                if self.isLoggedIn {
+                    onSuccess()
+                    return
+                }
+            }
+        }
     }
 
     func cancelLogin() {
@@ -161,7 +211,7 @@ final class ClaudeAccountStore {
             let tail = output.components(separatedBy: "\n").filter { !$0.contains("http") && !$0.trimmingCharacters(in: .whitespaces).isEmpty }.suffix(3).joined(separator: "\n")
             loginError = tail.isEmpty ? "Sign-in failed (code \(code))" : tail
         }
-        Task { await refresh() }
+        Task { await refresh(force: true) }
     }
 
     func logout(configDir: String? = nil) async {
@@ -195,15 +245,15 @@ final class ClaudeAccountStore {
 struct ClaudeAuthView: View {
     @State private var method: ClaudeLoginMethod = .claudeai
     @State private var email = ""
-    @State private var code = ""
     private var store: ClaudeAccountStore { ClaudeAccountStore.shared }
     static let installCommand = "curl -fsSL https://claude.ai/install.sh | bash"
 
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                IconTile(systemImage: "sparkles", color: .syCoral, size: 56)
-                Text("Claude Code").font(.syTitle.weight(.bold)).foregroundStyle(Color.syText)
+                Image(systemName: "terminal").font(.system(size: 34, weight: .light)).foregroundStyle(Color.syMuted)
+                Text("Agents").font(.syTitle.weight(.bold)).foregroundStyle(Color.syText)
+                Text("Runs Claude Code, installed on this Mac").font(.syCallout).foregroundStyle(Color.syMuted)
                 ClaudeProfileSwitcher()
                 switch store.status {
                 case .notInstalled: installCard
@@ -218,6 +268,9 @@ struct ClaudeAuthView: View {
         }
         .surface(.panel)
         .task { await store.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await store.refresh() }
+        }
     }
 
     private var installCard: some View {
@@ -235,7 +288,7 @@ struct ClaudeAuthView: View {
                 Button("Copy command") { copyToPasteboard(Self.installCommand) }
                 Button("Docs") { openInBrowser("https://code.claude.com/docs/en/setup") }
                 Spacer()
-                Button("Check again") { Task { await store.refresh() } }.buttonStyle(.borderedProminent).tint(.syCoral)
+                Button("Check again") { Task { await store.refresh(force: true) } }.buttonStyle(.borderedProminent).tint(.syAgentAccent)
             }
         }
     }
@@ -252,21 +305,12 @@ struct ClaudeAuthView: View {
                         Text("Confirm the sign-in in your browser…")
                     }
                     if let url = store.fallbackURL {
-                        Text("Browser didn't open, or the page shows a code?").font(.syCaption).foregroundStyle(Color.syMuted)
+                        Text("Browser didn't open, or the page shows a code? Finish the sign-in in Terminal: the code goes straight to Claude Code, never through PullYard.").font(.syCaption).foregroundStyle(Color.syMuted)
                         HStack {
                             Button("Open sign-in link") { LinkBrowser.open(url) }
-                            Button("Copy link") { copyToPasteboard(url.absoluteString) }
+                            Button("Sign in in Terminal") { store.loginInTerminal(method: method, email: email) }
                         }
                         .controlSize(.small)
-                        HStack {
-                            SecureField("Paste the code from the page", text: $code)
-                                .textFieldStyle(.roundedBorder)
-                                .onSubmit { store.submitCode(code); code = "" }
-                            Button("Submit") { store.submitCode(code); code = "" }
-                                .buttonStyle(.borderedProminent)
-                                .tint(.syCoral)
-                                .disabled(code.isEmpty)
-                        }
                     }
                     Button("Cancel", role: .cancel) { store.cancelLogin() }
                 }
@@ -278,6 +322,8 @@ struct ClaudeAuthView: View {
                 TextField("Email (optional)", text: $email)
                     .textFieldStyle(.roundedBorder)
                 HStack {
+                    Button("Sign in in Terminal") { store.loginInTerminal(method: method, email: email) }
+                        .controlSize(.large)
                     Spacer()
                     Button {
                         store.login(method: method, email: email)
@@ -285,7 +331,7 @@ struct ClaudeAuthView: View {
                         Label("Sign in with browser", systemImage: "person.badge.key")
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.syCoral)
+                    .tint(.syAgentAccent)
                     .controlSize(.large)
                     .keyboardShortcut(.defaultAction)
                 }
@@ -329,10 +375,10 @@ struct ClaudeAccountCard: View {
                     if let plan = info.subscription {
                         Text(plan)
                             .font(.syCaption2.weight(.semibold))
-                            .foregroundStyle(Color.syCoral)
+                            .foregroundStyle(Color.syMuted)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.syCoral.opacity(0.12)))
+                            .background(Capsule().fill(Color.syMuted.opacity(0.14)))
                     } else if info.method == "console" || info.provider != "firstParty" {
                         Text(info.provider == "firstParty" ? "API" : (info.provider ?? "API")).font(.syCaption2)
                     }
@@ -347,7 +393,7 @@ struct ClaudeAccountCard: View {
                 Button("Sign out of this account…", role: .destructive) { confirmLogout = true }
                 Divider()
                 Button("Usage page") { openInBrowser("https://claude.ai/settings/usage") }
-                Button("Refresh status") { Task { await store.refresh() } }
+                Button("Refresh status") { Task { await store.refresh(force: true) } }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }

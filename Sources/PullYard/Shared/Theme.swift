@@ -118,6 +118,7 @@ extension Color {
     static let syLineStrong = Color(nsColor: .syLineStrong)
     static let syText = Color(nsColor: .syText)
     static let syMuted = Color(nsColor: .syMuted)
+    static var syAgentAccent: Color { Theme.isBrand ? .syCoral : .accentColor }
     static let syDim = Color(nsColor: .syDim)
     static let syAccent = Color(nsColor: .syAccent)
     static let sySky = Color(nsColor: .sySky)

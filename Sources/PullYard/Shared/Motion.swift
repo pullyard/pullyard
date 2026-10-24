@@ -26,6 +26,10 @@ extension AnyTransition {
         Motion.reduced ? .opacity : .asymmetric(insertion: .opacity.combined(with: .offset(x: 14)), removal: .opacity)
     }
 
+    static var reveal: AnyTransition {
+        Motion.reduced ? .opacity : .asymmetric(insertion: .opacity.combined(with: .offset(y: -6)), removal: .opacity.combined(with: .offset(y: -4)))
+    }
+
     static var pop: AnyTransition {
         Motion.reduced ? .opacity : .opacity.combined(with: .scale(scale: 0.96))
     }

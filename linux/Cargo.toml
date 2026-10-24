@@ -1,6 +1,6 @@
 [package]
 name = "pullyard"
-version = "2.12.0"
+version = "2.13.0"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT"
@@ -63,4 +63,5 @@ assets = [
     ["dist/share/icons/hicolor/128x128/apps/*", "usr/share/icons/hicolor/128x128/apps/", "644"],
     ["dist/share/icons/hicolor/256x256/apps/*", "usr/share/icons/hicolor/256x256/apps/", "644"],
     ["dist/share/icons/hicolor/512x512/apps/*", "usr/share/icons/hicolor/512x512/apps/", "644"],
+    ["dist/THIRD-PARTY-NOTICES.txt", "usr/share/doc/pullyard/THIRD-PARTY-NOTICES.txt", "644"],
 ]

@@ -47,11 +47,11 @@ struct NotificationsView: View {
                     .padding(.top, 30)
                 }
             }
-            .overlay { if loading && !checkingCache && items.isEmpty { ProgressView().controlSize(.small) } }
+            .overlay { if loading && !checkingCache && items.isEmpty { PullYardLoader(size: 44) } }
             .liveRefresh(updated: lastUpdated, refreshing: loading, error: items.isEmpty ? nil : error) { await load() }
         }
         .navigationTitle("Notifications")
-        .toolbar {
+        .panelToolbar {
             ToolbarItem {
                 Button { Task { await markAll() } } label: { Label("Mark all read", systemImage: "checkmark.circle") }
                     .help("Mark all as read")

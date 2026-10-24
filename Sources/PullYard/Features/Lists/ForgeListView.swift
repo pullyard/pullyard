@@ -153,7 +153,7 @@ struct ForgeListView: View {
                             if open { ForEach(group.items) { row($0, showRepo: false) } }
                         } header: {
                             RepoGroupHeader(group: group, expanded: open) {
-                                if collapsed.contains(group.id) { collapsed.remove(group.id) } else { collapsed.insert(group.id) }
+                                withAnimation(Motion.quick) { if collapsed.contains(group.id) { collapsed.remove(group.id) } else { collapsed.insert(group.id) } }
                             }
                         }
                     }
@@ -167,13 +167,13 @@ struct ForgeListView: View {
             .opacity(model.loading && !model.items.isEmpty ? 0.55 : 1)
             .animation(.easeOut(duration: 0.15), value: model.loading)
             .overlay {
-                if model.loading && model.items.isEmpty { ProgressView().controlSize(.small) }
+                if model.loading && model.items.isEmpty { PullYardLoader(size: 44) }
             }
             .liveRefresh(updated: model.lastUpdated, refreshing: model.refreshing, error: model.items.isEmpty ? nil : model.error) {
                 await reload(silent: true)
             }
         }
-        .searchable(text: $text, placement: .toolbar, prompt: "Filter: title, repository, author")
+        .toolbarSearch(text: $text, prompt: "Filter: title, repository, author")
         .navigationTitle(kind.title(app.provider))
         .navigationSubtitle(items.isEmpty ? "" : "\(items.count)")
         .task(id: "\(stateFilter.rawValue)|\(app.account?.id ?? "")") { await reload() }

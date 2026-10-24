@@ -4,7 +4,7 @@ using PullYard.Core.Util;
 
 namespace PullYard.Core.Update;
 
-public sealed record Release(string Version, string Name, string Notes, string PageUrl, DateTimeOffset? PublishedAt, string? InstallerUrl, long InstallerSize, string? PortableUrl, long PortableSize);
+public sealed record Release(string Version, string Name, string Notes, string PageUrl, DateTimeOffset? PublishedAt, string? InstallerUrl, long InstallerSize, string? PortableUrl, long PortableSize, string? SignatureUrl = null);
 
 public sealed class UpdateException : Exception
 {
@@ -45,6 +45,7 @@ public static class Releases
         JsonObject? Find(string name) => assets.FirstOrDefault(a => string.Equals(a.Str("name"), name, StringComparison.OrdinalIgnoreCase));
         var installer = Find(AppInfo.InstallerAssetName(arch));
         var portable = Find(AppInfo.PortableAssetName(arch));
+        var signature = Find(AppInfo.InstallerAssetName(arch) + ".sig");
         if (installer is null && portable is null) throw new UpdateException($"The release has no Windows {arch} download.");
         var version = (o.Str("tag_name") ?? "").Trim();
         if (version.StartsWith('v') || version.StartsWith('V')) version = version[1..];
@@ -59,7 +60,8 @@ public static class Releases
             installer?.Str("browser_download_url"),
             (long)(installer?.Dbl("size") ?? 0),
             portable?.Str("browser_download_url"),
-            (long)(portable?.Dbl("size") ?? 0));
+            (long)(portable?.Dbl("size") ?? 0),
+            signature?.Str("browser_download_url"));
     }
 
     public static int Compare(string a, string b)

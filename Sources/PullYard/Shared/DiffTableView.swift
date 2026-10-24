@@ -226,6 +226,7 @@ struct DiffTableView: NSViewRepresentable {
         private var viewHeights: [String: CGFloat] = [:]
         private var width: CGFloat = 0
         private var widthObserver: NSObjectProtocol?
+        private var widthSettle: DispatchWorkItem?
 
         deinit {
             if let widthObserver { NotificationCenter.default.removeObserver(widthObserver) }
@@ -233,13 +234,18 @@ struct DiffTableView: NSViewRepresentable {
 
         func observeWidth(_ scroll: NSScrollView) {
             widthObserver = NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: scroll.contentView, queue: .main) { [weak self] _ in
-                guard let self, let table = self.table else { return }
-                let w = table.bounds.width
-                if abs(w - self.width) > 1 {
+                guard let self, let table = self.table, abs(table.bounds.width - self.width) > 1 else { return }
+                self.widthSettle?.cancel()
+                let settle = DispatchWorkItem { [weak self] in
+                    guard let self, let table = self.table else { return }
+                    let w = table.bounds.width
+                    guard abs(w - self.width) > 1 else { return }
                     self.width = w
                     self.lineHeights.removeAll()
                     table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<self.rows.count))
                 }
+                self.widthSettle = settle
+                DispatchQueue.main.asyncAfter(deadline: .now() + (self.width == 0 ? 0 : 0.15), execute: settle)
             }
             scroll.contentView.postsFrameChangedNotifications = true
         }

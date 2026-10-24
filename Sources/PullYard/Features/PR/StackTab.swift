@@ -104,6 +104,7 @@ struct StackTab: View {
     @State private var input = StackInput()
     @State private var sessions: [Int: ClaudeSessionInfo] = [:]
     @State private var notesFor: Int?
+    @State private var refreshingStack = false
     private let notes = StackNotes.shared
 
     private var geometry: StackGeometry {
@@ -127,6 +128,23 @@ struct StackTab: View {
                     .foregroundStyle(Color.syMuted)
                     .lineLimit(1)
                 Spacer()
+                Button {
+                    Task {
+                        refreshingStack = true
+                        await model.loadStack(force: true)
+                        refreshingStack = false
+                    }
+                } label: {
+                    if refreshingStack {
+                        PullYardLoader(size: 22)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(Color.syMuted)
+                .disabled(refreshingStack)
+                .help("Refresh stack")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -757,7 +775,7 @@ private struct StackListRow: View {
                 Text(key).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
             }
             if hasSession {
-                Image(systemName: "sparkles").font(.syCaption).foregroundStyle(Color.syCoral).help("Has a Claude Code session")
+                Image(systemName: "terminal").font(.syCaption).foregroundStyle(Color.syMuted).help("Has a Claude Code session")
             }
             BranchChip(name: node.headRefName, color: current ? .syViolet : .sySlate)
             Button(action: onNote) {

@@ -78,12 +78,13 @@ struct RefreshFooter: View {
 }
 
 extension View {
-    func liveRefresh(updated: Date?, refreshing: Bool, error: String? = nil, footer: Bool = true, web: Bool = false, action: @escaping @MainActor () async -> Void) -> some View {
-        modifier(LiveRefreshModifier(updated: updated, refreshing: refreshing, error: error, footer: footer, web: web, action: action))
+    func liveRefresh(updated: Date?, refreshing: Bool, error: String? = nil, footer: Bool = true, web: Bool = false, button: Bool = true, revealOnTick: Bool? = nil, action: @escaping @MainActor () async -> Void) -> some View {
+        modifier(LiveRefreshModifier(updated: updated, refreshing: refreshing, error: error, footer: footer, web: web, button: button, revealOnTick: revealOnTick ?? footer, action: action))
     }
 }
 
-private let pullThreshold: CGFloat = 36
+private let pullThreshold: CGFloat = 64
+private let pullCooldown: TimeInterval = 10
 private let heldMargin: CGFloat = 48
 
 enum PullPhase: Equatable {
@@ -96,16 +97,24 @@ private struct LiveRefreshModifier: ViewModifier {
     let error: String?
     let footer: Bool
     let web: Bool
+    let button: Bool
+    let revealOnTick: Bool
     let action: @MainActor () async -> Void
+    @Environment(AppModel.self) private var app
     @State private var pull: CGFloat = 0
     @State private var phase: PullPhase = .idle
+    @State private var lastPull: Date?
+    @State private var scrollTopToken = 0
+    @State private var revealing = false
+    @State private var sawRefreshing = false
+    @State private var manual = false
 
     private var held: Bool { phase != .idle }
 
     func body(content: Content) -> some View {
         VStack(spacing: 0) {
             scrollArea(content)
-                .background(ScrollPullProbe(pull: $pull, onTrigger: pulled))
+                .background(ScrollPullProbe(pull: $pull, scrollTopToken: scrollTopToken, onTrigger: pulled))
                 .overlay(alignment: .top) {
                     PullIndicator(pull: pull, phase: phase)
                         .allowsHitTesting(false)
@@ -116,9 +125,25 @@ private struct LiveRefreshModifier: ViewModifier {
                 }
             if footer {
                 RefreshFooter(updated: updated, refreshing: refreshing && phase == .idle, error: error) {
-                    Task { await action() }
+                    manualRefresh()
                 }
             }
+        }
+        .panelToolbar {
+            if button {
+                ToolbarItem {
+                    Button(action: manualRefresh) {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .help("Refresh")
+                    .disabled(phase != .idle)
+                }
+            }
+        }
+        .onChange(of: app.refreshTick) { if revealOnTick { reveal() } }
+        .onChange(of: refreshing) { _, now in
+            guard revealing else { return }
+            if now { sawRefreshing = true } else if sawRefreshing { finish() }
         }
     }
 
@@ -129,19 +154,59 @@ private struct LiveRefreshModifier: ViewModifier {
         } else {
             content
                 .scrollBounceBehavior(.always, axes: .vertical)
-                .contentMargins(.top, held ? heldMargin : nil, for: .scrollContent)
+                .contentMargins(.top, held && !manual ? heldMargin : nil, for: .scrollContent)
+                .padding(.top, held && manual ? heldMargin : 0)
         }
     }
 
     private func pulled() {
         guard phase == .idle else { return }
+        if let lastPull, Date().timeIntervalSince(lastPull) < pullCooldown { return }
+        lastPull = Date()
+        run()
+    }
+
+    private func manualRefresh() {
+        guard phase == .idle else { return }
+        lastPull = Date()
+        scrollTopToken += 1
+        manual = true
+        run()
+    }
+
+    private func run() {
         withAnimation(Motion.insert) { phase = .loading }
         Task { @MainActor in
             await action()
-            withAnimation(Motion.fade) { phase = .done }
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            finish()
+        }
+    }
+
+    private func reveal() {
+        guard phase == .idle else { return }
+        scrollTopToken += 1
+        manual = true
+        revealing = true
+        sawRefreshing = refreshing
+        withAnimation(Motion.insert) { phase = .loading }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            if revealing && !sawRefreshing { finish() }
+        }
+    }
+
+    private func finish() {
+        revealing = false
+        guard phase == .loading else { return }
+        withAnimation(Motion.fade) { phase = .done }
+        Task { @MainActor in
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard phase == .done else { return }
-            withAnimation(Motion.insert) { phase = .idle }
+            withAnimation(Motion.insert) {
+                phase = .idle
+                manual = false
+            }
         }
     }
 }
@@ -149,7 +214,6 @@ private struct LiveRefreshModifier: ViewModifier {
 private struct PullIndicator: View {
     let pull: CGFloat
     let phase: PullPhase
-    @State private var spin = false
 
     private var progress: CGFloat { min(1, pull / pullThreshold) }
 
@@ -159,7 +223,7 @@ private struct PullIndicator: View {
             switch phase {
             case .done:
                 HStack(spacing: 5) {
-                    Image(systemName: "checkmark").font(.syCaption2.weight(.bold)).foregroundStyle(Color.syGreen)
+                    Image(systemName: "checkmark").font(.syCaption2.weight(.bold)).foregroundStyle(Color.syMuted)
                     Text("Updated just now").font(.syCaption.weight(.medium)).foregroundStyle(Color.syMuted)
                 }
                 .padding(.horizontal, 10)
@@ -167,17 +231,16 @@ private struct PullIndicator: View {
                 .background(.regularMaterial, in: Capsule())
                 .transition(.opacity)
             case .loading:
-                ring(trim: 0.28)
-                    .rotationEffect(.degrees(spin ? 360 : 0))
-                    .onAppear {
-                        guard !Motion.reduced else { return }
-                        withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) { spin = true }
-                    }
-                    .onDisappear { spin = false }
+                PullYardLoader(size: 30)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(.regularMaterial, in: Capsule())
             case .idle:
-                ring(trim: progress)
-                    .scaleEffect(0.6 + 0.4 * progress)
-                    .rotationEffect(.degrees(Double(progress) * 270))
+                PullYardLogoMark(progress: Double(progress), size: 30)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(.regularMaterial, in: Capsule())
+                    .scaleEffect(0.75 + 0.25 * progress)
             }
         }
         .frame(height: 26)
@@ -186,44 +249,30 @@ private struct PullIndicator: View {
         .animation(Motion.fade, value: phase)
     }
 
-    private func ring(trim: CGFloat) -> some View {
-        ZStack {
-            Circle().stroke(Color.syLine, lineWidth: 2.5)
-            Circle()
-                .trim(from: 0, to: max(0.001, trim))
-                .stroke(Color.sySky, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-        }
-        .frame(width: 22, height: 22)
-        .padding(2)
-        .background(Circle().fill(.regularMaterial))
-    }
 }
 
 struct PullGesture {
     private(set) var value: CGFloat = 0
     private var active = false
-    private var fired = false
 
     mutating func handle(_ event: NSEvent, atTop: Bool) -> (pull: CGFloat?, fire: Bool) {
         guard event.hasPreciseScrollingDeltas, event.momentumPhase == [] else { return (nil, false) }
         if event.phase.contains(.began) || event.phase.contains(.mayBegin) {
-            active = true
-            fired = false
+            active = atTop
             value = 0
         }
-        if active, event.phase.contains(.changed) {
-            if atTop || value > 0 { value = max(0, value + event.scrollingDeltaY) }
-            if !fired, value >= pullThreshold {
-                fired = true
-                return (value, true)
+        if event.phase.contains(.changed) {
+            guard active else { return (nil, false) }
+            if !atTop && value <= 0 {
+                active = false
+                return (0, false)
             }
+            value = max(0, value + event.scrollingDeltaY)
             return (value, false)
         }
         if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
-            let fire = active && !fired && event.phase.contains(.ended) && value >= pullThreshold * 0.7
+            let fire = active && event.phase.contains(.ended) && value >= pullThreshold
             active = false
-            fired = false
             value = 0
             return (0, fire)
         }
@@ -252,6 +301,7 @@ final class PullWebView: WKWebView {
 
 private struct ScrollPullProbe: NSViewRepresentable {
     @Binding var pull: CGFloat
+    var scrollTopToken = 0
     let onTrigger: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -268,6 +318,10 @@ private struct ScrollPullProbe: NSViewRepresentable {
         }
         context.coordinator.onTrigger = onTrigger
         view.coordinator = context.coordinator
+        if context.coordinator.scrollTopToken != scrollTopToken {
+            context.coordinator.scrollTopToken = scrollTopToken
+            context.coordinator.scrollToTop()
+        }
     }
 
     static func dismantleNSView(_ view: ProbeView, coordinator: Coordinator) {
@@ -339,6 +393,7 @@ private struct ScrollPullProbe: NSViewRepresentable {
         weak var webView: PullWebView?
         var onPull: (CGFloat) -> Void = { _ in }
         var onTrigger: () -> Void = {}
+        var scrollTopToken = 0
         private var monitor: Any?
         private var gesture = PullGesture()
         private var settle: DispatchWorkItem?
@@ -371,6 +426,24 @@ private struct ScrollPullProbe: NSViewRepresentable {
             webView?.onPull = nil
             webView?.onTrigger = nil
             webView = nil
+        }
+
+        func scrollToTop() {
+            if let web = webView {
+                web.evaluateJavaScript("window.scrollTo({top: 0, behavior: 'smooth'})")
+                return
+            }
+            guard let scroll = scrollView else { return }
+            let clip = scroll.contentView
+            let top = NSPoint(x: clip.bounds.minX, y: clip.isFlipped ? -clip.contentInsets.top : max(0, (scroll.documentView?.frame.height ?? 0) - clip.bounds.height))
+            guard abs(clip.bounds.origin.y - top.y) > 0.5 else { return }
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = Motion.reduced ? 0 : 0.28
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                clip.animator().setBoundsOrigin(top)
+            } completionHandler: {
+                MainActor.assumeIsolated { scroll.reflectScrolledClipView(clip) }
+            }
         }
 
         private var atTop: Bool {

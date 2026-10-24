@@ -263,6 +263,56 @@ public sealed partial class ClaudeAccountStore : ObservableObject
         else context.Post(_ => a(), null);
     }
 
+    private CancellationTokenSource? reauthWatch;
+
+    public bool Reauthenticate(Action onSuccess)
+    {
+        var method = (Info?.Method ?? "").Contains("console", StringComparison.OrdinalIgnoreCase) ? ClaudeLoginMethod.Console : ClaudeLoginMethod.ClaudeAi;
+        reauthWatch?.Cancel();
+        var cts = new CancellationTokenSource();
+        reauthWatch = cts;
+        try
+        {
+            ClaudeLauncher.LaunchInTerminal(new[] { "auth", "login", method.Flag() }, "Claude sign-in", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ClaudeProfiles.Shared.ActiveOverride);
+        }
+        catch (Exception e)
+        {
+            LoginError = e.Message;
+            cts.Cancel();
+            return false;
+        }
+        Status = ClaudeAccountStatus.LoggedOut;
+        WatchSignIn(cts.Token, onSuccess).Forget();
+        return true;
+    }
+
+    public void CancelReauthentication() => reauthWatch?.Cancel();
+
+    private async Task WatchSignIn(CancellationToken token, Action onSuccess)
+    {
+        for (var attempt = 0; attempt < 90; attempt++)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(ReauthDelay(attempt)), token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            if (token.IsCancellationRequested) return;
+            await Refresh();
+            if (token.IsCancellationRequested) return;
+            if (IsLoggedIn)
+            {
+                Ui(onSuccess);
+                return;
+            }
+        }
+    }
+
+    public static int ReauthDelay(int attempt) => Math.Min(3 + attempt, 10);
+
     public async Task Refresh()
     {
         if (ClaudeLauncher.Command is not { } cmd)

@@ -40,12 +40,15 @@ public partial class App : Application
         {
             ShowMainWindow();
             if (action == "update") AppViewModel.Shared.Updater.Present();
+            else AgentNotifier.Handle(action);
         });
         Notifications.Register();
         DiagnosticsService.Restore();
         AppViewModel.Shared.Initialize();
+        if (Program.SmokeTour) Settings.Shared.Set(Keys.ThemeStyle, AppInfo.Env("TOUR_STYLE") == "system" ? "system" : "brand");
         MainWindow = new MainWindow();
         MainWindow.Activate();
+        AgentNotifier.Attach(AppViewModel.Shared, MainWindow);
         CreateTray();
         AppViewModel.Shared.HandleArguments(Environment.CommandLine);
         if (Program.SmokeTour)

@@ -31,6 +31,8 @@ public sealed class ClaudeWorkspaceView : Grid
 
     public ClaudeWorkspaceView()
     {
+        Background = ThemeService.IsBrand ? Palette.Brush("panel") : null;
+        ThemeService.Changed += () => Background = ThemeService.IsBrand ? Palette.Brush("panel") : null;
         Children.Add(host);
         Loaded += (_, _) =>
         {
@@ -53,8 +55,8 @@ public sealed class ClaudeWorkspaceView : Grid
         tick.Tick += (_, _) =>
         {
             foreach (var t in Ws.Tabs) t.UpdateState();
-            RenderTabBar();
-            RenderControlBar();
+            RenderTabBar(false);
+            RenderControlBar(false);
         };
         Ws.AttentionRequested += _ =>
         {
@@ -87,7 +89,7 @@ public sealed class ClaudeWorkspaceView : Grid
     private void Render()
     {
         var status = ClaudeAccountStore.Shared.Status;
-        App.MainWindow?.SetSubtitle(Ws.SelectedTab is { } st ? $"{st.Title} — {Fmt.HomeRelative(st.Folder)}" : L.T("Section_Claude", "Claude Code"));
+        App.MainWindow?.SetSubtitle(Ws.SelectedTab is { } st ? $"{st.Title} — {Fmt.HomeRelative(st.Folder)}" : L.T("Section_Claude", "Agents"));
         if (status is ClaudeAccountStatus.LoggedOut or ClaudeAccountStatus.NotInstalled)
         {
             authView ??= new ClaudeAuthView();
@@ -153,7 +155,7 @@ public sealed class ClaudeWorkspaceView : Grid
     {
         var tile = Ui.IconTile("", "coral", 56);
         tile.HorizontalAlignment = HorizontalAlignment.Center;
-        var title = Ui.Text(L.T("Section_Claude", "Claude Code"), 20, "text", FontWeights.SemiBold);
+        var title = Ui.Text(L.T("Section_Claude", "Agents"), 20, "text", FontWeights.SemiBold);
         title.HorizontalAlignment = HorizontalAlignment.Center;
         var sub = Ui.Text(L.T("Claude_EmptyHelp", "Start a new session in a project or resume one from the history on the left."), 13, "muted", wrap: true);
         sub.TextAlignment = TextAlignment.Center;
@@ -176,9 +178,30 @@ public sealed class ClaudeWorkspaceView : Grid
         return panel;
     }
 
-    private void RenderTabBar()
+    private string? tabBarKey;
+    private string? controlBarKey;
+
+    private string TabBarKey()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(Ws.Projects)).Append('|').Append(Ws.SelectedTab?.Id);
+        foreach (var t in Ws.Tabs) sb.Append('|').Append(t.Id).Append(':').Append(t.Title).Append(':').Append(t.Kind);
+        return sb.ToString();
+    }
+
+    private string ControlBarKey(ClaudeTab tab)
+    {
+        var chat = tab.Chat;
+        return string.Join("|", tab.Id, tab.Kind, tab.Git.Branch, tab.State, Fmt.Memory(tab.MemoryBytes), tab.Running, tab.SessionId.Length > 0, Ws.Model, Ws.Effort, Ws.Mode,
+            chat?.Model, chat is not null && (chat.TotalCost > 0 || chat.SessionId is not null), Ws.ShowInspector);
+    }
+
+    private void RenderTabBar(bool force = true)
     {
         if (workspace is null) return;
+        var key = TabBarKey();
+        if (!force && key == tabBarKey) return;
+        tabBarKey = key;
         tabBar.Children.Clear();
         foreach (var tab in Ws.Tabs)
         {
@@ -188,7 +211,7 @@ public sealed class ClaudeWorkspaceView : Grid
             title.MaxWidth = 180;
             var close = Ui.IconButton("", L.T("Common_Close", "Close"), () => Ws.Close(tab), "dim");
             close.Padding = new Thickness(4);
-            var content = Ui.H(6, stripe, SessionRow.StateBadge(tab.State, 0, compact: true), Ui.Glyph(tab.Kind == ClaudeTabKind.Chat ? "" : "", 10), title, Ui.Text(tab.ProjectName, 12, "dim"), close);
+            var content = Ui.H(6, stripe, SessionDot.ForTab(tab), Ui.Glyph(tab.Kind == ClaudeTabKind.Chat ? "" : "", 10), title, Ui.Text(tab.ProjectName, 12, "dim"), close);
             var b = new Button
             {
                 Content = content,
@@ -220,15 +243,19 @@ public sealed class ClaudeWorkspaceView : Grid
         tabBar.Children.Add(add);
     }
 
-    private void RenderControlBar()
+    private void RenderControlBar(bool force = true)
     {
         if (workspace is null || Ws.SelectedTab is not { } tab) return;
+        var key = ControlBarKey(tab);
+        if (!force && key == controlBarKey) return;
+        controlBarKey = key;
         var left = Ui.H(6, Ui.IconTile("", Palette.ProjectKey(tab.Folder), 18), Ui.Text(tab.ProjectName, 13, "text", FontWeights.SemiBold));
         if (tab.Git.Branch is { } b && b != "HEAD") left.Children.Add(SessionRow.BranchTag(b));
         var badge = SessionRow.StateBadge(tab.State, tab.MemoryBytes);
         badge.Margin = new Thickness(4, 0, 0, 0);
         left.Children.Add(badge);
         var right = Ui.H(6);
+        right.Children.Add(OpenInButton(tab.Folder));
         if (tab.Kind == ClaudeTabKind.Terminal)
         {
             right.Children.Add(ControlMenu("", Ws.Model.Title(), L.T("Claude_Model", "Model"), menu =>
@@ -274,6 +301,54 @@ public sealed class ClaudeWorkspaceView : Grid
         controlBar.Content = Ui.Columns((left, Ui.Star), (right, Ui.Auto));
     }
 
+    private static FrameworkElement OpenInButton(string folder)
+    {
+        var apps = OpenIn.Apps;
+        var primary = OpenIn.Primary;
+        var button = new SplitButton
+        {
+            Content = Ui.H(5, Ui.Glyph(OpenIn.Glyph(primary?.Kind), 12, "text"), Ui.Text(primary?.Name ?? L.T("Agents_OpenIn", "Open in"), 12.5)),
+            Padding = new Thickness(8, 3, 8, 3)
+        };
+        button.Click += (_, _) =>
+        {
+            if (OpenIn.Primary is { } app) OpenIn.Open(app, folder);
+        };
+        var menu = new MenuFlyout();
+        void Section(string title, ExternalAppKind kind)
+        {
+            var list = apps.Where(a => a.Kind == kind).ToList();
+            if (list.Count == 0) return;
+            if (menu.Items.Count > 0) menu.Items.Add(Ui.Separator());
+            menu.Items.Add(new MenuFlyoutItem { Text = title, IsEnabled = false });
+            foreach (var app in list)
+            {
+                var a = app;
+                menu.Items.Add(Ui.MenuItem(a.Name, () =>
+                {
+                    OpenIn.Remember(a);
+                    OpenIn.Open(a, folder);
+                }, OpenIn.Glyph(a.Kind)));
+            }
+        }
+        Section(L.T("Agents_Editors", "Editors"), ExternalAppKind.Editor);
+        Section(L.T("Agents_Terminals", "Terminals"), ExternalAppKind.Terminal);
+        if (apps.FirstOrDefault(a => a.Kind == ExternalAppKind.Explorer) is { } explorer)
+        {
+            if (menu.Items.Count > 0) menu.Items.Add(Ui.Separator());
+            menu.Items.Add(Ui.MenuItem(explorer.Name, () =>
+            {
+                OpenIn.Remember(explorer);
+                OpenIn.Open(explorer, folder);
+            }, OpenIn.Glyph(ExternalAppKind.Explorer)));
+        }
+        button.Flyout = menu;
+        var name = primary?.Name ?? L.T("Agents_AnotherApp", "another app");
+        Ui.Tip(button, L.F("Agents_OpenInHelp", "Open the project in {0} — the arrow lists more apps", name));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, L.F("Agents_OpenInName", "Open in {0}", name));
+        return button;
+    }
+
     private static DropDownButton ControlMenu(string glyph, string title, string help, Action<MenuFlyout> fill)
     {
         var menu = new MenuFlyout();
@@ -299,6 +374,7 @@ public sealed class ClaudeWorkspaceView : Grid
         kind.Items.Add(Ui.CheckItem(L.T("Claude_Chat", "Chat"), Ws.PreferredKind == ClaudeTabKind.Chat, () => Ws.PreferredKind = ClaudeTabKind.Chat));
         kind.Items.Add(Ui.CheckItem(L.T("Claude_Terminal", "Terminal"), Ws.PreferredKind == ClaudeTabKind.Terminal, () => Ws.PreferredKind = ClaudeTabKind.Terminal));
         menu.Items.Add(kind);
+        menu.Items.Add(Ui.CheckItem(L.T("Agents_Notify", "Notify when a session finishes or needs you"), AgentNotifier.Enabled, () => AgentNotifier.Enabled = !AgentNotifier.Enabled));
         menu.Items.Add(Ui.Separator());
         menu.Items.Add(Ui.MenuItem(L.T("Claude_ContinueInTerminal", "Continue in Windows Terminal"), () =>
         {
@@ -364,7 +440,7 @@ public sealed class ClaudeAuthView : Grid
         content.Children.Clear();
         var tile = Ui.IconTile("", "coral", 56);
         tile.HorizontalAlignment = HorizontalAlignment.Center;
-        var title = Ui.Text(L.T("Section_Claude", "Claude Code"), 26, "text", FontWeights.Bold);
+        var title = Ui.Text(L.T("Section_Claude", "Agents"), 26, "text", FontWeights.Bold);
         title.HorizontalAlignment = HorizontalAlignment.Center;
         var switcher = ClaudeAccountCard.Switcher();
         switcher.HorizontalAlignment = HorizontalAlignment.Center;

@@ -4,6 +4,11 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="About_Acknowledgements" xml:space="preserve"><value>{0} is open source and builds on the .NET runtime, the Windows App SDK, WebView2, CommunityToolkit.Mvvm, xterm.js and marked. Their licenses and copyright notices are listed in the third-party notices.</value></data>
+  <data name="About_Disclaimer" xml:space="preserve"><value>{0} is an independent project and is not affiliated with or endorsed by GitHub, Inc., Anthropic, PBC or Atlassian. GitHub, Claude, Claude Code and Jira are trademarks of their respective owners.</value></data>
+  <data name="About_License" xml:space="preserve"><value>MIT License</value></data>
+  <data name="About_LicenseFiles" xml:space="preserve"><value>License files</value></data>
+  <data name="About_ThirdPartyLicenses" xml:space="preserve"><value>Third-party licenses</value></data>
   <data name="Accounts_Add" xml:space="preserve"><value>Add Account…</value></data>
   <data name="Accounts_AddTitle" xml:space="preserve"><value>Add account</value></data>
   <data name="Accounts_Expired" xml:space="preserve"><value>Sign-in for {0} has expired. Sign in again to use this account.</value></data>
@@ -18,6 +23,47 @@
   <data name="Accounts_SwitchTitle" xml:space="preserve"><value>Switch to {0}?</value></data>
   <data name="Accounts_ThisAccount" xml:space="preserve"><value>this account</value></data>
   <data name="Accounts_Title" xml:space="preserve"><value>Accounts</value></data>
+  <data name="Agents_AnotherApp" xml:space="preserve"><value>another app</value></data>
+  <data name="Agents_Archive" xml:space="preserve"><value>Archive</value></data>
+  <data name="Agents_BadgeDescription" xml:space="preserve"><value>{0} agent sessions need attention</value></data>
+  <data name="Agents_BranchDetail" xml:space="preserve"><value>Branch: {0}</value></data>
+  <data name="Agents_Editors" xml:space="preserve"><value>Editors</value></data>
+  <data name="Agents_HideArchived" xml:space="preserve"><value>Hide archived sessions</value></data>
+  <data name="Agents_HideSubsessions" xml:space="preserve"><value>Hide sub-sessions</value></data>
+  <data name="Agents_HintClose" xml:space="preserve"><value>close</value></data>
+  <data name="Agents_HintOpen" xml:space="preserve"><value>open</value></data>
+  <data name="Agents_HintSelect" xml:space="preserve"><value>select</value></data>
+  <data name="Agents_IndicatorDone" xml:space="preserve"><value>Finished — not viewed yet</value></data>
+  <data name="Agents_IndicatorWaiting" xml:space="preserve"><value>Waiting for you</value></data>
+  <data name="Agents_IndicatorWorking" xml:space="preserve"><value>Working</value></data>
+  <data name="Agents_NewSessionIn" xml:space="preserve"><value>New session in</value></data>
+  <data name="Agents_Notify" xml:space="preserve"><value>Notify when a session finishes or needs you</value></data>
+  <data name="Agents_NotifyFinished" xml:space="preserve"><value>Finished · {0}</value></data>
+  <data name="Agents_NotifyPermission" xml:space="preserve"><value>Claude needs permission: {0}</value></data>
+  <data name="Agents_NotifyPlan" xml:space="preserve"><value>Claude has a plan ready for review</value></data>
+  <data name="Agents_NotifyQuestion" xml:space="preserve"><value>Claude has a question for you</value></data>
+  <data name="Agents_OpenIn" xml:space="preserve"><value>Open in</value></data>
+  <data name="Agents_OpenInDesktop" xml:space="preserve"><value>Open in Claude Desktop</value></data>
+  <data name="Agents_OpenInHelp" xml:space="preserve"><value>Open the project in {0} — the arrow lists more apps</value></data>
+  <data name="Agents_OpenInName" xml:space="preserve"><value>Open in {0}</value></data>
+  <data name="Agents_Pin" xml:space="preserve"><value>Pin to top</value></data>
+  <data name="Agents_Pinned" xml:space="preserve"><value>Pinned</value></data>
+  <data name="Agents_QuickOpenEmpty" xml:space="preserve"><value>Nothing matches “{0}”</value></data>
+  <data name="Agents_QuickOpenPlaceholder" xml:space="preserve"><value>Go to a session, search conversations, or start one in a project…</value></data>
+  <data name="Agents_QuickOpenTab" xml:space="preserve"><value>open · {0}</value></data>
+  <data name="Agents_QuickOpenTitle" xml:space="preserve"><value>Go to session</value></data>
+  <data name="Agents_Rename" xml:space="preserve"><value>Rename…</value></data>
+  <data name="Agents_RenameButton" xml:space="preserve"><value>Rename</value></data>
+  <data name="Agents_RenameHelp" xml:space="preserve"><value>The new name is only shown in {0}.</value></data>
+  <data name="Agents_RenameTitle" xml:space="preserve"><value>Rename session</value></data>
+  <data name="Agents_ShowArchived" xml:space="preserve"><value>Show archived sessions</value></data>
+  <data name="Agents_ShowSubsessions" xml:space="preserve"><value>Show sub-sessions</value></data>
+  <data name="Agents_SleepAll" xml:space="preserve"><value>Sleep all</value></data>
+  <data name="Agents_Terminals" xml:space="preserve"><value>Terminals</value></data>
+  <data name="Agents_Unarchive" xml:space="preserve"><value>Unarchive</value></data>
+  <data name="Agents_Unpin" xml:space="preserve"><value>Unpin</value></data>
+  <data name="Agents_Updated" xml:space="preserve"><value>Updated {0}</value></data>
+  <data name="Agents_WorktreeDetail" xml:space="preserve"><value>Worktree: {0}</value></data>
   <data name="App_Tagline" xml:space="preserve"><value>Pull requests, without the browser</value></data>
   <data name="Board_All" xml:space="preserve"><value>All</value></data>
   <data name="Board_Draft" xml:space="preserve"><value>Draft</value></data>
@@ -28,11 +74,40 @@
   <data name="Changes_Help" xml:space="preserve"><value>Changes Claude makes will show up here automatically</value></data>
   <data name="Changes_None" xml:space="preserve"><value>No uncommitted changes</value></data>
   <data name="Changes_Unpushed" xml:space="preserve"><value>Unpushed commits · {0}</value></data>
+  <data name="ChatWeb_Changed" xml:space="preserve"><value>{0} changed</value></data>
+  <data name="ChatWeb_Copied" xml:space="preserve"><value>Copied</value></data>
+  <data name="ChatWeb_Copy" xml:space="preserve"><value>Copy</value></data>
+  <data name="ChatWeb_CopyLink" xml:space="preserve"><value>Copy link</value></data>
+  <data name="ChatWeb_EditFromHere" xml:space="preserve"><value>Edit from here — continues in a new branch of this session</value></data>
+  <data name="ChatWeb_Failed" xml:space="preserve"><value>{0} failed</value></data>
+  <data name="ChatWeb_Hint" xml:space="preserve"><value>/ commands · @ files · Shift+Enter new line · paste a screenshot Ctrl+V</value></data>
+  <data name="ChatWeb_JumpLatest" xml:space="preserve"><value>Jump to the latest message</value></data>
+  <data name="ChatWeb_JumpNew" xml:space="preserve"><value>{0} new — jump to the latest message</value></data>
+  <data name="ChatWeb_OpenInApp" xml:space="preserve"><value>Open in PullYard</value></data>
+  <data name="ChatWeb_PROpen" xml:space="preserve"><value>Pull request #{0} is open</value></data>
+  <data name="ChatWeb_Recent" xml:space="preserve"><value>Recent in this project</value></data>
+  <data name="ChatWeb_RestartSession" xml:space="preserve"><value>Restart session</value></data>
+  <data name="ChatWeb_Running" xml:space="preserve"><value>Running:</value></data>
+  <data name="ChatWeb_SignInAgain" xml:space="preserve"><value>Sign in again</value></data>
+  <data name="ChatWeb_SignInExpired" xml:space="preserve"><value>Claude sign-in expired</value></data>
+  <data name="ChatWeb_SignInHint" xml:space="preserve"><value>Sign in again and the session resumes where it stopped.</value></data>
+  <data name="ChatWeb_SignInWaitingHint" xml:space="preserve"><value>Finish signing in in the terminal. The session picks up where it stopped.</value></data>
+  <data name="ChatWeb_SugAddress" xml:space="preserve"><value>Address review on #{0}</value></data>
+  <data name="ChatWeb_SugBugs" xml:space="preserve"><value>Find bugs in recent changes</value></data>
+  <data name="ChatWeb_SugExplain" xml:space="preserve"><value>Explain the project structure</value></data>
+  <data name="ChatWeb_SugOpenPR" xml:space="preserve"><value>Open a pull request</value></data>
+  <data name="ChatWeb_SugReview" xml:space="preserve"><value>Review my uncommitted changes</value></data>
+  <data name="ChatWeb_SugTests" xml:space="preserve"><value>Write tests for changed code</value></data>
+  <data name="ChatWeb_Thinking" xml:space="preserve"><value>Thinking</value></data>
+  <data name="ChatWeb_Unpushed" xml:space="preserve"><value>{0} unpushed</value></data>
+  <data name="ChatWeb_WaitingSignIn" xml:space="preserve"><value>Waiting for sign-in…</value></data>
+  <data name="ChatWeb_WelcomeIntro" xml:space="preserve"><value>Describe a task. The agent reads the code, proposes changes and asks before acting.</value></data>
   <data name="Chat_Allow" xml:space="preserve"><value>Allow</value></data>
   <data name="Chat_AskedQuestion" xml:space="preserve"><value>Claude asked a question — answer above</value></data>
   <data name="Chat_AttachImage" xml:space="preserve"><value>Attach image</value></data>
   <data name="Chat_ContextHelp" xml:space="preserve"><value>Context {0}% — click for usage and limits</value></data>
   <data name="Chat_Deny" xml:space="preserve"><value>Deny</value></data>
+  <data name="Chat_EditTitle" xml:space="preserve"><value>Edit · {0}</value></data>
   <data name="Chat_ModeHelp" xml:space="preserve"><value>Permission mode (Shift+Tab to cycle)</value></data>
   <data name="Chat_NeedsPermission" xml:space="preserve"><value>Claude needs permission: {0}</value></data>
   <data name="Chat_Placeholder" xml:space="preserve"><value>Ask Claude or describe a task…</value></data>
@@ -137,7 +212,7 @@
   <data name="Claude_SignInTitle" xml:space="preserve"><value>Sign in to Claude</value></data>
   <data name="Claude_SignOut" xml:space="preserve"><value>Sign out of Claude Code</value></data>
   <data name="Claude_SignOutDefaultHelp" xml:space="preserve"><value>This also signs out Claude Code in the terminal. You can sign in again afterwards, including with another account.</value></data>
-  <data name="Claude_SignOutHelp" xml:space="preserve"><value>This also signs out Claude Code in the terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Claude Code section.</value></data>
+  <data name="Claude_SignOutHelp" xml:space="preserve"><value>This also signs out Claude Code in the terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Agents section.</value></data>
   <data name="Claude_SignOutProfileHelp" xml:space="preserve"><value>Signs out only “{0}”. Other accounts are not affected.</value></data>
   <data name="Claude_SignOutQ" xml:space="preserve"><value>Sign out of Claude Code?</value></data>
   <data name="Claude_SignOutThis" xml:space="preserve"><value>Sign out of this account…</value></data>
@@ -233,7 +308,7 @@
   <data name="Filter_ReviewRequests" xml:space="preserve"><value>Review requests</value></data>
   <data name="Filter_ReviewedByMe" xml:space="preserve"><value>Reviewed by me</value></data>
   <data name="Fix_All" xml:space="preserve"><value>All</value></data>
-  <data name="Fix_Button" xml:space="preserve"><value>Fix with Claude Code</value></data>
+  <data name="Fix_Button" xml:space="preserve"><value>Fix with agent</value></data>
   <data name="Fix_ChooseFolder" xml:space="preserve"><value>Choose folder…</value></data>
   <data name="Fix_CloneHint" xml:space="preserve"><value>Clone it with: gh repo clone {0}</value></data>
   <data name="Fix_Commit" xml:space="preserve"><value>Commit</value></data>
@@ -278,6 +353,7 @@
   <data name="Inline_Title" xml:space="preserve"><value>Comment on line</value></data>
   <data name="Inspector_AskReview" xml:space="preserve"><value>Ask Claude to review this PR</value></data>
   <data name="Inspector_Changes" xml:space="preserve"><value>Changes</value></data>
+  <data name="Inspector_CommitAgent" xml:space="preserve"><value>Commit and push to #{0} with agent</value></data>
   <data name="Inspector_CreatePR" xml:space="preserve"><value>Create PR in browser</value></data>
   <data name="Inspector_Files" xml:space="preserve"><value>Files</value></data>
   <data name="Inspector_FilesChanged" xml:space="preserve"><value>Files changed · {0}</value></data>
@@ -287,6 +363,7 @@
   <data name="Inspector_NoRepo" xml:space="preserve"><value>Folder isn't linked to a GitHub repository</value></data>
   <data name="Inspector_OpenFull" xml:space="preserve"><value>Open full</value></data>
   <data name="Inspector_OpenInPRs" xml:space="preserve"><value>Open in PR section</value></data>
+  <data name="Inspector_OpenPRAgent" xml:space="preserve"><value>Open PR with agent</value></data>
   <data name="Inspector_PR" xml:space="preserve"><value>PR</value></data>
   <data name="Inspector_SendToSession" xml:space="preserve"><value>Send to this session</value></data>
   <data name="Inspector_ThisBranch" xml:space="preserve"><value>This branch</value></data>
@@ -294,6 +371,30 @@
   <data name="Issue_Close" xml:space="preserve"><value>Close issue</value></data>
   <data name="Issue_Reopen" xml:space="preserve"><value>Reopen issue</value></data>
   <data name="Item_StackedOn" xml:space="preserve"><value>stacked on {0}</value></data>
+  <data name="Jira_ChangeStatus" xml:space="preserve"><value>Change status</value></data>
+  <data name="Jira_Connect" xml:space="preserve"><value>Connect</value></data>
+  <data name="Jira_ConnectHint" xml:space="preserve"><value>Connect Jira to see the ticket for a pull request and move it between statuses. Your API token stays in Windows Credential Manager.</value></data>
+  <data name="Jira_Connected" xml:space="preserve"><value>Connected</value></data>
+  <data name="Jira_CreateToken" xml:space="preserve"><value>Create an API token at id.atlassian.com</value></data>
+  <data name="Jira_Disconnect" xml:space="preserve"><value>Disconnect</value></data>
+  <data name="Jira_EmailPlaceholder" xml:space="preserve"><value>Atlassian account email (empty for a Data Center token)</value></data>
+  <data name="Jira_LinkTicket" xml:space="preserve"><value>Link ticket</value></data>
+  <data name="Jira_Loading" xml:space="preserve"><value>Loading…</value></data>
+  <data name="Jira_NoTicket" xml:space="preserve"><value>No Jira ticket found</value></data>
+  <data name="Jira_NoTicketHint" xml:space="preserve"><value>PullYard looks for keys like ABC-123 in the title, branch and description. Link one by hand:</value></data>
+  <data name="Jira_NoTransitions" xml:space="preserve"><value>No transitions available</value></data>
+  <data name="Jira_Open" xml:space="preserve"><value>Open in Jira</value></data>
+  <data name="Jira_ReportedBy" xml:space="preserve"><value>Reported by {0}</value></data>
+  <data name="Jira_ShowLess" xml:space="preserve"><value>Show less</value></data>
+  <data name="Jira_ShowMore" xml:space="preserve"><value>Show more</value></data>
+  <data name="Jira_SitePlaceholder" xml:space="preserve"><value>Jira address — acme.atlassian.net</value></data>
+  <data name="Jira_Title" xml:space="preserve"><value>Jira</value></data>
+  <data name="Jira_TokenPlaceholder" xml:space="preserve"><value>API token</value></data>
+  <data name="Jira_Unassigned" xml:space="preserve"><value>Unassigned</value></data>
+  <data name="Jira_Unlink" xml:space="preserve"><value>Unlink</value></data>
+  <data name="Jira_Updated" xml:space="preserve"><value>Updated {0}</value></data>
+  <data name="Loader_Loading" xml:space="preserve"><value>Loading</value></data>
+  <data name="Loader_Running" xml:space="preserve"><value>Running</value></data>
   <data name="Lock_Blocked" xml:space="preserve"><value>Too many wrong PINs. Reset the PIN to continue. This also signs out the Claude Code accounts linked to this account.</value></data>
   <data name="Lock_EnterPin" xml:space="preserve"><value>Enter PIN</value></data>
   <data name="Lock_EnterPinToTurnOff" xml:space="preserve"><value>Enter the PIN to turn it off</value></data>
@@ -349,6 +450,9 @@
   <data name="Login_GiteaTokenBody" xml:space="preserve"><value>Required permissions: read for user, repository and issue.</value></data>
   <data name="Login_GlabBody" xml:space="preserve"><value>Use the token you're signed in with in glab.</value></data>
   <data name="Login_GlabTitle" xml:space="preserve"><value>GitLab CLI</value></data>
+  <data name="Login_OneClickBody" xml:space="preserve"><value>Opens github.com in your browser. Enter the code shown here and you're in — no token to copy.</value></data>
+  <data name="Login_OneClickTitle" xml:space="preserve"><value>Sign in with GitHub</value></data>
+  <data name="Login_OwnOAuthApp" xml:space="preserve"><value>Use your own OAuth App</value></data>
   <data name="Login_PatBody" xml:space="preserve"><value>Required scopes: repo, read:org, read:project, project, notifications, workflow.</value></data>
   <data name="Login_PatTitle" xml:space="preserve"><value>Personal Access Token</value></data>
   <data name="Login_ServerTitle" xml:space="preserve"><value>{0} server</value></data>
@@ -396,6 +500,7 @@
   <data name="Nav_Issues" xml:space="preserve"><value>Issues</value></data>
   <data name="Nav_PullRequests" xml:space="preserve"><value>Pull requests</value></data>
   <data name="Notes_Add" xml:space="preserve"><value>Add note</value></data>
+  <data name="Notes_AddedBy" xml:space="preserve"><value>Added by {0}</value></data>
   <data name="Notes_ClickToEdit" xml:space="preserve"><value>Click to read and edit all notes</value></data>
   <data name="Notes_Close" xml:space="preserve"><value>Close (Esc)</value></data>
   <data name="Notes_Decision" xml:space="preserve"><value>Decision</value></data>
@@ -455,6 +560,7 @@
   <data name="PR_TabCommits" xml:space="preserve"><value>Commits</value></data>
   <data name="PR_TabConversation" xml:space="preserve"><value>Conversation</value></data>
   <data name="PR_TabFiles" xml:space="preserve"><value>Files changed</value></data>
+  <data name="PR_TabJira" xml:space="preserve"><value>Jira</value></data>
   <data name="PR_TabStack" xml:space="preserve"><value>Stack</value></data>
   <data name="PR_UpStack" xml:space="preserve"><value>Up the stack</value></data>
   <data name="PR_UpdateBranchFrom" xml:space="preserve"><value>Update branch from {0}</value></data>
@@ -474,12 +580,13 @@
   <data name="Provider_Projects" xml:space="preserve"><value>Projects</value></data>
   <data name="Provider_PullRequest" xml:space="preserve"><value>pull request</value></data>
   <data name="Provider_ToDoList" xml:space="preserve"><value>To-Do List</value></data>
-  <data name="RateLimit_Hint" xml:space="preserve"><value>GitHub rate limit reached. Live polling is paused; manual refresh still works.</value></data>
+  <data name="RateLimit_Hint" xml:space="preserve"><value>GitHub rate limit reached. Live polling and refreshes are paused until the limit resets.</value></data>
   <data name="RateLimit_Paused" xml:space="preserve"><value>Rate limited — live updates resume at {0}</value></data>
   <data name="ReReview_Other" xml:space="preserve"><value>Other…</value></data>
   <data name="ReReview_Request" xml:space="preserve"><value>Re-request review</value></data>
   <data name="ReReview_RequestN" xml:space="preserve"><value>Re-request review ({0})</value></data>
   <data name="ReReview_Requested" xml:space="preserve"><value>Requested</value></data>
+  <data name="Refresh_Button" xml:space="preserve"><value>Refresh (Ctrl+R)</value></data>
   <data name="Refresh_Failed" xml:space="preserve"><value>Couldn't refresh</value></data>
   <data name="Refresh_Hint" xml:space="preserve"><value>Pull down to refresh (Ctrl+R)</value></data>
   <data name="Refresh_LastFailed" xml:space="preserve"><value>Last refresh failed: {0}</value></data>
@@ -516,13 +623,14 @@
   <data name="Reviewers_Stale" xml:space="preserve"><value>reviewed before latest push</value></data>
   <data name="Reviewers_Title" xml:space="preserve"><value>Request review</value></data>
   <data name="Search_Placeholder" xml:space="preserve"><value>Filter: text, repo:org/name, label:bug</value></data>
-  <data name="Section_Claude" xml:space="preserve"><value>Claude Code</value></data>
+  <data name="Section_Claude" xml:space="preserve"><value>Agents</value></data>
   <data name="Section_IssuesTitle" xml:space="preserve"><value>Issues: {0}</value></data>
   <data name="Section_MyPrsByProject" xml:space="preserve"><value>My PRs by project</value></data>
   <data name="Section_Notifications" xml:space="preserve"><value>Notifications</value></data>
   <data name="Section_Projects" xml:space="preserve"><value>Projects</value></data>
   <data name="Section_Repositories" xml:space="preserve"><value>Repositories</value></data>
   <data name="Section_Stacks" xml:space="preserve"><value>Stacks</value></data>
+  <data name="Settings_About" xml:space="preserve"><value>About</value></data>
   <data name="Settings_Account" xml:space="preserve"><value>Account</value></data>
   <data name="Settings_Appearance" xml:space="preserve"><value>Appearance</value></data>
   <data name="Settings_AutoRefresh" xml:space="preserve"><value>Auto-refresh pull requests</value></data>

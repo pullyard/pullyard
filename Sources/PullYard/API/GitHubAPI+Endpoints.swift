@@ -78,7 +78,7 @@ extension GitHubAPI {
         var after: String?
         for _ in 0..<pages {
             let r: R = try await graphQL(Q.repoStack, ["o": repo.owner, "n": repo.name, "after": after])
-            guard let page = r.repository?.pullRequests else { break }
+            guard let page = r.repository?.pullRequests else { throw APIError(message: "Can't read pull requests of \(repo.full)") }
             out += page.nodes.map { pr in
                 let c = pr.commits.nodes.first?.commit
                 return StackNode(number: pr.number, title: pr.title, state: pr.state, isDraft: pr.isDraft,

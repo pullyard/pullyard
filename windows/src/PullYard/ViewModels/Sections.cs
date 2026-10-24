@@ -38,7 +38,7 @@ public sealed record Section(SectionKind Kind, PRFilter Pr = PRFilter.ReviewRequ
         SectionKind.Issues => L.F("Section_IssuesTitle", "Issues: {0}", Issue.Title()),
         SectionKind.Repos => L.T("Section_Repositories", "Repositories"),
         SectionKind.Projects => L.T("Section_Projects", "Projects"),
-        SectionKind.Claude => L.T("Section_Claude", "Claude Code"),
+        SectionKind.Claude => L.T("Section_Claude", "Agents"),
         _ => ""
     };
 

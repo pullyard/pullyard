@@ -94,6 +94,7 @@ final class ClaudeTab: Identifiable {
     var terminalRunning = false
     var terminalSleeping = false
     var terminalMemory = 0
+    var unread = false
     var exitCode: Int32?
     var startedAt = Date()
     let git: GitWorkingCopy
@@ -165,10 +166,19 @@ final class ClaudeTab: Identifiable {
 @MainActor
 final class ClaudeWorkspace {
     var tabs: [ClaudeTab] = []
-    var selectedTabID: UUID?
+    var selectedTabID: UUID? {
+        didSet {
+            guard let tab = selectedTab else { return }
+            tab.unread = false
+            SessionSeen.shared.mark(tab.sessionId)
+        }
+    }
     var projects: [ClaudeProject] = []
     var loadingProjects = false
     var projectsUpdated: Date?
+    @ObservationIgnored private var indexTask: Task<Void, Never>?
+    @ObservationIgnored private var indexWarmed = false
+    @ObservationIgnored private(set) var sessionsByID: [String: ClaudeSessionInfo] = [:]
     let sessionRows = RowAppearTracker()
     var showInspector = true
     var ciFixes: [ItemRef: CIFixLaunch] = [:]
@@ -217,6 +227,8 @@ final class ClaudeWorkspace {
             let snap = await Task.detached(priority: .utility) { ProcessMemory.snapshot() }.value
             for tab in live {
                 let bytes = ProcessMemory.treeBytes(tab.pid, in: snap)
+                let current = tab.chat?.memoryBytes ?? tab.terminalMemory
+                guard abs(current - bytes) > 4 << 20 else { continue }
                 if let chat = tab.chat { chat.memoryBytes = bytes } else { tab.terminalMemory = bytes }
             }
         }
@@ -253,7 +265,10 @@ final class ClaudeWorkspace {
     var attentionCount: Int { tabs.filter(\.needsAttention).count }
 
     func git(for folder: String) -> GitWorkingCopy {
-        if let g = gits[folder] { return g }
+        if let g = gits[folder] {
+            g.startWatching()
+            return g
+        }
         let g = GitWorkingCopy(path: folder)
         gits[folder] = g
         g.startWatching()
@@ -261,17 +276,70 @@ final class ClaudeWorkspace {
         return g
     }
 
-    func reloadProjects() async {
+    func reloadProjects(force: Bool = true) async {
+        if loadingProjects { return }
+        if !force, let last = projectsUpdated, Date().timeIntervalSince(last) < 10 { return }
         loadingProjects = true
         defer { loadingProjects = false }
         let root = URL(fileURLWithPath: ClaudeProfiles.shared.configDir()).appendingPathComponent("projects", isDirectory: true)
         let profileID = ClaudeProfiles.shared.activeID
-        let loaded = await Task.detached(priority: .userInitiated) { ClaudeSessionParser.loadAll(root: root) }.value
+        let loaded = await Task.detached(priority: .userInitiated) { () -> [ClaudeProject] in
+            let projects = ClaudeSessionParser.loadAll(root: root)
+            MemoryRelief.release()
+            return projects
+        }.value
         guard profileID == ClaudeProfiles.shared.activeID else { return }
         let next = Demo.folder.map { f in loaded.filter { $0.path.hasPrefix(f) } } ?? loaded
+        projectsUpdated = Date()
+        guard next != projects else { return }
         sessionRows.ingest(next.flatMap { $0.sessions.map(\.id) }, mode: .refresh)
         projects = next
-        projectsUpdated = Date()
+        sessionsByID = Dictionary(next.flatMap { $0.sessions.map { ($0.id, $0) } }, uniquingKeysWith: { a, _ in a })
+        guard indexTask == nil, !indexWarmed else { return }
+        indexWarmed = true
+        let files = next.flatMap { $0.sessions.map(\.file) }
+        indexTask = Task.detached(priority: .background) { [weak self] in
+            defer { Task { @MainActor in self?.indexTask = nil } }
+            try? await Task.sleep(for: .seconds(8))
+            for start in stride(from: 0, to: files.count, by: 10) {
+                guard !Task.isCancelled else { return }
+                await SessionIndex.shared.update(Array(files[start..<min(start + 10, files.count)]))
+            }
+            MemoryRelief.release()
+        }
+    }
+
+    func pullRequest(for tab: ClaudeTab) -> (number: Int, url: String)? {
+        guard !tab.sessionId.isEmpty else { return nil }
+        guard let s = sessionsByID[tab.sessionId], let n = s.prNumber, let url = s.prURL else { return nil }
+        return (n, url)
+    }
+
+    func cycleTab(_ delta: Int) {
+        guard !tabs.isEmpty else { return }
+        let i = tabs.firstIndex { $0.id == selectedTabID } ?? 0
+        selectedTabID = tabs[(i + delta + tabs.count) % tabs.count].id
+    }
+
+    func isWatching(_ tab: ClaudeTab) -> Bool {
+        selectedTabID == tab.id && NSApp.isActive && NSApp.keyWindow?.isVisible == true
+    }
+
+    var attentionBadge: Int {
+        tabs.filter { $0.state == .waiting || $0.unread }.count
+    }
+
+    func observeBadge() {
+        withObservationTracking {
+            AgentNotifier.setBadge(attentionBadge)
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.observeBadge() }
+        }
+    }
+
+    func indicator(for session: ClaudeSessionInfo) -> SessionIndicator {
+        if let tab = tab(forSession: session.id) { return SessionIndicator(tab: tab) }
+        return SessionIndicator(closed: session)
     }
 
     func tab(forSession id: String) -> ClaudeTab? {
@@ -290,7 +358,7 @@ final class ClaudeWorkspace {
         let sessionId = UUID().uuidString.lowercased()
         var args = ["--session-id", sessionId]
         if let name, !name.isEmpty { args += ["-n", name] }
-        if let prompt, !prompt.isEmpty { args.append(prompt) }
+        if let prompt, !prompt.isEmpty { args.append(ClaudeLauncher.positionalPrompt(prompt)) }
         let tab = makeTab(folder: folder, kind: .terminal, title: title, sessionId: sessionId)
         launchTerminal(tab, extra: args, mode: mode)
         return tab
@@ -315,6 +383,42 @@ final class ClaudeWorkspace {
         return tab
     }
 
+    func rewind(_ tab: ClaudeTab, to text: String, occurrenceFromEnd: Int) {
+        guard let chat = tab.chat, let sid = chat.sessionId, !sid.isEmpty else {
+            tab.chat?.draftRequest = text
+            return
+        }
+        let configDir = chat.configDir ?? ClaudeProfiles.shared.configDir()
+        Task { @MainActor in
+            let result = await Task.detached(priority: .userInitiated) { () -> Result<(URL, ClaudeSessionInfo?), Error> in
+                guard let file = SessionRewind.sessionFile(id: sid, configDir: configDir) else {
+                    return .failure(APIError(message: "Couldn't find the session file"))
+                }
+                do {
+                    let forked = try SessionRewind.fork(file: file, text: text, occurrenceFromEnd: occurrenceFromEnd)
+                    return .success((forked.file, ClaudeSessionParser.parse(forked.file)))
+                } catch {
+                    return .failure(error)
+                }
+            }.value
+            switch result {
+            case .success(let (file, info)):
+                let new: ClaudeTab
+                if let info {
+                    new = resume(info.retitled("Edit · " + tab.title), kind: .chat)
+                } else {
+                    try? FileManager.default.removeItem(at: file)
+                    new = newSession(folder: tab.folder, name: "Edit · " + tab.title, kind: .chat)
+                }
+                new.chat?.draftRequest = text
+                selectedTabID = new.id
+            case .failure(let error):
+                chat.draftRequest = text
+                chat.lastError = error.localizedDescription
+            }
+        }
+    }
+
     func openInTerminal(_ tab: ClaudeTab) {
         guard !tab.sessionId.isEmpty else { return }
         tab.chat?.stop()
@@ -335,7 +439,18 @@ final class ClaudeWorkspace {
     }
 
     private func sessionFile(_ id: String) -> URL? {
-        projects.flatMap(\.sessions).first { $0.id == id }?.file
+        sessionsByID[id]?.file
+    }
+
+    func reconnect(_ tab: ClaudeTab) {
+        guard let chat = tab.chat else { return restart(tab) }
+        chat.lastError = nil
+        guard chat.running else { return restart(tab) }
+        chat.stop()
+        Task { @MainActor [weak self] in
+            for _ in 0..<40 where chat.running { try? await Task.sleep(for: .milliseconds(100)) }
+            self?.restart(tab)
+        }
     }
 
     func restart(_ tab: ClaudeTab) {
@@ -352,11 +467,20 @@ final class ClaudeWorkspace {
         }
     }
 
+    func releaseUnusedGits() {
+        let used = Set(tabs.map(\.folder))
+        for (folder, g) in gits where !used.contains(folder) {
+            g.stopWatching()
+            gits[folder] = nil
+        }
+    }
+
     func close(_ tab: ClaudeTab) {
         tab.chat?.stop()
         if tab.terminalRunning { tab.terminal.terminate() }
         tabs.removeAll { $0.id == tab.id }
         if selectedTabID == tab.id { selectedTabID = tabs.last?.id }
+        releaseUnusedGits()
     }
 
     func applyModelToCurrent() {
@@ -404,9 +528,20 @@ final class ClaudeWorkspace {
     private func startChat(_ tab: ClaudeTab, resume: String?, fork: Bool = false, prompt: String?, mode modeOverride: ClaudeMode?) {
         guard let chat = tab.chat else { return }
         chat.onSessionId = { [weak tab] sid in tab?.sessionId = sid }
-        chat.onTurnFinished = { [weak tab] in
+        chat.onTurnFinished = { [weak self, weak tab] in
             guard let tab else { return }
+            if self?.isWatching(tab) == true {
+                SessionSeen.shared.mark(tab.sessionId)
+            } else {
+                tab.unread = true
+                AgentNotifier.post(tab: tab.id, title: "Claude finished · " + tab.title, body: AgentNotifier.snippet(tab.chat?.lastAssistantText))
+            }
             Task { await tab.git.refresh() }
+        }
+        chat.onNeedsInput = { [weak self, weak tab] request in
+            guard let tab, self?.isWatching(tab) != true else { return }
+            let body = request.toolName == "AskUserQuestion" ? "Claude has a question for you" : request.toolName == "ExitPlanMode" ? "Claude has a plan ready for review" : "Claude needs permission: " + request.toolName
+            AgentNotifier.post(tab: tab.id, title: tab.title, body: body)
         }
         let m = modeOverride ?? mode
         chat.start(
@@ -425,6 +560,7 @@ final class ClaudeWorkspace {
         if model != .standard { args += ["--model", model.rawValue] }
         if effort != .standard { args += ["--effort", effort.rawValue] }
         if mode != .standard { args += ["--permission-mode", mode.rawValue] }
+        args += StackNotesMCP.args
         args += extra
         let command = "exec claude " + args.map(ClaudeLauncher.shellQuote).joined(separator: " ")
         let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { FileManager.default.isExecutableFile(atPath: $0) ? $0 : nil } ?? "/bin/zsh"

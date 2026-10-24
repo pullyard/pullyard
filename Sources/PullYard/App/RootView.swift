@@ -24,7 +24,7 @@ struct RootView: View {
         }
         .animation(Motion.smooth, value: splashHold)
         .task {
-            try? await Task.sleep(nanoseconds: 750_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(SplashLogo.hold * 1_000_000_000))
             splashHold = false
         }
         .task { await Updater.shared.checkOnLaunch() }
@@ -59,71 +59,154 @@ struct MainView: View {
 
     var body: some View {
         @Bindable var app = app
-        NavigationSplitView {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 300)
-                .surface(.sidebar)
-        } content: {
-            ContentColumn()
-                .id(app.section)
-                .transition(.opacity)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .animation(Motion.fade, value: app.section)
-                .surface(.list)
-                .navigationSplitViewColumnWidth(min: 300, ideal: 380, max: 560)
-        } detail: {
-            Group {
-                if app.section == .claude {
-                    ClaudeWorkspaceView()
-                        .surface(.panel)
-                        .transition(.opacity)
-                } else if app.forge != nil {
-                    ForgeDetailColumn()
-                        .animation(Motion.smooth, value: app.forgeSelection?.id)
-                        .surface(.panel)
-                        .transition(.opacity)
-                } else {
-                    NavigationStack(path: $app.detailPath) {
-                        Group {
-                            if let root = app.detailRoot {
-                                RouteView(route: root).id(root).transition(.rise)
-                            } else {
-                                VStack(spacing: 12) {
-                                    IconTile(systemImage: "arrow.triangle.pull", color: .syViolet, size: 56)
-                                        .opacity(0.9)
-                                    Text("Select a pull request, issue or project").foregroundStyle(Color.syMuted)
-                                    Text("⌘L — open by link").font(.syCaption).foregroundStyle(Color.syDim)
-                                }
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .transition(.opacity)
-                            }
-                        }
-                        .animation(Motion.smooth, value: app.detailRoot)
-                        .navigationDestination(for: Route.self) { RouteView(route: $0) }
-                    }
-                    .surface(.panel)
-                    .transition(.opacity)
+        AppShell()
+            .modifier(BrandToolbar())
+            .sheet(isPresented: $app.showOpenLink) { OpenLinkSheet() }
+            .sheet(isPresented: $app.showQuickOpen) { AgentQuickOpen().environment(app) }
+            .overlay(alignment: .bottom) {
+                VStack(spacing: 8) {
+                    ToastBanner()
+                    RateLimitBanner()
+                    ClipboardBanner()
                 }
             }
-            .animation(Motion.fade, value: app.section == .claude)
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                app.checkClipboard()
+                app.didBecomeActive()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeOcclusionStateNotification)) { _ in
+                app.windowVisibilityChanged()
+            }
+            .onAppear { app.checkClipboard() }
+    }
+}
+
+struct AppShell: View {
+    @Environment(AppModel.self) private var app
+    @AppStorage("agents.sidebarHidden") private var hidden = false
+    @AppStorage("shell.listWidth") private var listWidth: Double = 360
+
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 0) {
+                SidebarView()
+                    .frame(width: 220)
+                    .surface(.sidebar)
+                Rectangle().fill(Color.syLine).frame(width: 1)
+                ContentColumn()
+                    .id(app.section)
+                    .frame(width: listWidth)
+                    .frame(maxHeight: .infinity)
+                    .surface(.list)
+                ColumnResizeHandle(width: $listWidth, range: 280...560, edge: .leading)
+            }
+            .frame(width: hidden ? 0 : 222 + listWidth, alignment: .trailing)
+            .clipped()
+            .allowsHitTesting(!hidden)
+            .accessibilityHidden(hidden)
+            DetailColumn()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .modifier(BrandToolbar())
-        .sheet(isPresented: $app.showOpenLink) { OpenLinkSheet() }
-        .overlay(alignment: .bottom) {
-            VStack(spacing: 8) {
-                ToastBanner()
-                RateLimitBanner()
-                ClipboardBanner()
+        .edgeReveal(.leading, enabled: hidden, width: 221 + listWidth) {
+            HStack(spacing: 0) {
+                SidebarView()
+                    .frame(width: 220)
+                    .surface(.sidebar)
+                Rectangle().fill(Color.syLine).frame(width: 1)
+                ContentColumn()
+                    .id(app.section)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .surface(.list)
+            }
+            .environment(app)
+            .font(.syBody)
+            .tint(Color.syAccent)
+            .environment(\.locale, .app)
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                SidebarToggleButton(hidden: $hidden)
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            app.checkClipboard()
-            app.didBecomeActive()
+    }
+}
+
+struct DetailColumn: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        @Bindable var app = app
+        Group {
+            if app.section == .claude {
+                ClaudeWorkspaceView()
+                    .surface(.panel)
+            } else if app.forge != nil {
+                ForgeDetailColumn()
+                    .animation(Motion.smooth, value: app.forgeSelection?.id)
+                    .surface(.panel)
+            } else {
+                NavigationStack(path: $app.detailPath) {
+                    Group {
+                        if let root = app.detailRoot {
+                            RouteView(route: root).id(root).transition(.rise)
+                        } else {
+                            VStack(spacing: 12) {
+                                IconTile(systemImage: "arrow.triangle.pull", color: .syViolet, size: 56)
+                                    .opacity(0.9)
+                                Text("Select a pull request, issue or project").foregroundStyle(Color.syMuted)
+                                Text("⌘L — open by link").font(.syCaption).foregroundStyle(Color.syDim)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .transition(.opacity)
+                        }
+                    }
+                    .animation(Motion.smooth, value: app.detailRoot)
+                    .navigationDestination(for: Route.self) { RouteView(route: $0) }
+                }
+                .surface(.panel)
+            }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeOcclusionStateNotification)) { _ in
-            app.windowVisibilityChanged()
+    }
+}
+
+struct SidebarToggleButton: View {
+    @Binding var hidden: Bool
+
+    var body: some View {
+        Button { hidden.toggle() } label: {
+            Label("Toggle sidebar", systemImage: "sidebar.left")
         }
-        .onAppear { app.checkClipboard() }
+        .help("Toggle sidebar")
+    }
+}
+
+struct ColumnResizeHandle: View {
+    @Binding var width: Double
+    let range: ClosedRange<Double>
+    let edge: HorizontalEdge
+    @State private var start: Double?
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.syLine)
+            .frame(width: 1)
+            .overlay {
+                Color.clear
+                    .frame(width: 8)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { g in
+                                let base = start ?? width
+                                start = base
+                                width = min(range.upperBound, max(range.lowerBound, base + (edge == .leading ? g.translation.width : -g.translation.width)))
+                            }
+                            .onEnded { _ in start = nil }
+                    )
+            }
     }
 }
 
@@ -156,7 +239,7 @@ struct SidebarView: View {
                 gitHubSections
             }
             SidebarGroup("AI") {
-                SidebarRow(section: .claude, title: "Claude Code", icon: "sparkles", color: .syCoral, count: app.claude.attentionCount > 0 ? app.claude.attentionCount : app.claude.tabs.filter(\.running).count)
+                SidebarRow(section: .claude, title: "Agents", icon: "terminal.fill", color: .syCoral, count: app.claude.attentionCount > 0 ? app.claude.attentionCount : app.claude.tabs.filter(\.running).count)
             }
         }
         .listStyle(.sidebar)

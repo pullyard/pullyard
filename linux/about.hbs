@@ -1,0 +1,55 @@
+THIRD-PARTY SOFTWARE NOTICES
+============================
+
+This program is distributed under the MIT License. It is built from the Rust
+crates listed below, which are compiled and statically linked into the
+executable. Each crate is used under the license shown next to it; the full
+license texts, with the copyright notices supplied by each project, follow.
+
+
+System libraries (dynamically linked, not bundled)
+--------------------------------------------------
+
+GTK 4, libadwaita, VTE, WebKitGTK and GtkSourceView are licensed under the
+GNU Lesser General Public License (LGPL-2.1-or-later or LGPL-3.0-or-later).
+OpenSSL is licensed under the Apache License 2.0. None of these libraries are
+bundled with the .deb package or the tarball: they are provided by your
+operating system and linked dynamically at run time, so they can be replaced
+or upgraded independently of this program.
+
+The Flatpak build takes these libraries from the GNOME runtime, except VTE,
+which is built as a separate shared library from the unmodified upstream
+source at https://gitlab.gnome.org/GNOME/vte (tag 0.78.2) and remains
+dynamically linked and replaceable.
+
+
+Rust crates
+-----------
+
+{{#each crates}}
+{{{package.name}}} {{{package.version}}} ({{{license}}})
+{{/each}}
+
+
+Licenses overview
+-----------------
+
+{{#each overview}}
+{{{name}}} ({{{id}}}): {{count}} crate(s)
+{{/each}}
+
+
+License texts
+-------------
+{{#each licenses}}
+
+================================================================================
+{{{name}}} ({{{id}}})
+Used by:
+{{#each used_by}}
+  {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} {{{crate.repository}}}{{/if}}
+{{/each}}
+--------------------------------------------------------------------------------
+
+{{{text}}}
+{{/each}}

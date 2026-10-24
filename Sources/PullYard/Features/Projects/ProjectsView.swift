@@ -45,10 +45,10 @@ struct ProjectsListView: View {
                 Text("No projects").font(.syBody).foregroundStyle(Color.syMuted)
             }
         }
-        .overlay { if loading && projects.isEmpty { ProgressView().controlSize(.small) } }
+        .overlay { if loading && projects.isEmpty { PullYardLoader(size: 44) } }
         .liveRefresh(updated: lastUpdated, refreshing: loading, error: projects.isEmpty ? nil : error) { await load() }
         .navigationTitle("Projects")
-        .toolbar {
+        .panelToolbar {
             ToolbarItem {
                 Toggle(isOn: $showClosed) { Label("Closed", systemImage: "archivebox") }.help("Show closed")
             }
@@ -264,7 +264,7 @@ struct ProjectBoardView: View {
                 Task { await model.load() }
             }
         }
-        .toolbar {
+        .panelToolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { openInBrowser(project.url) } label: { Label("Open in Browser", systemImage: "safari") }
             }

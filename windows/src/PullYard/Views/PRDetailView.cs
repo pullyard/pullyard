@@ -107,7 +107,7 @@ public sealed class PRContent : Grid, IShortcutHost
     private readonly Grid tabArea = new();
     private readonly StackPanel toolbar = Ui.H(2);
     private readonly RefreshFooter status = new(compact: true);
-    private readonly ProgressRing busy = Ui.Spinner(16);
+    private readonly WakeLoader busy = Ui.Spinner(16);
     private readonly Dictionary<PRTab, FrameworkElement> tabViews = new();
     private HtmlView? conversation;
     private HtmlView? diff;
@@ -156,15 +156,19 @@ public sealed class PRContent : Grid, IShortcutHost
         status.Retry = () => model.Load(true).Forget();
         busy.Visibility = Visibility.Collapsed;
         model.PropertyChanged += OnModel;
+        JiraService.Account.Changed += OnJiraChanged;
         Unloaded += (_, _) =>
         {
             model.PropertyChanged -= OnModel;
+            JiraService.Account.Changed -= OnJiraChanged;
             WatchFixTab(null);
         };
         Loaded += (_, _) =>
         {
             model.PropertyChanged -= OnModel;
             model.PropertyChanged += OnModel;
+            JiraService.Account.Changed -= OnJiraChanged;
+            JiraService.Account.Changed += OnJiraChanged;
             RenderAll();
         };
         AddShortcuts();
@@ -183,12 +187,26 @@ public sealed class PRContent : Grid, IShortcutHost
             acc.Invoked += (_, e) =>
             {
                 e.Handled = true;
-                if (t != PRTab.Stack || model.StackTree is not null) model.Tab = t;
+                if (TabAvailable(t)) model.Tab = t;
             };
             KeyboardAccelerators.Add(acc);
             index++;
         }
     }
+
+    private bool TabAvailable(PRTab t) => t switch
+    {
+        PRTab.Stack => model.StackTree is not null,
+        PRTab.Jira => model.Pr is { } pr && JiraService.Account.ShowsTab(pr),
+        _ => true
+    };
+
+    private void OnJiraChanged() => DispatcherQueue.TryEnqueue(() =>
+    {
+        if (model.Pr is null) return;
+        RenderTabs();
+        if (model.Tab == PRTab.Jira && !TabAvailable(PRTab.Jira)) model.Tab = PRTab.Conversation;
+    });
 
     private void OnModel(object? sender, PropertyChangedEventArgs e)
     {
@@ -471,7 +489,7 @@ public sealed class PRContent : Grid, IShortcutHost
         }
         var actions = Ui.H(6);
         if (model.CanWrite && model.FailedRuns > 0) actions.Children.Add(Ui.Button(L.T("Checks_RerunShort", "Re-run failed"), rerun));
-        var button = Ui.Button(L.T("Fix_Button", "Fix with Claude Code"), fix, accent: true);
+        var button = Ui.Button(L.T("Fix_Button", "Fix with agent"), fix, accent: true);
         button.Background = Palette.Brush("coral");
         button.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
         actions.Children.Add(button);
@@ -525,7 +543,7 @@ public sealed class PRContent : Grid, IShortcutHost
             if (unresolved > 0) row.Children.Add(Ui.Text("·", 13, "dim"));
             row.Children.Add(Ui.Text(L.F("Fix_PromptBy", "Fix prompt by @{0}", found.Author) + (found.Date is { } d ? " · " + Fmt.Rel(d) : ""), 13, "muted"));
         }
-        var button = Ui.Button(L.T("Fix_Button", "Fix with Claude Code"), action, accent: true);
+        var button = Ui.Button(L.T("Fix_Button", "Fix with agent"), action, accent: true);
         var (fill, text) = Palette.Filled("coral");
         button.Background = fill;
         button.Foreground = text;
@@ -555,6 +573,7 @@ public sealed class PRContent : Grid, IShortcutHost
         toolbar.Children.Add(Ui.IconButton("", L.T("PR_FixWithClaude", "Send review comments to a new Claude Code session"), () => Dialogs.FixWithClaude(XamlRoot, model).Forget(), "coral"));
         if (pr.IsOpen && !pr.IsDraft && model.CanWrite)
             toolbar.Children.Add(Ui.IconButton("", L.T("PR_Merge", "Merge pull request"), () => Dialogs.Merge(XamlRoot, model).Forget(), "green"));
+        toolbar.Children.Add(Ui.RefreshButton(() => model.Load(true)));
         var more = Ui.IconButton("", L.T("Common_More", "More"), () => { }, "text");
         more.Flyout = MoreMenu();
         toolbar.Children.Add(more);
@@ -633,7 +652,8 @@ public sealed class PRContent : Grid, IShortcutHost
             new TabSpec(nameof(PRTab.Commits), L.T("PR_TabCommits", "Commits"), "", (pr.AllCommits.TotalCount ?? pr.AllCommits.Items.Count).ToString()),
             new TabSpec(nameof(PRTab.Checks), L.T("PR_TabChecks", "Checks"), "", summary, color),
             new TabSpec(nameof(PRTab.Files), L.T("PR_TabFiles", "Files changed"), "", pr.ChangedFiles.ToString())
-        }.Concat(model.StackTree is { } tree ? new[] { new TabSpec(nameof(PRTab.Stack), L.T("PR_TabStack", "Stack"), StackUi.StackGlyph, tree.Count.ToString()) } : Array.Empty<TabSpec>()));
+        }.Concat(model.StackTree is { } tree ? new[] { new TabSpec(nameof(PRTab.Stack), L.T("PR_TabStack", "Stack"), StackUi.StackGlyph, tree.Count.ToString()) } : Array.Empty<TabSpec>())
+         .Concat(JiraService.Account.ShowsTab(pr) ? new[] { new TabSpec(nameof(PRTab.Jira), L.T("PR_TabJira", "Jira"), "\uE8EC", JiraService.Account.Keys(pr).FirstOrDefault()) } : Array.Empty<TabSpec>()));
         tabs.Selected = model.Tab.ToString();
     }
 
@@ -649,6 +669,7 @@ public sealed class PRContent : Grid, IShortcutHost
                 PRTab.Commits => BuildCommits(null),
                 PRTab.Checks => BuildChecks(null),
                 PRTab.Stack => new StackTab(model),
+                PRTab.Jira => new JiraTab(model),
                 _ => BuildFiles()
             };
             tabViews[model.Tab] = view;
@@ -975,7 +996,7 @@ public sealed record CheckRowItem(CheckContext Check, Action ShowLog, Action? Fi
         if (!string.IsNullOrEmpty(c.Description)) parts.Add(c.Description);
         var body = Ui.V(1, Ui.Text(c.FullTitle, 13), Ui.Caption(string.Join(" · ", parts)));
         var right = Ui.H(4);
-        if (Fix is not null) right.Children.Add(Ui.Button(L.T("Fix_Button", "Fix with Claude Code"), Fix, glyph: "\uE945", tooltip: L.T("CiFix_RowHelp", "Send this check's log and the PR context to Claude Code")));
+        if (Fix is not null) right.Children.Add(Ui.Button(L.T("Fix_Button", "Fix with agent"), Fix, glyph: "\uE945", tooltip: L.T("CiFix_RowHelp", "Send this check's log and the PR context to Claude Code")));
         if (c.IsActionsJob && c.Outcome is not CheckOutcome.Pending and not CheckOutcome.Skipped)
             right.Children.Add(Ui.Button(L.T("Checks_Log", "Log"), ShowLog));
         if (c.Link is { } link) right.Children.Add(Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(link)));

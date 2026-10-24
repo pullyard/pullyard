@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 struct ClaudeSessionInfo: Identifiable, Hashable {
@@ -12,10 +13,115 @@ struct ClaudeSessionInfo: Identifiable, Hashable {
     let model: String?
     let linesAdded: Int?
     let linesRemoved: Int?
+    var parentId: String? = nil
+    var desktopId: String? = nil
+    var archived = false
 
     var worktreeName: String? {
         guard let r = cwd.range(of: "/.claude/worktrees/") else { return nil }
         return String(cwd[r.upperBound...]).components(separatedBy: "/").first
+    }
+}
+
+extension ClaudeSessionInfo {
+    func retitled(_ title: String) -> ClaudeSessionInfo {
+        var copy = ClaudeSessionInfo(id: id, file: file, cwd: cwd, title: title, branch: branch, modified: modified, prURL: prURL, prNumber: prNumber, model: model, linesAdded: linesAdded, linesRemoved: linesRemoved)
+        copy.parentId = parentId
+        copy.desktopId = desktopId
+        copy.archived = archived
+        return copy
+    }
+}
+
+enum DesktopSessionIndex {
+    @MainActor static let isInstalled = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.anthropic.claudefordesktop") != nil
+
+    private struct Record {
+        let local: String
+        let cli: String
+        let parentLocal: String?
+        let title: String?
+        let archived: Bool
+    }
+
+    private struct Fields: Decodable {
+        struct Spawned: Decodable { let sessionId: String? }
+        let sessionId: String?
+        let cliSessionId: String?
+        let spawnedFrom: Spawned?
+        let forkedFromSessionId: String?
+        let title: String?
+        let isArchived: Bool?
+    }
+
+    private static var cache: [String: (Date, Record?)] = [:]
+    private static let lock = NSLock()
+
+    @MainActor static func open(localID: String) {
+        var c = URLComponents()
+        c.scheme = "claude"
+        c.host = "code"
+        c.path = "/continue"
+        c.queryItems = [URLQueryItem(name: "session", value: localID)]
+        if let url = c.url { NSWorkspace.shared.open(url) }
+    }
+
+    struct Link {
+        var local: String? = nil
+        let parent: String?
+        let title: String?
+        let archived: Bool
+    }
+
+    static var directory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Claude/claude-code-sessions", isDirectory: true)
+    }
+
+    static func load(directory: URL = directory) -> [String: Link] {
+        let fm = FileManager.default
+        var records: [(local: String, cli: String, parentLocal: String?, title: String?, archived: Bool)] = []
+        var seen = Set<String>()
+        let accounts = (try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        for account in accounts {
+            for org in (try? fm.contentsOfDirectory(at: account, includingPropertiesForKeys: nil)) ?? [] {
+                for file in (try? fm.contentsOfDirectory(at: org, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] where file.pathExtension == "json" {
+                    seen.insert(file.path)
+                    guard let r = autoreleasepool(invoking: { record(file) }) else { continue }
+                    records.append((r.local, r.cli, r.parentLocal, r.title, r.archived))
+                }
+            }
+        }
+        lock.lock()
+        cache = cache.filter { seen.contains($0.key) }
+        lock.unlock()
+        let cliByLocal = Dictionary(records.map { ($0.local, $0.cli) }, uniquingKeysWith: { a, _ in a })
+        var out: [String: Link] = [:]
+        for r in records {
+            out[r.cli] = Link(local: r.local, parent: r.parentLocal.flatMap { cliByLocal[$0] }, title: r.title, archived: r.archived)
+        }
+        return out
+    }
+}
+
+extension DesktopSessionIndex {
+    private static func record(_ file: URL) -> Record? {
+        let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        lock.lock()
+        if let hit = cache[file.path], hit.0 == mtime {
+            lock.unlock()
+            return hit.1
+        }
+        lock.unlock()
+        var r: Record?
+        if let data = try? Data(contentsOf: file), let f = try? JSONDecoder().decode(Fields.self, from: data),
+           let local = f.sessionId, let cli = f.cliSessionId {
+            r = Record(local: local, cli: cli, parentLocal: f.spawnedFrom?.sessionId ?? f.forkedFromSessionId, title: f.title, archived: f.isArchived ?? false)
+        }
+        lock.lock()
+        cache[file.path] = (mtime, r)
+        lock.unlock()
+        return r
     }
 }
 
@@ -48,11 +154,18 @@ enum ClaudeSessionParser {
     static func loadAll(root: URL = root) -> [ClaudeProject] {
         let fm = FileManager.default
         guard let dirs = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return [] }
+        let desktop = DesktopSessionIndex.load()
         var byProject: [String: [ClaudeSessionInfo]] = [:]
         for dir in dirs {
             guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { continue }
             for file in files where file.pathExtension == "jsonl" {
-                guard let info = parse(file) else { continue }
+                guard var info = autoreleasepool(invoking: { parse(file) }) else { continue }
+                if let link = desktop[info.id] {
+                    info.parentId = link.parent
+                    info.desktopId = link.local
+                    info.archived = link.archived
+                    if let title = link.title, !title.isEmpty { info = info.retitled(title) }
+                }
                 byProject[projectRoot(for: info.cwd), default: []].append(info)
             }
         }

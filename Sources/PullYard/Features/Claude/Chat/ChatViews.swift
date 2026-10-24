@@ -7,32 +7,47 @@ struct ChatView: View {
     let tab: ClaudeTab
     let chat: ChatSession
     @State private var follow = ChatFollow()
+    @State private var awayCount: Int?
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
+                    LazyVStack(alignment: .leading, spacing: 18) {
                         if chat.items.isEmpty {
                             ChatWelcome(chat: chat, folder: tab.folder)
                         }
-                        ForEach(chat.items) { item in
-                            ChatItemView(item: item, chat: chat, folder: tab.folder)
-                                .id(item.id)
-                                .transition(.rise)
+                        ForEach(chat.displayItems) { entry in
+                            Group {
+                                switch entry {
+                                case .item(let item):
+                                    ChatItemView(item: item, chat: chat, folder: tab.folder)
+                                case .tools(let id, let steps):
+                                    ToolGroupView(id: id, steps: steps, chat: chat, folder: tab.folder)
+                                }
+                            }
+                            .id(entry.id)
+                            .transition(.rise)
+                        }
+                        if let url = chat.createdPR {
+                            CreatedPRCard(url: url)
+                                .id("created-pr")
+                                .transition(.pop)
                         }
                         if chat.busy {
                             WorkingIndicator(chat: chat)
                                 .transition(.opacity)
                         }
                         if let e = chat.lastError {
-                            ErrorBanner(text: e) { app.claude.restart(tab) }
+                            ErrorBanner(text: e, retry: { app.claude.restart(tab) }, reconnect: { app.claude.reconnect(tab) })
                                 .transition(.pop)
                         }
                         Color.clear.frame(height: 1).id("bottom")
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
+                    .scrollTargetLayout()
+                    .allowsHitTesting(!follow.scrolling)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 20)
                     .animation(Motion.smooth, value: chat.items.count)
                     .animation(Motion.fade, value: chat.busy)
                     .animation(Motion.spring, value: chat.lastError)
@@ -40,10 +55,15 @@ struct ChatView: View {
                     .frame(maxWidth: .infinity)
                     .background {
                         GeometryReader { g in
-                            Color.clear.preference(key: ChatContentFrameKey.self, value: g.frame(in: .named(ChatContentFrameKey.space)))
+                            Color.clear.preference(key: ChatContentFrameKey.self, value: CGRect(origin: .zero, size: g.size))
                         }
                     }
+                    .background(ChatScrollObserver(follow: follow))
                 }
+                .scrollPosition(id: Binding(get: { follow.topID }, set: { id in
+                    follow.topID = id
+                    if !follow.resizing { follow.keptTopID = id }
+                }))
                 .coordinateSpace(name: ChatContentFrameKey.space)
                 .background {
                     GeometryReader { g in
@@ -57,18 +77,33 @@ struct ChatView: View {
                     if case .user? = chat.items.last { follow.stick = true }
                     scrollDown(proxy)
                 }
-                .onChange(of: lastTextLength) { scrollDown(proxy) }
                 .onChange(of: chat.busy) { scrollDown(proxy) }
                 .onChange(of: chat.lastError) { scrollDown(proxy) }
                 .onChange(of: chat.pendingCount) {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { scrollDown(proxy) }
                 }
+                .onChange(of: follow.resizeTick) { keepPosition(proxy) }
                 .onAppear { jumpToBottom(proxy) }
                 .onChange(of: tab.id) { jumpToBottom(proxy) }
+                .overlay(alignment: .bottom) {
+                    if !follow.stick, !chat.items.isEmpty {
+                        JumpToLatestButton(newCount: max(0, chat.items.count - (awayCount ?? chat.items.count))) {
+                            follow.stick = true
+                            withAnimation(Motion.reduced ? nil : .spring(response: 0.55, dampingFraction: 0.86)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                        }
+                        .padding(.bottom, 16)
+                        .transition(Motion.reduced ? .opacity : .asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.6)).combined(with: .offset(y: 14)),
+                            removal: .opacity.combined(with: .scale(scale: 0.85)).combined(with: .offset(y: 10))
+                        ))
+                    }
+                }
+                .animation(Motion.reduced ? nil : .spring(response: 0.42, dampingFraction: 0.7), value: follow.stick)
+                .onChange(of: follow.stick) { _, stick in awayCount = stick ? nil : chat.items.count }
             }
             if chat.sleeping && !chat.running {
                 HStack(spacing: 8) {
-                    Image(systemName: "moon.zzz.fill").foregroundStyle(Color.syIndigo)
+                    Image(systemName: "moon.zzz").foregroundStyle(Color.syMuted)
                     Text("Session is sleeping — process stopped, memory freed. A new message resumes it.")
                         .font(.syCallout)
                         .foregroundStyle(Color.syMuted)
@@ -77,17 +112,12 @@ struct ChatView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .background(Color.syIndigo.opacity(0.08))
+                .background(Color.syText.opacity(0.03))
                 .overlay(alignment: .top) { Rectangle().fill(Color.syLine).frame(height: 1) }
             }
             ChatComposer(tab: tab, chat: chat)
         }
         .background(Theme.isBrand ? Color.syPanel : Color(nsColor: .textBackgroundColor).opacity(0.35))
-    }
-
-    private var lastTextLength: Int {
-        if case .text(let t)? = chat.items.last { return t.text.count }
-        return 0
     }
 
     private func jumpToBottom(_ proxy: ScrollViewProxy) {
@@ -98,26 +128,261 @@ struct ChatView: View {
         }
     }
 
+    private func keepPosition(_ proxy: ScrollViewProxy) {
+        guard !follow.stick, let id = follow.keptTopID else { return }
+        proxy.scrollTo(id, anchor: .top)
+        for delay in [0.05, 0.15, 0.3, 0.5, 0.7] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard !follow.stick else { return }
+                proxy.scrollTo(id, anchor: .top)
+            }
+        }
+    }
+
     private func scrollDown(_ proxy: ScrollViewProxy) {
         guard follow.stick else { return }
-        withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom", anchor: .bottom) }
+        if chat.busy {
+            proxy.scrollTo("bottom", anchor: .bottom)
+        } else {
+            withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom", anchor: .bottom) }
+        }
     }
 }
 
-private final class ChatFollow {
+@Observable
+final class ChatFollow {
     var stick = true
-    var viewportHeight: CGFloat = 0
-    private var contentFrame: CGRect = .zero
+    var scrolling = false
+    @ObservationIgnored var topID: String?
+    @ObservationIgnored var keptTopID: String?
+    var resizeTick = 0
+    @ObservationIgnored var resizing = false
+    @ObservationIgnored var viewportHeight: CGFloat = 0
+    @ObservationIgnored private var contentHeight: CGFloat = 0
 
     func track(_ frame: CGRect) -> Bool {
-        let grew = frame.height > contentFrame.height + 1
-        if frame.maxY - viewportHeight <= 40 {
-            stick = true
-        } else if frame.minY > contentFrame.minY + 1 {
-            stick = false
-        }
-        contentFrame = frame
+        let grew = frame.height > contentHeight + 1
+        contentHeight = frame.height
         return grew && stick
+    }
+}
+
+private struct ChatScrollObserver: NSViewRepresentable {
+    let follow: ChatFollow
+
+    func makeNSView(context: Context) -> ObserverView {
+        let v = ObserverView()
+        v.follow = follow
+        return v
+    }
+
+    func updateNSView(_ view: ObserverView, context: Context) {
+        view.follow = follow
+    }
+
+    final class ObserverView: NSView {
+        weak var follow: ChatFollow?
+        private var monitor: Any?
+        private var scrollEnd: DispatchWorkItem?
+        private weak var scroll: NSScrollView?
+        private var observers: [NSObjectProtocol] = []
+        private var lastWidth: CGFloat = 0
+        private var restoreUntil = Date.distantPast
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            detach()
+            guard window != nil else { return }
+            DispatchQueue.main.async { [weak self] in self?.attach() }
+        }
+
+        deinit {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            observers.forEach(NotificationCenter.default.removeObserver)
+        }
+
+        private func detach() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers = []
+            scroll = nil
+        }
+
+        private func attach() {
+            guard monitor == nil, let s = enclosingScrollView else { return }
+            scroll = s
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                self?.handle(event)
+                return event
+            }
+            lastWidth = s.contentView.bounds.width
+            let clip = s.contentView
+            clip.postsBoundsChangedNotifications = true
+            clip.postsFrameChangedNotifications = true
+            s.documentView?.postsFrameChangedNotifications = true
+            let center = NotificationCenter.default
+            observers.append(center.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.layoutChanged() }
+            })
+            observers.append(center.addObserver(forName: NSView.frameDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.layoutChanged() }
+            })
+            if let doc = s.documentView {
+                observers.append(center.addObserver(forName: NSView.frameDidChangeNotification, object: doc, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.layoutChanged() }
+                })
+            }
+        }
+
+        private func layoutChanged() {
+            guard let s = scroll, let doc = s.documentView, let follow else { return }
+            let clip = s.contentView
+            let width = clip.bounds.width
+            if abs(width - lastWidth) > 0.5 {
+                lastWidth = width
+                restoreUntil = Date().addingTimeInterval(0.8)
+                if !follow.resizing {
+                    follow.resizing = true
+                    follow.resizeTick += 1
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) { [weak self] in
+                    guard let self, self.restoreUntil < Date() else { return }
+                    self.follow?.resizing = false
+                }
+            }
+            guard restoreUntil > Date(), follow.stick else { return }
+            let y = max(0, doc.frame.height - clip.bounds.height)
+            guard abs(clip.bounds.origin.y - y) > 0.5 else { return }
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
+            s.reflectScrolledClipView(clip)
+        }
+
+        private var distanceToBottom: CGFloat {
+            guard let s = scroll, let doc = s.documentView else { return 0 }
+            let clip = s.contentView
+            return doc.frame.height - clip.bounds.maxY
+        }
+
+        private func handle(_ event: NSEvent) {
+            guard let s = scroll, let window = s.window, event.window === window else { return }
+            let point = s.convert(event.locationInWindow, from: nil)
+            guard s.bounds.contains(point) else { return }
+            if event.scrollingDeltaY > 0 {
+                if follow?.stick == true { follow?.stick = false }
+            }
+            if follow?.scrolling == false { follow?.scrolling = true }
+            scrollEnd?.cancel()
+            let end = DispatchWorkItem { [weak self] in self?.follow?.scrolling = false }
+            scrollEnd = end
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: end)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let follow = self.follow else { return }
+                if !follow.stick, self.distanceToBottom < 24 { follow.stick = true }
+            }
+        }
+    }
+}
+
+struct JumpToLatestButton: View {
+    var newCount = 0
+    let action: () -> Void
+    @State private var hover = false
+    @State private var pressed = false
+    @State private var start = Date()
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(Color.syRaised)
+                    .shadow(color: .black.opacity(hover ? 0.32 : 0.2), radius: hover ? 14 : 9, y: hover ? 6 : 3)
+                let animate = !Motion.reduced && (hover || newCount > 0)
+                TimelineView(.animation(minimumInterval: 1 / 30, paused: !animate)) { context in
+                    let t = context.date.timeIntervalSince(start)
+                    ZStack {
+                        DiveLogo(time: animate ? t : nil)
+                            .clipShape(Circle())
+                        Circle()
+                            .strokeBorder(
+                                AngularGradient(colors: [BrandMark.violet, BrandMark.sky, BrandMark.violet.opacity(0.25), BrandMark.violet], center: .center),
+                                lineWidth: 1.5
+                            )
+                            .rotationEffect(.degrees(animate ? t * 70 : 0))
+                    }
+                    .drawingGroup()
+                }
+            }
+            .frame(width: 44, height: 44)
+            .overlay(alignment: .topTrailing) {
+                if newCount > 0 {
+                    Text(newCount > 99 ? "99+" : "\(newCount)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .frame(minWidth: 18, minHeight: 18)
+                        .background(Capsule().fill(LinearGradient(colors: [BrandMark.violet, BrandMark.sky], startPoint: .topLeading, endPoint: .bottomTrailing)))
+                        .overlay(Capsule().strokeBorder(Color.syPanel, lineWidth: 2))
+                        .offset(x: 6, y: -4)
+                        .transition(.scale.combined(with: .opacity))
+                        .id(newCount)
+                }
+            }
+            .scaleEffect(pressed ? 0.92 : (hover ? 1.06 : 1))
+            .offset(y: hover ? -2 : 0)
+        }
+        .buttonStyle(PressReporter(pressed: $pressed))
+        .onHover { h in withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { hover = h } }
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: newCount)
+        .help(newCount > 0 ? "\(newCount) new — jump to the latest message" : "Jump to the latest message")
+    }
+}
+
+private struct PressReporter: ButtonStyle {
+    @Binding var pressed: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .onChange(of: configuration.isPressed) { _, p in
+                withAnimation(.spring(response: 0.22, dampingFraction: 0.6)) { pressed = p }
+            }
+    }
+}
+
+private struct DiveLogo: View {
+    let time: Double?
+    private static let cycle = 2.6
+
+    var body: some View {
+        let (y, opacity, bob) = state
+        PullYardLogoMark(progress: 1, size: 30)
+            .offset(y: y + bob)
+            .opacity(opacity)
+            .frame(width: 44, height: 44)
+    }
+
+    private var state: (CGFloat, Double, CGFloat) {
+        guard let time else { return (0, 1, 0) }
+        let t = time.truncatingRemainder(dividingBy: Self.cycle)
+        func easeOut(_ x: Double) -> Double { 1 - pow(1 - x, 4) }
+        func easeIn(_ x: Double) -> Double { pow(x, 2.6) }
+        func smooth(_ x: Double) -> Double { 0.5 - 0.5 * cos(.pi * min(max(x, 0), 1)) }
+        switch t {
+        case ..<0.7:
+            let p = easeOut(t / 0.7)
+            return (CGFloat(-34 * (1 - p)), smooth(t / 0.45), 0)
+        case ..<1.9:
+            let local = (t - 0.7) / 1.2
+            let envelope = sin(.pi * local)
+            return (0, 1, CGFloat(sin(local * .pi * 2) * 1.4 * envelope))
+        case ..<2.45:
+            let p = easeIn((t - 1.9) / 0.55)
+            return (CGFloat(34 * p), 1 - smooth((t - 2.05) / 0.4), 0)
+        default:
+            return (34, 0, 0)
+        }
     }
 }
 
@@ -149,35 +414,127 @@ private struct InitialBottomAnchor: ViewModifier {
 struct ChatWelcome: View {
     let chat: ChatSession
     let folder: String
+    @Environment(AppModel.self) private var app
+
+    private var tab: ClaudeTab? { app.claude.tabs.first { $0.chat === chat } }
+
+    private var recent: [ClaudeSessionInfo] {
+        let root = ClaudeSessionParser.projectRoot(for: folder)
+        let sid = chat.sessionId ?? ""
+        return app.claude.projects.first { $0.path == root }?.sessions.filter { $0.id != sid && !AgentSessionPrefs.shared.isArchived($0) }.prefix(3).map { $0 } ?? []
+    }
+
+    private struct Suggestion: Hashable {
+        let icon: String
+        let title: String
+        let prompt: String
+    }
+
+    private var suggestions: [Suggestion] {
+        var out: [Suggestion] = []
+        let git = tab?.git
+        if let git, !git.changes.isEmpty {
+            out.append(Suggestion(icon: "eye", title: "Review my uncommitted changes", prompt: "Review my uncommitted changes (git diff HEAD). Point out bugs, risky parts and missing tests."))
+            if let branch = git.branch, branch != "HEAD", git.repo != nil {
+                out.append(Suggestion(icon: "arrow.triangle.pull", title: "Open a pull request", prompt: AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: true, ahead: git.ahead)))
+            }
+        }
+        if let tab, let pr = app.claude.pullRequest(for: tab) {
+            out.append(Suggestion(icon: "text.bubble", title: "Address review on #\(pr.number)", prompt: "Read the review comments on pull request #\(pr.number) (\(pr.url)) with gh, fix what is valid and reply to what is not."))
+        }
+        out.append(Suggestion(icon: "map", title: "Explain the project structure", prompt: "Explain the project structure: main modules, how they connect, and where to start reading."))
+        out.append(Suggestion(icon: "ladybug", title: "Find bugs in recent changes", prompt: "Look at the last few commits and find likely bugs or regressions."))
+        out.append(Suggestion(icon: "checkmark.seal", title: "Write tests for changed code", prompt: "Write tests for the code changed on this branch, following the existing test style."))
+        return Array(out.prefix(4))
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                IconTile(systemImage: "sparkles", color: .syCoral, size: 24)
-                Text("Claude Code").font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText)
-            }
-            Text("Describe a task — Claude will read the code, propose changes and ask before acting.")
-                .foregroundStyle(Color.syMuted)
-            HStack(spacing: 8) {
-                ForEach(suggestions, id: \.self) { s in
-                    Button(s) { chat.send(s) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .center, spacing: 14) {
+                PullYardLogoMark(progress: 1, size: 54)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text((folder as NSString).lastPathComponent).font(.syTitle2.weight(.semibold)).foregroundStyle(Color.syText)
+                    HStack(spacing: 8) {
+                        if let git = tab?.git, let branch = git.branch {
+                            Label(branch, systemImage: "arrow.triangle.branch").lineLimit(1)
+                            if !git.changes.isEmpty {
+                                Text("· \(git.changes.count) changed").foregroundStyle(Color.syAmber)
+                            }
+                            if git.ahead > 0 {
+                                Text("· \(git.ahead) unpushed")
+                            }
+                        } else {
+                            Text(folder).lineLimit(1).truncationMode(.head)
+                        }
+                    }
+                    .font(.syCallout)
+                    .foregroundStyle(Color.syMuted)
                 }
             }
-            Text("/ commands · @ files · ⇧↩ new line · paste a screenshot ⌘V")
+            Text("Describe a task. The agent reads the code, proposes changes and asks before acting.")
+                .foregroundStyle(Color.syMuted)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                ForEach(suggestions, id: \.self) { s in
+                    WelcomeSuggestionButton(icon: s.icon, title: s.title) { chat.send(s.prompt) }
+                }
+            }
+            if !recent.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Recent in this project").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syDim)
+                    ForEach(recent) { s in
+                        Button {
+                            app.claude.resume(s)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "clock.arrow.circlepath").foregroundStyle(Color.syDim)
+                                Text(AgentSessionPrefs.shared.title(s)).foregroundStyle(Color.syText).lineLimit(1)
+                                Spacer(minLength: 8)
+                                Text(Fmt.rel(s.modified)).font(.syCaption).foregroundStyle(Color.syDim)
+                            }
+                            .font(.syCallout)
+                            .padding(.vertical, 4)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            Text("/ commands · @ files · ⇧↩ new line · paste a screenshot ⌘V · ⌘K switch session")
                 .font(.syCaption)
                 .foregroundStyle(Color.syDim)
         }
-        .padding(16)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .card(radius: 12, fill: Color.syCoral.opacity(0.06))
+        .card(radius: 14)
     }
+}
 
-    private var suggestions: [String] {
-        ["Explain the project structure",
-         "Find bugs in the latest changes",
-         "Write tests for the changed code"]
+struct WelcomeSuggestionButton: View {
+    let icon: String
+    let title: String
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.syCallout)
+                    .foregroundStyle(LinearGradient(colors: [BrandMark.violet, BrandMark.sky], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 18)
+                Text(title).foregroundStyle(Color.syText).lineLimit(2).multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .font(.syCallout)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.syText.opacity(hover ? 0.07 : 0.035)))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(hover ? BrandMark.violet.opacity(0.45) : Color.syLine))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(Motion.fade) { hover = h } }
     }
 }
 
@@ -187,7 +544,7 @@ struct WorkingIndicator: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { ctx in
             HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
+                PullYardLoader(size: 26)
                 Text(chat.status ?? (chat.pendingCount > 0 ? "Waiting for you" : "Working…"))
                     .foregroundStyle(Color.syMuted)
                 if let start = chat.turnStartedAt {
@@ -206,25 +563,44 @@ struct WorkingIndicator: View {
 struct ErrorBanner: View {
     let text: String
     let retry: () -> Void
+    var reconnect: (() -> Void)?
+    @State private var waiting = false
 
-    private var looksLikeAuth: Bool {
-        let s = text.lowercased()
-        return ["login", "log in", "logged in", "auth", "api key", "credential", "401", "oauth", "token"].contains { s.contains($0) }
-    }
+    private var looksLikeAuth: Bool { ChatSession.isAuthError(text) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(text, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.syAmber).textSelection(.enabled)
+            if looksLikeAuth {
+                Label("Claude sign-in expired", systemImage: "person.crop.circle.badge.exclamationmark")
+                    .font(.syBody.weight(.semibold))
+                    .foregroundStyle(Color.syAmber)
+                Text(waiting ? "Finish signing in in Terminal. The session picks up where it stopped." : "Sign in again and the session resumes where it stopped.")
+                    .font(.syCallout)
+                    .foregroundStyle(Color.syMuted)
+                Text(text).font(.syCaption).foregroundStyle(Color.syDim).textSelection(.enabled).lineLimit(3)
+            } else {
+                Label(text, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.syAmber).textSelection(.enabled)
+            }
             HStack {
-                Button("Restart session", action: retry).controlSize(.small)
                 if looksLikeAuth {
-                    Button("Check Claude sign-in") {
-                        Task { await ClaudeAccountStore.shared.refresh() }
+                    Button {
+                        waiting = true
+                        ClaudeAccountStore.shared.reauthenticate {
+                            waiting = false
+                            (reconnect ?? retry)()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if waiting { WakeLoader() }
+                            Text(waiting ? "Waiting for sign-in…" : "Sign in again")
+                        }
                     }
                     .controlSize(.small)
                     .buttonStyle(.borderedProminent)
-                    .tint(.syCoral)
+                    .tint(.syAgentAccent)
+                    .disabled(waiting)
                 }
+                Button("Restart session", action: reconnect ?? retry).controlSize(.small)
             }
         }
         .padding(12)
@@ -240,10 +616,26 @@ struct ChatItemView: View {
     let chat: ChatSession
     let folder: String
 
+    @Environment(AppModel.self) private var app
+
+    private func edit(id: String, text: String) {
+        guard !chat.busy, chat.sessionId?.isEmpty == false,
+              let tab = app.claude.tabs.first(where: { $0.chat === chat }),
+              let index = chat.items.firstIndex(where: { $0.id == id }) else {
+            chat.draftRequest = text
+            return
+        }
+        let later = chat.items[(index + 1)...].filter {
+            if case .user(_, let t, _) = $0 { return t == text }
+            return false
+        }.count
+        app.claude.rewind(tab, to: text, occurrenceFromEnd: later)
+    }
+
     var body: some View {
         switch item {
-        case .user(_, let text, let images):
-            UserBubble(text: text, images: images)
+        case .user(let id, let text, let images):
+            UserBubble(text: text, images: images) { edit(id: id, text: text) }
         case .text(let t):
             AssistantText(text: t)
         case .thinking(let t):
@@ -251,10 +643,23 @@ struct ChatItemView: View {
         case .tool(let call):
             ToolCallView(call: call, chat: chat, folder: folder)
         case .notice(_, let text, let isError):
-            HStack(spacing: 6) {
-                Rectangle().fill(Color.syLine).frame(height: 1)
-                Text(text).font(.syCaption).foregroundStyle(isError ? Color.syRed : Color.syDim).fixedSize()
-                Rectangle().fill(Color.syLine).frame(height: 1)
+            if text == "Interrupted" {
+                HStack(spacing: 5) {
+                    Image(systemName: "stop.circle")
+                    Text("Interrupted")
+                }
+                .font(.syCaption)
+                .foregroundStyle(Color.syMuted)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(Color.syText.opacity(0.06)))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
+                HStack(spacing: 6) {
+                    Rectangle().fill(Color.syLine).frame(height: 1)
+                    Text(text).font(.syCaption).foregroundStyle(isError ? Color.syRed : Color.syDim).fixedSize()
+                    Rectangle().fill(Color.syLine).frame(height: 1)
+                }
             }
         }
     }
@@ -263,45 +668,127 @@ struct ChatItemView: View {
 struct UserBubble: View {
     let text: String
     let images: [ChatImage]
+    var onEdit: (() -> Void)?
     @State private var expanded = false
+    @State private var hover = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !images.isEmpty {
-                HStack(spacing: 6) {
-                    ForEach(images) { img in
-                        if let ns = img.image {
-                            Image(nsImage: ns).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 6))
+        VStack(alignment: .trailing, spacing: 4) {
+            HStack {
+                Spacer(minLength: 80)
+                VStack(alignment: .leading, spacing: 8) {
+                    if !images.isEmpty {
+                        HStack(spacing: 6) {
+                            ForEach(images) { img in
+                                if let ns = img.image {
+                                    Image(nsImage: ns).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                            }
+                        }
+                    }
+                    if !text.isEmpty {
+                        Text(text)
+                            .foregroundStyle(Color.syText)
+                            .textSelection(.enabled)
+                            .lineLimit(expanded ? nil : 12)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if text.split(separator: "\n").count > 12 {
+                            Button(expanded ? "Collapse" : "Show all") { withAnimation(Motion.quick) { expanded.toggle() } }
+                                .buttonStyle(.link)
+                                .font(.syCaption)
                         }
                     }
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.syAgentAccent.opacity(0.13)))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.syAgentAccent.opacity(0.22)))
             }
-            if !text.isEmpty {
-                Text(text)
-                    .foregroundStyle(Color.syText)
-                    .textSelection(.enabled)
-                    .lineLimit(expanded ? nil : 12)
-                    .fixedSize(horizontal: false, vertical: true)
-                if text.split(separator: "\n").count > 12 {
-                    Button(expanded ? "Collapse" : "Show all") { expanded.toggle() }
-                        .buttonStyle(.link)
-                        .font(.syCaption)
+            MessageActions(visible: hover && !text.isEmpty) {
+                MessageActionButton(icon: "doc.on.doc", help: "Copy") { copyToPasteboard(text) }
+                if let onEdit {
+                    MessageActionButton(icon: "arrow.uturn.backward.circle", help: "Edit from here — continues in a new branch of this session") { onEdit() }
                 }
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .card(radius: 10)
+        .contentShape(Rectangle())
+        .modifier(LingeringHover(hover: $hover))
+    }
+}
+
+struct LingeringHover: ViewModifier {
+    @Binding var hover: Bool
+    @State private var hide: DispatchWorkItem?
+
+    func body(content: Content) -> some View {
+        content.onHover { inside in
+            hide?.cancel()
+            if inside {
+                withAnimation(Motion.fade) { hover = true }
+            } else {
+                let item = DispatchWorkItem { withAnimation(Motion.fade) { hover = false } }
+                hide = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: item)
+            }
+        }
+    }
+}
+
+struct MessageActions<Content: View>: View {
+    let visible: Bool
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        HStack(spacing: 2) { content }
+            .opacity(visible ? 1 : 0)
+            .offset(y: visible || Motion.reduced ? 0 : -3)
+            .frame(height: 22)
+    }
+}
+
+struct MessageActionButton: View {
+    let icon: String
+    let help: String
+    let action: () -> Void
+    @State private var done = false
+    @State private var hover = false
+
+    var body: some View {
+        Button {
+            action()
+            withAnimation(Motion.quick) { done = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { withAnimation(Motion.fade) { done = false } }
+        } label: {
+            Image(systemName: done && icon == "doc.on.doc" ? "checkmark" : icon)
+                .font(.syCaption)
+                .foregroundStyle(hover ? Color.syText : Color.syMuted)
+                .frame(width: 22, height: 20)
+                .background(RoundedRectangle(cornerRadius: 5).fill(Color.syText.opacity(hover ? 0.08 : 0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help(help)
     }
 }
 
 struct AssistantText: View {
     let text: ChatText
+    @State private var hover = false
 
     var body: some View {
         if !text.text.isEmpty {
-            MarkdownView(text: text.text)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                MarkdownView(text: text.text, streaming: !text.finalized)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if text.finalized {
+                    MessageActions(visible: hover) {
+                        MessageActionButton(icon: "doc.on.doc", help: "Copy") { copyToPasteboard(text.text) }
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+            .modifier(LingeringHover(hover: $hover))
         }
     }
 }
@@ -316,7 +803,7 @@ struct ThinkingView: View {
                 Button { withAnimation(Motion.quick) { open.toggle() } } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "chevron.right").font(.syCaption2).rotationEffect(.degrees(open ? 90 : 0))
-                        Image(systemName: "brain").foregroundStyle(Color.syViolet)
+                        Image(systemName: "brain").foregroundStyle(Color.syViolet.opacity(0.8))
                         Text("Thinking")
                     }
                     .font(.syCaption)
@@ -325,7 +812,7 @@ struct ThinkingView: View {
                 .buttonStyle(.plain)
                 if open {
                     Text(text.text).font(.syCallout).foregroundStyle(Color.syMuted).textSelection(.enabled).padding(.leading, 18)
-                        .transition(.opacity)
+                        .transition(.reveal)
                 }
             }
         }
@@ -359,6 +846,17 @@ enum ToolPresentation {
             return parts.last.map(String.init) ?? call.name
         }
         return call.name
+    }
+
+    static func diffStat(_ call: ChatToolCall) -> DiffStat? {
+        if let patch = call.structured?["structuredPatch"] as? [[String: Any]], !patch.isEmpty {
+            let lines = patch.flatMap { $0["lines"] as? [String] ?? [] }
+            return DiffStat(additions: lines.filter { $0.hasPrefix("+") }.count, deletions: lines.filter { $0.hasPrefix("-") }.count)
+        }
+        if call.name == "Write", let content = call.string("content") {
+            return DiffStat(additions: content.split(separator: "\n", omittingEmptySubsequences: false).count, deletions: 0)
+        }
+        return nil
     }
 
     static func relative(_ path: String, _ folder: String) -> String {
@@ -411,7 +909,7 @@ struct ToolCallView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 4)
-                    if let stat = diffStat { stat }
+                    if let stat = ToolPresentation.diffStat(call) { stat }
                     Image(systemName: "chevron.down").font(.syCaption2).foregroundStyle(Color.syDim).rotationEffect(.degrees(isOpen ? 180 : 0))
                 }
                 .font(.syCallout)
@@ -424,7 +922,7 @@ struct ToolCallView: View {
                 Rectangle().fill(Color.syLine).frame(height: 1)
                 ToolDetails(call: call, folder: folder)
                     .padding(10)
-                    .transition(.opacity)
+                    .transition(.reveal)
             }
             if let p = call.permission, !p.resolved {
                 PermissionCard(request: p, chat: chat, folder: folder)
@@ -454,24 +952,14 @@ struct ToolCallView: View {
             if call.permission?.resolved == false {
                 Image(systemName: "hand.raised.fill").foregroundStyle(Color.syAmber)
             } else {
-                ProgressView().controlSize(.mini).frame(width: 14)
+                WakeLoader()
             }
-        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.syGreen)
+        case .done: Image(systemName: "checkmark").foregroundStyle(Color.syDim)
         case .error: Image(systemName: "xmark.circle.fill").foregroundStyle(Color.syRed)
         case .denied: Image(systemName: "nosign").foregroundStyle(Color.syAmber)
         }
     }
 
-    private var diffStat: DiffStat? {
-        if let patch = call.structured?["structuredPatch"] as? [[String: Any]], !patch.isEmpty {
-            let lines = patch.flatMap { $0["lines"] as? [String] ?? [] }
-            return DiffStat(additions: lines.filter { $0.hasPrefix("+") }.count, deletions: lines.filter { $0.hasPrefix("-") }.count)
-        }
-        if call.name == "Write", let content = call.string("content") {
-            return DiffStat(additions: content.split(separator: "\n", omittingEmptySubsequences: false).count, deletions: 0)
-        }
-        return nil
-    }
 }
 
 struct ToolDetails: View {
@@ -596,7 +1084,7 @@ struct InlineDiff: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(shown) { DiffLineView(line: $0).equatable() }
             if lines.count > 60 && !showAll {
-                Button("Show \(lines.count - 60) more lines") { showAll = true }
+                Button("Show \(lines.count - 60) more lines") { withAnimation(Motion.quick) { showAll = true } }
                     .buttonStyle(.link).font(.syCaption).padding(6)
             }
         }
@@ -614,7 +1102,7 @@ struct TodoListView: View {
                 let status = todo["status"] as? String ?? "pending"
                 HStack(spacing: 8) {
                     Image(systemName: status == "completed" ? "checkmark.circle.fill" : status == "in_progress" ? "circle.dotted.circle" : "circle")
-                        .foregroundStyle(status == "completed" ? Color.syGreen : status == "in_progress" ? Color.sySky : Color.syDim)
+                        .foregroundStyle(status == "completed" ? Color.syMuted : status == "in_progress" ? Color.syText : Color.syDim)
                     Text(todo["content"] as? String ?? todo["subject"] as? String ?? "")
                         .strikethrough(status == "completed")
                         .foregroundStyle(status == "completed" ? Color.syMuted : Color.syText)

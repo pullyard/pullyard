@@ -288,7 +288,7 @@
         ? '<div class="d-rerq done">' + icon("check", "ti") + "<b>Requested</b><span>· Review re-requested from @" + p.rerequest.who + "</span></div>"
         : '<div class="d-rerq"><span>' + icon("commit", "ti") + "You pushed " + p.rerequest.n + " commits after @" + p.rerequest.who + " reviewed</span><button data-rerq>Re-request review</button></div>";
     }
-    if (p.review) h += '<div class="d-fix"><span>' + icon("chat", "ti") + '1 unresolved comment</span><button data-fix>' + icon("spark", "ti") + "Fix with Claude Code</button></div>";
+    if (p.review) h += '<div class="d-fix"><span>' + icon("chat", "ti") + '1 unresolved comment</span><button data-fix>' + icon("spark", "ti") + "Fix with agent</button></div>";
     h += "</div>";
     var tabs = [["conversation", "Conversation", "chat", p.review ? 1 : 0], ["commits", "Commits", "commit", p.commits.length], ["checks", "Checks", "check", p.checks.length], ["files", "Files changed", "file", p.files.length]];
     h += '<div class="d-tabs">' + tabs.map(function (t) {
@@ -301,7 +301,7 @@
     if (state.tab === "conversation") {
       var h = '<div class="d-conv"><div class="d-card"><div class="d-ch">' + avatar(p.author) + "<b>" + p.author + "</b> · description · " + p.ago + ' ago</div><div class="d-cb">' + p.body + "</div></div>";
       if (p.review) {
-        h += '<div class="d-card"><div class="d-ch">' + avatar(p.review.who) + "<b>" + p.review.who + '</b> · <span class="r">requested changes</span></div><div class="d-cb"><div class="d-tpath">' + p.review.file + ":" + p.review.line + "</div>" + esc(p.review.text) + '<div class="d-acts"><button>Reply</button><button>Resolve</button><button class="d-hot" data-fix>' + icon("spark", "ti") + "Fix with Claude Code</button></div></div></div>";
+        h += '<div class="d-card"><div class="d-ch">' + avatar(p.review.who) + "<b>" + p.review.who + '</b> · <span class="r">requested changes</span></div><div class="d-cb"><div class="d-tpath">' + p.review.file + ":" + p.review.line + "</div>" + esc(p.review.text) + '<div class="d-acts"><button>Reply</button><button>Resolve</button><button class="d-hot" data-fix>' + icon("spark", "ti") + "Fix with agent</button></div></div></div>";
       }
       return h + '<div class="d-composer">Comment (Markdown) — ' + sendKey() + ' to send<span>Comment</span></div></div>';
     }
@@ -357,7 +357,7 @@
   function chatView() {
     var c = state.chat || { step: 0, items: [] };
     var h = '<div class="d-chat"><div class="d-ctab"><span class="d-ct">' + icon("chat", "ti") + 'Cancel stale searches <small>web-app</small></span><span class="d-cplus">+</span><span class="d-cmodel">opus</span></div><div class="d-msgs" id="d-msgs">';
-    if (!c.items.length) h += '<div class="d-welcome"><span class="d-tile lg" style="--c:var(--coral)">' + icon("spark", "ti") + '</span><b>Claude Code</b><p>Open a PR and press <em>Fix with Claude Code</em>, or start here.</p><button class="d-start" data-fix>' + icon("spark", "ti") + "Fix review on #482</button></div>";
+    if (!c.items.length) h += '<div class="d-welcome"><span class="d-tile lg" style="--c:var(--coral)">' + icon("spark", "ti") + '</span><b>Claude Code</b><p>Open a PR and press <em>Fix with agent</em>, or start here.</p><button class="d-start" data-fix>' + icon("spark", "ti") + "Fix review on #482</button></div>";
     c.items.forEach(function (it, i) { h += i === c.fresh ? it.replace('<div class="', '<div class="new ') : it; });
     if (c.busy) h += '<div class="d-working"><span class="d-spin"></span>Working…</div>';
     h += '</div><form class="d-ccomp" data-compose><input placeholder="Ask Claude or describe a task…" aria-label="Message"><div class="d-crow"><span>Accept edits ▾</span><span>Opus ▾</span><span>effort ▾</span><span class="d-ring"></span><button type="submit" aria-label="Send">' + icon("send", "ti") + "</button></div></form></div>";

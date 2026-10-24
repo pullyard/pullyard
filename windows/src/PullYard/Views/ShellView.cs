@@ -152,7 +152,7 @@ public sealed class ShellView : Grid
                 Item(Section.Repos, provider.RepositoriesTitle(), "\uE8F1", "teal");
             }
             Header(L.T("Nav_AI", "AI"));
-            Item(Section.Claude, L.T("Section_Claude", "Claude Code"), "\uE945", "coral");
+            Item(Section.Claude, L.T("Section_Claude", "Agents"), "\uE945", "coral");
             SyncNavSelection();
             UpdateBadges();
             return;
@@ -169,7 +169,7 @@ public sealed class ShellView : Grid
         Item(Section.Repos, L.T("Section_Repositories", "Repositories"), "", "teal");
         Item(Section.Projects, L.T("Section_Projects", "Projects"), "", "indigo");
         Header(L.T("Nav_AI", "AI"));
-        Item(Section.Claude, L.T("Section_Claude", "Claude Code"), "", "coral");
+        Item(Section.Claude, L.T("Section_Claude", "Agents"), "", "coral");
         SyncNavSelection();
         UpdateBadges();
     }
@@ -220,7 +220,7 @@ public sealed class ShellView : Grid
             var row = Ui.Columns((Ui.Glyph("\uE823", 13, "amber"), Ui.Auto), (text, Ui.Star));
             row.ColumnSpacing = 8;
             row.Margin = new Thickness(14, 0, 10, 8);
-            Ui.Tip(row, L.T("RateLimit_Hint", "GitHub rate limit reached. Live polling is paused; manual refresh still works."));
+            Ui.Tip(row, L.T("RateLimit_Hint", "GitHub rate limit reached. Live polling and refreshes are paused until the limit resets."));
             footer.Children.Add(row);
         }
         if (app.User is { } user)

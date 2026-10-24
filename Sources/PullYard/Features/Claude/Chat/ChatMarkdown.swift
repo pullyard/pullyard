@@ -17,18 +17,44 @@ struct MDListItem: Hashable {
 }
 
 enum MarkdownParser {
-    private static let cache = NSCache<NSString, MDBox>()
+    private static let cache: NSCache<NSString, MDBox> = {
+        let c = NSCache<NSString, MDBox>()
+        c.countLimit = 500
+        c.totalCostLimit = 8 << 20
+        return c
+    }()
 
     final class MDBox {
         let blocks: [MDBlock]
         init(_ b: [MDBlock]) { blocks = b }
     }
 
-    static func parse(_ text: String) -> [MDBlock] {
+    static func parse(_ text: String, streaming: Bool = false) -> [MDBlock] {
         if let hit = cache.object(forKey: text as NSString) { return hit.blocks }
-        let blocks = parseUncached(text)
-        if text.count < 200_000 { cache.setObject(MDBox(blocks), forKey: text as NSString) }
-        return blocks
+        guard streaming else {
+            let blocks = parseUncached(text)
+            if text.utf8.count < 200_000 { cache.setObject(MDBox(blocks), forKey: text as NSString, cost: text.utf8.count) }
+            return blocks
+        }
+        guard let split = stableSplit(text) else { return parseUncached(text) }
+        return parse(String(text[..<split])) + parseUncached(String(text[split...]))
+    }
+
+    static func stableSplit(_ text: String) -> String.Index? {
+        var fenced = false
+        var split: String.Index?
+        var lineStart = text.startIndex
+        var previousBlank = false
+        while lineStart < text.endIndex {
+            let lineEnd = text[lineStart...].firstIndex(of: "\n") ?? text.endIndex
+            let line = text[lineStart..<lineEnd].trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("```") || line.hasPrefix("~~~") { fenced.toggle() }
+            let blank = line.isEmpty
+            if blank, !fenced, !previousBlank, lineEnd < text.endIndex { split = text.index(after: lineEnd) }
+            previousBlank = blank
+            lineStart = lineEnd < text.endIndex ? text.index(after: lineEnd) : text.endIndex
+        }
+        return split
     }
 
     private static func parseUncached(_ text: String) -> [MDBlock] {
@@ -140,7 +166,33 @@ enum MarkdownParser {
     }
 }
 
+private final class AttributedBox {
+    let value: AttributedString
+    init(_ value: AttributedString) { self.value = value }
+}
+
+private let inlineCache: NSCache<NSString, AttributedBox> = {
+    let c = NSCache<NSString, AttributedBox>()
+    c.countLimit = 4000
+    c.totalCostLimit = 8 << 20
+    return c
+}()
+
+private let highlightCache: NSCache<NSString, AttributedBox> = {
+    let c = NSCache<NSString, AttributedBox>()
+    c.countLimit = 300
+    c.totalCostLimit = 8 << 20
+    return c
+}()
+
 func inlineMarkdown(_ text: String) -> AttributedString {
+    if let hit = inlineCache.object(forKey: text as NSString) { return hit.value }
+    let attr = parseInlineMarkdown(text)
+    if text.utf8.count < 20_000 { inlineCache.setObject(AttributedBox(attr), forKey: text as NSString, cost: text.utf8.count) }
+    return attr
+}
+
+private func parseInlineMarkdown(_ text: String) -> AttributedString {
     var opts = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
     opts.failurePolicy = .returnPartiallyParsedIfPossible
     var attr = (try? AttributedString(markdown: text, options: opts)) ?? AttributedString(text)
@@ -153,10 +205,11 @@ func inlineMarkdown(_ text: String) -> AttributedString {
 
 struct MarkdownView: View {
     let text: String
+    var streaming = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(MarkdownParser.parse(text).enumerated()), id: \.offset) { _, block in
+            ForEach(Array(MarkdownParser.parse(text, streaming: streaming).enumerated()), id: \.offset) { _, block in
                 blockView(block)
             }
         }
@@ -177,7 +230,7 @@ struct MarkdownView: View {
         case .paragraph(let s):
             Text(inlineMarkdown(s)).fixedSize(horizontal: false, vertical: true)
         case .code(let lang, let code):
-            CodeBlockView(language: lang, code: code)
+            CodeBlockView(language: lang, code: code, streaming: streaming)
         case .bullet(let items):
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
@@ -217,6 +270,7 @@ struct MarkdownView: View {
 struct CodeBlockView: View {
     let language: String
     let code: String
+    var streaming = false
     @State private var copied = false
 
     var body: some View {
@@ -251,6 +305,15 @@ struct CodeBlockView: View {
     }
 
     private var highlighted: AttributedString {
+        let key = "\(language)\u{0}\(code)" as NSString
+        if let hit = highlightCache.object(forKey: key) { return hit.value }
+        guard !streaming else { return AttributedString(code) }
+        let value = highlight()
+        highlightCache.setObject(AttributedBox(value), forKey: key, cost: code.utf8.count)
+        return value
+    }
+
+    private func highlight() -> AttributedString {
         let aliases = ["python": "py", "javascript": "js", "typescript": "ts", "kotlin": "kt", "shell": "sh", "console": "sh", "zsh": "sh", "yml": "yaml", "rust": "rs", "golang": "go", "objective-c": "m", "objc": "m", "c++": "cpp", "csharp": "cs", "jsonc": "js", "json": "js"]
         let ext = aliases[language.lowercased()] ?? (language.isEmpty ? "txt" : language.lowercased())
         let ns = SyntaxHighlighter.attributed(code, ext: ext, font: .monospacedSystemFont(ofSize: 12, weight: .regular))

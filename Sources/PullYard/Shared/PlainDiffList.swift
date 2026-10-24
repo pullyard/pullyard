@@ -74,7 +74,7 @@ struct PlainDiffList: View {
         .overlay(alignment: .bottom) { Divider() }
         .contentShape(Rectangle())
         .onTapGesture {
-            if isCollapsed { collapsed.remove(f.id) } else { collapsed.insert(f.id) }
+            withAnimation(Motion.quick) { if isCollapsed { collapsed.remove(f.id) } else { collapsed.insert(f.id) } }
         }
         .contextMenu {
             Button("Copy path") { copyToPasteboard(f.id) }
