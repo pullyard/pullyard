@@ -310,6 +310,7 @@ final class ChatSession {
         process = nil
         stdin = nil
         memoryBytes = 0
+        for t in tools.values where t.status == .running { t.status = wasIntentional ? .done : .error }
         if wasIntentional {
             sleeping = sessionId != nil
             pendingPermissions.removeAll()

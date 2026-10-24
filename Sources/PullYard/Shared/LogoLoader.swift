@@ -68,16 +68,43 @@ private enum LogoGeometry {
 }
 
 private struct LogoPart: Shape {
-    let build: (inout Path) -> Void
+    let base: Path
+
+    init(_ base: Path) { self.base = base }
 
     func path(in rect: CGRect) -> Path {
-        var p = Path()
-        build(&p)
+        let p = base
         let box = LogoGeometry.box
         let scale = min(rect.width / box.width, rect.height / box.height)
         let dx = rect.midX - box.midX * scale
         let dy = rect.midY - box.midY * scale
         return p.applying(CGAffineTransform(a: scale, b: 0, c: 0, d: scale, tx: dx, ty: dy))
+    }
+}
+
+
+private enum LogoPaths {
+    static let nodeA = LogoPart.make(LogoGeometry.nodeA)
+    static let nodeB = LogoPart.make(LogoGeometry.nodeB)
+    static let curveA = LogoPart.make(LogoGeometry.curveA)
+    static let curveB = LogoPart.make(LogoGeometry.curveB)
+    static let hull = LogoPart.make(LogoGeometry.hull)
+    static let deckStrip = LogoPart.make(LogoGeometry.deckStrip)
+    static let porthole = LogoPart.make(LogoGeometry.porthole)
+    static let chimney = LogoPart.make(LogoGeometry.chimney)
+    static let chimneyTop = LogoPart.make(LogoGeometry.chimneyTop)
+    static let cabin = LogoPart.make(LogoGeometry.cabin)
+    static let cabinShade = LogoPart.make(LogoGeometry.cabinShade)
+    static let windows = LogoPart.make(LogoGeometry.windows)
+    static let wave1 = LogoPart.make(LogoGeometry.wave1)
+    static let wave2 = LogoPart.make(LogoGeometry.wave2)
+}
+
+extension LogoPart {
+    static func make(_ build: (inout Path) -> Void) -> Path {
+        var p = Path()
+        build(&p)
+        return p
     }
 }
 
@@ -102,42 +129,43 @@ struct PullYardLogoMark: View {
         let tail = min(1, max(0, erase))
         ZStack {
             Group {
-                LogoPart(build: LogoGeometry.nodeA).trim(from: tail, to: nodes)
+                LogoPart(LogoPaths.nodeA).trim(from: tail, to: nodes)
                     .stroke(LogoGeometry.violet, style: StrokeStyle(lineWidth: 18 * lineScale, lineCap: .round))
-                LogoPart(build: LogoGeometry.nodeB).trim(from: tail, to: nodes)
+                LogoPart(LogoPaths.nodeB).trim(from: tail, to: nodes)
                     .stroke(LogoGeometry.sky, style: StrokeStyle(lineWidth: 18 * lineScale, lineCap: .round))
-                LogoPart(build: LogoGeometry.curveA).trim(from: tail, to: curves)
+                LogoPart(LogoPaths.curveA).trim(from: tail, to: curves)
                     .stroke(LogoGeometry.violet, style: StrokeStyle(lineWidth: 24 * lineScale, lineCap: .round))
-                LogoPart(build: LogoGeometry.curveB).trim(from: tail, to: curves)
+                LogoPart(LogoPaths.curveB).trim(from: tail, to: curves)
                     .stroke(LogoGeometry.sky, style: StrokeStyle(lineWidth: 24 * lineScale, lineCap: .round))
             }
             Group {
-                LogoPart(build: LogoGeometry.hull)
+                LogoPart(LogoPaths.hull)
                     .fill(LinearGradient(colors: [LogoGeometry.hullTop, LogoGeometry.hullBottom], startPoint: .top, endPoint: .bottom))
                     .opacity(hullFill * (1 - tail))
-                LogoPart(build: LogoGeometry.deckStrip).fill(LogoGeometry.deck).opacity(hullFill * (1 - tail))
-                LogoPart(build: LogoGeometry.porthole).fill(LogoGeometry.deck).opacity(hullFill * (1 - tail))
-                LogoPart(build: LogoGeometry.hull).trim(from: tail, to: hullLine)
+                LogoPart(LogoPaths.deckStrip).fill(LogoGeometry.deck).opacity(hullFill * (1 - tail))
+                LogoPart(LogoPaths.porthole).fill(LogoGeometry.deck).opacity(hullFill * (1 - tail))
+                LogoPart(LogoPaths.hull).trim(from: tail, to: hullLine)
                     .stroke(LogoGeometry.hullTop, style: StrokeStyle(lineWidth: 14 * lineScale, lineCap: .round, lineJoin: .round))
                     .opacity(1 - hullFill * 0.85)
             }
             Group {
-                LogoPart(build: LogoGeometry.chimney).fill(LogoGeometry.cabinShade)
-                LogoPart(build: LogoGeometry.chimneyTop).fill(LogoGeometry.hullTop)
-                LogoPart(build: LogoGeometry.cabin).fill(LogoGeometry.cabin)
-                LogoPart(build: LogoGeometry.cabinShade).fill(LogoGeometry.cabinShade)
-                LogoPart(build: LogoGeometry.windows).fill(LogoGeometry.window)
+                LogoPart(LogoPaths.chimney).fill(LogoGeometry.cabinShade)
+                LogoPart(LogoPaths.chimneyTop).fill(LogoGeometry.hullTop)
+                LogoPart(LogoPaths.cabin).fill(LogoGeometry.cabin)
+                LogoPart(LogoPaths.cabinShade).fill(LogoGeometry.cabinShade)
+                LogoPart(LogoPaths.windows).fill(LogoGeometry.window)
             }
             .scaleEffect(x: 1, y: 0.6 + 0.4 * cabin, anchor: UnitPoint(x: 0.5, y: (566 - LogoGeometry.box.minY) / LogoGeometry.box.height))
             .opacity(cabin * (1 - tail))
             Group {
-                LogoPart(build: LogoGeometry.wave1).trim(from: tail, to: waves)
+                LogoPart(LogoPaths.wave1).trim(from: tail, to: waves)
                     .stroke(LogoGeometry.wave.opacity(0.55), style: StrokeStyle(lineWidth: 12 * lineScale, lineCap: .round))
-                LogoPart(build: LogoGeometry.wave2).trim(from: tail, to: max(0, waves - 0.15) / 0.85)
+                LogoPart(LogoPaths.wave2).trim(from: tail, to: max(0, waves - 0.15) / 0.85)
                     .stroke(LogoGeometry.wave.opacity(0.32), style: StrokeStyle(lineWidth: 10 * lineScale, lineCap: .round))
             }
         }
         .frame(width: size, height: size * LogoGeometry.box.height / LogoGeometry.box.width)
+        .drawingGroup()
         .accessibilityHidden(true)
     }
 }
@@ -156,7 +184,7 @@ struct PullYardLoader: View {
                 .opacity(0.8)
                 .accessibilityLabel("Loading")
         } else {
-            TimelineView(.animation) { context in
+            TimelineView(.animation(minimumInterval: 1 / 30)) { context in
                 let cycle = Self.draw + Self.hold + Self.fade
                 let t = context.date.timeIntervalSince(start).truncatingRemainder(dividingBy: cycle)
                 let progress = min(1, t / Self.draw)

@@ -177,6 +177,7 @@ final class ClaudeWorkspace {
     var loadingProjects = false
     var projectsUpdated: Date?
     @ObservationIgnored private var indexTask: Task<Void, Never>?
+    @ObservationIgnored private var indexWarmed = false
     @ObservationIgnored private(set) var sessionsByID: [String: ClaudeSessionInfo] = [:]
     let sessionRows = RowAppearTracker()
     var showInspector = true
@@ -285,7 +286,8 @@ final class ClaudeWorkspace {
         sessionRows.ingest(next.flatMap { $0.sessions.map(\.id) }, mode: .refresh)
         projects = next
         sessionsByID = Dictionary(next.flatMap { $0.sessions.map { ($0.id, $0) } }, uniquingKeysWith: { a, _ in a })
-        guard indexTask == nil else { return }
+        guard indexTask == nil, !indexWarmed else { return }
+        indexWarmed = true
         let files = next.flatMap { $0.sessions.map(\.file) }
         indexTask = Task.detached(priority: .background) { [weak self] in
             defer { Task { @MainActor in self?.indexTask = nil } }

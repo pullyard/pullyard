@@ -19,7 +19,7 @@ enum ForegroundActivity {
 
     private static func begin() {
         guard token == nil else { return }
-        token = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical], reason: "Interactive")
+        token = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep], reason: "Interactive")
     }
 
     private static func end() {

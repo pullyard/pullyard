@@ -289,17 +289,18 @@ struct JumpToLatestButton: View {
                 Circle()
                     .fill(Color.syRaised)
                     .shadow(color: .black.opacity(hover ? 0.32 : 0.2), radius: hover ? 14 : 9, y: hover ? 6 : 3)
-                TimelineView(.animation(minimumInterval: 1 / 60, paused: Motion.reduced)) { context in
+                let animate = !Motion.reduced && (hover || newCount > 0)
+                TimelineView(.animation(minimumInterval: 1 / 30, paused: !animate)) { context in
                     let t = context.date.timeIntervalSince(start)
                     ZStack {
-                        DiveLogo(time: Motion.reduced ? nil : t)
+                        DiveLogo(time: animate ? t : nil)
                             .clipShape(Circle())
                         Circle()
                             .strokeBorder(
                                 AngularGradient(colors: [BrandMark.violet, BrandMark.sky, BrandMark.violet.opacity(0.25), BrandMark.violet], center: .center),
                                 lineWidth: 1.5
                             )
-                            .rotationEffect(.degrees(Motion.reduced ? 0 : t * 70))
+                            .rotationEffect(.degrees(animate ? t * 70 : 0))
                     }
                     .drawingGroup()
                 }

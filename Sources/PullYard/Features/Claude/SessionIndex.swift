@@ -6,6 +6,7 @@ actor SessionIndex {
 
     private let dir: URL
     private var stamps: [String: String] = [:]
+    private var blobs: [String: (stamp: String, data: Data)] = [:]
     private var loaded = false
 
     init(directory: URL? = nil) {
@@ -49,22 +50,34 @@ actor SessionIndex {
     }
 
     func search(_ query: String, files: [URL]) -> [String: String] {
-        update(files)
-        let needle = query.lowercased()
+        load()
+        let missing = files.filter { stamps[$0.path] == nil }
+        let stale = files.filter { stamps[$0.path] != nil && stamps[$0.path] != stamp($0) }
+        update(missing + (stale.count <= 6 ? stale : []))
+        let needle = Data(query.lowercased().utf8)
         var out: [String: String] = [:]
-        for file in files {
-            guard let data = try? Data(contentsOf: dir.appendingPathComponent(Self.key(file) + ".txt")) else { continue }
-            let text = String(decoding: data, as: UTF8.self)
-            guard let r = text.range(of: needle) else { continue }
-            out[file.path] = Self.snippet(text, around: r)
+        for (i, file) in files.enumerated() {
+            if i % 32 == 0, Task.isCancelled { return out }
+            guard let data = blob(file), let r = data.range(of: needle) else { continue }
+            out[file.path] = Self.snippet(data, around: r)
         }
         return out
     }
 
-    nonisolated static func snippet(_ text: String, around r: Range<String.Index>) -> String {
-        let start = text.index(r.lowerBound, offsetBy: -50, limitedBy: text.startIndex) ?? text.startIndex
-        let end = text.index(r.upperBound, offsetBy: 70, limitedBy: text.endIndex) ?? text.endIndex
-        return (start > text.startIndex ? "…" : "") + text[start..<end].replacingOccurrences(of: "\n", with: " ") + (end < text.endIndex ? "…" : "")
+    nonisolated static func snippet(_ data: Data, around r: Range<Data.Index>) -> String {
+        let start = max(data.startIndex, r.lowerBound - 90)
+        let end = min(data.endIndex, r.upperBound + 140)
+        var text = String(decoding: data[start..<end], as: UTF8.self)
+        text = text.trimmingCharacters(in: CharacterSet(charactersIn: "\u{FFFD}")).replacingOccurrences(of: "\n", with: " ")
+        return (start > data.startIndex ? "…" : "") + text + (end < data.endIndex ? "…" : "")
+    }
+
+    private func blob(_ file: URL) -> Data? {
+        guard let st = stamps[file.path] else { return nil }
+        if let hit = blobs[file.path], hit.stamp == st { return hit.data }
+        guard let data = try? Data(contentsOf: dir.appendingPathComponent(Self.key(file) + ".txt")) else { return nil }
+        blobs[file.path] = (st, data)
+        return data
     }
 
     nonisolated static func extract(_ file: URL) -> String {
