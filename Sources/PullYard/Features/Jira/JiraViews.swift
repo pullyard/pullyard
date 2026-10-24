@@ -67,17 +67,15 @@ struct JiraTab: View {
     @State private var loading = false
     @State private var manualKey = ""
 
-    private var detectedKeys: [String] {
-        JiraKeys.extract([pr.title]) + JiraKeys.extract(branch: pr.headRefName) + JiraKeys.extract([pr.body])
-    }
-
-    var keys: [String] {
+    static func keys(for pr: PullRequestDetail) -> [String] {
         var out: [String] = []
-        for k in account.linkedKeys(for: pr.url) + detectedKeys where !out.contains(k) { out.append(k) }
+        for k in JiraAccount.shared.linkedKeys(for: pr.url) + JiraKeys.detected(title: pr.title, branch: pr.headRefName, body: pr.body) where !out.contains(k) { out.append(k) }
         return out
     }
 
     var body: some View {
+        let keys = Self.keys(for: pr)
+        let linked = account.linkedKeys(for: pr.url)
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if !account.isConfigured {
@@ -92,13 +90,14 @@ struct JiraTab: View {
                 } else {
                     ForEach(keys, id: \.self) { key in
                         if let issue = issues.first(where: { $0.key == key }) {
-                            JiraIssueCard(issue: issue, manual: account.linkedKeys(for: pr.url).contains(key), onUnlink: { unlink(key) }) { updated in
+                            JiraIssueCard(issue: issue, manual: linked.contains(key), onUnlink: { unlink(key) }) { updated in
+                                account.remember(updated)
                                 if let i = issues.firstIndex(where: { $0.key == updated.key }) { issues[i] = updated }
                             }
                         } else if let error = errors[key] {
                             card {
                                 Label("\(key): \(error)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.syAmber)
-                                if account.linkedKeys(for: pr.url).contains(key) { Button("Unlink") { unlink(key) }.controlSize(.small) }
+                                if linked.contains(key) { Button("Unlink") { unlink(key) }.controlSize(.small) }
                             }
                         } else {
                             card {
@@ -116,13 +115,13 @@ struct JiraTab: View {
             .frame(maxWidth: 820, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .task(id: "\(account.isConfigured)|\(keys.joined(separator: ","))") { await load() }
+        .task(id: "\(account.isConfigured)|\(keys.joined(separator: ","))") { await load(keys) }
     }
 
     private var linkField: some View {
         HStack {
             TextField("ABC-123", text: $manualKey).textFieldStyle(.roundedBorder).frame(width: 140).onSubmit(link)
-            Button("Link ticket", action: link).disabled(JiraKeys.extract([manualKey.uppercased()]).isEmpty)
+            Button("Link ticket", action: link).disabled(manualKey.trimmingCharacters(in: .whitespaces).count < 3)
         }
         .controlSize(.small)
     }
@@ -140,19 +139,22 @@ struct JiraTab: View {
         issues.removeAll { $0.key == key }
     }
 
-    private func load() async {
+    private func load(_ keys: [String]) async {
         guard let client = account.client() else { return }
+        for key in keys where !issues.contains(where: { $0.key == key }) {
+            if let hit = account.cachedIssue(key) { issues.append(hit) }
+        }
         loading = true
         defer { loading = false }
         await withTaskGroup(of: (String, Result<JiraIssue, Error>).self) { group in
-            for key in keys where !issues.contains(where: { $0.key == key }) {
+            for key in keys where !issues.contains(where: { $0.key == key }) && errors[key] == nil {
                 group.addTask {
                     do { return (key, .success(try await client.issue(key))) } catch { return (key, .failure(error)) }
                 }
             }
             for await (key, result) in group {
                 switch result {
-                case .success(let issue): issues.append(issue); errors[key] = nil
+                case .success(let issue): issues.append(issue); errors[key] = nil; account.remember(issue)
                 case .failure(let e): errors[key] = e.localizedDescription
                 }
             }
@@ -173,6 +175,7 @@ struct JiraIssueCard: View {
     var onUnlink: () -> Void = {}
     let onChange: (JiraIssue) -> Void
     @State private var transitions: [JiraTransition] = []
+    @State private var loadingTransitions = false
     @State private var moving = false
     @State private var error: String?
     @State private var expanded = false
@@ -230,13 +233,13 @@ struct JiraIssueCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(radius: 12)
-        .task(id: issue.status) { await loadTransitions() }
+        .onChange(of: issue.status) { transitions = [] }
     }
 
     private var statusMenu: some View {
         Menu {
             if transitions.isEmpty {
-                Text("No transitions available")
+                Text(loadingTransitions ? "Loading…" : "No transitions available")
             }
             ForEach(transitions) { t in
                 Button {
@@ -260,6 +263,10 @@ struct JiraIssueCard: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
+        .onHover { inside in
+            guard inside, transitions.isEmpty, !loadingTransitions else { return }
+            Task { await loadTransitions() }
+        }
         .disabled(moving)
         .help("Change status")
     }
@@ -295,7 +302,9 @@ struct JiraIssueCard: View {
 
     private func loadTransitions() async {
         guard let client = JiraAccount.shared.client() else { return }
+        loadingTransitions = true
         transitions = (try? await client.transitions(issue.key)) ?? []
+        loadingTransitions = false
     }
 
     private func move(_ t: JiraTransition) {

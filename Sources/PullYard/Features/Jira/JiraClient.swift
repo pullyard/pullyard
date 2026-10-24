@@ -26,9 +26,10 @@ struct JiraTransition: Identifiable, Equatable {
 enum JiraKeys {
     private static let ignored: Set<String> = ["UTF", "SHA", "ISO", "RFC", "CVE", "GPT", "TLS", "SSL", "HTTP", "MD", "X", "COVID", "ES", "IPV", "AES", "RSA"]
 
+    private static let regex = try! NSRegularExpression(pattern: #"(?<![A-Za-z0-9])([A-Z][A-Z0-9_]{1,9})-([1-9][0-9]{0,6})(?![A-Za-z0-9])"#)
+
     static func extract(_ texts: [String]) -> [String] {
         var seen: [String] = []
-        let regex = try! NSRegularExpression(pattern: #"(?<![A-Za-z0-9])([A-Z][A-Z0-9_]{1,9})-([1-9][0-9]{0,6})(?![A-Za-z0-9])"#)
         for text in texts {
             let ns = text as NSString
             for m in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
@@ -43,6 +44,12 @@ enum JiraKeys {
 
     static func extract(branch: String) -> [String] {
         extract([branch.uppercased()])
+    }
+
+    static func detected(title: String, branch: String, body: String) -> [String] {
+        var out: [String] = []
+        for k in extract([title]) + extract(branch: branch) + extract([body]) where !out.contains(k) { out.append(k) }
+        return out
     }
 }
 
@@ -60,7 +67,10 @@ final class JiraAccount {
     private init() {
         site = UserDefaults.standard.string(forKey: "jira.site") ?? ""
         email = UserDefaults.standard.string(forKey: "jira.email") ?? ""
-        hasToken = Keychain.load(account: Self.keychainAccount) != nil
+        if UserDefaults.standard.object(forKey: "jira.hasToken") == nil, !(UserDefaults.standard.string(forKey: "jira.site") ?? "").isEmpty {
+            UserDefaults.standard.set(Keychain.load(account: Self.keychainAccount) != nil, forKey: "jira.hasToken")
+        }
+        hasToken = UserDefaults.standard.bool(forKey: "jira.hasToken")
         displayName = UserDefaults.standard.string(forKey: "jira.name")
     }
 
@@ -83,14 +93,20 @@ final class JiraAccount {
         let client = JiraClient(base: base, authorization: Self.authorization(email: self.email, token: t))
         let name = try await client.myself()
         try Keychain.save(t, account: Self.keychainAccount)
+        self.token = t
         hasToken = true
+        UserDefaults.standard.set(true, forKey: "jira.hasToken")
+        issueCache = [:]
         displayName = name
         UserDefaults.standard.set(name, forKey: "jira.name")
     }
 
     func disconnect() {
         Keychain.delete(account: Self.keychainAccount)
+        token = nil
         hasToken = false
+        UserDefaults.standard.set(false, forKey: "jira.hasToken")
+        issueCache = [:]
         displayName = nil
         UserDefaults.standard.removeObject(forKey: "jira.name")
     }
@@ -99,9 +115,23 @@ final class JiraAccount {
         email.isEmpty ? "Bearer \(token)" : "Basic " + Data("\(email):\(token)".utf8).base64EncodedString()
     }
 
+    @ObservationIgnored private var token: String?
+    @ObservationIgnored private var issueCache: [String: (issue: JiraIssue, at: Date)] = [:]
+
     func client() -> JiraClient? {
-        guard let base = baseURL, let token = Keychain.load(account: Self.keychainAccount) else { return nil }
+        guard hasToken, let base = baseURL else { return nil }
+        if token == nil { token = Keychain.load(account: Self.keychainAccount) }
+        guard let token else { return nil }
         return JiraClient(base: base, authorization: Self.authorization(email: email, token: token))
+    }
+
+    func cachedIssue(_ key: String) -> JiraIssue? {
+        guard let hit = issueCache[key], Date().timeIntervalSince(hit.at) < 60 else { return nil }
+        return hit.issue
+    }
+
+    func remember(_ issue: JiraIssue) {
+        issueCache[issue.key] = (issue, Date())
     }
 
     func linkedKeys(for prURL: String) -> [String] {
@@ -186,9 +216,7 @@ struct JiraClient: Sendable {
         let status = f["status"] as? [String: Any]
         let rendered = (o["renderedFields"] as? [String: Any])?["description"] as? String
         let assignee = f["assignee"] as? [String: Any]
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let updated = (f["updated"] as? String).flatMap { s in iso.date(from: s.replacingOccurrences(of: #"([+-]\d\d)(\d\d)$"#, with: "$1:$2", options: .regularExpression)) }
+        let updated = (f["updated"] as? String).flatMap { s in isoFormatter.date(from: s.replacingOccurrences(of: #"([+-]\d\d)(\d\d)$"#, with: "$1:$2", options: .regularExpression)) }
         return JiraIssue(
             key: key,
             summary: f["summary"] as? String ?? "",
@@ -204,6 +232,12 @@ struct JiraClient: Sendable {
             updated: updated
         )
     }
+
+    nonisolated private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 
     nonisolated static func plainText(_ html: String) -> String {
         var s = html
