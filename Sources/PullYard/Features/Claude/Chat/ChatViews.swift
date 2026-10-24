@@ -45,6 +45,7 @@ struct ChatView: View {
                         Color.clear.frame(height: 1).id("bottom")
                     }
                     .scrollTargetLayout()
+                    .allowsHitTesting(!follow.scrolling)
                     .padding(.horizontal, 28)
                     .padding(.vertical, 20)
                     .animation(Motion.smooth, value: chat.items.count)
@@ -151,6 +152,7 @@ struct ChatView: View {
 @Observable
 final class ChatFollow {
     var stick = true
+    var scrolling = false
     @ObservationIgnored var topID: String?
     @ObservationIgnored var keptTopID: String?
     var resizeTick = 0
@@ -181,6 +183,7 @@ private struct ChatScrollObserver: NSViewRepresentable {
     final class ObserverView: NSView {
         weak var follow: ChatFollow?
         private var monitor: Any?
+        private var scrollEnd: DispatchWorkItem?
         private weak var scroll: NSScrollView?
         private var observers: [NSObjectProtocol] = []
         private var lastWidth: CGFloat = 0
@@ -270,6 +273,11 @@ private struct ChatScrollObserver: NSViewRepresentable {
             if event.scrollingDeltaY > 0 {
                 if follow?.stick == true { follow?.stick = false }
             }
+            if follow?.scrolling == false { follow?.scrolling = true }
+            scrollEnd?.cancel()
+            let end = DispatchWorkItem { [weak self] in self?.follow?.scrolling = false }
+            scrollEnd = end
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: end)
             DispatchQueue.main.async { [weak self] in
                 guard let self, let follow = self.follow else { return }
                 if !follow.stick, self.distanceToBottom < 24 { follow.stick = true }
