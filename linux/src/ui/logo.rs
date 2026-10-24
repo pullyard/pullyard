@@ -512,7 +512,7 @@ mod tests {
     fn wake_waves_are_staggered() {
         let a = wake_phase(1.0, 0);
         let b = wake_phase(1.0, 1);
-        assert!((a - b - 0.22).rem_euclid(1.0) < 1e-9);
+        assert!(((a - b).rem_euclid(1.0) - 0.22).abs() < 1e-9);
         assert!((0.0..1.0).contains(&wake_phase(0.0, 2)));
     }
 }
