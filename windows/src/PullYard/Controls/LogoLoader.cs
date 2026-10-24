@@ -193,6 +193,15 @@ public sealed class LogoLoader : Grid
         RegisterPropertyChangedCallback(VisibilityProperty, (_, _) => Sync());
     }
 
+    internal void Freeze(double seconds)
+    {
+        if (board is null) return;
+        running = true;
+        board.Begin();
+        board.Pause();
+        board.SeekAlignedToLastTick(TimeSpan.FromSeconds(seconds));
+    }
+
     private double Cycle => drawSeconds + Hold + Erase;
 
     private TimeSpan At(double progress) => TimeSpan.FromSeconds(progress * drawSeconds);
@@ -291,6 +300,15 @@ public sealed class WakeLoader : Grid
     private const int Samples = 16;
     private readonly Storyboard? board;
     private bool running;
+
+    internal void Freeze(double seconds)
+    {
+        if (board is null) return;
+        running = true;
+        board.Begin();
+        board.Pause();
+        board.SeekAlignedToLastTick(TimeSpan.FromSeconds(seconds));
+    }
 
     public WakeLoader(double size = 16)
     {

@@ -8,6 +8,7 @@ using PullYard.Core.Api;
 using PullYard.Core.Claude;
 using PullYard.Core.Stacks;
 using PullYard.Core.Util;
+using PullYard.Controls;
 using PullYard.ViewModels;
 using PullYard.Views;
 
@@ -156,6 +157,7 @@ public static class SmokeTour
             Feed(tab.Chat);
             await Step("claude chat feed", 4000);
             await Shot("16-claude-chat");
+            if (ThemeService.IsBrand && ThemeService.IsDark) await LogoFrames(window);
             app.Section = Section.Prs(PRFilter.ReviewRequested);
             app.RequestSettings();
             await Step("settings", 3000);
@@ -274,6 +276,31 @@ public static class SmokeTour
             return;
         }
         window.AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(area.X + (area.Width - 1600) / 2, area.Y + (area.Height - 1000) / 2, 1600, 1000));
+    }
+
+    private static async Task LogoFrames(MainWindow window)
+    {
+        if (window.Content is not Grid root) return;
+        var logo = new LogoLoader(420);
+        var wake = new WakeLoader(64);
+        var stack = Ui.V(48, logo, wake);
+        stack.HorizontalAlignment = HorizontalAlignment.Center;
+        stack.VerticalAlignment = VerticalAlignment.Center;
+        wake.HorizontalAlignment = HorizontalAlignment.Center;
+        var overlay = new Grid { Background = Palette.Brush("panel") };
+        overlay.Children.Add(stack);
+        Grid.SetRowSpan(overlay, Math.Max(1, root.RowDefinitions.Count));
+        Grid.SetColumnSpan(overlay, Math.Max(1, root.ColumnDefinitions.Count));
+        root.Children.Add(overlay);
+        await Step("logo frames", 1500);
+        for (var i = 0; i < 12; i++)
+        {
+            logo.Freeze(i * 0.25);
+            wake.Freeze(i * 0.05);
+            await Task.Delay(300);
+            await Shot($"logo-{i:00}");
+        }
+        root.Children.Remove(overlay);
     }
 
     private static async Task Shot(string name)
