@@ -107,7 +107,7 @@ public sealed class PRContent : Grid, IShortcutHost
     private readonly Grid tabArea = new();
     private readonly StackPanel toolbar = Ui.H(2);
     private readonly RefreshFooter status = new(compact: true);
-    private readonly ProgressRing busy = Ui.Spinner(16);
+    private readonly WakeLoader busy = Ui.Spinner(16);
     private readonly Dictionary<PRTab, FrameworkElement> tabViews = new();
     private HtmlView? conversation;
     private HtmlView? diff;
@@ -156,15 +156,19 @@ public sealed class PRContent : Grid, IShortcutHost
         status.Retry = () => model.Load(true).Forget();
         busy.Visibility = Visibility.Collapsed;
         model.PropertyChanged += OnModel;
+        JiraService.Account.Changed += OnJiraChanged;
         Unloaded += (_, _) =>
         {
             model.PropertyChanged -= OnModel;
+            JiraService.Account.Changed -= OnJiraChanged;
             WatchFixTab(null);
         };
         Loaded += (_, _) =>
         {
             model.PropertyChanged -= OnModel;
             model.PropertyChanged += OnModel;
+            JiraService.Account.Changed -= OnJiraChanged;
+            JiraService.Account.Changed += OnJiraChanged;
             RenderAll();
         };
         AddShortcuts();
@@ -183,12 +187,26 @@ public sealed class PRContent : Grid, IShortcutHost
             acc.Invoked += (_, e) =>
             {
                 e.Handled = true;
-                if (t != PRTab.Stack || model.StackTree is not null) model.Tab = t;
+                if (TabAvailable(t)) model.Tab = t;
             };
             KeyboardAccelerators.Add(acc);
             index++;
         }
     }
+
+    private bool TabAvailable(PRTab t) => t switch
+    {
+        PRTab.Stack => model.StackTree is not null,
+        PRTab.Jira => model.Pr is { } pr && JiraService.Account.ShowsTab(pr),
+        _ => true
+    };
+
+    private void OnJiraChanged() => DispatcherQueue.TryEnqueue(() =>
+    {
+        if (model.Pr is null) return;
+        RenderTabs();
+        if (model.Tab == PRTab.Jira && !TabAvailable(PRTab.Jira)) model.Tab = PRTab.Conversation;
+    });
 
     private void OnModel(object? sender, PropertyChangedEventArgs e)
     {
@@ -555,6 +573,7 @@ public sealed class PRContent : Grid, IShortcutHost
         toolbar.Children.Add(Ui.IconButton("", L.T("PR_FixWithClaude", "Send review comments to a new Claude Code session"), () => Dialogs.FixWithClaude(XamlRoot, model).Forget(), "coral"));
         if (pr.IsOpen && !pr.IsDraft && model.CanWrite)
             toolbar.Children.Add(Ui.IconButton("", L.T("PR_Merge", "Merge pull request"), () => Dialogs.Merge(XamlRoot, model).Forget(), "green"));
+        toolbar.Children.Add(Ui.RefreshButton(() => model.Load(true)));
         var more = Ui.IconButton("", L.T("Common_More", "More"), () => { }, "text");
         more.Flyout = MoreMenu();
         toolbar.Children.Add(more);
@@ -633,7 +652,8 @@ public sealed class PRContent : Grid, IShortcutHost
             new TabSpec(nameof(PRTab.Commits), L.T("PR_TabCommits", "Commits"), "", (pr.AllCommits.TotalCount ?? pr.AllCommits.Items.Count).ToString()),
             new TabSpec(nameof(PRTab.Checks), L.T("PR_TabChecks", "Checks"), "", summary, color),
             new TabSpec(nameof(PRTab.Files), L.T("PR_TabFiles", "Files changed"), "", pr.ChangedFiles.ToString())
-        }.Concat(model.StackTree is { } tree ? new[] { new TabSpec(nameof(PRTab.Stack), L.T("PR_TabStack", "Stack"), StackUi.StackGlyph, tree.Count.ToString()) } : Array.Empty<TabSpec>()));
+        }.Concat(model.StackTree is { } tree ? new[] { new TabSpec(nameof(PRTab.Stack), L.T("PR_TabStack", "Stack"), StackUi.StackGlyph, tree.Count.ToString()) } : Array.Empty<TabSpec>())
+         .Concat(JiraService.Account.ShowsTab(pr) ? new[] { new TabSpec(nameof(PRTab.Jira), L.T("PR_TabJira", "Jira"), "\uE8EC", JiraService.Account.Keys(pr).FirstOrDefault()) } : Array.Empty<TabSpec>()));
         tabs.Selected = model.Tab.ToString();
     }
 
@@ -649,6 +669,7 @@ public sealed class PRContent : Grid, IShortcutHost
                 PRTab.Commits => BuildCommits(null),
                 PRTab.Checks => BuildChecks(null),
                 PRTab.Stack => new StackTab(model),
+                PRTab.Jira => new JiraTab(model),
                 _ => BuildFiles()
             };
             tabViews[model.Tab] = view;

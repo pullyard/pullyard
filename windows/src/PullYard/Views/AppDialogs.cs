@@ -177,6 +177,8 @@ public static class SettingsDialog
 
         if (app.Phase == Phase.LoggedIn) panel.Children.Add(Group(L.T("Section_Claude", "Claude Code"), "", "coral", ClaudeSettings(app)));
 
+        panel.Children.Add(Group(L.T("Jira_Title", "Jira"), "\uE8EC", "sky", new JiraConnectForm()));
+
         var auto = new ToggleSwitch { IsOn = UpdaterViewModel.AutoCheck, OnContent = "", OffContent = "" };
         auto.Toggled += (_, _) => UpdaterViewModel.AutoCheck = auto.IsOn;
         var check = Ui.Button(L.T("Settings_CheckNow", "Check Now"), () =>
@@ -226,7 +228,7 @@ public static class SettingsDialog
         if (File.Exists(license)) links.Children.Add(Ui.Link(L.T("About_License", "MIT License"), () => OpenPath(license), 13));
         return Ui.V(8,
             Ui.Text(L.F("About_Acknowledgements", "{0} is open source and builds on the .NET runtime, the Windows App SDK, WebView2, CommunityToolkit.Mvvm, xterm.js and marked. Their licenses and copyright notices are listed in the third-party notices.", AppInfo.DisplayName), 12.5, "muted", wrap: true),
-            Ui.Text(L.F("About_Disclaimer", "{0} is an independent project and is not affiliated with or endorsed by GitHub, Inc. or Anthropic. GitHub and Claude are trademarks of their respective owners.", AppInfo.DisplayName), 12.5, "muted", wrap: true),
+            Ui.Text(L.F("About_Disclaimer", "{0} is an independent project and is not affiliated with or endorsed by GitHub, Inc., Anthropic, PBC or Atlassian. GitHub, Claude, Claude Code and Jira are trademarks of their respective owners.", AppInfo.DisplayName), 12.5, "muted", wrap: true),
             links);
     }
 

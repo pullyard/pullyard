@@ -18,7 +18,7 @@ public sealed class LoginView : Grid
     private readonly AppViewModel app = AppViewModel.Shared;
     private readonly bool embedded;
     private readonly Action? onDone;
-    private readonly ProgressRing busyRing = Ui.Spinner(18);
+    private readonly WakeLoader busyRing = Ui.Spinner(18);
     private readonly InfoBar errorBar = new() { Severity = InfoBarSeverity.Error, IsClosable = true, IsOpen = false };
     private readonly StackPanel providerArea = Ui.V(18);
     private readonly TextBox hostBox = new();
@@ -26,10 +26,13 @@ public sealed class LoginView : Grid
     private readonly PasswordBox tokenBox = new();
     private readonly TextBox clientIdBox = new();
     private readonly StackPanel devicePanel = Ui.V(8);
+    private readonly StackPanel oneClickPanel = Ui.V(8);
     private readonly SelectorBar picker = new() { HorizontalAlignment = HorizontalAlignment.Center };
     private GitProvider provider;
     private GitAccount? prefill;
     private CancellationTokenSource? deviceCts;
+
+    private bool OneClick => OAuthApp.OneClick(provider, OAuthApp.Bundled);
 
     public LoginView(bool embedded = false, Action? onDone = null)
     {
@@ -161,6 +164,14 @@ public sealed class LoginView : Grid
         if (provider.HostEditable())
             providerArea.Children.Add(Card(L.F("Login_ServerTitle", "{0} server", provider.Title()), "", "teal", hostBox));
 
+        if (OneClick)
+        {
+            RenderOneClick(null);
+            providerArea.Children.Add(Card(L.T("Login_OneClickTitle", "Sign in with GitHub"), "\uE774", "indigo",
+                Ui.Text(L.T("Login_OneClickBody", "Opens github.com in your browser. Enter the code shown here and you're in — no token to copy."), 13, "muted", wrap: true),
+                oneClickPanel));
+        }
+
         var cli = provider switch
         {
             GitProvider.GitHub or GitProvider.GitHubEnterprise when GhCli.Binary is not null => (Title: L.T("Login_GhTitle", "GitHub CLI"), Body: L.T("Login_GhBody", "Use the token you're signed in with in gh."), Button: L.T("Login_SignInWithGh", "Sign in with gh")),
@@ -192,7 +203,7 @@ public sealed class LoginView : Grid
             RenderDevice(null);
             providerArea.Children.Add(new Expander
             {
-                Header = Ui.H(8, Ui.IconTile("", "indigo", 22), Ui.Text(L.T("Login_DeviceTitle", "Sign in via browser (OAuth Device Flow)"), 14, "text", FontWeights.SemiBold)),
+                Header = Ui.H(8, Ui.IconTile(OneClick ? "\uE713" : "", "indigo", 22), Ui.Text(OneClick ? L.T("Login_OwnOAuthApp", "Use your own OAuth App") : L.T("Login_DeviceTitle", "Sign in via browser (OAuth Device Flow)"), 14, "text", FontWeights.SemiBold)),
                 Content = Ui.V(8, Ui.Text(provider.DeviceHelp(), 13, "muted", wrap: true), clientIdBox, devicePanel),
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch
@@ -207,22 +218,50 @@ public sealed class LoginView : Grid
         return Ui.Card(panel, 12, "raised", 16);
     }
 
+    private void RenderOneClick(DeviceCode? code)
+    {
+        oneClickPanel.Children.Clear();
+        if (code is null)
+        {
+            var button = Ui.Button(L.T("Login_OneClickTitle", "Sign in with GitHub"), () => StartDevice(OAuthApp.Bundled), accent: true, glyph: "\uE8A7");
+            button.HorizontalAlignment = HorizontalAlignment.Stretch;
+            button.MinHeight = 40;
+            oneClickPanel.Children.Add(button);
+            return;
+        }
+        AddCodeRow(oneClickPanel, code);
+    }
+
     private void RenderDevice(DeviceCode? code)
     {
         devicePanel.Children.Clear();
         if (code is null)
         {
-            devicePanel.Children.Add(Ui.Button(L.T("Login_GetCode", "Get code"), StartDevice));
+            devicePanel.Children.Add(Ui.Button(L.T("Login_GetCode", "Get code"), () => StartDevice()));
             return;
         }
+        AddCodeRow(devicePanel, code);
+    }
+
+    private void AddCodeRow(StackPanel panel, DeviceCode code)
+    {
         var codeText = Ui.Text(code.UserCode, 24, "text", FontWeights.Bold, mono: true, select: true);
         var copy = Ui.Button(L.T("Login_CopyAndOpen", "Copy and open"), () =>
         {
             WindowInterop.Copy(code.UserCode);
             LinkBrowser.Open(code.VerificationUri);
         }, accent: true);
-        devicePanel.Children.Add(Ui.H(12, Ui.Card(codeText, 8, "sunken", 6), copy, Ui.Spinner(16)));
-        devicePanel.Children.Add(Ui.Text(L.F("Login_DeviceHintAt", "Enter the code at {0} — you'll be signed in automatically.", code.VerificationUri), 12, "muted", wrap: true));
+        var cancel = Ui.Button(L.T("Common_Cancel", "Cancel"), CancelDevice);
+        panel.Children.Add(Ui.H(12, Ui.Card(codeText, 8, "sunken", 6), copy, cancel, Ui.Spinner(16)));
+        panel.Children.Add(Ui.Text(L.F("Login_DeviceHintAt", "Enter the code at {0} — you'll be signed in automatically.", code.VerificationUri), 12, "muted", wrap: true));
+    }
+
+    private void CancelDevice()
+    {
+        deviceCts?.Cancel();
+        deviceCts = null;
+        RenderDevice(null);
+        RenderOneClick(null);
     }
 
     private void ShowError(string? message)
@@ -291,9 +330,9 @@ public sealed class LoginView : Grid
         RunLogin(() => Finish(p, host, GitCredential.Of(token), p == GitProvider.Bitbucket ? email : null));
     }
 
-    private async void StartDevice()
+    private async void StartDevice(string? clientOverride = null)
     {
-        var id = clientIdBox.Text.Trim();
+        var id = clientOverride ?? clientIdBox.Text.Trim();
         var p = provider;
         var host = Host;
         if (id.Length == 0) return;
@@ -310,7 +349,8 @@ public sealed class LoginView : Grid
         try
         {
             var code = await DeviceFlow.Start(id, endpoint, cts.Token);
-            RenderDevice(code);
+            if (clientOverride is not null) RenderOneClick(code);
+            else RenderDevice(code);
             WindowInterop.Copy(code.UserCode);
             LinkBrowser.Open(code.VerificationUri);
             var token = await DeviceFlow.Poll(id, code, endpoint, cts.Token);
@@ -324,6 +364,10 @@ public sealed class LoginView : Grid
         {
             ShowError(e.Message);
         }
-        if (ReferenceEquals(deviceCts, cts)) RenderDevice(null);
+        if (ReferenceEquals(deviceCts, cts))
+        {
+            RenderDevice(null);
+            RenderOneClick(null);
+        }
     }
 }
