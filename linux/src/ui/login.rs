@@ -32,7 +32,14 @@ struct Login {
     token: gtk::PasswordEntry,
     sign: gtk::Button,
     create: gtk::Button,
+    one_click_card: gtk::Box,
+    one_click_button: gtk::Button,
+    one_click_box: gtk::Box,
+    one_click_code: gtk::Label,
+    one_click_hint: gtk::Label,
     device_card: gtk::Box,
+    device_title: gtk::Label,
+    device_title_icon: gtk::Box,
     device_help: gtk::Label,
     client: gtk::Entry,
     device_box: gtk::Box,
@@ -129,15 +136,37 @@ impl Login {
         self.email.set_visible(p == GitProvider::Bitbucket);
         self.token.set_text("");
         self.token.set_placeholder_text(Some(p.token_placeholder()));
+        let one_click = p == GitProvider::Github && auth::built_in_client_id().is_some();
+        self.one_click_card.set_visible(one_click);
+        self.reset_device();
         self.device_card.set_visible(p.supports_device_flow());
+        self.device_title.set_text(if one_click { "Use your own OAuth App" } else { "Sign in via browser (OAuth Device Flow)" });
+        if let Some(old) = self.device_title_icon.first_child() {
+            self.device_title_icon.remove(&old);
+        }
+        self.device_title_icon.append(&icon_tile(if one_click { "emblem-system-symbolic" } else { "sy-globe-symbolic" }, "indigo", 22));
         self.device_help.set_text(p.device_help());
         self.client.set_placeholder_text(Some(p.client_id_placeholder()));
         self.client.set_text(&client_id_for(p));
+        self.show_error(None);
+        self.sync_state();
+    }
+
+    fn reset_device(&self) {
         self.device_box.set_visible(false);
         self.device_hint.set_visible(false);
         self.get_code.set_visible(true);
-        self.show_error(None);
-        self.sync_state();
+        self.one_click_box.set_visible(false);
+        self.one_click_hint.set_visible(false);
+        self.one_click_button.set_visible(true);
+        self.device_uri.borrow_mut().take();
+    }
+
+    fn cancel_device(&self) {
+        if let Some(h) = self.cancel.borrow_mut().take() {
+            h.abort();
+        }
+        self.reset_device();
     }
 
     fn finish(self: &Rc<Self>, credential: GitCredential) {
@@ -189,17 +218,21 @@ impl Login {
         self.finish(GitCredential::token(t));
     }
 
-    fn start_device(self: &Rc<Self>) {
+    fn start_device(self: &Rc<Self>, built_in: Option<&str>) {
         let p = self.provider.get();
         let host = self.effective_host();
-        let id = self.client.text().trim().to_string();
+        let id = built_in.map(str::to_string).unwrap_or_else(|| self.client.text().trim().to_string());
         if id.is_empty() || host.is_empty() {
             return;
         }
         self.show_error(None);
-        if let Some(h) = self.cancel.borrow_mut().take() {
-            h.abort();
-        }
+        self.cancel_device();
+        let (row, code_label, hint, start) = if built_in.is_some() {
+            (self.one_click_box.clone(), self.one_click_code.clone(), self.one_click_hint.clone(), self.one_click_button.clone())
+        } else {
+            (self.device_box.clone(), self.code_label.clone(), self.device_hint.clone(), self.get_code.clone())
+        };
+        start.set_sensitive(false);
         let endpoint = auth::Endpoint::for_provider(p, &host);
         let keep_refresh = p == GitProvider::Gitlab;
         let (tx, rx) = async_channel::bounded::<Result<auth::DeviceCode, String>>(1);
@@ -220,13 +253,15 @@ impl Login {
         *self.cancel.borrow_mut() = Some(task.abort_handle());
         let me = self.clone();
         rt::spawn_local(async move {
-            match rx.recv().await {
+            let first = rx.recv().await;
+            start.set_sensitive(true);
+            match first {
                 Ok(Ok(code)) => {
-                    me.code_label.set_text(&code.user_code);
-                    me.device_box.set_visible(true);
-                    me.get_code.set_visible(false);
-                    me.device_hint.set_text(&format!("Enter the code at {} — you'll be signed in automatically.", code.verification_uri));
-                    me.device_hint.set_visible(true);
+                    code_label.set_text(&code.user_code);
+                    row.set_visible(true);
+                    start.set_visible(false);
+                    hint.set_text(&format!("The code is copied. Paste it at {} — you'll be signed in automatically.", code.verification_uri));
+                    hint.set_visible(true);
                     util::copy(&code.user_code);
                     util::open_url(&code.verification_uri);
                     *me.device_uri.borrow_mut() = Some((code.user_code.clone(), code.verification_uri.clone()));
@@ -237,11 +272,11 @@ impl Login {
                         }
                         Ok(Ok(_)) => {}
                         Ok(Err(e)) => me.show_error(Some(&e)),
-                        Err(_) => {}
+                        Err(_) => return,
                     }
-                    me.device_box.set_visible(false);
-                    me.get_code.set_visible(true);
-                    me.device_hint.set_visible(false);
+                    row.set_visible(false);
+                    start.set_visible(true);
+                    hint.set_visible(false);
                 }
                 Ok(Err(e)) => me.show_error(Some(&e)),
                 Err(_) => {}
@@ -416,6 +451,33 @@ pub fn form(embedded: bool, on_done: Option<Rc<dyn Fn()>>) -> gtk::Box {
     host_card.append(&host);
     column.append(&host_card);
 
+    let one_click_card = card();
+    one_click_card.append(&card_title("Sign in with GitHub", "sy-globe-symbolic", "indigo").0);
+    one_click_card.append(&wrap_label("Opens github.com in your browser. Enter the code shown here and you're in — no token to copy.", &["sy-muted", "sy-small"]));
+    let one_click_button = icon_label_button("sy-external-symbolic", "Sign in with GitHub");
+    one_click_button.add_css_class("suggested-action");
+    one_click_button.add_css_class("pill");
+    one_click_card.append(&one_click_button);
+    let one_click_box = hbox(12);
+    let one_click_code = label_with("", &["user-code", "sy-text"]);
+    one_click_code.set_selectable(true);
+    one_click_box.append(&one_click_code);
+    let one_click_open = suggested("Copy and open");
+    one_click_open.set_valign(gtk::Align::Center);
+    one_click_box.append(&one_click_open);
+    one_click_box.append(&spinner(12));
+    one_click_box.append(&spacer());
+    let one_click_cancel = link_button("Cancel");
+    one_click_cancel.set_valign(gtk::Align::Center);
+    one_click_box.append(&one_click_cancel);
+    one_click_box.set_visible(false);
+    one_click_card.append(&one_click_box);
+    let one_click_hint = wrap_label("", &["sy-muted", "sy-tiny"]);
+    one_click_hint.set_visible(false);
+    one_click_card.append(&one_click_hint);
+    one_click_card.set_visible(false);
+    column.append(&one_click_card);
+
     let cli_card = card();
     let (title, cli_title) = card_title("GitHub CLI", "sy-terminal-symbolic", "sky");
     cli_card.append(&title);
@@ -451,7 +513,13 @@ pub fn form(embedded: bool, on_done: Option<Rc<dyn Fn()>>) -> gtk::Box {
 
     let device_card = card();
     let expander = gtk::Expander::new(None);
-    expander.set_label_widget(Some(&card_title("Sign in via browser (OAuth Device Flow)", "sy-globe-symbolic", "indigo").0));
+    let device_title_row = hbox(8);
+    let device_title_icon = hbox(0);
+    device_title_icon.append(&icon_tile("sy-globe-symbolic", "indigo", 22));
+    let device_title = label_with("Sign in via browser (OAuth Device Flow)", &["heading"]);
+    device_title_row.append(&device_title_icon);
+    device_title_row.append(&device_title);
+    expander.set_label_widget(Some(&device_title_row));
     let inner = vbox(8);
     inner.set_margin_top(8);
     let device_help = wrap_label("", &["sy-muted", "sy-small"]);
@@ -463,8 +531,13 @@ pub fn form(embedded: bool, on_done: Option<Rc<dyn Fn()>>) -> gtk::Box {
     code_label.set_selectable(true);
     device_box.append(&code_label);
     let copy_open = suggested("Copy and open");
+    copy_open.set_valign(gtk::Align::Center);
     device_box.append(&copy_open);
-    device_box.append(&spinner(14));
+    device_box.append(&spinner(12));
+    device_box.append(&spacer());
+    let device_cancel = link_button("Cancel");
+    device_cancel.set_valign(gtk::Align::Center);
+    device_box.append(&device_cancel);
     device_box.set_visible(false);
     inner.append(&device_box);
     let device_hint = wrap_label("", &["sy-muted", "sy-tiny"]);
@@ -511,7 +584,14 @@ pub fn form(embedded: bool, on_done: Option<Rc<dyn Fn()>>) -> gtk::Box {
         token,
         sign,
         create,
+        one_click_card,
+        one_click_button,
+        one_click_box,
+        one_click_code,
+        one_click_hint,
         device_card,
+        device_title,
+        device_title_icon,
         device_help,
         client,
         device_box,
@@ -579,16 +659,32 @@ pub fn form(embedded: bool, on_done: Option<Rc<dyn Fn()>>) -> gtk::Box {
     let weak = Rc::downgrade(&login);
     login.get_code.connect_clicked(move |_| {
         if let Some(l) = weak.upgrade() {
-            l.start_device();
+            l.start_device(None);
         }
     });
     let weak = Rc::downgrade(&login);
-    copy_open.connect_clicked(move |_| {
-        if let Some((code, uri)) = weak.upgrade().and_then(|l| l.device_uri.borrow().clone()) {
-            util::copy(&code);
-            util::open_url(&uri);
+    login.one_click_button.connect_clicked(move |_| {
+        if let (Some(l), Some(id)) = (weak.upgrade(), auth::built_in_client_id()) {
+            l.start_device(Some(id));
         }
     });
+    for b in [&copy_open, &one_click_open] {
+        let weak = Rc::downgrade(&login);
+        b.connect_clicked(move |_| {
+            if let Some((code, uri)) = weak.upgrade().and_then(|l| l.device_uri.borrow().clone()) {
+                util::copy(&code);
+                util::open_url(&uri);
+            }
+        });
+    }
+    for b in [&device_cancel, &one_click_cancel] {
+        let weak = Rc::downgrade(&login);
+        b.connect_clicked(move |_| {
+            if let Some(l) = weak.upgrade() {
+                l.cancel_device();
+            }
+        });
+    }
 
     let initial = settings::read(|s| GitProvider::from_key(&s.login_provider)).unwrap_or(GitProvider::Github);
     login.select(initial);

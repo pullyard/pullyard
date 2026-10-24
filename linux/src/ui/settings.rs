@@ -347,7 +347,7 @@ pub fn show() {
     jira_group.add(&jira_form);
     page.add(&jira_group);
 
-    let oauth = group("OAuth Device Flow", "sy-key-symbolic", "amber");
+    let oauth = group(if auth::built_in_client_id().is_some() { "Use your own OAuth App" } else { "OAuth Device Flow" }, "sy-key-symbolic", "amber");
     let entry = adw::EntryRow::new();
     entry.set_title("Client ID");
     entry.set_text(&settings::read(|s| s.oauth_client_id.clone()));

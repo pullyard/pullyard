@@ -65,6 +65,8 @@ jobs:
         run: cargo test
 
       - name: Build
+        env:
+          PULLYARD_GITHUB_CLIENT_ID: ${{ vars.PULLYARD_GITHUB_CLIENT_ID }}
         run: cargo build --release
 
       - name: Launch checks
