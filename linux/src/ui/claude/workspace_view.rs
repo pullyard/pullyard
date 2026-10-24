@@ -1,14 +1,15 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
 
 use super::chat_view::ChatView;
+use super::indicator::Dot;
 use super::inspector::Inspector;
 use crate::claude::accounts::{self, Status};
 use crate::claude::workspace::{apply_terminal_colors, Tab, WsEvent};
-use crate::claude::{launcher, ClaudeMode, ModelOption, TabKind, TabState, EFFORTS};
+use crate::claude::{launcher, notifier, ClaudeMode, Indicator, ModelOption, TabKind, TabState, EFFORTS};
 use crate::ui::menu::Menu;
 use crate::ui::widgets::*;
 use crate::{app, util};
@@ -26,10 +27,44 @@ struct View {
     tab_widgets: RefCell<HashMap<u64, (gtk::Widget, Option<Rc<ChatView>>)>>,
     inspectors: RefCell<HashMap<u64, Rc<Inspector>>>,
     terminal_overlays: RefCell<HashMap<u64, gtk::Box>>,
-    tab_badges: RefCell<HashMap<u64, gtk::Box>>,
+    tab_badges: RefCell<HashMap<u64, TabBadge>>,
     tab_bar_key: RefCell<String>,
     control_key: RefCell<String>,
     control_badge: RefCell<Option<gtk::Box>>,
+}
+
+struct TabBadge {
+    dot: Dot,
+    state: gtk::Box,
+    last: Cell<Option<TabState>>,
+}
+
+impl TabBadge {
+    fn new(tab: &Tab) -> (gtk::Box, TabBadge) {
+        let holder = hbox(0);
+        holder.set_valign(gtk::Align::Center);
+        let dot = Dot::new(Indicator::None);
+        let state = hbox(0);
+        holder.append(&dot.area);
+        holder.append(&state);
+        let badge = TabBadge { dot, state, last: Cell::new(None) };
+        badge.update(tab);
+        (holder, badge)
+    }
+
+    fn update(&self, tab: &Tab) {
+        let ind = tab.indicator();
+        if self.dot.kind() != ind {
+            self.dot.set(ind);
+        }
+        let st = tab.state();
+        self.state.set_visible(ind == Indicator::None);
+        if ind == Indicator::None && self.last.get() != Some(st) {
+            self.last.set(Some(st));
+            clear(&self.state);
+            self.state.append(&super::state_badge(st, None, true));
+        }
+    }
 }
 
 fn control_menu(icon_name: &str, title: &str, help: &str, menu: &Menu) -> gtk::MenuButton {
@@ -123,8 +158,7 @@ impl View {
         let ws = app::get().claude.clone();
         for t in ws.tabs.borrow().iter() {
             if let Some(b) = self.tab_badges.borrow().get(&t.id) {
-                clear(b);
-                b.append(&super::state_badge(t.state(), None, true));
+                b.update(t);
             }
         }
         if let (Some(b), Some(tab)) = (self.control_badge.borrow().as_ref(), ws.selected_tab()) {
@@ -160,10 +194,9 @@ impl View {
             edge.set_size_request(3, 14);
             edge.set_valign(gtk::Align::Center);
             chip_box.append(&edge);
-            let badge_box = hbox(0);
-            badge_box.append(&super::state_badge(t.state(), None, true));
+            let (badge_box, badge) = TabBadge::new(t);
             chip_box.append(&badge_box);
-            self.tab_badges.borrow_mut().insert(t.id, badge_box);
+            self.tab_badges.borrow_mut().insert(t.id, badge);
             chip_box.append(&colored_icon(if t.kind == TabKind::Chat { "sy-comment-symbolic" } else { "sy-terminal-symbolic" }, 11, "muted"));
             let title = ellipsized(&t.title.borrow(), &[if selected == Some(t.id) { "sy-text" } else { "sy-muted" }]);
             title.set_max_width_chars(22);
@@ -205,7 +238,8 @@ impl View {
     fn render_control_bar(self: &Rc<Self>, tab: &Rc<Tab>) {
         let ws = app::get().claude.clone();
         let key = format!(
-            "{}|{}|{:?}|{}|{}|{}|{}|{:?}|{}|{}|{}|{}",
+            "{}|{}|{}|{:?}|{}|{}|{}|{}|{:?}|{}|{}|{}|{}",
+            notifier::enabled(),
             tab.id,
             tab.kind.key(),
             tab.git.branch.borrow(),
@@ -304,6 +338,7 @@ impl View {
         kind.append(&chat_btn);
         kind.append(&term_btn);
         kind.set_tooltip_text(Some("Chat or terminal (same session)"));
+        self.control_bar.append(&super::open_in::button(&tab.folder));
         self.control_bar.append(&kind);
         let mut more = Menu::new();
         let tt = tab.clone();
@@ -342,6 +377,12 @@ impl View {
             sub.item(&format!("{}Chat", if pref == TabKind::Chat { "✓ " } else { "" }), move || w2.set_preferred_kind(TabKind::Chat));
             let w3 = w.clone();
             sub.item(&format!("{}Terminal", if pref == TabKind::Terminal { "✓ " } else { "" }), move || w3.set_preferred_kind(TabKind::Terminal));
+        });
+        let notify = notifier::enabled();
+        let w = ws.clone();
+        more.item(&format!("{}Notify when sessions finish", if notify { "✓ " } else { "" }), move || {
+            notifier::set_enabled(!notify);
+            w.emit(WsEvent::TabState);
         });
         more.section(None);
         let tt = tab.clone();
@@ -544,6 +585,7 @@ pub fn build() -> gtk::Widget {
                         }
                     }
                 }
+                WsEvent::Loading => {}
                 _ => v.render_all(),
             }
             true
