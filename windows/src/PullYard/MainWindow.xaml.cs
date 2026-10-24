@@ -16,6 +16,7 @@ namespace PullYard;
 
 public sealed partial class MainWindow : Window
 {
+    internal static Action<string>? AppShortcut;
     private readonly AppViewModel model = AppViewModel.Shared;
     private bool splashHold = true;
     private Phase? shownPhase;
@@ -160,6 +161,16 @@ public sealed partial class MainWindow : Window
         Add(VirtualKey.Number6, VirtualKeyModifiers.Control, () => model.Section = Section.Claude);
         Add(VirtualKey.Left, VirtualKeyModifiers.Menu, () => ShellView.Current?.GoBack());
         Add(VirtualKey.K, VirtualKeyModifiers.Control, () => { if (model.Phase == Phase.LoggedIn) AgentQuickOpen.Show(RootGrid.XamlRoot).Forget(); });
+        AppShortcut = id =>
+        {
+            switch (id)
+            {
+                case "quickopen": if (model.Phase == Phase.LoggedIn) AgentQuickOpen.Show(RootGrid.XamlRoot).Forget(); break;
+                case "new": NewAgentSession().Forget(); break;
+                case "next": CycleAgent(1); break;
+                case "prev": CycleAgent(-1); break;
+            }
+        };
         Add(VirtualKey.N, VirtualKeyModifiers.Control, () => NewAgentSession().Forget());
         Add((VirtualKey)221, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => CycleAgent(1));
         Add((VirtualKey)219, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => CycleAgent(-1));

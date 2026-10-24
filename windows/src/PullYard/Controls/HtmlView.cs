@@ -132,6 +132,9 @@ public sealed class HtmlView : Grid
             case "key":
                 Shortcuts.Dispatch(this, id);
                 break;
+            case "app":
+                MainWindow.AppShortcut?.Invoke(id);
+                break;
             default:
                 ActionInvoked?.Invoke(type, id);
                 break;

@@ -1009,6 +1009,16 @@
 
   document.addEventListener("keydown", function (e) {
     if (!e.ctrlKey || e.altKey || e.metaKey) return;
+    var key = e.key.toLowerCase();
+    var app = !e.shiftKey && key === "k" ? "quickopen" : !e.shiftKey && key === "n" ? "new" : e.shiftKey && (e.key === "}" || e.key === "]") ? "next" : e.shiftKey && (e.key === "{" || e.key === "[") ? "prev" : null;
+    if (app) {
+      e.preventDefault();
+      send({ type: "app", id: app });
+    }
+  }, true);
+
+  document.addEventListener("keydown", function (e) {
+    if (!e.ctrlKey || e.altKey || e.metaKey) return;
     var id = e.key === "=" || e.key === "+" ? "in" : e.key === "-" || e.key === "_" ? "out" : e.key === "0" ? "reset" : null;
     if (!id) return;
     e.preventDefault();
