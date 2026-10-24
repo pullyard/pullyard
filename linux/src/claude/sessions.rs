@@ -20,6 +20,9 @@ pub struct SessionInfo {
     pub model: Option<String>,
     pub lines_added: Option<i64>,
     pub lines_removed: Option<i64>,
+    pub parent_id: Option<String>,
+    pub desktop_id: Option<String>,
+    pub archived: bool,
 }
 
 impl SessionInfo {
@@ -60,18 +63,36 @@ pub fn project_root(cwd: &str) -> String {
 }
 
 pub fn load_all(root: PathBuf) -> Vec<Project> {
+    load_with(root, &super::desktop::load())
+}
+
+pub fn load_with(root: PathBuf, desktop: &HashMap<String, super::desktop::Link>) -> Vec<Project> {
     let Ok(dirs) = std::fs::read_dir(&root) else { return vec![] };
     let mut by_project: HashMap<String, Vec<SessionInfo>> = HashMap::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     for dir in dirs.flatten() {
         let Ok(files) = std::fs::read_dir(dir.path()) else { continue };
         for f in files.flatten() {
             let p = f.path();
             if p.extension().map(|e| e == "jsonl").unwrap_or(false) {
-                if let Some(info) = parse(&p) {
+                seen.insert(p.to_string_lossy().to_string());
+                if let Some(mut info) = parse(&p) {
+                    if let Some(link) = desktop.get(&info.id) {
+                        info.parent_id = link.parent.clone();
+                        info.desktop_id = link.local.clone();
+                        info.archived = link.archived;
+                        if let Some(t) = link.title.as_ref().filter(|t| !t.is_empty()) {
+                            info.title = t.clone();
+                        }
+                    }
                     by_project.entry(project_root(&info.cwd)).or_default().push(info);
                 }
             }
         }
+    }
+    let prefix = root.to_string_lossy().to_string();
+    if let Ok(mut cache) = CACHE.lock() {
+        cache.retain(|k, _| !k.starts_with(&prefix) || seen.contains(k));
     }
     let mut projects: Vec<Project> = by_project
         .into_iter()
@@ -250,7 +271,39 @@ fn parse_uncached(file: &Path, mtime: SystemTime) -> Option<SessionInfo> {
         model,
         lines_added: added,
         lines_removed: removed,
+        parent_id: None,
+        desktop_id: None,
+        archived: false,
     })
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TreeNode {
+    pub session: SessionInfo,
+    pub children: Vec<SessionInfo>,
+}
+
+pub fn build_tree(sessions: Vec<SessionInfo>) -> Vec<TreeNode> {
+    let ids: std::collections::HashSet<String> = sessions.iter().map(|s| s.id.clone()).collect();
+    let mut children: HashMap<String, Vec<SessionInfo>> = HashMap::new();
+    let mut roots: Vec<SessionInfo> = vec![];
+    for s in sessions {
+        match s.parent_id.clone().filter(|p| *p != s.id && ids.contains(p)) {
+            Some(p) => children.entry(p).or_default().push(s),
+            None => roots.push(s),
+        }
+    }
+    let mut nodes: Vec<TreeNode> = roots
+        .into_iter()
+        .map(|s| {
+            let mut c = children.remove(&s.id).unwrap_or_default();
+            c.sort_by(|a, b| b.modified.cmp(&a.modified));
+            TreeNode { session: s, children: c }
+        })
+        .collect();
+    let latest = |n: &TreeNode| n.children.first().map(|c| c.modified.max(n.session.modified)).unwrap_or(n.session.modified);
+    nodes.sort_by_key(|n| std::cmp::Reverse(latest(n)));
+    nodes
 }
 
 #[cfg(test)]
@@ -274,6 +327,51 @@ mod tests {
         assert_eq!(s.title, "Fix the bug please");
         assert_eq!(s.branch.as_deref(), Some("feat-a"));
         assert_eq!(s.pr_number, Some(3));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn info(id: &str, parent: Option<&str>, secs: i64) -> SessionInfo {
+        SessionInfo {
+            id: id.into(),
+            file: PathBuf::from(format!("/tmp/{id}.jsonl")),
+            cwd: "/tmp".into(),
+            title: id.into(),
+            branch: None,
+            modified: DateTime::<Utc>::from_timestamp(secs, 0).unwrap(),
+            pr_url: None,
+            pr_number: None,
+            model: None,
+            lines_added: None,
+            lines_removed: None,
+            parent_id: parent.map(|p| p.to_string()),
+            desktop_id: None,
+            archived: false,
+        }
+    }
+
+    #[test]
+    fn builds_session_tree() {
+        let tree = build_tree(vec![info("a", None, 10), info("b", None, 20), info("c", Some("a"), 30), info("d", Some("a"), 25), info("e", Some("gone"), 5), info("f", Some("f"), 1)]);
+        let ids: Vec<&str> = tree.iter().map(|n| n.session.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b", "e", "f"]);
+        let kids: Vec<&str> = tree[0].children.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(kids, vec!["c", "d"]);
+    }
+
+    #[test]
+    fn merges_desktop_metadata() {
+        let dir = std::env::temp_dir().join(format!("sy-test-{}", uuid::Uuid::new_v4()));
+        let proj = dir.join("p");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(proj.join("kid.jsonl"), "{\"type\":\"user\",\"cwd\":\"/home/x/repo\",\"message\":{\"content\":\"Child task\"}}\n").unwrap();
+        let mut desktop = HashMap::new();
+        desktop.insert("kid".to_string(), super::super::desktop::Link { local: Some("local_kid".into()), parent: Some("mom".into()), title: Some("Renamed".into()), archived: true });
+        let all = load_with(dir.clone(), &desktop);
+        let s = &all[0].sessions[0];
+        assert_eq!(s.title, "Renamed");
+        assert_eq!(s.parent_id.as_deref(), Some("mom"));
+        assert_eq!(s.desktop_id.as_deref(), Some("local_kid"));
+        assert!(s.archived);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

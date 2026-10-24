@@ -79,6 +79,8 @@ pub struct Settings {
     pub stack_view: String,
     pub stack_support_asked: bool,
     pub text_zoom: f64,
+    pub agents_notify: bool,
+    pub agents_open_in: String,
 }
 
 impl Default for Settings {
@@ -118,6 +120,8 @@ impl Default for Settings {
             stack_view: "list".into(),
             stack_support_asked: false,
             text_zoom: 1.0,
+            agents_notify: true,
+            agents_open_in: String::new(),
         }
     }
 }
