@@ -202,10 +202,13 @@ public static class Motion
 {
     private static Windows.UI.ViewManagement.UISettings? settings;
 
+    internal static bool Forced { get; set; }
+
     public static bool Enabled
     {
         get
         {
+            if (Forced) return true;
             try
             {
                 settings ??= new Windows.UI.ViewManagement.UISettings();

@@ -281,8 +281,10 @@ public static class SmokeTour
     private static async Task LogoFrames(MainWindow window)
     {
         if (window.Content is not Grid root) return;
+        Motion.Forced = true;
         var logo = new LogoLoader(420);
         var wake = new WakeLoader(64);
+        Motion.Forced = false;
         var stack = Ui.V(48, logo, wake);
         stack.HorizontalAlignment = HorizontalAlignment.Center;
         stack.VerticalAlignment = VerticalAlignment.Center;
