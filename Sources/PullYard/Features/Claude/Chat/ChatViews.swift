@@ -403,35 +403,127 @@ private struct InitialBottomAnchor: ViewModifier {
 struct ChatWelcome: View {
     let chat: ChatSession
     let folder: String
+    @Environment(AppModel.self) private var app
+
+    private var tab: ClaudeTab? { app.claude.tabs.first { $0.chat === chat } }
+
+    private var recent: [ClaudeSessionInfo] {
+        let root = ClaudeSessionParser.projectRoot(for: folder)
+        let sid = chat.sessionId ?? ""
+        return app.claude.projects.first { $0.path == root }?.sessions.filter { $0.id != sid && !AgentSessionPrefs.shared.isArchived($0) }.prefix(3).map { $0 } ?? []
+    }
+
+    private struct Suggestion: Hashable {
+        let icon: String
+        let title: String
+        let prompt: String
+    }
+
+    private var suggestions: [Suggestion] {
+        var out: [Suggestion] = []
+        let git = tab?.git
+        if let git, !git.changes.isEmpty {
+            out.append(Suggestion(icon: "eye", title: "Review my uncommitted changes", prompt: "Review my uncommitted changes (git diff HEAD). Point out bugs, risky parts and missing tests."))
+            if let branch = git.branch, branch != "HEAD", git.repo != nil {
+                out.append(Suggestion(icon: "arrow.triangle.pull", title: "Open a pull request", prompt: AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: true, ahead: git.ahead)))
+            }
+        }
+        if let tab, let pr = app.claude.pullRequest(for: tab) {
+            out.append(Suggestion(icon: "text.bubble", title: "Address review on #\(pr.number)", prompt: "Read the review comments on pull request #\(pr.number) (\(pr.url)) with gh, fix what is valid and reply to what is not."))
+        }
+        out.append(Suggestion(icon: "map", title: "Explain the project structure", prompt: "Explain the project structure: main modules, how they connect, and where to start reading."))
+        out.append(Suggestion(icon: "ladybug", title: "Find bugs in recent changes", prompt: "Look at the last few commits and find likely bugs or regressions."))
+        out.append(Suggestion(icon: "checkmark.seal", title: "Write tests for changed code", prompt: "Write tests for the code changed on this branch, following the existing test style."))
+        return Array(out.prefix(4))
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "terminal").foregroundStyle(Color.syMuted)
-                Text("New session").font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText)
-            }
-            Text("Describe a task — Claude will read the code, propose changes and ask before acting.")
-                .foregroundStyle(Color.syMuted)
-            HStack(spacing: 8) {
-                ForEach(suggestions, id: \.self) { s in
-                    Button(s) { chat.send(s) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .center, spacing: 14) {
+                PullYardLogoMark(progress: 1, size: 54)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text((folder as NSString).lastPathComponent).font(.syTitle2.weight(.semibold)).foregroundStyle(Color.syText)
+                    HStack(spacing: 8) {
+                        if let git = tab?.git, let branch = git.branch {
+                            Label(branch, systemImage: "arrow.triangle.branch").lineLimit(1)
+                            if !git.changes.isEmpty {
+                                Text("· \(git.changes.count) changed").foregroundStyle(Color.syAmber)
+                            }
+                            if git.ahead > 0 {
+                                Text("· \(git.ahead) unpushed")
+                            }
+                        } else {
+                            Text(folder).lineLimit(1).truncationMode(.head)
+                        }
+                    }
+                    .font(.syCallout)
+                    .foregroundStyle(Color.syMuted)
                 }
             }
-            Text("/ commands · @ files · ⇧↩ new line · paste a screenshot ⌘V")
+            Text("Describe a task. The agent reads the code, proposes changes and asks before acting.")
+                .foregroundStyle(Color.syMuted)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                ForEach(suggestions, id: \.self) { s in
+                    WelcomeSuggestionButton(icon: s.icon, title: s.title) { chat.send(s.prompt) }
+                }
+            }
+            if !recent.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Recent in this project").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syDim)
+                    ForEach(recent) { s in
+                        Button {
+                            app.claude.resume(s)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "clock.arrow.circlepath").foregroundStyle(Color.syDim)
+                                Text(AgentSessionPrefs.shared.title(s)).foregroundStyle(Color.syText).lineLimit(1)
+                                Spacer(minLength: 8)
+                                Text(Fmt.rel(s.modified)).font(.syCaption).foregroundStyle(Color.syDim)
+                            }
+                            .font(.syCallout)
+                            .padding(.vertical, 4)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            Text("/ commands · @ files · ⇧↩ new line · paste a screenshot ⌘V · ⌘K switch session")
                 .font(.syCaption)
                 .foregroundStyle(Color.syDim)
         }
-        .padding(16)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .card(radius: 12)
+        .card(radius: 14)
     }
+}
 
-    private var suggestions: [String] {
-        ["Explain the project structure",
-         "Find bugs in the latest changes",
-         "Write tests for the changed code"]
+struct WelcomeSuggestionButton: View {
+    let icon: String
+    let title: String
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.syCallout)
+                    .foregroundStyle(LinearGradient(colors: [BrandMark.violet, BrandMark.sky], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 18)
+                Text(title).foregroundStyle(Color.syText).lineLimit(2).multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .font(.syCallout)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.syText.opacity(hover ? 0.07 : 0.035)))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(hover ? BrandMark.violet.opacity(0.45) : Color.syLine))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(Motion.fade) { hover = h } }
     }
 }
 
