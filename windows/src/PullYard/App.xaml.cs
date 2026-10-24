@@ -40,12 +40,14 @@ public partial class App : Application
         {
             ShowMainWindow();
             if (action == "update") AppViewModel.Shared.Updater.Present();
+            else AgentNotifier.Handle(action);
         });
         Notifications.Register();
         DiagnosticsService.Restore();
         AppViewModel.Shared.Initialize();
         MainWindow = new MainWindow();
         MainWindow.Activate();
+        AgentNotifier.Attach(AppViewModel.Shared, MainWindow);
         CreateTray();
         AppViewModel.Shared.HandleArguments(Environment.CommandLine);
         if (Program.SmokeTour)

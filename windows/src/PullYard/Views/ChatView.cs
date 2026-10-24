@@ -295,7 +295,7 @@ public sealed class ChatView : Grid
             e.Handled = true;
             CycleMode();
         };
-        var focus = new KeyboardAccelerator { Key = VirtualKey.K, Modifiers = VirtualKeyModifiers.Control };
+        var focus = new KeyboardAccelerator { Key = VirtualKey.J, Modifiers = VirtualKeyModifiers.Control };
         focus.Invoked += (_, e) =>
         {
             e.Handled = true;
