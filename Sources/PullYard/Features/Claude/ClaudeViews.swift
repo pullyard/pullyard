@@ -167,7 +167,9 @@ struct ClaudeProjectsColumn: View {
             }
             Rectangle().fill(Color.syLine).frame(height: 1).padding(.horizontal, 8).padding(.vertical, 8)
         }
-        let pinnedSessions = prefs.pinned.compactMap { id in filtered.lazy.flatMap(\.sessions).first { $0.id == id } }
+        let pinnedSessions: [ClaudeSessionInfo] = query.isEmpty
+            ? prefs.pinned.compactMap { ws.sessionsByID[$0] }
+            : prefs.pinned.compactMap { id in filtered.lazy.flatMap(\.sessions).first { $0.id == id } }
         if !pinnedSessions.isEmpty {
             HStack(spacing: 5) {
                 Image(systemName: "pin.fill").imageScale(.small)
@@ -1098,7 +1100,7 @@ struct BranchPRPanel: View {
                 found = try await api.repoPullRequests(repo, headRefName: branch, states: ["OPEN", "MERGED", "CLOSED"], first: 5)
             }
             var linkedItem: SearchItem?
-            if let number = app.claude.projects.flatMap(\.sessions).first(where: { $0.id == tab.sessionId })?.prNumber,
+            if let number = app.claude.sessionsByID[tab.sessionId]?.prNumber,
                !found.contains(where: { $0.number == number }) {
                 linkedItem = try? await api.pullRequestItem(ItemRef(repo: repo, number: number))
             }

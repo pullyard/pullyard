@@ -631,8 +631,8 @@ final class AppModel {
             if url.path == "/resume", let id = value("id") {
                 let kind = value("kind").flatMap(ClaudeTabKind.init(rawValue:))
                 Task {
-                    if !claude.projects.flatMap(\.sessions).contains(where: { $0.id == id }) { await claude.reloadProjects() }
-                    if let s = claude.projects.flatMap(\.sessions).first(where: { $0.id == id }) { claude.resume(s, kind: kind) }
+                    if claude.sessionsByID[id] == nil { await claude.reloadProjects() }
+                    if let s = claude.sessionsByID[id] { claude.resume(s, kind: kind) }
                 }
             }
             NSApp.activate(ignoringOtherApps: true)

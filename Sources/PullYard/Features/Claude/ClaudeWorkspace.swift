@@ -434,7 +434,7 @@ final class ClaudeWorkspace {
     }
 
     private func sessionFile(_ id: String) -> URL? {
-        projects.flatMap(\.sessions).first { $0.id == id }?.file
+        sessionsByID[id]?.file
     }
 
     func reconnect(_ tab: ClaudeTab) {
