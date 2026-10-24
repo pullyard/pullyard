@@ -477,7 +477,9 @@ impl View {
                 i
             }
         };
-        self.inspector_bin.set_child(Some(&insp.widget));
+        if self.inspector_bin.child().as_ref() != Some(insp.widget.upcast_ref::<gtk::Widget>()) {
+            self.inspector_bin.set_child(Some(&insp.widget));
+        }
         self.inspector_bin.set_visible(app::get().claude.show_inspector.get());
     }
 }
