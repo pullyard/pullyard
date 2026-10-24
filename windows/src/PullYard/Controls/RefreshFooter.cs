@@ -9,7 +9,7 @@ public sealed class RefreshFooter : Grid
 {
     private readonly TextBlock label = Ui.Caption("");
     private readonly FontIcon icon = Ui.Glyph("", 11);
-    private readonly ProgressRing ring = Ui.Spinner(11);
+    private readonly WakeLoader ring = Ui.Spinner(11);
     private readonly HyperlinkButton retry;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(5) };
     private DateTimeOffset? updated;

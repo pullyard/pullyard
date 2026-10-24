@@ -56,6 +56,7 @@ public sealed class RepoDetailView : LiveDetail
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
         var tools = Toolbar(
+            Ui.RefreshButton(OnRefresh),
             Ui.IconButton("", L.T("Repos_CopyClone", "Copy “gh repo clone”"), () => WindowInterop.Copy($"gh repo clone {repo.Full}"), "text"),
             Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(code?.WebUrl ?? $"https://github.com/{repo.Full}"), "text"));
         var card = Ui.Card(headerCard, 12, "raised", 12);

@@ -224,7 +224,37 @@ public static class Ui
     public static GridLength Auto => GridLength.Auto;
     public static GridLength Star => new(1, GridUnitType.Star);
 
-    public static ProgressRing Spinner(double size = 16) => new() { IsActive = true, Width = size, Height = size };
+    public static WakeLoader Spinner(double size = 16) => new(size);
+
+    public static Button RefreshButton(Func<Task> refresh, string? tooltip = null)
+    {
+        Button? button = null;
+        button = IconButton("\uE72C", tooltip ?? L.T("Refresh_Button", "Refresh (Ctrl+R)"), async () =>
+        {
+            if (button is null || !button.IsEnabled) return;
+            button.IsEnabled = false;
+            try
+            {
+                await Task.WhenAll(refresh(), Task.Delay(600));
+            }
+            catch (Exception e)
+            {
+                ErrorLog.Write(e, "refresh failed");
+            }
+            finally
+            {
+                button.IsEnabled = true;
+            }
+        }, "text");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, L.T("Common_Refresh", "Refresh"));
+        return button;
+    }
+
+    public static Button RefreshButton(Action refresh, string? tooltip = null) => RefreshButton(() =>
+    {
+        refresh();
+        return Task.CompletedTask;
+    }, tooltip);
 
     public static FrameworkElement Error(string message, Action? retry = null)
     {
@@ -244,13 +274,11 @@ public static class Ui
         return panel;
     }
 
-    public static FrameworkElement Loading()
+    public static FrameworkElement Loading(double size = 56) => new LogoLoader(size)
     {
-        var ring = Spinner(22);
-        ring.HorizontalAlignment = HorizontalAlignment.Center;
-        ring.VerticalAlignment = VerticalAlignment.Center;
-        return ring;
-    }
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center
+    };
 
     public static FrameworkElement Empty(string glyph, string color, string message)
     {

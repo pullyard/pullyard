@@ -191,6 +191,7 @@ public sealed class IssueDetailView : LiveDetail, IShortcutHost
                 ? Ui.IconButton("", L.T("Issue_Close", "Close issue"), () => model.SetOpen(false).Forget(), "text")
                 : Ui.IconButton("", L.T("Issue_Reopen", "Reopen issue"), () => model.SetOpen(true).Forget(), "text"));
         }
+        tools.Children.Add(Ui.RefreshButton(() => model?.Load() ?? Task.CompletedTask));
         tools.Children.Add(Ui.IconButton("", L.T("Menu_CopyLink", "Copy Link"), () => WindowInterop.Copy(issue.Url), "text"));
         tools.Children.Add(Ui.IconButton("\uE8C8", L.T("Menu_CopyShortLinkHint", "Copy short link (Ctrl+Shift+C)"), () => ShellView.CopyShortLink(ShortLink.Of(itemRef)), "text"));
         tools.Children.Add(Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(issue.Url), "text"));
@@ -355,7 +356,7 @@ public sealed class ProjectBoardView : LiveDetail
         };
         filter.TextChanged += (_, _) => RenderColumns();
         var title = Ui.Text(project.Title, 17, "text", FontWeights.SemiBold);
-        var top = Ui.Columns((Ui.H(10, title, groupBy, filter), Ui.Star), (Ui.H(8, count, Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(project.Url), "text")), Ui.Auto));
+        var top = Ui.Columns((Ui.H(10, title, groupBy, filter), Ui.Star), (Ui.H(8, count, Ui.RefreshButton(() => model?.Load() ?? Task.CompletedTask), Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(project.Url), "text")), Ui.Auto));
         top.Padding = new Thickness(14, 10, 10, 8);
         grid.Children.Add(top);
         var line = Ui.Line();

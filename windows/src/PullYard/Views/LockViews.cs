@@ -26,7 +26,7 @@ public sealed class UnlockView : Grid
     private readonly StackPanel entry;
     private readonly TextBlock blockedText;
     private readonly StackPanel resetPanel = Ui.V(8);
-    private readonly ProgressRing busy = Ui.Spinner(16);
+    private readonly WakeLoader busy = Ui.Spinner(16);
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private DateTimeOffset? waitUntil;
     private bool blocked;
