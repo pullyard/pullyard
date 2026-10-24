@@ -11,7 +11,7 @@ use super::accounts;
 use super::chat::ChatSession;
 use super::git::WorkingCopy;
 use super::sessions::{self, Project, SessionInfo};
-use super::{ClaudeMode, ModelOption, TabKind, TabState};
+use super::{notifier, prefs, ClaudeMode, Indicator, ModelOption, TabKind, TabState};
 use crate::host::{self, HostCmd};
 use crate::signal::Signal;
 use crate::{demo, settings, util};
@@ -31,6 +31,7 @@ pub struct Tab {
     pub terminal_memory: Cell<i64>,
     pub exit_code: Cell<Option<i32>>,
     pub last_output: Cell<Instant>,
+    pub unread: Cell<bool>,
     terminal_pid: Cell<i32>,
     wired: Cell<bool>,
 }
@@ -136,6 +137,23 @@ impl Tab {
     pub fn project_name(&self) -> String {
         util::last_component(&self.folder)
     }
+
+    pub fn indicator(&self) -> Indicator {
+        Indicator::for_state(self.state(), self.unread.get())
+    }
+
+    pub fn last_assistant_text(&self) -> Option<String> {
+        let chat = self.chat.as_ref()?;
+        let items = chat.items.borrow();
+        items.iter().rev().find_map(|i| match i {
+            super::chat::ChatItem::Text(t) => Some(t.text.borrow().clone()),
+            _ => None,
+        })
+    }
+
+    pub fn pending_tool(&self) -> String {
+        self.chat.as_ref().and_then(|c| c.pending.borrow().last().map(|p| p.tool_name.clone())).unwrap_or_default()
+    }
 }
 
 pub fn apply_terminal_colors(t: &vte4::Terminal) {
@@ -166,6 +184,7 @@ pub enum WsEvent {
     Selection,
     Projects,
     TabState,
+    Loading,
 }
 
 pub struct Workspace {
@@ -178,6 +197,8 @@ pub struct Workspace {
     gits: RefCell<HashMap<String, Rc<WorkingCopy>>>,
     monitor: Cell<bool>,
     next_id: Cell<u64>,
+    index_warmed: Cell<bool>,
+    closed_working_timer: Cell<bool>,
     pub changed: Signal<WsEvent>,
 }
 
@@ -193,12 +214,85 @@ impl Workspace {
             gits: RefCell::new(HashMap::new()),
             monitor: Cell::new(false),
             next_id: Cell::new(1),
+            index_warmed: Cell::new(false),
+            closed_working_timer: Cell::new(false),
             changed: Signal::new(),
         })
     }
 
     pub fn emit(&self, e: WsEvent) {
         self.changed.emit(&e);
+        notifier::set_badge(self.attention_badge());
+    }
+
+    pub fn attention_badge(&self) -> usize {
+        self.tabs.borrow().iter().filter(|t| t.state() == TabState::Waiting || t.unread.get()).count()
+    }
+
+    fn set_selected(&self, id: Option<u64>) {
+        self.selected.set(id);
+        let Some(id) = id else { return };
+        let tab = self.tabs.borrow().iter().find(|t| t.id == id).cloned();
+        if let Some(tab) = tab {
+            tab.unread.set(false);
+            prefs::mark_seen(&tab.session_id.borrow());
+            notifier::withdraw(tab.id);
+        }
+    }
+
+    pub fn cycle_tab(&self, delta: i64) {
+        let ids: Vec<u64> = self.tabs.borrow().iter().map(|t| t.id).collect();
+        if ids.is_empty() {
+            return;
+        }
+        let n = ids.len() as i64;
+        let i = self.selected.get().and_then(|s| ids.iter().position(|t| *t == s)).unwrap_or(0) as i64;
+        self.select(ids[(i + delta).rem_euclid(n) as usize]);
+    }
+
+    pub fn is_watching(&self, tab: &Tab) -> bool {
+        self.selected.get() == Some(tab.id) && crate::app::is_active() && crate::app::section() == crate::app::Section::Claude
+    }
+
+    pub fn window_activated(&self) {
+        let Some(tab) = self.selected_tab() else { return };
+        if crate::app::section() != crate::app::Section::Claude {
+            return;
+        }
+        prefs::mark_seen(&tab.session_id.borrow());
+        notifier::withdraw(tab.id);
+        if tab.unread.replace(false) {
+            self.emit(WsEvent::TabState);
+        }
+    }
+
+    pub fn indicator_for(self: &Rc<Self>, s: &SessionInfo) -> Indicator {
+        if let Some(tab) = self.tab_for_session(&s.id) {
+            return tab.indicator();
+        }
+        let age = chrono::Utc::now().signed_duration_since(s.modified);
+        if age < chrono::Duration::seconds(15) {
+            self.schedule_closed_refresh(15 - age.num_seconds().max(0));
+            return Indicator::Working;
+        }
+        if prefs::read(|p| p.is_unread(&s.id, s.modified)) {
+            Indicator::Done
+        } else {
+            Indicator::None
+        }
+    }
+
+    fn schedule_closed_refresh(self: &Rc<Self>, secs: i64) {
+        if self.closed_working_timer.replace(true) {
+            return;
+        }
+        let w = Rc::downgrade(self);
+        glib::timeout_add_local_once(Duration::from_millis(secs.max(1) as u64 * 1000 + 300), move || {
+            if let Some(me) = w.upgrade() {
+                me.closed_working_timer.set(false);
+                me.emit(WsEvent::TabState);
+            }
+        });
     }
 
     pub fn model(&self) -> ModelOption {
@@ -253,7 +347,7 @@ impl Workspace {
     }
 
     pub fn select(&self, id: u64) {
-        self.selected.set(Some(id));
+        self.set_selected(Some(id));
         self.emit(WsEvent::Selection);
     }
 
@@ -340,7 +434,7 @@ impl Workspace {
             t.kill_terminal();
         }
         self.tabs.borrow_mut().clear();
-        self.selected.set(None);
+        self.set_selected(None);
         self.projects.borrow_mut().clear();
         self.emit(WsEvent::Tabs);
         self.emit(WsEvent::Projects);
@@ -365,7 +459,7 @@ impl Workspace {
 
     pub async fn reload_projects(self: &Rc<Self>) {
         self.loading_projects.set(true);
-        self.emit(WsEvent::Projects);
+        self.emit(WsEvent::Loading);
         let root = std::path::PathBuf::from(accounts::config_dir(None)).join("projects");
         let profile = accounts::active_id();
         let loaded = crate::rt::blocking(move || sessions::load_all(root)).await;
@@ -377,9 +471,43 @@ impl Workspace {
             Some(f) => loaded.into_iter().filter(|p| p.path.starts_with(&f)).collect(),
             None => loaded,
         };
-        *self.projects.borrow_mut() = next;
         self.projects_updated.set(Some(chrono::Utc::now()));
+        if *self.projects.borrow() == next {
+            self.emit(WsEvent::Loading);
+            return;
+        }
+        *self.projects.borrow_mut() = next;
         self.emit(WsEvent::Projects);
+        self.prewarm_index();
+    }
+
+    fn prewarm_index(self: &Rc<Self>) {
+        if self.index_warmed.replace(true) {
+            return;
+        }
+        let files = self.all_session_files();
+        crate::rt::spawn_local(async move {
+            crate::rt::sleep(Duration::from_secs(8)).await;
+            for chunk in files.chunks(10) {
+                let chunk = chunk.to_vec();
+                crate::rt::blocking(move || {
+                    if let Ok(mut index) = super::session_index::shared().lock() {
+                        index.update(&chunk);
+                    }
+                })
+                .await;
+            }
+            crate::rt::blocking(|| {
+                if let Ok(mut index) = super::session_index::shared().lock() {
+                    index.release();
+                }
+            })
+            .await;
+        });
+    }
+
+    pub fn all_session_files(&self) -> Vec<std::path::PathBuf> {
+        self.projects.borrow().iter().flat_map(|p| p.sessions.iter().map(|s| s.file.clone())).collect()
     }
 
     pub fn find_session(&self, id: &str) -> Option<SessionInfo> {
@@ -409,6 +537,7 @@ impl Workspace {
             terminal_memory: Cell::new(0),
             exit_code: Cell::new(None),
             last_output: Cell::new(Instant::now()),
+            unread: Cell::new(false),
             terminal_pid: Cell::new(0),
             wired: Cell::new(false),
         });
@@ -425,7 +554,7 @@ impl Workspace {
             });
         }
         self.tabs.borrow_mut().push(tab.clone());
-        self.selected.set(Some(id));
+        self.set_selected(Some(id));
         self.start_monitoring();
         self.emit(WsEvent::Tabs);
         self.emit(WsEvent::Selection);
@@ -499,7 +628,7 @@ impl Workspace {
         let t = self.make_tab(&tab.folder, TabKind::Terminal, &title, &sid);
         self.launch_terminal(&t, vec!["--resume".into(), sid], None);
         self.tabs.borrow_mut().retain(|x| x.id != tab.id);
-        self.selected.set(Some(t.id));
+        self.set_selected(Some(t.id));
         self.emit(WsEvent::Tabs);
         self.emit(WsEvent::Selection);
     }
@@ -517,7 +646,7 @@ impl Workspace {
         }
         self.start_chat(&c, Some(sid), false, None, None);
         self.tabs.borrow_mut().retain(|x| x.id != tab.id);
-        self.selected.set(Some(c.id));
+        self.set_selected(Some(c.id));
         self.emit(WsEvent::Tabs);
         self.emit(WsEvent::Selection);
     }
@@ -550,8 +679,10 @@ impl Workspace {
         }
         tab.kill_terminal();
         self.tabs.borrow_mut().retain(|t| t.id != tab.id);
+        notifier::withdraw(tab.id);
         if self.selected.get() == Some(tab.id) {
-            self.selected.set(self.tabs.borrow().last().map(|t| t.id));
+            let last = self.tabs.borrow().last().map(|t| t.id);
+            self.set_selected(last);
         }
         self.emit(WsEvent::Tabs);
         self.emit(WsEvent::Selection);
@@ -601,15 +732,29 @@ impl Workspace {
             }
         }));
         let wt = Rc::downgrade(tab);
+        let ws = Rc::downgrade(self);
         *chat.on_turn_finished.borrow_mut() = Some(Rc::new(move || {
-            if let Some(t) = wt.upgrade() {
-                t.git.refresh();
+            let Some(t) = wt.upgrade() else { return };
+            t.git.refresh();
+            let Some(w) = ws.upgrade() else { return };
+            if w.is_watching(&t) {
+                prefs::mark_seen(&t.session_id.borrow());
+            } else {
+                t.unread.set(true);
+                let title = format!("Claude finished · {}", t.title.borrow());
+                notifier::post(t.id, &title, &notifier::snippet(t.last_assistant_text().as_deref()));
+                w.emit(WsEvent::TabState);
             }
         }));
         let wt = Rc::downgrade(tab);
+        let ws = Rc::downgrade(self);
         *chat.on_attention.borrow_mut() = Some(Rc::new(move || {
-            if let Some(t) = wt.upgrade() {
-                crate::app::claude_attention(&t);
+            let Some(t) = wt.upgrade() else { return };
+            let Some(w) = ws.upgrade() else { return };
+            w.emit(WsEvent::TabState);
+            if !w.is_watching(&t) {
+                let title = t.title.borrow().clone();
+                notifier::post(t.id, &title, &notifier::needs_input_body(&t.pending_tool()));
             }
         }));
         let m = mode.unwrap_or_else(|| self.mode());

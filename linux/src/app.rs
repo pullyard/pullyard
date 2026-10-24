@@ -358,16 +358,16 @@ pub fn notify_update(version: &str) {
     a.gtk_app.send_notification(Some(&format!("update-{version}")), &n);
 }
 
-pub fn claude_attention(tab: &crate::claude::workspace::Tab) {
-    let Some(a) = try_get() else { return };
-    a.claude.emit(crate::claude::workspace::WsEvent::TabState);
-    if is_active() {
-        return;
+fn forward_to_terminal(byte: u8) -> bool {
+    let Some(focus) = try_get().and_then(|a| a.window.borrow().clone()).and_then(|w| gtk::prelude::GtkWindowExt::focus(&w)) else { return false };
+    let term = focus.clone().downcast::<vte4::Terminal>().ok().or_else(|| focus.ancestor(vte4::Terminal::static_type()).and_then(|w| w.downcast::<vte4::Terminal>().ok()));
+    match term {
+        Some(t) => {
+            vte4::prelude::TerminalExt::feed_child(&t, &[byte]);
+            true
+        }
+        None => false,
     }
-    let n = gio::Notification::new("Claude Code needs your permission");
-    n.set_body(Some(&format!("{} · {}", tab.title.borrow(), tab.project_name())));
-    n.set_default_action_and_target_value("app.open-url", Some(&format!("{}://section/claude", brand::URL_SCHEME).to_variant()));
-    a.gtk_app.send_notification(Some(&format!("claude-{}", tab.id)), &n);
 }
 
 pub fn section() -> Section {
@@ -381,6 +381,9 @@ pub fn set_section(s: Section) {
     }
     a.state.borrow_mut().section = s;
     a.section_changed.emit(&s);
+    if s == Section::Claude {
+        a.claude.window_activated();
+    }
 }
 
 pub fn select(route: Option<Route>) {
@@ -1362,6 +1365,65 @@ impl App {
         for (i, (name, s)) in sections.into_iter().enumerate() {
             add(name, &[&format!("<Control>{}", i + 1)], Box::new(move || set_section(s)));
         }
+        let claude_ready = || try_get().is_some_and(|a| a.state.borrow().phase == Phase::LoggedIn && section_allowed(Section::Claude));
+        add(
+            "agents-quick-open",
+            &["<Control>k"],
+            Box::new(move || {
+                if forward_to_terminal(0x0b) || !claude_ready() {
+                    return;
+                }
+                ui::claude::quick_open::show();
+            }),
+        );
+        let me = self.clone();
+        add(
+            "agents-new-session",
+            &["<Control>n"],
+            Box::new(move || {
+                if forward_to_terminal(0x0e) || !claude_ready() {
+                    return;
+                }
+                set_section(Section::Claude);
+                ui::claude::column::new_session_here(&me.claude);
+            }),
+        );
+        let me = self.clone();
+        add(
+            "agents-next-session",
+            &["<Control><Shift>bracketright", "<Control>braceright"],
+            Box::new(move || {
+                if claude_ready() && !me.claude.tabs.borrow().is_empty() {
+                    set_section(Section::Claude);
+                    me.claude.cycle_tab(1);
+                }
+            }),
+        );
+        let me = self.clone();
+        add(
+            "agents-previous-session",
+            &["<Control><Shift>bracketleft", "<Control>braceleft"],
+            Box::new(move || {
+                if claude_ready() && !me.claude.tabs.borrow().is_empty() {
+                    set_section(Section::Claude);
+                    me.claude.cycle_tab(-1);
+                }
+            }),
+        );
+        let agent_tab = gio::SimpleAction::new(crate::claude::notifier::TAB_ACTION, Some(glib::VariantTy::UINT64));
+        let me = self.clone();
+        agent_tab.connect_activate(move |_, v| {
+            me.present();
+            let Some(id) = v.and_then(|v| v.get::<u64>()) else { return };
+            if me.state.borrow().phase != Phase::LoggedIn {
+                return;
+            }
+            set_section(Section::Claude);
+            if me.claude.tabs.borrow().iter().any(|t| t.id == id) {
+                me.claude.select(id);
+            }
+        });
+        app.add_action(&agent_tab);
         let open_url = gio::SimpleAction::new("open-url", Some(glib::VariantTy::STRING));
         let me = self.clone();
         open_url.connect_activate(move |_, v| {
@@ -1398,6 +1460,7 @@ impl App {
         window.connect_is_active_notify(move |w| {
             if w.is_active() {
                 if let Some(me) = weak.upgrade() {
+                    me.claude.window_activated();
                     me.did_become_active();
                 }
             }
