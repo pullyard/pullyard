@@ -500,7 +500,7 @@ impl RefreshStatus {
         self.text.set_text(&text);
         self.retry.set_visible(error.is_some() && !refreshing && resume.is_none());
         self.widget.set_tooltip_text(Some(&match (&resume, &error) {
-            (Some(at), _) => format!("GitHub rate limit reached. Live updates resume at {at}."),
+            (Some(at), _) => format!("GitHub rate limit reached. Live updates and loading resume at {at}; your changes still go through."),
             (None, Some(e)) => format!("Last refresh failed: {e}"),
             (None, None) => "Refresh (Ctrl+R)".to_string(),
         }));
