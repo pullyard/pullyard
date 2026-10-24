@@ -773,8 +773,22 @@ final class ChatSession {
         }
     }
 
+    nonisolated static func readTail(_ file: URL, maxBytes: Int = 6 << 20) -> (data: Data, truncated: Bool)? {
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return nil }
+        guard size > UInt64(maxBytes) else {
+            try? handle.seek(toOffset: 0)
+            return (handle.readDataToEndOfFile(), false)
+        }
+        try? handle.seek(toOffset: size - UInt64(maxBytes))
+        var data = handle.readDataToEndOfFile()
+        if let newline = data.firstIndex(of: 0x0A) { data = data[data.index(after: newline)...] }
+        return (Data(data), true)
+    }
+
     func loadHistory(from file: URL, limit: Int = 600) {
-        guard let data = try? Data(contentsOf: file) else { return }
+        guard let (data, truncated) = Self.readTail(file) else { return }
         var loaded: [ChatItem] = []
         var map: [String: ChatToolCall] = [:]
         for line in data.split(separator: 0x0A) {
@@ -824,8 +838,8 @@ final class ChatSession {
         }
         let tail = Array(loaded.suffix(limit))
         for case .tool(let c) in tail { tools[c.id] = c }
-        if loaded.count > limit {
-            items = [.notice(id: "older", text: "Showing the last \(limit) messages", isError: false)] + tail
+        if loaded.count > limit || truncated {
+            items = [.notice(id: "older", text: "Showing the latest messages", isError: false)] + tail
         } else {
             items = tail
         }

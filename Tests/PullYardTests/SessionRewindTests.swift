@@ -30,3 +30,18 @@ final class SessionRewindTests: XCTestCase {
         XCTAssertThrowsError(try SessionRewind.fork(file: file, text: "missing", occurrenceFromEnd: 0))
     }
 }
+
+final class HistoryTailTests: XCTestCase {
+    func testTailStartsAtLineBoundary() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jsonl")
+        let lines = (0..<200).map { "{\"n\":\($0),\"pad\":\"\(String(repeating: "x", count: 40))\"}" }
+        try (lines.joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
+        let whole = try XCTUnwrap(ChatSession.readTail(file, maxBytes: 1 << 20))
+        XCTAssertFalse(whole.truncated)
+        let tail = try XCTUnwrap(ChatSession.readTail(file, maxBytes: 600))
+        XCTAssertTrue(tail.truncated)
+        let first = String(decoding: tail.data.split(separator: 0x0A).first!, as: UTF8.self)
+        XCTAssertTrue(first.hasPrefix("{\"n\":"))
+        XCTAssertTrue(String(decoding: tail.data, as: UTF8.self).contains("\"n\":199"))
+    }
+}
