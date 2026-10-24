@@ -69,15 +69,13 @@ struct OpenInMenu: View {
             Divider()
             if let finder = apps.first(where: { $0.kind == .finder }) { item(finder) }
         } label: {
-            HStack(spacing: 5) {
-                if let primary, let icon = primary.icon { Image(nsImage: icon) } else { Image(systemName: "arrow.up.forward.app") }
-                Text(primary?.name ?? "Open")
-            }
+            if let primary, let icon = primary.icon { Image(nsImage: icon) } else { Image(systemName: "arrow.up.forward.app") }
         } primaryAction: {
             primary?.open(folder)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .accessibilityLabel("Open in \(primary?.name ?? "another app")")
         .help("Open the project in \(primary?.name ?? "another app") — click the arrow for more")
     }
 

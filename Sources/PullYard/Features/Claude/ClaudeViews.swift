@@ -677,7 +677,7 @@ struct ClaudeControlBar: View {
                 AgentBranchMenu(tab: tab, pr: ws.pullRequest(for: tab))
                 TabStateBadge(state: tab.state, memory: tab.memoryBytes)
             }
-            .fixedSize(horizontal: false, vertical: true)
+            .lineLimit(1)
             .layoutPriority(1)
             Spacer(minLength: 8)
             if tab.kind == .terminal {
@@ -1344,7 +1344,7 @@ struct AgentBranchMenu: View {
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "arrow.triangle.branch").imageScale(.small)
-                    Text(branch == "HEAD" ? "Detached HEAD" : branch).lineLimit(1).truncationMode(.middle)
+                    Text(branch == "HEAD" ? "Detached HEAD" : branch).lineLimit(1).truncationMode(.middle).frame(maxWidth: 240, alignment: .leading).fixedSize(horizontal: false, vertical: true)
                     if let worktree = git.worktree {
                         Text("·").foregroundStyle(Color.syDim)
                         Image(systemName: "square.stack.3d.up").imageScale(.small)

@@ -176,6 +176,8 @@ struct TabStateBadge: View {
             }
         }
         .font(.syCaption)
+        .lineLimit(1)
+        .fixedSize()
         .foregroundStyle(state.color)
         .help(state.help + (memory.map { $0 > 0 ? " — " + ProcessMemory.format($0) : "" } ?? ""))
     }
