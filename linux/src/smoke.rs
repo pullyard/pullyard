@@ -301,6 +301,21 @@ pub fn run(_app: Rc<App>) {
             ws.select(id);
         }
     });
+    step(next(400), "claude chat states", || {
+        let ws = app::get().claude.clone();
+        let chat = ws.tabs.borrow().iter().find_map(|t| t.chat.clone());
+        if let Some(chat) = chat {
+            *chat.last_error.borrow_mut() = Some("OAuth token has expired. Please run /login".into());
+            chat.expanded.borrow_mut().insert("gtool-5".into(), true);
+            chat.expanded.borrow_mut().insert("km4:0".into(), true);
+            chat.changed.emit(&crate::claude::chat::Event::Updated("ctool-5".into()));
+            chat.changed.emit(&crate::claude::chat::Event::State);
+        }
+    });
+    step(next(400), "claude welcome", || {
+        let ws = app::get().claude.clone();
+        ws.new_session("/tmp", None, Some("Smoke welcome".into()), None, Some(crate::claude::TabKind::Chat));
+    });
     step(next(400), "deep link", || app::get().handle_url(&format!("{}://section/repos", crate::brand::URL_SCHEME)));
     step(next(300), "gitlab account", || {
         let caps = ForgeCapabilities { pull_filters: PrFilter::ALL.to_vec(), issue_filters: IssueFilter::ALL.to_vec(), inbox_title: Some("To-Do List"), repositories: true };

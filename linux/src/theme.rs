@@ -348,6 +348,24 @@ listview.stack-list > row { padding: 0; margin: 1px 0; background: none; }
 .chat-composer textview, .chat-composer textview text { background-color: transparent; }
 .chat-code { background-color: @sy_sunken; border-radius: 8px; padding: 8px; font-family: monospace; font-size: 12px; }
 .chat-notice { color: @sy_dim; font-size: 0.82em; }
+.chat-actions { opacity: 0; transition: opacity 160ms ease-out; min-height: 22px; }
+.chat-actions.shown { opacity: 1; }
+.chat-actions button { min-height: 22px; min-width: 24px; padding: 0 4px; border-radius: 6px; color: @sy_muted; }
+.chat-actions button:hover { color: @sy_text; background-color: alpha(@sy_text, 0.08); }
+.chat-group-head, .chat-step-head { padding: 4px 8px; min-height: 26px; }
+.chat-group-steps { border: 1px solid @sy_line; border-radius: 10px; }
+.chat-jump { min-width: 40px; min-height: 40px; padding: 0; border-radius: 999px; background-color: @sy_raised; border: 1.5px solid alpha(@sy_violet, 0.45); box-shadow: 0 3px 9px alpha(black, 0.2); transition: transform 200ms ease-out, box-shadow 200ms ease-out, border-color 200ms ease-out; }
+.chat-jump:hover { transform: translateY(-2px) scale(1.06); box-shadow: 0 6px 14px alpha(black, 0.32); border-color: @sy_sky; }
+.chat-jump:active { transform: scale(0.92); }
+.chat-jump.fresh { animation: sy-jump-pulse 1.6s ease-in-out infinite; }
+@keyframes sy-jump-pulse { 0% { border-color: alpha(@sy_violet, 0.45); } 50% { border-color: @sy_sky; } 100% { border-color: alpha(@sy_violet, 0.45); } }
+.chat-jump-badge { background-color: @sy_violet; color: white; border-radius: 9px; min-width: 18px; min-height: 18px; padding: 0 5px; font-size: 10px; font-weight: 700; border: 2px solid @sy_panel; }
+.chat-pr-card { background-color: alpha(@sy_violet, 0.08); border: 1px solid alpha(@sy_violet, 0.25); border-radius: 10px; padding: 12px; }
+.chat-todo { background-color: alpha(@sy_text, 0.03); border: 1px solid @sy_line; border-radius: 10px; }
+.chat-todo-head { padding: 6px 10px; border-radius: 10px; }
+.chat-todo-progress trough, .chat-todo-progress progress { min-height: 4px; border-radius: 2px; }
+.chat-suggestion { padding: 10px 12px; border-radius: 10px; background-color: alpha(@sy_text, 0.035); border: 1px solid @sy_line; min-height: 24px; }
+.chat-suggestion:hover { background-color: alpha(@sy_text, 0.07); border-color: alpha(@sy_violet, 0.45); }
 .claude-tab { padding: 4px 10px; border-radius: 8px; background-color: alpha(@sy_text, 0.04); border: 1px solid @sy_line; }
 .claude-tab.selected { background-color: alpha(@sy_accent, 0.14); border-color: alpha(@sy_accent, 0.45); }
 .project-column { background-color: @sy_sunken; border-radius: 12px; }
