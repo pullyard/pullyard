@@ -94,14 +94,23 @@ final class StacksModel {
             let picked = (repos.filter(\.stacked) + repos.filter { !$0.stacked }).prefix(Self.maxRepos)
             let previous = entries
             let results = await withTaskGroup(of: (Int, [StackNode]?).self) { group in
-                for (i, r) in picked.enumerated() {
+                let list = Array(picked.enumerated())
+                var next = 0
+                func add() {
+                    guard next < list.count else { return }
+                    let (i, r) = list[next]
+                    next += 1
                     group.addTask { @MainActor in
                         if let nodes = await StackStore.nodes(api: api, repo: r.repo, account: account, force: force) { return (i, nodes) }
                         return (i, await StackStore.cached(api: api, repo: r.repo, account: account)?.nodes)
                     }
                 }
+                for _ in 0..<3 { add() }
                 var out = [[StackNode]?](repeating: nil, count: picked.count)
-                for await (i, nodes) in group { out[i] = nodes }
+                for await (i, nodes) in group {
+                    out[i] = nodes
+                    add()
+                }
                 return out
             }
             var found: [StackEntry] = []
