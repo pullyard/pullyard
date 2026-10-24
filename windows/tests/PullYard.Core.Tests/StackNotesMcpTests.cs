@@ -192,6 +192,8 @@ public class StackNotesMcpTests : IDisposable
     {
         var command = StackNotesMcp.Command;
         var target = StackNotesMcp.Target;
+        var configDir = StackNotesMcp.ConfigDirectory;
+        StackNotesMcp.ConfigDirectory = dir;
         try
         {
             StackNotesMcp.Command = null;
@@ -203,12 +205,15 @@ public class StackNotesMcpTests : IDisposable
             StackNotesMcp.Target = () => ("me", "github.com");
             var args = StackNotesMcp.LaunchArgs();
             Assert.Equal("--mcp-config", args[0]);
-            Assert.Contains("--mcp-stack-notes", args[1]);
+            Assert.StartsWith(dir, args[1]);
+            Assert.Equal(StackNotesMcp.Config("me", "github.com", "PullYard.exe"), File.ReadAllText(args[1]));
+            Assert.Equal(args[1], StackNotesMcp.LaunchArgs()[1]);
         }
         finally
         {
             StackNotesMcp.Command = command;
             StackNotesMcp.Target = target;
+            StackNotesMcp.ConfigDirectory = configDir;
         }
     }
 

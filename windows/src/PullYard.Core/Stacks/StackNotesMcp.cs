@@ -338,12 +338,27 @@ public static class StackNotesMcp
         return root.ToJsonString();
     }
 
+    public static string? ConfigDirectory { get; set; }
+
+    public static string WriteConfig(string json, string directory)
+    {
+        Directory.CreateDirectory(directory);
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json)))[..16].ToLowerInvariant();
+        var path = Path.Combine(directory, $"mcp-stack-notes-{hash}.json");
+        if (File.Exists(path) && File.ReadAllText(path) == json) return path;
+        var tmp = $"{path}.{Guid.NewGuid():N}.tmp";
+        File.WriteAllText(tmp, json);
+        File.Move(tmp, path, true);
+        return path;
+    }
+
     public static List<string> LaunchArgs()
     {
         try
         {
             if (string.IsNullOrEmpty(Command) || Target() is not { } t || string.IsNullOrEmpty(t.Host)) return new List<string>();
-            return new List<string> { "--mcp-config", Config(t.Account, t.Host, Command) };
+            var json = Config(t.Account, t.Host, Command);
+            return new List<string> { "--mcp-config", WriteConfig(json, ConfigDirectory ?? AppInfo.DataDirectory) };
         }
         catch (Exception e)
         {
