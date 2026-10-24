@@ -8,8 +8,6 @@ struct ChatView: View {
     let chat: ChatSession
     @State private var follow = ChatFollow()
     @State private var awayCount: Int?
-    @State private var topID: String?
-    @State private var keptTopID: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,7 +17,7 @@ struct ChatView: View {
                         if chat.items.isEmpty {
                             ChatWelcome(chat: chat, folder: tab.folder)
                         }
-                        ForEach(ChatDisplayItem.build(chat.items)) { entry in
+                        ForEach(chat.displayItems) { entry in
                             Group {
                                 switch entry {
                                 case .item(let item):
@@ -56,12 +54,15 @@ struct ChatView: View {
                     .frame(maxWidth: .infinity)
                     .background {
                         GeometryReader { g in
-                            Color.clear.preference(key: ChatContentFrameKey.self, value: g.frame(in: .named(ChatContentFrameKey.space)))
+                            Color.clear.preference(key: ChatContentFrameKey.self, value: CGRect(origin: .zero, size: g.size))
                         }
                     }
                     .background(ChatScrollObserver(follow: follow))
                 }
-                .scrollPosition(id: $topID)
+                .scrollPosition(id: Binding(get: { follow.topID }, set: { id in
+                    follow.topID = id
+                    if !follow.resizing { follow.keptTopID = id }
+                }))
                 .coordinateSpace(name: ChatContentFrameKey.space)
                 .background {
                     GeometryReader { g in
@@ -80,7 +81,6 @@ struct ChatView: View {
                 .onChange(of: chat.pendingCount) {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { scrollDown(proxy) }
                 }
-                .onChange(of: topID) { if !follow.resizing { keptTopID = topID } }
                 .onChange(of: follow.resizeTick) { keepPosition(proxy) }
                 .onAppear { jumpToBottom(proxy) }
                 .onChange(of: tab.id) { jumpToBottom(proxy) }
@@ -128,7 +128,7 @@ struct ChatView: View {
     }
 
     private func keepPosition(_ proxy: ScrollViewProxy) {
-        guard !follow.stick, let id = keptTopID else { return }
+        guard !follow.stick, let id = follow.keptTopID else { return }
         proxy.scrollTo(id, anchor: .top)
         for delay in [0.05, 0.15, 0.3, 0.5, 0.7] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
@@ -151,6 +151,8 @@ struct ChatView: View {
 @Observable
 final class ChatFollow {
     var stick = true
+    @ObservationIgnored var topID: String?
+    @ObservationIgnored var keptTopID: String?
     var resizeTick = 0
     @ObservationIgnored var resizing = false
     @ObservationIgnored var viewportHeight: CGFloat = 0
@@ -266,11 +268,11 @@ private struct ChatScrollObserver: NSViewRepresentable {
             let point = s.convert(event.locationInWindow, from: nil)
             guard s.bounds.contains(point) else { return }
             if event.scrollingDeltaY > 0 {
-                follow?.stick = false
+                if follow?.stick == true { follow?.stick = false }
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self, let follow = self.follow else { return }
-                if self.distanceToBottom < 24 { follow.stick = true }
+                if !follow.stick, self.distanceToBottom < 24 { follow.stick = true }
             }
         }
     }

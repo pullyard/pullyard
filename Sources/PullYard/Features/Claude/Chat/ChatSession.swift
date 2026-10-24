@@ -68,7 +68,22 @@ struct ChatImage: Identifiable {
     let id = UUID()
     let data: Data
     let mediaType: String
-    var image: NSImage? { NSImage(data: data) }
+    var image: NSImage? {
+        if let hit = Self.decoded.object(forKey: id as NSUUID) { return hit }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 1200, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) else {
+            return NSImage(data: data)
+        }
+        let image = NSImage(cgImage: cg, size: NSSize(width: CGFloat(cg.width) / 2, height: CGFloat(cg.height) / 2))
+        Self.decoded.setObject(image, forKey: id as NSUUID)
+        return image
+    }
+
+    private static let decoded: NSCache<NSUUID, NSImage> = {
+        let c = NSCache<NSUUID, NSImage>()
+        c.countLimit = 60
+        return c
+    }()
 }
 
 enum ChatItem: Identifiable {
@@ -177,16 +192,38 @@ final class ChatSession {
     @ObservationIgnored private var messageTexts: [String: [ChatText]] = [:]
     @ObservationIgnored private var queuedPrompts: [(text: String, images: [ChatImage])] = []
     @ObservationIgnored private var requestCounter = 0
+    @ObservationIgnored private var todoCache: (count: Int, todos: [[String: Any]]) = (-1, [])
+    @ObservationIgnored private var displayCache: (key: DisplayKey, items: [ChatDisplayItem])?
+    var resolvedPermissions = 0
     @ObservationIgnored private var intentionalStop = false
     @ObservationIgnored var onSessionId: ((String) -> Void)?
     @ObservationIgnored var onTurnFinished: (() -> Void)?
     @ObservationIgnored var onNeedsInput: ((PermissionRequest) -> Void)?
 
     var currentTodos: [[String: Any]] {
+        let count = items.count
+        if todoCache.count == count { return todoCache.todos }
+        var found: [[String: Any]] = []
         for item in items.reversed() {
-            if case .tool(let c) = item, c.name == "TodoWrite", let todos = c.input["todos"] as? [[String: Any]] { return todos }
+            if case .tool(let c) = item, c.name == "TodoWrite", let todos = c.input["todos"] as? [[String: Any]] { found = todos; break }
         }
-        return []
+        todoCache = (count, found)
+        return found
+    }
+
+    var displayItems: [ChatDisplayItem] {
+        let key = DisplayKey(count: items.count, pending: pendingCount, resolved: resolvedPermissions, last: items.last?.id)
+        if let cached = displayCache, cached.key == key { return cached.items }
+        let built = ChatDisplayItem.build(items)
+        displayCache = (key, built)
+        return built
+    }
+
+    private struct DisplayKey: Equatable {
+        let count: Int
+        let pending: Int
+        let resolved: Int
+        let last: String?
     }
 
     var lastAssistantText: String? {
@@ -317,6 +354,7 @@ final class ChatSession {
             return
         }
         for p in pendingPermissions where !p.resolved { p.resolved = true }
+        resolvedPermissions += 1
         pendingPermissions.removeAll()
         if code != 0 && code != 15 {
             let tail = stderrTail.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -395,6 +433,7 @@ final class ChatSession {
     func respond(_ req: PermissionRequest, allow: Bool, always: PermissionSuggestion? = nil, message: String? = nil, updatedInput: [String: Any]? = nil) {
         guard !req.resolved else { return }
         req.resolved = true
+        resolvedPermissions += 1
         lastActivity = Date()
         var response: [String: Any]
         if allow {
@@ -563,7 +602,7 @@ final class ChatSession {
             guard let id = block["tool_use_id"] as? String, let tool = tools[id] else { continue }
             if tool.status != .denied { tool.status = (block["is_error"] as? Bool == true) ? .error : .done }
             tool.resultText = ChatSession.resultText(block["content"])
-            tool.structured = o["tool_use_result"] as? [String: Any]
+            tool.structured = ChatSession.trimmed(o["tool_use_result"] as? [String: Any])
             if tool.name == "Bash", (tool.input["command"] as? String)?.contains("gh pr create") == true,
                let url = tool.resultText.flatMap(AgentShip.pullRequestURL) {
                 createdPR = url
@@ -572,6 +611,19 @@ final class ChatSession {
     }
 
     static let maxResultLength = 64_000
+
+    nonisolated static func trimmed(_ structured: [String: Any]?) -> [String: Any]? {
+        guard var s = structured else { return nil }
+        s.removeValue(forKey: "originalFile")
+        for key in ["stdout", "stderr", "content"] {
+            if let v = s[key] as? String, v.utf8.count > maxResultLength { s[key] = String(v.prefix(maxResultLength)) }
+        }
+        if var file = s["file"] as? [String: Any], let c = file["content"] as? String, c.utf8.count > maxResultLength {
+            file["content"] = String(c.prefix(maxResultLength))
+            s["file"] = file
+        }
+        return s
+    }
 
     nonisolated static func historyUserItem(id: String, text raw: String) -> ChatItem? {
         var text = raw.replacingOccurrences(of: "<system-reminder>[\\s\\S]*?</system-reminder>", with: "", options: .regularExpression)
@@ -740,7 +792,7 @@ final class ChatSession {
                         if b["type"] as? String == "tool_result", let id = b["tool_use_id"] as? String, let tool = map[id] {
                             tool.status = (b["is_error"] as? Bool == true) ? .error : .done
                             tool.resultText = ChatSession.resultText(b["content"])
-                            tool.structured = o["toolUseResult"] as? [String: Any]
+                            tool.structured = ChatSession.trimmed(o["toolUseResult"] as? [String: Any])
                         } else if b["type"] as? String == "text", let s = b["text"] as? String, !s.hasPrefix("<") {
                             texts.append(s)
                         }
