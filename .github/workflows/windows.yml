@@ -189,10 +189,12 @@ jobs:
           $personalize = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
           if (-not (Test-Path $personalize)) { New-Item -Path $personalize -Force | Out-Null }
           $codes = @{}
-          foreach ($mode in @("dark", "light")) {
+          foreach ($run in @("brand-dark", "brand-light", "system-dark", "system-light")) {
+            $style, $mode = $run -split "-"
+            Set-Item "env:${prefix}_TOUR_STYLE" $style
             Set-ItemProperty -Path $personalize -Name AppsUseLightTheme -Value ([int]($mode -eq "light")) -Type DWord
             Remove-Item $log -ErrorAction SilentlyContinue
-            $shots = New-Item -ItemType Directory -Force -Path "windows/dist/shots/$mode"
+            $shots = New-Item -ItemType Directory -Force -Path "windows/dist/shots/$run"
             $p = Start-Process -FilePath $exe -ArgumentList @('--smoke-tour', $link) -PassThru
             $seen = 0
             $deadline = (Get-Date).AddMinutes(4)
@@ -205,11 +207,11 @@ jobs:
             }
             if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
             $p.WaitForExit()
-            foreach ($f in @('tour.log', 'errors.log')) { $path = Join-Path $data $f; if (Test-Path $path) { Write-Host "--- $mode $f"; Get-Content $path | Write-Host } }
-            Write-Host "Exit code ($mode): $($p.ExitCode)"
-            $codes[$mode] = $p.ExitCode
+            foreach ($f in @('tour.log', 'errors.log')) { $path = Join-Path $data $f; if (Test-Path $path) { Write-Host "--- $run $f"; Get-Content $path | Write-Host } }
+            Write-Host "Exit code ($run): $($p.ExitCode)"
+            $codes[$run] = $p.ExitCode
           }
-          foreach ($mode in $codes.Keys) { if ($codes[$mode] -ne 0) { throw "UI tour ($mode) exited with $($codes[$mode])" } }
+          foreach ($run in $codes.Keys) { if ($codes[$run] -ne 0) { throw "UI tour ($run) exited with $($codes[$run])" } }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: matrix.arch == 'x64' && always()

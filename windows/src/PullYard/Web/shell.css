@@ -1,4 +1,4 @@
-html,body{margin:0;background:transparent}
+html,body{margin:0;background:var(--page,transparent)}
 body.flush{padding:0}
 body.readme .md{padding:8px 4px}
 body.readme .tl{max-width:900px}

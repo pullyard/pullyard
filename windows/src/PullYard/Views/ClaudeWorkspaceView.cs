@@ -31,6 +31,8 @@ public sealed class ClaudeWorkspaceView : Grid
 
     public ClaudeWorkspaceView()
     {
+        Background = ThemeService.IsBrand ? Palette.Brush("panel") : null;
+        ThemeService.Changed += () => Background = ThemeService.IsBrand ? Palette.Brush("panel") : null;
         Children.Add(host);
         Loaded += (_, _) =>
         {
