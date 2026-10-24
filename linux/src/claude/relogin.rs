@@ -63,11 +63,8 @@ pub fn sign_in_again(config_dir: Option<String>, on_done: impl FnOnce(Result<(),
     let dir = config_dir.clone().unwrap_or_else(|| accounts::config_dir(None));
     let start = credentials_stamp(&dir);
     if let Err(e) = open_terminal_login(config_dir.as_deref()) {
-        if host::claude_binary().is_none() {
-            on_done(Err(e));
-            return;
-        }
-        accounts::store().login(accounts::LoginMethod::ClaudeAi, "");
+        on_done(Err(e));
+        return;
     }
     crate::rt::spawn_local(async move {
         for attempt in 0..MAX_ATTEMPTS {
