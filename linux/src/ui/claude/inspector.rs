@@ -5,6 +5,7 @@ use adw::prelude::*;
 use chrono::{DateTime, Utc};
 
 use crate::api::models::*;
+use crate::claude::ship;
 use crate::claude::workspace::Tab;
 use crate::fix_prompt::{self, FixOptions};
 use crate::ui::code_view::CodeView;
@@ -470,12 +471,26 @@ impl BranchPrs {
         } else if items.is_empty() && linked.is_none() && !self.branch_loading.get() {
             self.branch_box.append(&label_with(&format!("No PR for branch {}", branch.clone().unwrap_or_else(|| "?".into())), &["sy-muted"]));
             if let Some(b) = branch.filter(|b| b != "HEAD") {
+                let row = hbox(6);
+                let agent = tinted("Open PR with agent", "coral");
+                let (tab, br) = (self.tab.clone(), b.clone());
+                agent.connect_clicked(move |_| {
+                    let prompt = ship::open_pr_prompt(&br, None, !tab.git.changes.borrow().is_empty(), tab.git.ahead());
+                    app::get().claude.send(&prompt, Some(tab.clone()), true);
+                });
+                row.append(&agent);
                 let create = button("Create PR in browser");
-                create.set_halign(gtk::Align::Start);
                 let url = format!("https://github.com/{}/pull/new/{b}", repo.full());
                 create.connect_clicked(move |_| util::open_url(&url));
-                self.branch_box.append(&create);
+                row.append(&create);
+                self.branch_box.append(&row);
             }
+        } else if let Some(open) = items.iter().find(|i| i.pr_state.as_deref() == Some("OPEN")).filter(|_| !self.tab.git.changes.borrow().is_empty()) {
+            let commit = tinted("Commit and push with agent", "coral");
+            commit.set_halign(gtk::Align::Start);
+            let (tab, n) = (self.tab.clone(), open.number);
+            commit.connect_clicked(move |_| app::get().claude.send(&ship::commit_prompt(n), Some(tab.clone()), true));
+            self.branch_box.append(&commit);
         }
         let lb = gtk::ListBox::new();
         lb.add_css_class("sy-list");
