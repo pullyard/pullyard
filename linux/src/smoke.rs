@@ -66,6 +66,36 @@ fn diff_round(m: Rc<PrModel>, middle: String, i: usize, mut sync: Vec<f64>, mut 
     });
 }
 
+fn agent_projects() -> Vec<crate::claude::sessions::Project> {
+    let now = chrono::Utc::now();
+    let session = |id: &str, title: &str, parent: Option<&str>, mins: i64| crate::claude::sessions::SessionInfo {
+        id: id.into(),
+        file: std::path::PathBuf::from(format!("/nonexistent/{id}.jsonl")),
+        cwd: "/tmp".into(),
+        title: title.into(),
+        branch: Some("feat-smoke".into()),
+        modified: now - chrono::Duration::minutes(mins),
+        pr_url: None,
+        pr_number: if mins == 0 { Some(7) } else { None },
+        model: None,
+        lines_added: Some(3),
+        lines_removed: Some(1),
+        parent_id: parent.map(|p| p.to_string()),
+        desktop_id: None,
+        archived: false,
+    };
+    vec![crate::claude::sessions::Project {
+        id: "/tmp".into(),
+        path: "/tmp".into(),
+        sessions: vec![
+            session("smoke-root", "Smoke parent session", None, 0),
+            session("smoke-child-a", "Smoke sub-session A", Some("smoke-root"), 2),
+            session("smoke-child-b", "Smoke sub-session B", Some("smoke-root"), 3),
+            session("smoke-old", "Smoke old session", None, 90),
+        ],
+    }]
+}
+
 pub fn run(_app: Rc<App>) {
     println!("smoke: window built ({} {})", crate::brand::APP_NAME, crate::brand::VERSION);
     let mut t = 200;
@@ -358,6 +388,64 @@ pub fn run(_app: Rc<App>) {
     step(next(400), "claude welcome", || {
         let ws = app::get().claude.clone();
         ws.new_session("/tmp", None, Some("Smoke welcome".into()), None, Some(crate::claude::TabKind::Chat));
+    });
+    step(next(300), "agents sidebar fixtures", || {
+        let store = crate::claude::accounts::store();
+        *store.status.borrow_mut() = crate::claude::accounts::Status::LoggedIn(crate::claude::accounts::AccountInfo {
+            email: Some("smoke@example.invalid".into()),
+            org_name: None,
+            subscription: Some("pro".into()),
+            method: None,
+            provider: None,
+        });
+        store.changed.emit(&());
+        let ws = app::get().claude.clone();
+        *ws.projects.borrow_mut() = agent_projects();
+        ws.emit(crate::claude::workspace::WsEvent::Projects);
+    });
+    step(next(400), "agents pin and archive", || {
+        crate::claude::prefs::update(|p| {
+            p.toggle_pin("smoke-root");
+            p.set_archived("smoke-old", true);
+        });
+        app::get().claude.emit(crate::claude::workspace::WsEvent::Projects);
+    });
+    step(next(300), "agents unpin and unarchive", || {
+        crate::claude::prefs::update(|p| {
+            p.toggle_pin("smoke-root");
+            p.set_archived("smoke-old", false);
+        });
+        app::get().claude.emit(crate::claude::workspace::WsEvent::Projects);
+    });
+    step(next(300), "agents unread indicator", || {
+        let ws = app::get().claude.clone();
+        if let Some(t) = ws.tabs.borrow().last() {
+            t.unread.set(true);
+        }
+        ws.emit(crate::claude::workspace::WsEvent::TabState);
+        println!("smoke: agents attention badge {}", ws.attention_badge());
+    });
+    step(next(300), "agents cycle tabs", || {
+        let ws = app::get().claude.clone();
+        ws.cycle_tab(1);
+        ws.cycle_tab(-1);
+    });
+    step(next(300), "agents notifications", || {
+        let id = app::get().claude.tabs.borrow().first().map(|t| t.id).unwrap_or(0);
+        crate::claude::notifier::post(id, "Smoke finished", "Body");
+        crate::claude::notifier::withdraw(id);
+        crate::claude::notifier::set_badge(2);
+        crate::claude::notifier::set_badge(0);
+    });
+    step(next(300), "agents quick open", crate::ui::claude::quick_open::show);
+    step(next(300), "agents quick open filter", || crate::ui::claude::quick_open::set_query("smoke"));
+    step(next(600), "agents quick open search", || {
+        println!("smoke: quick open shows {} entries", crate::ui::claude::quick_open::shown_count());
+        crate::ui::claude::quick_open::set_query("migrate the schema");
+    });
+    step(next(900), "agents quick open close", crate::ui::claude::quick_open::close);
+    step(next(200), "agents open in", || {
+        crate::ui::claude::open_in::when_ready(|| println!("smoke: open in apps {}", crate::ui::claude::open_in::installed().map(|a| a.len()).unwrap_or(0)));
     });
     step(next(400), "deep link", || app::get().handle_url(&format!("{}://section/repos", crate::brand::URL_SCHEME)));
     step(next(300), "gitlab account", || {
