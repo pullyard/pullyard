@@ -256,6 +256,9 @@ struct ClaudeProjectsColumn: View {
         Button("Resume as chat") { ws.resume(s, kind: .chat) }
         Button("Resume in terminal") { ws.resume(s, kind: .terminal) }
         Button("Fork session") { ws.resume(s, fork: true) }
+        if let local = s.desktopId, DesktopSessionIndex.isInstalled {
+            Button("Open in Claude Desktop") { DesktopSessionIndex.open(localID: local) }
+        }
         Divider()
         Button("Copy session ID") { copyToPasteboard(s.id) }
         Button("Copy resume command") { copyToPasteboard("cd \(ClaudeLauncher.shellQuote(s.cwd)) && claude --resume \(s.id)") }
@@ -731,6 +734,9 @@ struct ClaudeControlBar: View {
                 Divider()
                 Button("Continue in Terminal") {
                     try? ClaudeLauncher.launch(prompt: "", folder: tab.folder, target: .terminal, mode: .standard, sessionName: tab.title, resumeId: tab.sessionId, configDir: tab.configDir)
+                }
+                if DesktopSessionIndex.isInstalled, let local = ws.projects.lazy.flatMap(\.sessions).first(where: { $0.id == tab.sessionId })?.desktopId {
+                    Button("Open in Claude Desktop") { DesktopSessionIndex.open(localID: local) }
                 }
                 Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: tab.folder)]) }
                 Button("Copy session ID") { copyToPasteboard(tab.sessionId) }

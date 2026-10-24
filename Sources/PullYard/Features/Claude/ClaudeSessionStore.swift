@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 struct ClaudeSessionInfo: Identifiable, Hashable {
@@ -13,6 +14,7 @@ struct ClaudeSessionInfo: Identifiable, Hashable {
     let linesAdded: Int?
     let linesRemoved: Int?
     var parentId: String? = nil
+    var desktopId: String? = nil
     var archived = false
 
     var worktreeName: String? {
@@ -25,13 +27,26 @@ extension ClaudeSessionInfo {
     func retitled(_ title: String) -> ClaudeSessionInfo {
         var copy = ClaudeSessionInfo(id: id, file: file, cwd: cwd, title: title, branch: branch, modified: modified, prURL: prURL, prNumber: prNumber, model: model, linesAdded: linesAdded, linesRemoved: linesRemoved)
         copy.parentId = parentId
+        copy.desktopId = desktopId
         copy.archived = archived
         return copy
     }
 }
 
 enum DesktopSessionIndex {
+    @MainActor static var isInstalled: Bool { NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.anthropic.claudefordesktop") != nil }
+
+    @MainActor static func open(localID: String) {
+        var c = URLComponents()
+        c.scheme = "claude"
+        c.host = "code"
+        c.path = "/continue"
+        c.queryItems = [URLQueryItem(name: "session", value: localID)]
+        if let url = c.url { NSWorkspace.shared.open(url) }
+    }
+
     struct Link {
+        var local: String? = nil
         let parent: String?
         let title: String?
         let archived: Bool
@@ -61,7 +76,7 @@ enum DesktopSessionIndex {
         let cliByLocal = Dictionary(records.map { ($0.local, $0.cli) }, uniquingKeysWith: { a, _ in a })
         var out: [String: Link] = [:]
         for r in records {
-            out[r.cli] = Link(parent: r.parentLocal.flatMap { cliByLocal[$0] }, title: r.title, archived: r.archived)
+            out[r.cli] = Link(local: r.local, parent: r.parentLocal.flatMap { cliByLocal[$0] }, title: r.title, archived: r.archived)
         }
         return out
     }
@@ -104,6 +119,7 @@ enum ClaudeSessionParser {
                 guard var info = parse(file) else { continue }
                 if let link = desktop[info.id] {
                     info.parentId = link.parent
+                    info.desktopId = link.local
                     info.archived = link.archived
                     if let title = link.title, !title.isEmpty { info = info.retitled(title) }
                 }
