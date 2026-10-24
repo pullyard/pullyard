@@ -147,7 +147,7 @@ public static class ThemeService
         var dark = IsDark;
         var sb = new System.Text.StringBuilder(":root{");
         sb.Append(V("fg", "text")).Append(V("muted", "muted")).Append(V("dim", "dim")).Append(V("link", "sky")).Append(V("green", "green")).Append(V("red", "red"))
-            .Append(V("amber", "amber")).Append(V("sky", "sky")).Append(V("accent", "accent")).Append(V("coral", "coral")).Append(V("purple", "violet")).Append(V("gutter", "gutter"));
+            .Append(V("amber", "amber")).Append(V("sky", "sky")).Append(V("accent", "accent")).Append(V("coral", "coral")).Append(V("purple", "violet")).Append(V("teal", "teal")).Append(V("indigo", "indigo")).Append(V("gutter", "gutter"));
         if (IsBrand)
         {
             sb.Append(V("raised", "raised")).Append(V("sunken", "sunken"));

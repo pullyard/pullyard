@@ -220,6 +220,19 @@ public static class ClaudeLauncher
         if (resumeId is not null) args.AddRange(new[] { "--resume", resumeId });
         else args.AddRange(new[] { "-n", title });
         var script = WriteLauncherScript(command, args, string.IsNullOrWhiteSpace(prompt) ? "" : prompt, configDir);
+        OpenScript(script, title, workDir, configDir);
+    }
+
+    public static void LaunchInTerminal(IEnumerable<string> args, string title, string? folder, string? configDir)
+    {
+        var command = Command ?? throw new InvalidOperationException("claude CLI not found");
+        var workDir = string.IsNullOrWhiteSpace(folder) || !System.IO.Directory.Exists(folder) ? null : Path.GetFullPath(folder);
+        var script = WriteLauncherScript(command, args, "", configDir);
+        OpenScript(script, SanitizeName(title), workDir, configDir);
+    }
+
+    private static void OpenScript(string script, string title, string? workDir, string? configDir)
+    {
         var powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
         if (!File.Exists(powershell)) powershell = "powershell.exe";
         if (WindowsTerminal is { } wt)
