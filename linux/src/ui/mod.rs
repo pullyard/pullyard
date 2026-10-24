@@ -15,6 +15,7 @@ pub mod issue;
 pub mod item_row;
 pub mod lists;
 pub mod login;
+pub mod logo;
 pub mod main_view;
 pub mod markdown;
 pub mod menu;

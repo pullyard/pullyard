@@ -5,6 +5,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gdk, glib};
 
+pub use super::logo::Loader;
 use crate::api::models::{CheckOutcome, LabelInfo, VisualState};
 use crate::util;
 
@@ -299,9 +300,7 @@ pub fn scrolled_both<W: IsA<gtk::Widget>>(child: &W) -> gtk::ScrolledWindow {
 }
 
 pub fn loading() -> gtk::Widget {
-    let s = gtk::Spinner::new();
-    s.set_spinning(true);
-    s.set_size_request(24, 24);
+    let s = Loader::logo(44);
     s.set_halign(gtk::Align::Center);
     s.set_valign(gtk::Align::Center);
     s.set_vexpand(true);
@@ -326,10 +325,16 @@ pub fn after_next_paint<W: IsA<gtk::Widget>>(w: &W, f: impl FnOnce() + 'static) 
     clock.request_phase(gdk::FrameClockPhase::PAINT);
 }
 
-pub fn spinner(size: i32) -> gtk::Spinner {
-    let s = gtk::Spinner::new();
-    s.set_spinning(true);
-    s.set_size_request(size, size);
+pub fn spinner(size: i32) -> Loader {
+    let s = Loader::wake(size);
+    s.set_valign(gtk::Align::Center);
+    s
+}
+
+pub fn logo_loader(size: i32) -> Loader {
+    let s = Loader::logo(size);
+    s.set_halign(gtk::Align::Center);
+    s.set_valign(gtk::Align::Center);
     s
 }
 
@@ -437,6 +442,7 @@ pub struct RefreshStatus {
     retry: gtk::Button,
     state: Rc<RefCell<(Option<chrono::DateTime<chrono::Utc>>, bool, Option<String>)>>,
     compact: bool,
+    buttons: RefCell<Vec<glib::WeakRef<gtk::Button>>>,
 }
 
 impl RefreshStatus {
@@ -457,7 +463,7 @@ impl RefreshStatus {
         widget.append(&icon_stack);
         widget.append(&text);
         widget.append(&retry);
-        let me = Rc::new(RefreshStatus { widget, icon: icon_stack, text, retry, state: Rc::new(RefCell::new((None, false, None))), compact });
+        let me = Rc::new(RefreshStatus { widget, icon: icon_stack, text, retry, state: Rc::new(RefCell::new((None, false, None))), compact, buttons: RefCell::new(Vec::new()) });
         let weak = Rc::downgrade(&me);
         glib::timeout_add_seconds_local(5, move || match weak.upgrade() {
             Some(me) => {
@@ -475,8 +481,22 @@ impl RefreshStatus {
         self.render();
     }
 
+    pub fn header_button(&self) -> gtk::Button {
+        let b = refresh_button();
+        b.set_sensitive(!self.state.borrow().1);
+        self.buttons.borrow_mut().push(b.downgrade());
+        b
+    }
+
     fn render(&self) {
         let (updated, refreshing, error) = self.state.borrow().clone();
+        self.buttons.borrow_mut().retain(|w| match w.upgrade() {
+            Some(b) => {
+                b.set_sensitive(!refreshing);
+                true
+            }
+            None => false,
+        });
         let paused = crate::api::rate_limited_until().filter(|_| !refreshing);
         self.icon.set_visible_child_name(if refreshing { "spin" } else if error.is_some() || paused.is_some() { "warn" } else { "idle" });
         let resume = paused.map(|t| t.with_timezone(&chrono::Local).format("%H:%M").to_string());
@@ -505,6 +525,14 @@ impl RefreshStatus {
             (None, None) => "Refresh (Ctrl+R)".to_string(),
         }));
     }
+}
+
+pub fn refresh_button() -> gtk::Button {
+    let b = gtk::Button::from_icon_name("view-refresh-symbolic");
+    b.set_tooltip_text(Some("Refresh (Ctrl+R)"));
+    b.set_action_name(Some("app.refresh"));
+    b.update_property(&[gtk::accessible::Property::Label("Refresh")]);
+    b
 }
 
 pub fn footer(status: &RefreshStatus) -> gtk::Box {

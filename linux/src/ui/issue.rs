@@ -30,7 +30,7 @@ struct IssuePage {
     title: adw::WindowTitle,
     actions: gtk::Box,
     status: Rc<RefreshStatus>,
-    busy_spinner: gtk::Spinner,
+    busy_spinner: Loader,
     page: gtk::glib::WeakRef<adw::Bin>,
 }
 
@@ -248,6 +248,7 @@ pub fn page_child(r: &ItemRef) -> gtk::Widget {
             me.load();
         }
     });
+    hb.pack_end(&status.header_button());
     hb.pack_end(&actions);
     hb.pack_end(&status.widget);
     hb.pack_end(&busy_spinner);

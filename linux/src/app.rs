@@ -1496,7 +1496,8 @@ pub fn run(smoke: bool) -> glib::ExitCode {
             return;
         }
         let me = a.clone();
-        glib::timeout_add_local_once(Duration::from_millis(750), move || {
+        let splash = if ui::logo::animations_enabled() { ui::logo::ONCE + 0.15 } else { 0.6 };
+        glib::timeout_add_local_once(Duration::from_secs_f64(splash), move || {
             me.splash_done.set(true);
             me.render_phase();
         });

@@ -210,6 +210,7 @@ pub fn list() -> gtk::Widget {
     let hb = adw::HeaderBar::new();
     hb.set_show_end_title_buttons(false);
     hb.set_title_widget(Some(&adw::WindowTitle::new("Projects", "")));
+    hb.pack_end(&me.status.header_button());
     hb.pack_end(&closed);
     tv.add_top_bar(&hb);
     tv.set_content(Some(&content));
@@ -654,6 +655,7 @@ pub fn board_page(project: &ProjectRef) -> adw::NavigationPage {
     let open = icon_button("sy-external-symbolic", "Open in Browser");
     let url = project.url.clone();
     open.connect_clicked(move |_| util::open_url(&url));
+    hb.pack_end(&me.status.header_button());
     hb.pack_end(&open);
     for sig in [0, 1] {
         let w = Rc::downgrade(&me);

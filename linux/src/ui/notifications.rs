@@ -349,6 +349,7 @@ pub fn build() -> gtk::Widget {
     let hb = adw::HeaderBar::new();
     hb.set_show_end_title_buttons(false);
     hb.set_title_widget(Some(&adw::WindowTitle::new("Notifications", "")));
+    hb.pack_end(&view.status.header_button());
     hb.pack_end(&mark_all);
     tv.add_top_bar(&hb);
     tv.set_content(Some(&content));

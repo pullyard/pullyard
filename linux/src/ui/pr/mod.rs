@@ -28,7 +28,7 @@ pub struct PrPage {
     page: gtk::glib::WeakRef<adw::NavigationPage>,
     title: adw::WindowTitle,
     actions: gtk::Box,
-    busy: gtk::Spinner,
+    busy: Loader,
     status: Rc<RefreshStatus>,
     header_box: gtk::Box,
     banners: gtk::Box,
@@ -106,6 +106,7 @@ impl PrPage {
                 me.model.load(true);
             }
         });
+        hb.pack_end(&status.header_button());
         hb.pack_end(&actions);
         hb.pack_end(&status.widget);
         hb.pack_end(&busy);

@@ -14,7 +14,9 @@ pub fn build() -> gtk::Widget {
     b.set_valign(gtk::Align::Center);
     b.set_halign(gtk::Align::Center);
     b.set_vexpand(true);
-    b.append(&app_icon(136));
+    let mark = super::logo::Loader::once(200);
+    mark.set_halign(gtk::Align::Center);
+    b.append(&mark);
     let texts = vbox(6);
     let title = label_with(brand::APP_NAME, &["splash-title", "sy-text"]);
     title.set_xalign(0.5);
@@ -23,10 +25,6 @@ pub fn build() -> gtk::Widget {
     texts.append(&title);
     texts.append(&sub);
     b.append(&texts);
-    let s = spinner(16);
-    s.set_halign(gtk::Align::Center);
-    s.set_opacity(0.7);
-    b.append(&s);
     let w = vbox(0);
     w.add_css_class("sy-panel-pane");
     w.append(&b);

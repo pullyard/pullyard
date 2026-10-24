@@ -16,7 +16,7 @@ struct Login {
     provider: Cell<GitProvider>,
     tabs: Vec<(GitProvider, gtk::ToggleButton)>,
     on_done: Option<Rc<dyn Fn()>>,
-    busy: gtk::Spinner,
+    busy: Loader,
     error: gtk::Label,
     error_box: gtk::Box,
     host_card: gtk::Box,

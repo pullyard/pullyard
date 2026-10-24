@@ -305,6 +305,7 @@ pub fn list() -> gtk::Widget {
     hb.set_show_end_title_buttons(false);
     hb.set_title_widget(Some(&adw::WindowTitle::new("Repositories", "")));
     hb.pack_start(&search_btn);
+    hb.pack_end(&me.status.header_button());
     hb.pack_end(&archived);
     tv.add_top_bar(&hb);
     tv.add_top_bar(&search_bar);
@@ -886,7 +887,7 @@ pub struct CodeBrowser {
     blame_toggle: gtk::ToggleButton,
     blame_status: gtk::Box,
     blame_status_label: gtk::Label,
-    blame_spinner: gtk::Spinner,
+    blame_spinner: Loader,
     blame_retry: gtk::Button,
     syncing_blame: Cell<bool>,
     applied_blame: RefCell<Option<(String, Rc<crate::blame::Blame>)>>,
@@ -1929,6 +1930,7 @@ pub fn detail_page(repo: &RepoRef) -> adw::NavigationPage {
     let browser_btn = icon_button("sy-external-symbolic", "Open in browser");
     let cm = me.code_model.clone();
     browser_btn.connect_clicked(move |_| util::open_url(&cm.web_url()));
+    hb.pack_end(&me.status.header_button());
     hb.pack_end(&browser_btn);
     hb.pack_end(&clone_btn);
     me.render_header();
