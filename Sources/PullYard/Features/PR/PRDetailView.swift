@@ -112,6 +112,7 @@ struct PRDetailContent: View {
             } else {
                 LoadingView()
             }
+        case .jira: JiraTab(pr: pr)
         }
     }
 
@@ -124,6 +125,10 @@ struct PRDetailContent: View {
         ]
         if let tree = model.stackTree {
             items.append(TabItem(id: PRTab.stack, title: "Stack", icon: "square.stack.3d.up", badge: "\(tree.count)"))
+        }
+        let jiraKeys = JiraTab(pr: pr).keys
+        if JiraAccount.shared.isConfigured || !jiraKeys.isEmpty {
+            items.append(TabItem(id: PRTab.jira, title: "Jira", icon: "ticket", badge: jiraKeys.first))
         }
         return items
     }

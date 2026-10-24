@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 enum PRTab: String, CaseIterable, Identifiable {
-    case conversation, commits, checks, files, stack
+    case conversation, commits, checks, files, stack, jira
     var id: String { rawValue }
 }
 

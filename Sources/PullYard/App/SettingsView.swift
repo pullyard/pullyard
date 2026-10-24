@@ -166,6 +166,11 @@ struct SettingsView: View {
                 SettingsHeader(title: "Diagnostics", icon: "gauge.with.dots.needle.33percent", color: .sySky)
             }
             Section {
+                JiraConnectForm()
+            } header: {
+                SettingsHeader(title: "Jira", icon: "ticket", color: .sySky)
+            }
+            Section {
                 TextField("Client ID", text: $clientID)
             } header: {
                 SettingsHeader(title: "OAuth Device Flow", icon: "key.fill", color: .syAmber)
