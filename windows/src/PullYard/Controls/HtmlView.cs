@@ -25,7 +25,7 @@ public sealed class HtmlView : Grid
     public HtmlView(string page = "shell.html")
     {
         this.page = page;
-        web.DefaultBackgroundColor = Microsoft.UI.Colors.Transparent;
+        ApplyBackground();
         Children.Add(web);
         Loaded += (_, _) => EnsureInitialized().Forget();
         ThemeService.Changed += OnTheme;
@@ -64,8 +64,12 @@ public sealed class HtmlView : Grid
 
     public WebView2 WebView => web;
 
+    private void ApplyBackground() =>
+        web.DefaultBackgroundColor = ThemeService.IsBrand ? Palette.Get("panel") : Microsoft.UI.Colors.Transparent;
+
     private void OnTheme()
     {
+        ApplyBackground();
         WebViewEnvironment.ApplyScheme(web);
         if (lastRender is not null)
         {
