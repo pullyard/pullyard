@@ -129,7 +129,7 @@ private struct LiveRefreshModifier: ViewModifier {
                 }
             }
         }
-        .toolbar {
+        .panelToolbar {
             if button {
                 ToolbarItem {
                     Button(action: manualRefresh) {

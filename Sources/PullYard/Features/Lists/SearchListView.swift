@@ -270,7 +270,7 @@ struct SearchListView: View {
                 await reload(silent: true)
             }
         }
-        .searchable(text: $text, placement: .toolbar, prompt: "Filter: text, repo:org/name, label:bug")
+        .toolbarSearch(text: $text, prompt: "Filter: text, repo:org/name, label:bug")
         .navigationTitle(title)
         .navigationSubtitle(model.total > 0 ? "\(model.total)" : "")
         .task(id: "\(query)|\(app.cacheAccount ?? "")|\(app.api != nil)") {

@@ -25,7 +25,7 @@ struct CommitDetailView: View {
         }
         .navigationTitle(String(sha.prefix(7)))
         .navigationSubtitle(repo.full)
-        .toolbar {
+        .panelToolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { copyToPasteboard(sha) } label: { Label("Copy SHA", systemImage: "doc.on.doc") }
                 if let url = commit?.htmlUrl {

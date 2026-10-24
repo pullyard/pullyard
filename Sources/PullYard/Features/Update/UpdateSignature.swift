@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 
 enum UpdateSignature {
-    static let publicKey = ""
+    static let publicKey = "m0UbLdp60TGrr4oQs1p3pqNTXQQOqOZM2oRtf3jnJlM="
 
     static var isConfigured: Bool { !publicKey.isEmpty }
 

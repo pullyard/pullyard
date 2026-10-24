@@ -173,7 +173,7 @@ struct ForgeListView: View {
                 await reload(silent: true)
             }
         }
-        .searchable(text: $text, placement: .toolbar, prompt: "Filter: title, repository, author")
+        .toolbarSearch(text: $text, prompt: "Filter: title, repository, author")
         .navigationTitle(kind.title(app.provider))
         .navigationSubtitle(items.isEmpty ? "" : "\(items.count)")
         .task(id: "\(stateFilter.rawValue)|\(app.account?.id ?? "")") { await reload() }

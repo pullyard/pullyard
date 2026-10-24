@@ -51,7 +51,7 @@ struct NotificationsView: View {
             .liveRefresh(updated: lastUpdated, refreshing: loading, error: items.isEmpty ? nil : error) { await load() }
         }
         .navigationTitle("Notifications")
-        .toolbar {
+        .panelToolbar {
             ToolbarItem {
                 Button { Task { await markAll() } } label: { Label("Mark all read", systemImage: "checkmark.circle") }
                     .help("Mark all as read")

@@ -155,7 +155,7 @@ struct ForgeReposView: View {
         .liveRefresh(updated: updated, refreshing: loading, error: repos.isEmpty ? nil : error) {
             await load()
         }
-        .searchable(text: $text, placement: .toolbar, prompt: "Filter \(app.provider.repositoriesTitle.lowercased())")
+        .toolbarSearch(text: $text, prompt: "Filter \(app.provider.repositoriesTitle.lowercased())")
         .navigationTitle(app.provider.repositoriesTitle)
         .navigationSubtitle(repos.isEmpty ? "" : "\(repos.count)")
         .task(id: app.account?.id) { await load() }
