@@ -509,7 +509,7 @@ pub fn job_log(api: GitHubApi, repo: RepoRef, check: CheckContext, fix: Option<R
     sheet.add_footer_spacer();
     let log: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     if let Some(fix) = fix {
-        let b = tinted("Fix with Claude Code", "coral");
+        let b = tinted("Fix with agent", "coral");
         let d = sheet.dialog.clone();
         let l = log.clone();
         b.connect_clicked(move |_| {

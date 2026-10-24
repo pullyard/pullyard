@@ -51,7 +51,7 @@ pub fn banner(pr: &PullRequestDetail, action: impl Fn() + 'static) -> Option<gtk
         b.append(&ellipsized(&format!("Fix prompt by @{}{}", f.author, f.date.map(|d| format!(" · {}", util::rel(Some(d)))).unwrap_or_default()), &["sy-muted"]));
     }
     b.append(&spacer());
-    let btn = tinted("Fix with Claude Code", "coral");
+    let btn = tinted("Fix with agent", "coral");
     btn.add_css_class("banner-button");
     btn.set_valign(gtk::Align::Center);
     btn.set_vexpand(false);
@@ -110,7 +110,7 @@ pub fn ci_banner(pr: &PullRequestDetail, r: &ItemRef, action: impl Fn() + 'stati
         b.append(&show);
     }
     b.append(&spacer());
-    let btn = tinted("Fix with Claude Code", "coral");
+    let btn = tinted("Fix with agent", "coral");
     btn.add_css_class("banner-button");
     btn.set_valign(gtk::Align::Center);
     btn.set_vexpand(false);
@@ -434,11 +434,11 @@ fn ci_section(state: &Rc<State>, ci: &Rc<CiFix>, body: &gtk::Box) {
 
 fn present(model: Rc<PrModel>, ci: Option<Rc<CiFix>>) -> Option<Rc<State>> {
     let pr = model.pr.borrow().clone()?;
-    let sheet = Sheet::new("Fix with Claude Code", 780, 680);
+    let sheet = Sheet::new("Fix with agent", 780, 680);
     let head = hbox(10);
     head.append(&icon_tile("sy-sparkles-symbolic", "coral", 30));
     let hc = vbox(1);
-    hc.append(&label_with("Fix with Claude Code", &["heading", "sy-text"]));
+    hc.append(&label_with("Fix with agent", &["heading", "sy-text"]));
     let sub = hbox(6);
     sub.append(&label_with(&format!("#{}", pr.number), &["fg-violet", "sy-bold"]));
     sub.append(&ellipsized(&pr.title, &["sy-muted"]));

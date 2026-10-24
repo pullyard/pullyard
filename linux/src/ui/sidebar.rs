@@ -244,7 +244,7 @@ type Group = (String, Vec<(Section, String, &'static str, &'static str)>);
 
 fn groups() -> Vec<Group> {
     let provider = app::provider();
-    let claude = ("AI".to_string(), vec![(Section::Claude, "Claude Code".to_string(), "sy-sparkles-symbolic", "coral")]);
+    let claude = ("AI".to_string(), vec![(Section::Claude, "Agents".to_string(), "sy-sparkles-symbolic", "coral")]);
     if provider.is_github() {
         return vec![
             ("Inbox".into(), vec![(Section::Notifications, "Notifications".into(), "sy-bell-symbolic", "amber")]),

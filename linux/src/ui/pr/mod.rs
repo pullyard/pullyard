@@ -624,7 +624,7 @@ impl PrPage {
                 b.append(&log);
             }
             if crate::ci_fix::is_fixable(&c) {
-                let fix = icon_label_button("sy-sparkles-symbolic", "Fix with Claude Code");
+                let fix = icon_label_button("sy-sparkles-symbolic", "Fix with agent");
                 fix.add_css_class("flat");
                 fix.set_tooltip_text(Some("Send this check's failure log to a new Claude Code session"));
                 let m = self.model.clone();

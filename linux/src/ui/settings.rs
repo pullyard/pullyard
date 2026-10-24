@@ -172,7 +172,7 @@ fn pin_row(account: GitAccount) -> adw::SwitchRow {
 }
 
 fn claude_group(dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
-    let g = group("Claude Code", "sy-sparkles-symbolic", "coral");
+    let g = group("Agents", "sy-sparkles-symbolic", "coral");
     let profiles = accounts::visible();
     let active = accounts::active_id();
     let names: Vec<String> = profiles.iter().map(|p| format!("{}{}", p.label, p.email.as_ref().map(|e| format!(" — {e}")).unwrap_or_default())).collect();
@@ -203,7 +203,7 @@ fn claude_group(dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
             out.connect_clicked(|_| {
                 dialogs::confirm(
                     "Sign out of Claude Code?",
-                    Some("This also signs out Claude Code in the terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Claude Code section."),
+                    Some("This also signs out Claude Code in the terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Agents section."),
                     "Sign out",
                     true,
                     || {
