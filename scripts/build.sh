@@ -23,6 +23,10 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Helpers"
 cp "$BIN" "$APP/Contents/MacOS/PullYard"
 cp "$HELPER" "$APP/Contents/Helpers/pullyard-mcp"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+GITHUB_CLIENT_ID="${PULLYARD_GITHUB_CLIENT_ID:-$(cat .github-oauth-client-id 2>/dev/null)}"
+if [ -n "$GITHUB_CLIENT_ID" ]; then
+    plutil -replace PYGitHubOAuthClientID -string "$GITHUB_CLIENT_ID" "$APP/Contents/Info.plist"
+fi
 
 if [ ! -f Resources/AppIcon.icns ]; then
     ICONSET="build/AppIcon.iconset"
