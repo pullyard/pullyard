@@ -400,6 +400,96 @@ public sealed partial class ClaudeWorkspace : ObservableObject
         }
     }
 
+    public void Reconnect(ClaudeTab tab)
+    {
+        if (tab.Chat is not { } chat)
+        {
+            Restart(tab);
+            return;
+        }
+        chat.LastError = null;
+        if (!chat.Running)
+        {
+            Restart(tab);
+            return;
+        }
+        chat.Stop();
+        RestartWhenStopped(tab, chat).Forget();
+    }
+
+    private async Task RestartWhenStopped(ClaudeTab tab, ChatSession chat)
+    {
+        for (var i = 0; i < 40 && chat.Running; i++) await Task.Delay(100);
+        Restart(tab);
+    }
+
+    public void Rewind(ClaudeTab tab, string itemId, string title)
+    {
+        if (tab.Chat is not { } chat || chat.Items.OfType<UserItem>().FirstOrDefault(u => u.Id == itemId) is not { } user) return;
+        var sid = chat.SessionId;
+        if (chat.Busy || string.IsNullOrEmpty(sid))
+        {
+            chat.DraftRequest = user.Text;
+            return;
+        }
+        var occurrence = SessionRewind.OccurrenceFromEnd(chat.Items, itemId);
+        var known = AllSessions.FirstOrDefault(s => s.Id == sid)?.File;
+        var dirs = new[] { chat.ConfigDir, ClaudeProfiles.Shared.ConfigDir(), ClaudeProfiles.DefaultConfigDir };
+        RewindFork(tab, chat, sid, known, dirs, user.Text, occurrence, title).Forget();
+    }
+
+    private async Task RewindFork(ClaudeTab tab, ChatSession chat, string sid, string? known, string?[] dirs, string text, int occurrence, string title)
+    {
+        try
+        {
+            var (file, info) = await Task.Run(() =>
+            {
+                var source = known is not null && File.Exists(known) ? known : SessionRewind.SessionFile(sid, dirs);
+                if (source is null) throw new InvalidOperationException("Couldn't find the session file");
+                var forked = SessionRewind.Fork(source, text, occurrence);
+                return (forked.File, ClaudeSessionParser.Parse(forked.File));
+            });
+            ClaudeTab next;
+            if (info is not null)
+            {
+                next = Resume(Retitled(info, title), kind: ClaudeTabKind.Chat);
+            }
+            else
+            {
+                try
+                {
+                    File.Delete(file);
+                }
+                catch
+                {
+                }
+                next = NewSession(tab.Folder, name: title, kind: ClaudeTabKind.Chat);
+            }
+            if (next.Chat is { } c) c.DraftRequest = text;
+            SelectedTab = next;
+        }
+        catch (Exception e)
+        {
+            chat.DraftRequest = text;
+            chat.LastError = e.Message;
+        }
+    }
+
+    private static ClaudeSessionInfo Retitled(ClaudeSessionInfo s, string title) => new()
+    {
+        Id = s.Id,
+        File = s.File,
+        Cwd = s.Cwd,
+        Title = title,
+        Branch = s.Branch,
+        Modified = s.Modified,
+        PrUrl = s.PrUrl,
+        PrNumber = s.PrNumber,
+        Model = s.Model,
+        LinesAdded = s.LinesAdded,
+        LinesRemoved = s.LinesRemoved
+    };
+
     public void Close(ClaudeTab tab)
     {
         tab.Chat?.Stop();

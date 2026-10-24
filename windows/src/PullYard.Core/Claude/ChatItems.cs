@@ -54,7 +54,8 @@ public sealed class TextItem : ChatItem
     {
         ["id"] = Id,
         ["kind"] = Thinking ? "thinking" : "text",
-        ["text"] = Text
+        ["text"] = Text,
+        ["finalized"] = Finalized
     };
 }
 
@@ -203,6 +204,9 @@ public sealed class ToolItem : ChatItem
             ["title"] = Title,
             ["icon"] = Icon,
             ["summary"] = Summary(folder),
+            ["step"] = ToolGrouping.Title(this, folder),
+            ["group"] = ToolGrouping.KindKey(Name),
+            ["groupable"] = ToolGrouping.Groupable(this),
             ["status"] = Status.ToString().ToLowerInvariant(),
             ["input"] = Input.DeepClone(),
             ["result"] = Truncate(ResultText)
