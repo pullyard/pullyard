@@ -167,12 +167,12 @@ public sealed class HtmlView : Grid
 
     public void Send(JsonObject msg) => Send(msg.ToJsonString());
 
-    public static string CssFor(string kind) => kind switch
+    public static string CssFor(string kind) => (kind switch
     {
         "diff" => ConversationHtml.Css + DiffHtml.Css,
         "code" => ConversationHtml.Css + CodeHtml.Css,
         _ => ConversationHtml.Css
-    };
+    }) + (ThemeService.IsBrand ? $"html,body{{background:{Palette.CssHex("panel")}}}" : "");
 
     public void Render(string html, string kind = "conversation", string? scroll = null, string bodyClass = "")
     {
