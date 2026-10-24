@@ -97,9 +97,9 @@ struct ClaudeProjectsColumn: View {
         .surface(.list)
         .overlay { if ws.loadingProjects && ws.projects.isEmpty { PullYardLoader(size: 44) } }
         .liveRefresh(updated: ws.projectsUpdated, refreshing: ws.loadingProjects) { await ws.reloadProjects() }
-        .searchable(text: $query, placement: .toolbar, prompt: "Search sessions")
+        .toolbarSearch(text: $query, prompt: "Search sessions")
         .navigationTitle("Agents")
-        .toolbar {
+        .panelToolbar {
             ToolbarItemGroup {
                 Button { openFolder() } label: { Label("Open folder", systemImage: "folder.badge.plus") }
                     .disabled(!ClaudeAccountStore.shared.isLoggedIn)
@@ -504,6 +504,7 @@ struct CompactLabelStyle: LabelStyle {
 
 struct ClaudeWorkspaceView: View {
     @Environment(AppModel.self) private var app
+    @AppStorage("agents.inspectorWidth") private var inspectorWidth: Double = 380
 
     var body: some View {
         let ws = app.claude
@@ -514,7 +515,7 @@ struct ClaudeWorkspaceView: View {
             } else if case .notInstalled = account.status {
                 ClaudeAuthView()
             } else if let tab = ws.selectedTab {
-                HSplitView {
+                HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         ClaudeTabBar()
                         ClaudeControlBar(tab: tab)
@@ -549,13 +550,22 @@ struct ClaudeWorkspaceView: View {
                         .transition(.opacity)
                     }
                     .animation(Motion.fade, value: tab.id)
-                    .frame(minWidth: 520, idealWidth: 900)
+                    .frame(minWidth: 420, maxWidth: .infinity)
                     .surface(.panel)
                     .layoutPriority(1)
                     if ws.showInspector {
+                        ColumnResizeHandle(width: $inspectorWidth, range: 300...640, edge: .trailing)
                         ClaudeInspector(tab: tab)
-                            .frame(minWidth: 300, idealWidth: 380, maxWidth: 640)
+                            .frame(width: inspectorWidth)
                     }
+                }
+                .edgeReveal(.trailing, enabled: !ws.showInspector, width: inspectorWidth) {
+                    ClaudeInspector(tab: tab)
+                        .surface(.panel)
+                        .environment(app)
+                        .font(.syBody)
+                        .tint(Color.syAccent)
+                        .environment(\.locale, .app)
                 }
             } else {
                 ClaudeEmptyState()
@@ -563,14 +573,18 @@ struct ClaudeWorkspaceView: View {
         }
         .navigationTitle(ws.selectedTab?.title ?? "Agents")
         .navigationSubtitle(ws.selectedTab?.folder.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~") ?? "")
-        .toolbar {
+        .panelToolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 if ws.selectedTab != nil {
-                    Button { withAnimation(Motion.smooth) { ws.showInspector.toggle() } } label: { Label("Inspector", systemImage: "sidebar.right") }
+                    Button { toggleInspector() } label: { Label("Inspector", systemImage: "sidebar.right") }
                         .help("Toggle changes panel")
                 }
             }
         }
+    }
+
+    private func toggleInspector() {
+        app.claude.showInspector.toggle()
     }
 }
 

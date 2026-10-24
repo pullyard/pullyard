@@ -8,64 +8,51 @@ struct ChatView: View {
     let chat: ChatSession
     @State private var follow = ChatFollow()
     @State private var awayCount: Int?
-    @State private var topID: String?
-    @State private var keptTopID: String?
+    @State private var layoutWidth: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 18) {
-                        if chat.items.isEmpty {
-                            ChatWelcome(chat: chat, folder: tab.folder)
-                        }
-                        ForEach(ChatDisplayItem.build(chat.items)) { entry in
-                            Group {
-                                switch entry {
-                                case .item(let item):
-                                    ChatItemView(item: item, chat: chat, folder: tab.folder)
-                                case .tools(let id, let steps):
-                                    ToolGroupView(id: id, steps: steps, chat: chat, folder: tab.folder)
-                                }
+                    SettledWidth(width: layoutWidth > 0 ? layoutWidth : nil) {
+                        LazyVStack(alignment: .leading, spacing: 18) {
+                            if chat.items.isEmpty {
+                                ChatWelcome(chat: chat, folder: tab.folder)
                             }
-                            .id(entry.id)
-                            .transition(.rise)
+                            ForEach(ChatDisplayItem.build(chat.items)) { entry in
+                                Group {
+                                    switch entry {
+                                    case .item(let item):
+                                        ChatItemView(item: item, chat: chat, folder: tab.folder)
+                                    case .tools(let id, let steps):
+                                        ToolGroupView(id: id, steps: steps, chat: chat, folder: tab.folder)
+                                    }
+                                }
+                                .id(entry.id)
+                                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatFollow.space)) } action: { follow.frames[entry.id] = $0 }
+                                .transition(.rise)
+                            }
+                            if chat.busy {
+                                WorkingIndicator(chat: chat)
+                                    .transition(.opacity)
+                            }
+                            if let e = chat.lastError {
+                                ErrorBanner(text: e) { app.claude.restart(tab) }
+                                    .transition(.pop)
+                            }
+                            Color.clear.frame(height: 1).id("bottom")
                         }
-                        if chat.busy {
-                            WorkingIndicator(chat: chat)
-                                .transition(.opacity)
-                        }
-                        if let e = chat.lastError {
-                            ErrorBanner(text: e) { app.claude.restart(tab) }
-                                .transition(.pop)
-                        }
-                        Color.clear.frame(height: 1).id("bottom")
-                    }
-                    .scrollTargetLayout()
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 20)
-                    .animation(Motion.smooth, value: chat.items.count)
-                    .animation(Motion.fade, value: chat.busy)
-                    .animation(Motion.spring, value: chat.lastError)
-                    .frame(maxWidth: 920)
-                    .frame(maxWidth: .infinity)
-                    .background {
-                        GeometryReader { g in
-                            Color.clear.preference(key: ChatContentFrameKey.self, value: g.frame(in: .named(ChatContentFrameKey.space)))
-                        }
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 20)
+                        .animation(Motion.smooth, value: chat.items.count)
+                        .animation(Motion.fade, value: chat.busy)
+                        .animation(Motion.spring, value: chat.lastError)
+                        .frame(maxWidth: 920)
                     }
                     .background(ChatScrollObserver(follow: follow))
                 }
-                .scrollPosition(id: $topID)
-                .coordinateSpace(name: ChatContentFrameKey.space)
-                .background {
-                    GeometryReader { g in
-                        Color.clear.preference(key: ChatViewportKey.self, value: g.size.height)
-                    }
-                }
+                .coordinateSpace(name: ChatFollow.space)
                 .modifier(InitialBottomAnchor())
-                .onPreferenceChange(ChatViewportKey.self) { follow.viewportHeight = $0 }
-                .onPreferenceChange(ChatContentFrameKey.self) { if follow.track($0) { scrollDown(proxy) } }
                 .onChange(of: chat.items.count) {
                     if case .user? = chat.items.last { follow.stick = true }
                     scrollDown(proxy)
@@ -75,9 +62,10 @@ struct ChatView: View {
                 .onChange(of: chat.pendingCount) {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { scrollDown(proxy) }
                 }
-                .onChange(of: topID) { if !follow.resizing { keptTopID = topID } }
-                .onChange(of: follow.resizeTick) { keepPosition(proxy) }
-                .onAppear { jumpToBottom(proxy) }
+                .onAppear {
+                    follow.onWidth = { widthChanged($0) }
+                    jumpToBottom(proxy)
+                }
                 .onChange(of: tab.id) { jumpToBottom(proxy) }
                 .overlay(alignment: .bottom) {
                     if !follow.stick, !chat.items.isEmpty {
@@ -122,15 +110,30 @@ struct ChatView: View {
         }
     }
 
-    private func keepPosition(_ proxy: ScrollViewProxy) {
-        guard !follow.stick, let id = keptTopID else { return }
-        proxy.scrollTo(id, anchor: .top)
-        for delay in [0.05, 0.15, 0.3, 0.5, 0.7] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                guard !follow.stick else { return }
-                proxy.scrollTo(id, anchor: .top)
+    private func widthChanged(_ width: CGFloat) {
+        guard abs(width - follow.width) > 0.5 else { return }
+        let first = follow.width == 0
+        follow.width = width
+        guard !first else {
+            layoutWidth = width
+            return
+        }
+        if follow.resizeAnchor == nil, !follow.stick { follow.resizeAnchor = follow.readingAnchor() }
+        let now = Date()
+        if now.timeIntervalSince(follow.lastReflow) >= ChatFollow.reflowInterval {
+            follow.lastReflow = now
+            layoutWidth = width
+        }
+        follow.endResize?.cancel()
+        let end = DispatchWorkItem {
+            layoutWidth = follow.width
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                if let anchor = follow.resizeAnchor { follow.restore(anchor) }
+                follow.resizeAnchor = nil
             }
         }
+        follow.endResize = end
+        DispatchQueue.main.asyncAfter(deadline: .now() + ChatFollow.reflowInterval, execute: end)
     }
 
     private func scrollDown(_ proxy: ScrollViewProxy) {
@@ -145,16 +148,55 @@ struct ChatView: View {
 
 @Observable
 final class ChatFollow {
-    var stick = true
-    var resizeTick = 0
-    @ObservationIgnored var resizing = false
-    @ObservationIgnored var viewportHeight: CGFloat = 0
-    @ObservationIgnored private var contentHeight: CGFloat = 0
+    static let space = "chatScroll"
 
-    func track(_ frame: CGRect) -> Bool {
-        let grew = frame.height > contentHeight + 1
-        contentHeight = frame.height
-        return grew && stick
+    struct Anchor {
+        let id: String
+        let offset: CGFloat
+        let fraction: CGFloat?
+    }
+
+    var stick = true
+    @ObservationIgnored var frames: [String: CGRect] = [:]
+    @ObservationIgnored weak var scroll: NSScrollView?
+    @ObservationIgnored var onWidth: ((CGFloat) -> Void)?
+    @ObservationIgnored var width: CGFloat = 0
+    @ObservationIgnored var resizeAnchor: Anchor?
+    @ObservationIgnored var endResize: DispatchWorkItem?
+    @ObservationIgnored var lastReflow = Date.distantPast
+    static let reflowInterval: TimeInterval = 1.0 / 15
+
+    func readingAnchor() -> Anchor? {
+        guard let top = frames.filter({ $0.value.maxY > 0 }).min(by: { $0.value.minY < $1.value.minY }) else { return nil }
+        let frame = top.value
+        let into = -frame.minY
+        return Anchor(id: top.key, offset: into, fraction: into > 0 && frame.height > 0 ? into / frame.height : nil)
+    }
+
+    func restore(_ anchor: Anchor) {
+        guard !stick, let frame = frames[anchor.id] else { return }
+        let into = anchor.fraction.map { $0 * frame.height } ?? anchor.offset
+        scrollBy(frame.minY + into)
+    }
+
+    func pinToBottom() {
+        guard let s = scroll, let doc = s.documentView else { return }
+        let clip = s.contentView
+        scrollTo(doc.frame.height - clip.bounds.height)
+    }
+
+    private func scrollBy(_ delta: CGFloat) {
+        guard abs(delta) > 0.5, let s = scroll else { return }
+        scrollTo(s.contentView.bounds.origin.y + delta)
+    }
+
+    private func scrollTo(_ y: CGFloat) {
+        guard let s = scroll, let doc = s.documentView else { return }
+        let clip = s.contentView
+        let target = min(max(0, y), max(0, doc.frame.height - clip.bounds.height))
+        guard abs(clip.bounds.origin.y - target) > 0.5 else { return }
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: target))
+        s.reflectScrolledClipView(clip)
     }
 }
 
@@ -176,8 +218,7 @@ private struct ChatScrollObserver: NSViewRepresentable {
         private var monitor: Any?
         private weak var scroll: NSScrollView?
         private var observers: [NSObjectProtocol] = []
-        private var lastWidth: CGFloat = 0
-        private var restoreUntil = Date.distantPast
+        private var lastHeight: CGFloat = 0
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -204,50 +245,41 @@ private struct ChatScrollObserver: NSViewRepresentable {
         private func attach() {
             guard monitor == nil, let s = enclosingScrollView else { return }
             scroll = s
+            follow?.scroll = s
             monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
                 self?.handle(event)
                 return event
             }
-            lastWidth = s.contentView.bounds.width
             let clip = s.contentView
-            clip.postsBoundsChangedNotifications = true
             clip.postsFrameChangedNotifications = true
-            s.documentView?.postsFrameChangedNotifications = true
-            let center = NotificationCenter.default
-            observers.append(center.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.layoutChanged() }
+            observers.append(NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.viewportResized() }
             })
-            observers.append(center.addObserver(forName: NSView.frameDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.layoutChanged() }
+            viewportResized()
+            guard let doc = s.documentView else { return }
+            lastHeight = doc.frame.height
+            doc.postsFrameChangedNotifications = true
+            observers.append(NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: doc, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.documentResized() }
             })
-            if let doc = s.documentView {
-                observers.append(center.addObserver(forName: NSView.frameDidChangeNotification, object: doc, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.layoutChanged() }
-                })
-            }
         }
 
-        private func layoutChanged() {
-            guard let s = scroll, let doc = s.documentView, let follow else { return }
-            let clip = s.contentView
-            let width = clip.bounds.width
-            if abs(width - lastWidth) > 0.5 {
-                lastWidth = width
-                restoreUntil = Date().addingTimeInterval(0.8)
-                if !follow.resizing {
-                    follow.resizing = true
-                    follow.resizeTick += 1
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) { [weak self] in
-                    guard let self, self.restoreUntil < Date() else { return }
-                    self.follow?.resizing = false
-                }
+        private func viewportResized() {
+            guard let width = scroll?.contentView.bounds.width, width > 0 else { return }
+            follow?.onWidth?(width)
+        }
+
+        private func documentResized() {
+            guard let doc = scroll?.documentView, let follow else { return }
+            let height = doc.frame.height
+            guard abs(height - lastHeight) > 0.5 else { return }
+            lastHeight = height
+            if follow.stick {
+                follow.pinToBottom()
+            } else if let anchor = follow.resizeAnchor {
+                follow.restore(anchor)
+                DispatchQueue.main.async { follow.restore(anchor) }
             }
-            guard restoreUntil > Date(), follow.stick else { return }
-            let y = max(0, doc.frame.height - clip.bounds.height)
-            guard abs(clip.bounds.origin.y - y) > 0.5 else { return }
-            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
-            s.reflectScrolledClipView(clip)
         }
 
         private var distanceToBottom: CGFloat {
@@ -370,18 +402,17 @@ private struct DiveLogo: View {
     }
 }
 
-private struct ChatContentFrameKey: PreferenceKey {
-    static let space = "chatScroll"
-    static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
-    }
-}
+private struct SettledWidth: Layout {
+    var width: CGFloat?
 
-private struct ChatViewportKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let inner = width ?? proposal.width
+        let height = subviews.first?.sizeThatFits(ProposedViewSize(width: inner, height: nil)).height ?? 0
+        return CGSize(width: proposal.width ?? inner ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: CGPoint(x: bounds.midX, y: bounds.minY), anchor: .top, proposal: ProposedViewSize(width: width ?? bounds.width, height: nil))
     }
 }
 
@@ -837,12 +868,22 @@ struct ToolDetails: View {
                 }
                 InlineDiff(lines: diffLines)
             case "Bash":
-                if let cmd = call.string("command") {
-                    Text("$ " + cmd).font(.sy(size: 12, design: .monospaced)).foregroundStyle(Color.syText).textSelection(.enabled)
-                        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
-                        .card(radius: 8, fill: .sySunken)
+                VStack(alignment: .leading, spacing: 0) {
+                    if let cmd = call.string("command") {
+                        Text("$ " + cmd)
+                            .font(.sy(size: 12, design: .monospaced))
+                            .foregroundStyle(Color.syText)
+                            .textSelection(.enabled)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if let out = bashOutput, !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Rectangle().fill(Color.syLine).frame(height: 1)
+                        outputScroll(out)
+                            .foregroundStyle(Color.syMuted)
+                    }
                 }
-                outputView(bashOutput)
+                .codeBox()
             case "TodoWrite":
                 TodoListView(todos: call.input["todos"] as? [[String: Any]] ?? [])
             case "ExitPlanMode":
@@ -880,17 +921,22 @@ struct ToolDetails: View {
         if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 if let title { Text(title).font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted) }
-                ScrollView([.vertical, .horizontal]) {
-                    Text(String(text.prefix(20_000)))
-                        .font(.sy(size: 11.5, design: .monospaced))
-                        .textSelection(.enabled)
-                        .fixedSize()
-                        .padding(8)
-                }
-                .frame(maxHeight: 220)
-                .card(radius: 8, fill: .sySunken)
+                outputScroll(text)
+                    .codeBox()
             }
         }
+    }
+
+    private func outputScroll(_ text: String) -> some View {
+        ScrollView([.vertical, .horizontal]) {
+            Text(String(text.prefix(20_000)))
+                .font(.sy(size: 11.5, design: .monospaced))
+                .textSelection(.enabled)
+                .fixedSize()
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxHeight: 220)
     }
 
     private var diffLines: [DiffLine] {
@@ -930,6 +976,19 @@ struct ToolDetails: View {
         }
         return out
     }
+}
+
+private struct CodeBox: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.syText.opacity(0.045)))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.syLineStrong))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+extension View {
+    fileprivate func codeBox() -> some View { modifier(CodeBox()) }
 }
 
 struct InlineDiff: View {
