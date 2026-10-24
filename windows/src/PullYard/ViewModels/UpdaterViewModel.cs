@@ -171,11 +171,35 @@ public sealed partial class UpdaterViewModel : ObservableObject
             }
             var destination = Path.Combine(dir, AppInfo.InstallerAssetName(Releases.Arch));
             var progress = new Progress<double>(p => Progress = p);
-            stagedInstaller = await Releases.Download(release.InstallerUrl, destination, release.InstallerSize, progress);
+            var downloaded = await Releases.Download(release.InstallerUrl, destination, release.InstallerSize, progress);
+            State = UpdateState.Installing;
+            try
+            {
+                await UpdateSignature.Verify(downloaded, release.SignatureUrl);
+            }
+            catch
+            {
+                try
+                {
+                    File.Delete(downloaded);
+                }
+                catch
+                {
+                }
+                throw;
+            }
+            stagedInstaller = downloaded;
             State = UpdateState.ReadyToRelaunch;
+        }
+        catch (UpdateException e)
+        {
+            stagedInstaller = null;
+            Error = e.Message;
+            State = UpdateState.Failed;
         }
         catch (Exception e)
         {
+            stagedInstaller = null;
             Error = $"Couldn't download the update: {e.Message}";
             State = UpdateState.Failed;
         }
