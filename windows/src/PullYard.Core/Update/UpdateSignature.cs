@@ -5,7 +5,7 @@ namespace PullYard.Core.Update;
 
 public static class UpdateSignature
 {
-    public const string PublicKey = "";
+    public const string PublicKey = "m0UbLdp60TGrr4oQs1p3pqNTXQQOqOZM2oRtf3jnJlM=";
 
     public static string UnsignedMessage => $"The release has no signature, so {AppInfo.DisplayName} won't install it. Download it from the release page instead.";
     public static string BadSignatureMessage => $"The update's signature doesn't match. It may have been tampered with, so {AppInfo.DisplayName} didn't install it.";

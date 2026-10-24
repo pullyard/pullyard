@@ -173,7 +173,7 @@ pub fn parse_release(data: &[u8]) -> Result<Release, ApiError> {
     })
 }
 
-pub const UPDATE_PUBLIC_KEY: &str = "";
+pub const UPDATE_PUBLIC_KEY: &str = "m0UbLdp60TGrr4oQs1p3pqNTXQQOqOZM2oRtf3jnJlM=";
 
 pub fn signature_is_configured() -> bool {
     !UPDATE_PUBLIC_KEY.trim().is_empty()
@@ -543,10 +543,12 @@ mod tests {
     }
 
     #[test]
-    fn unconfigured_key_skips_verification() {
-        assert!(!signature_is_configured());
+    fn shipped_key_requires_a_signature() {
+        use base64::Engine;
+        assert!(signature_is_configured());
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(UPDATE_PUBLIC_KEY).unwrap().len(), 32);
         let dir = std::env::temp_dir().join(format!("{}-sig-test-{}", brand::BIN_NAME, std::process::id()));
         let result = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(verify_archive(dir, None));
-        assert!(result.is_ok());
+        assert!(result.is_err());
     }
 }

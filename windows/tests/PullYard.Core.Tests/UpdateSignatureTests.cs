@@ -68,10 +68,16 @@ public class UpdateSignatureTests
     }
 
     [Fact]
-    public async Task VerifyIsSkippedWithoutAConfiguredKey()
+    public async Task ShippedKeyIsValidAndRequiresASignature()
     {
-        Assert.False(UpdateSignature.IsConfigured);
-        await UpdateSignature.Verify(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")), null);
+        Assert.True(UpdateSignature.IsConfigured);
+        Assert.Equal(32, Convert.FromBase64String(UpdateSignature.PublicKey).Length);
+        Assert.False(UpdateSignature.IsConfiguredWith(""));
+        var file = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        await File.WriteAllBytesAsync(file, new byte[] { 1, 2, 3 });
+        var error = await Assert.ThrowsAnyAsync<Exception>(() => UpdateSignature.Verify(file, null));
+        Assert.Equal(UpdateSignature.UnsignedMessage, error.Message);
+        File.Delete(file);
     }
 
     [Fact]

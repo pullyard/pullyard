@@ -44,4 +44,5 @@ The app is not notarized. On first launch macOS will block it — open **System 
 xattr -dr com.apple.quarantine /Applications/PullYard.app
 \`\`\`"
     gh release create "v$VERSION" "$DMG" "$LATEST" ${SIG_ASSET[@]+"${SIG_ASSET[@]}"} "$LEGACY" --title "PullYard $VERSION" --notes "$NOTES" --target "$(git rev-parse HEAD)"
+    echo "Next: once the Windows and Linux workflows attach their builds to v$VERSION, run scripts/sign_release.sh $VERSION"
 fi
