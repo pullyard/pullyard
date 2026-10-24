@@ -13,6 +13,7 @@ pub mod html;
 pub mod inbox;
 pub mod issue;
 pub mod item_row;
+pub mod jira;
 pub mod lists;
 pub mod login;
 pub mod logo;

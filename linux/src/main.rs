@@ -16,6 +16,7 @@ mod forge;
 mod git_accounts;
 mod host;
 mod icons;
+mod jira;
 mod list_cache;
 mod local_repo;
 mod rt;

@@ -340,6 +340,13 @@ pub fn show() {
     updates.add(&ver);
     page.add(&updates);
 
+    let jira_group = group("Jira", "sy-tag-symbolic", "sky");
+    let jira_form = super::jira::connect_form();
+    jira_form.add_css_class("card");
+    pad(&jira_form, 12);
+    jira_group.add(&jira_form);
+    page.add(&jira_group);
+
     let oauth = group("OAuth Device Flow", "sy-key-symbolic", "amber");
     let entry = adw::EntryRow::new();
     entry.set_title("Client ID");
