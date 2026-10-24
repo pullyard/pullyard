@@ -87,7 +87,7 @@ enum DesktopSessionIndex {
             for org in (try? fm.contentsOfDirectory(at: account, includingPropertiesForKeys: nil)) ?? [] {
                 for file in (try? fm.contentsOfDirectory(at: org, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] where file.pathExtension == "json" {
                     seen.insert(file.path)
-                    guard let r = record(file) else { continue }
+                    guard let r = autoreleasepool(invoking: { record(file) }) else { continue }
                     records.append((r.local, r.cli, r.parentLocal, r.title, r.archived))
                 }
             }
@@ -159,7 +159,7 @@ enum ClaudeSessionParser {
         for dir in dirs {
             guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { continue }
             for file in files where file.pathExtension == "jsonl" {
-                guard var info = parse(file) else { continue }
+                guard var info = autoreleasepool(invoking: { parse(file) }) else { continue }
                 if let link = desktop[info.id] {
                     info.parentId = link.parent
                     info.desktopId = link.local

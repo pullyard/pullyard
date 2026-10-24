@@ -283,7 +283,11 @@ final class ClaudeWorkspace {
         defer { loadingProjects = false }
         let root = URL(fileURLWithPath: ClaudeProfiles.shared.configDir()).appendingPathComponent("projects", isDirectory: true)
         let profileID = ClaudeProfiles.shared.activeID
-        let loaded = await Task.detached(priority: .userInitiated) { ClaudeSessionParser.loadAll(root: root) }.value
+        let loaded = await Task.detached(priority: .userInitiated) { () -> [ClaudeProject] in
+            let projects = ClaudeSessionParser.loadAll(root: root)
+            MemoryRelief.release()
+            return projects
+        }.value
         guard profileID == ClaudeProfiles.shared.activeID else { return }
         let next = Demo.folder.map { f in loaded.filter { $0.path.hasPrefix(f) } } ?? loaded
         projectsUpdated = Date()
@@ -301,6 +305,7 @@ final class ClaudeWorkspace {
                 guard !Task.isCancelled else { return }
                 await SessionIndex.shared.update(Array(files[start..<min(start + 10, files.count)]))
             }
+            MemoryRelief.release()
         }
     }
 

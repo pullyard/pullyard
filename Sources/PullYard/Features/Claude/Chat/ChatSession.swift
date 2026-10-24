@@ -846,6 +846,7 @@ final class ChatSession {
         if !items.isEmpty {
             items.append(.notice(id: "resumed", text: "Session resumed", isError: false))
         }
+        DispatchQueue.global(qos: .utility).async { MemoryRelief.release() }
     }
 }
 

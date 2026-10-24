@@ -41,7 +41,7 @@ actor SessionIndex {
         var changed = false
         for file in files {
             guard let st = stamp(file), stamps[file.path] != st else { continue }
-            let text = Self.extract(file)
+            let text = autoreleasepool { Self.extract(file) }
             try? Data(text.utf8).write(to: dir.appendingPathComponent(Self.key(file) + ".txt"), options: .atomic)
             stamps[file.path] = st
             changed = true
