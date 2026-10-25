@@ -72,14 +72,17 @@ struct JiraTab: View {
     @State private var reload = 0
 
     static func keys(for pr: PullRequestDetail) -> [String] {
+        let linked = JiraAccount.shared.linkedKeys(for: pr.url)
+        let hidden = Set(JiraAccount.shared.hiddenKeys(for: pr.url))
         var out: [String] = []
-        for k in JiraAccount.shared.linkedKeys(for: pr.url) + JiraKeys.detected(title: pr.title, branch: pr.headRefName, body: pr.body) where !out.contains(k) { out.append(k) }
+        for k in linked + JiraKeys.detected(title: pr.title, branch: pr.headRefName, body: pr.body) where !out.contains(k) && (linked.contains(k) || !hidden.contains(k)) { out.append(k) }
         return out
     }
 
     var body: some View {
         let keys = Self.keys(for: pr)
         let linked = account.linkedKeys(for: pr.url)
+        let hiddenCount = account.hiddenKeys(for: pr.url).count
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if !account.isConfigured {
@@ -93,6 +96,14 @@ struct JiraTab: View {
                         ForEach(Array(keys.enumerated()), id: \.element) { index, key in
                             entry(key, primary: index == 0, manual: linked.contains(key))
                         }
+                    }
+                    if hiddenCount > 0 {
+                        Button(hiddenCount == 1 ? "Show 1 hidden ticket" : "Show \(hiddenCount) hidden tickets") {
+                            account.setHiddenKeys([], for: pr.url)
+                            reload += 1
+                        }
+                        .buttonStyle(.link)
+                        .font(.syCaption)
                     }
                 }
             }
@@ -117,9 +128,10 @@ struct JiraTab: View {
             Button {
                 withAnimation(Motion.smooth) { linking.toggle() }
             } label: {
-                Label("Link ticket", systemImage: linking ? "xmark" : "plus")
+                if linking { Text("Cancel") } else { Label("Link ticket", systemImage: "plus") }
             }
             .controlSize(.small)
+            .keyboardShortcut(linking ? .cancelAction : nil)
             Button {
                 issues = []
                 errors = [:]
@@ -137,12 +149,12 @@ struct JiraTab: View {
     private func entry(_ key: String, primary: Bool, manual: Bool) -> some View {
         if let issue = issues.first(where: { $0.key == key }) {
             if primary || open.contains(key) {
-                JiraIssueCard(issue: issue, manual: manual, onUnlink: { unlink(key) }, onCollapse: primary ? nil : { open.remove(key) }) { updated in
+                JiraIssueCard(issue: issue, manual: manual, onUnlink: { unlink(key) }, onHide: manual ? nil : { hide(key) }, onCollapse: primary ? nil : { open.remove(key) }) { updated in
                     account.remember(updated)
                     if let i = issues.firstIndex(where: { $0.key == updated.key }) { issues[i] = updated }
                 }
             } else {
-                JiraIssueRow(issue: issue) { open.insert(key) }
+                JiraIssueRow(issue: issue, onHide: manual ? nil : { hide(key) }) { open.insert(key) }
             }
         } else if let error = errors[key] {
             JiraPanel {
@@ -186,6 +198,7 @@ struct JiraTab: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 220)
                 .onSubmit(link)
+                .onExitCommand { withAnimation(Motion.smooth) { linking = false } }
             Button("Link", action: link)
                 .buttonStyle(.borderedProminent)
                 .disabled(JiraKeys.extract([manualKey.uppercased()]).isEmpty)
@@ -202,8 +215,18 @@ struct JiraTab: View {
         var linked = account.linkedKeys(for: pr.url)
         if !linked.contains(key) { linked.insert(key, at: 0) }
         account.setLinkedKeys(linked, for: pr.url)
+        account.setHiddenKeys(account.hiddenKeys(for: pr.url).filter { $0 != key }, for: pr.url)
         manualKey = ""
         linking = false
+    }
+
+    private func hide(_ key: String) {
+        var hidden = account.hiddenKeys(for: pr.url)
+        if !hidden.contains(key) { hidden.append(key) }
+        account.setHiddenKeys(hidden, for: pr.url)
+        issues.removeAll { $0.key == key }
+        open.remove(key)
+        reload += 1
     }
 
     private func unlink(_ key: String) {
@@ -308,6 +331,7 @@ struct JiraStatusPill: View {
 
 struct JiraIssueRow: View {
     let issue: JiraIssue
+    var onHide: (() -> Void)?
     let onOpen: () -> Void
     @State private var hover = false
 
@@ -330,6 +354,10 @@ struct JiraIssueRow: View {
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .help("Show details")
+        .contextMenu {
+            Button("Open in Jira") { openInBrowser(issue.url) }
+            if let onHide { Button("Hide on this pull request", action: onHide) }
+        }
     }
 }
 
@@ -337,6 +365,7 @@ struct JiraIssueCard: View {
     let issue: JiraIssue
     var manual = false
     var onUnlink: () -> Void = {}
+    var onHide: (() -> Void)?
     var onCollapse: (() -> Void)?
     let onChange: (JiraIssue) -> Void
     @State private var transitions: [JiraTransition] = []
@@ -392,6 +421,10 @@ struct JiraIssueCard: View {
                 if manual {
                     Button(role: .destructive, action: onUnlink) { Label("Unlink", systemImage: "link.badge.minus") }
                         .buttonStyle(.borderless)
+                } else if let onHide {
+                    Button(action: onHide) { Label("Hide", systemImage: "eye.slash") }
+                        .buttonStyle(.borderless)
+                        .help("Hide this ticket on this pull request")
                 }
             }
             .controlSize(.small)

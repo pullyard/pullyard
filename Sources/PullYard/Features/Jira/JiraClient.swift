@@ -162,6 +162,14 @@ final class JiraAccount {
     func setLinkedKeys(_ keys: [String], for prURL: String) {
         UserDefaults.standard.set(keys, forKey: "jira.links." + prURL)
     }
+
+    func hiddenKeys(for prURL: String) -> [String] {
+        UserDefaults.standard.stringArray(forKey: "jira.hidden." + prURL) ?? []
+    }
+
+    func setHiddenKeys(_ keys: [String], for prURL: String) {
+        if keys.isEmpty { UserDefaults.standard.removeObject(forKey: "jira.hidden." + prURL) } else { UserDefaults.standard.set(keys, forKey: "jira.hidden." + prURL) }
+    }
 }
 
 struct JiraClient: Sendable {
