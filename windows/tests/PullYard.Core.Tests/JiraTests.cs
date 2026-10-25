@@ -93,7 +93,8 @@ public class JiraTests : IDisposable
         "assignee": { "displayName": "Ann", "avatarUrls": { "48x48": "https://a/48.png" } },
         "reporter": { "displayName": "Bob" },
         "description": "raw *wiki*",
-        "updated": "2024-03-05T10:11:12.000+0100"
+        "updated": "2024-03-05T10:11:12.000+0100",
+        "parent": { "key": "ABC-1", "fields": { "summary": "Auth epic" } }
       },
       "renderedFields": { "description": "<p>Steps:</p><ul><li>Open &amp; tap</li><li>See &lt;error&gt;</li></ul><br/>Done" }
     }
@@ -112,9 +113,24 @@ public class JiraTests : IDisposable
         Assert.Equal("Ann", issue.Assignee);
         Assert.Equal("https://a/48.png", issue.AssigneeAvatar);
         Assert.Equal("Bob", issue.Reporter);
-        Assert.Equal("Steps:\n\n• Open & tap\n• See <error>\n\nDone", issue.Description);
+        Assert.Equal("Steps:\n\n• Open & tap\n• See <error>\nDone", issue.Description);
         Assert.Equal("https://acme.atlassian.net/browse/ABC-12", issue.Url);
         Assert.Equal(new DateTimeOffset(2024, 3, 5, 10, 11, 12, TimeSpan.FromHours(1)), issue.Updated);
+        Assert.Equal("ABC-1", issue.ParentKey);
+        Assert.Equal("Auth epic", issue.ParentSummary);
+    }
+
+    [Fact]
+    public void TablesAndPanelsBecomeReadableText()
+    {
+        const string html = "<p>PR 2 of 2 for</p><div class=\"table-wrap\"><table><tbody><tr><td>\n  <a href=\"x\">COM-1563</a>\n</td><td>\n\n DONE \n</td></tr></tbody></table></div><p>&nbsp;</p><p>Next</p>";
+        Assert.Equal("PR 2 of 2 for\nCOM-1563 · DONE\n\nNext", JiraText.PlainText(html));
+    }
+
+    [Fact]
+    public void PreformattedTextKeepsLineBreaks()
+    {
+        Assert.Equal("Run:\nnpm ci\nnpm test", JiraText.PlainText("<p>Run:</p><pre>npm   ci\nnpm test</pre>"));
     }
 
     [Fact]
@@ -124,6 +140,8 @@ public class JiraTests : IDisposable
         Assert.Equal("plain", issue.Description);
         Assert.Null(issue.Assignee);
         Assert.Null(issue.Updated);
+        Assert.Null(issue.ParentKey);
+        Assert.Null(issue.ParentSummary);
         Assert.Equal("https://j.example.com/jira/browse/X1-1", issue.Url);
         var transitions = JiraClient.ParseTransitions((JsonObject)JsonNode.Parse("""{"transitions":[{"id":"11","name":"Start","to":{"name":"In Progress","statusCategory":{"key":"indeterminate"}}},{"id":"21","name":"Done"},{"name":"broken"}]}""")!);
         Assert.Equal(2, transitions.Count);
@@ -155,6 +173,7 @@ public class JiraTests : IDisposable
         Assert.Equal("Bearer t", req.Headers.GetValues("Authorization").Single());
         Assert.Equal("no-check", req.Headers.GetValues("X-Atlassian-Token").Single());
         Assert.Contains("expand=renderedFields", req.RequestUri!.Query);
+        Assert.Contains("parent", req.RequestUri!.Query);
         await Assert.ThrowsAsync<ApiException>(() => client.Issue("NOPE-1"));
     }
 
@@ -183,6 +202,8 @@ public class JiraTests : IDisposable
         Assert.Null(account.CachedIssue("ABC-12"));
         await account.Load("ABC-12");
         Assert.Equal(2, stub.Containing("/issue/ABC-12").Count);
+        account.ClearCache();
+        Assert.Null(account.CachedIssue("ABC-12"));
 
         var pr = new PullRequestDetail { Url = "https://github.com/a/b/pull/1", Title = "ONE-1 thing", HeadRefName = "main", Body = "" };
         Assert.Equal("MAN-5", account.Link(pr.Url, "man-5"));

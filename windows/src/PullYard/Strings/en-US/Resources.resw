@@ -371,20 +371,36 @@
   <data name="Issue_Close" xml:space="preserve"><value>Close issue</value></data>
   <data name="Issue_Reopen" xml:space="preserve"><value>Reopen issue</value></data>
   <data name="Item_StackedOn" xml:space="preserve"><value>stacked on {0}</value></data>
+  <data name="Jira_Assignee" xml:space="preserve"><value>Assignee</value></data>
   <data name="Jira_ChangeStatus" xml:space="preserve"><value>Change status</value></data>
+  <data name="Jira_Collapse" xml:space="preserve"><value>Collapse</value></data>
   <data name="Jira_Connect" xml:space="preserve"><value>Connect</value></data>
   <data name="Jira_ConnectHint" xml:space="preserve"><value>Connect Jira to see the ticket for a pull request and move it between statuses. Your API token stays in Windows Credential Manager.</value></data>
   <data name="Jira_Connected" xml:space="preserve"><value>Connected</value></data>
+  <data name="Jira_Copied" xml:space="preserve"><value>Copied</value></data>
+  <data name="Jira_CopyLink" xml:space="preserve"><value>Copy link</value></data>
   <data name="Jira_CreateToken" xml:space="preserve"><value>Create an API token at id.atlassian.com</value></data>
+  <data name="Jira_Description" xml:space="preserve"><value>Description</value></data>
   <data name="Jira_Disconnect" xml:space="preserve"><value>Disconnect</value></data>
   <data name="Jira_EmailPlaceholder" xml:space="preserve"><value>Atlassian account email (empty for a Data Center token)</value></data>
+  <data name="Jira_KeyPlaceholder" xml:space="preserve"><value>Ticket key, e.g. ABC-123</value></data>
+  <data name="Jira_Link" xml:space="preserve"><value>Link</value></data>
+  <data name="Jira_LinkATicket" xml:space="preserve"><value>Link a ticket</value></data>
+  <data name="Jira_LinkSaved" xml:space="preserve"><value>Saved for this pull request on this PC.</value></data>
   <data name="Jira_LinkTicket" xml:space="preserve"><value>Link ticket</value></data>
+  <data name="Jira_LinkedMany" xml:space="preserve"><value>{0} linked tickets</value></data>
+  <data name="Jira_LinkedOne" xml:space="preserve"><value>1 linked ticket</value></data>
   <data name="Jira_Loading" xml:space="preserve"><value>Loading…</value></data>
-  <data name="Jira_NoTicket" xml:space="preserve"><value>No Jira ticket found</value></data>
-  <data name="Jira_NoTicketHint" xml:space="preserve"><value>PullYard looks for keys like ABC-123 in the title, branch and description. Link one by hand:</value></data>
+  <data name="Jira_MoveTo" xml:space="preserve"><value>Move to</value></data>
+  <data name="Jira_NoTicket" xml:space="preserve"><value>No Jira ticket on this pull request</value></data>
+  <data name="Jira_NoTicketHint" xml:space="preserve"><value>PullYard looks for keys like ABC-123 in the title, branch name and description.</value></data>
   <data name="Jira_NoTransitions" xml:space="preserve"><value>No transitions available</value></data>
   <data name="Jira_Open" xml:space="preserve"><value>Open in Jira</value></data>
-  <data name="Jira_ReportedBy" xml:space="preserve"><value>Reported by {0}</value></data>
+  <data name="Jira_ParentTip" xml:space="preserve"><value>Parent ticket — open in Jira</value></data>
+  <data name="Jira_Priority" xml:space="preserve"><value>Priority</value></data>
+  <data name="Jira_Reload" xml:space="preserve"><value>Reload from Jira</value></data>
+  <data name="Jira_Reporter" xml:space="preserve"><value>Reporter</value></data>
+  <data name="Jira_ShowDetails" xml:space="preserve"><value>Show details</value></data>
   <data name="Jira_ShowLess" xml:space="preserve"><value>Show less</value></data>
   <data name="Jira_ShowMore" xml:space="preserve"><value>Show more</value></data>
   <data name="Jira_SitePlaceholder" xml:space="preserve"><value>Jira address — acme.atlassian.net</value></data>
@@ -392,7 +408,7 @@
   <data name="Jira_TokenPlaceholder" xml:space="preserve"><value>API token</value></data>
   <data name="Jira_Unassigned" xml:space="preserve"><value>Unassigned</value></data>
   <data name="Jira_Unlink" xml:space="preserve"><value>Unlink</value></data>
-  <data name="Jira_Updated" xml:space="preserve"><value>Updated {0}</value></data>
+  <data name="Jira_UpdatedTip" xml:space="preserve"><value>Updated</value></data>
   <data name="Loader_Loading" xml:space="preserve"><value>Loading</value></data>
   <data name="Loader_Running" xml:space="preserve"><value>Running</value></data>
   <data name="Lock_Blocked" xml:space="preserve"><value>Too many wrong PINs. Reset the PIN to continue. This also signs out the Claude Code accounts linked to this account.</value></data>
