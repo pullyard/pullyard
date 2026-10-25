@@ -84,6 +84,7 @@ pub struct Settings {
     pub jira_name: Option<String>,
     pub jira_has_token: bool,
     pub jira_links: HashMap<String, Vec<String>>,
+    pub jira_hidden: HashMap<String, Vec<String>>,
     pub agents_notify: bool,
     pub agents_open_in: String,
 }
@@ -130,6 +131,7 @@ impl Default for Settings {
             jira_name: None,
             jira_has_token: false,
             jira_links: HashMap::new(),
+            jira_hidden: HashMap::new(),
             agents_notify: true,
             agents_open_in: String::new(),
         }
