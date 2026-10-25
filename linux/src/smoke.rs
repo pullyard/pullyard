@@ -213,13 +213,32 @@ pub fn run(_app: Rc<App>) {
             description: "First line\n\n• second".repeat(40),
             url: "https://smoke.invalid/browse/SMOKE-1".into(),
             updated: Some(chrono::Utc::now()),
+            parent_key: Some("SMOKE-0".into()),
+            parent_summary: Some("Smoke epic".into()),
         });
-        crate::jira::set_linked(&url, vec!["SMOKE-1".into()]);
+        crate::jira::remember(&crate::jira::JiraIssue {
+            key: "SMOKE-2".into(),
+            summary: "Second smoke ticket".into(),
+            status: "Done".into(),
+            status_category: "done".into(),
+            kind: Some("Bug".into()),
+            priority: None,
+            assignee: None,
+            assignee_avatar: None,
+            reporter: None,
+            description: String::new(),
+            url: "https://smoke.invalid/browse/SMOKE-2".into(),
+            updated: None,
+            parent_key: None,
+            parent_summary: None,
+        });
+        crate::jira::set_linked(&url, vec!["SMOKE-1".into(), "SMOKE-2".into()]);
         crate::jira::changed();
     });
     step(next(400), "jira cleanup", move || {
         let url = pr().pr.borrow().as_ref().map(|p| p.url.clone()).unwrap_or_default();
         crate::jira::set_linked(&url, vec![]);
+        crate::jira::set_hidden(&url, vec![]);
         crate::settings::update(|s| {
             s.jira_site.clear();
             s.jira_has_token = false;

@@ -21,7 +21,9 @@ public sealed record JiraIssue(
     string? Reporter,
     string Description,
     string Url,
-    DateTimeOffset? Updated);
+    DateTimeOffset? Updated,
+    string? ParentKey = null,
+    string? ParentSummary = null);
 
 public sealed record JiraTransition(string Id, string Name, string To, string ToCategory)
 {
@@ -62,11 +64,13 @@ public static partial class JiraKeys
         return output;
     }
 
-    public static List<string> ForPullRequest(IEnumerable<string> linked, string? title, string? branch, string? body)
+    public static List<string> ForPullRequest(IEnumerable<string> linked, string? title, string? branch, string? body, IEnumerable<string>? hidden = null)
     {
+        var manual = linked.ToList();
+        var skip = new HashSet<string>(hidden ?? Enumerable.Empty<string>());
         var output = new List<string>();
-        foreach (var k in linked.Concat(Detected(title, branch, body)))
-            if (!output.Contains(k)) output.Add(k);
+        foreach (var k in manual.Concat(Detected(title, branch, body)))
+            if (!output.Contains(k) && (manual.Contains(k) || !skip.Contains(k))) output.Add(k);
         return output;
     }
 
@@ -78,17 +82,22 @@ public static partial class JiraText
     [GeneratedRegex(@"([+-]\d\d)(\d\d)$")]
     private static partial Regex OffsetPattern();
 
-    [GeneratedRegex(@"\n{3,}")]
-    private static partial Regex BlankLines();
+    [GeneratedRegex(@"(?is)<pre[^>]*>.*?</pre>")]
+    private static partial Regex PreBlock();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex Whitespace();
+
+    [GeneratedRegex(@"[ \t\u00A0]+")]
+    private static partial Regex Spaces();
 
     private static readonly (string Pattern, string Replacement)[] Tags =
     {
         (@"<br\s*/?>", "\n"),
-        ("</p>", "\n\n"),
-        ("<li>", "• "),
-        ("</li>", "\n"),
-        ("</h[1-6]>", "\n\n"),
-        ("<[^>]+>", "")
+        (@"</(p|div|h[1-6]|tr|table|blockquote|pre)>", "\n"),
+        (@"<li[^>]*>", "\n• "),
+        (@"</t[dh]>", " · "),
+        (@"<[^>]+>", "")
     };
 
     private static readonly (string Entity, string Char)[] Entities =
@@ -98,11 +107,33 @@ public static partial class JiraText
 
     public static string PlainText(string html)
     {
-        var s = html;
+        var s = CollapseWhitespace(html);
         foreach (var (pattern, replacement) in Tags) s = Regex.Replace(s, pattern, replacement, RegexOptions.IgnoreCase);
         foreach (var (entity, ch) in Entities) s = s.Replace(entity, ch);
-        s = BlankLines().Replace(s, "\n\n");
-        return s.Trim();
+        var output = new List<string>();
+        foreach (var raw in s.Split('\n'))
+        {
+            var line = Spaces().Replace(raw, " ").Trim();
+            while (line.EndsWith('·')) line = line[..^1].Trim();
+            while (line.StartsWith('·')) line = line[1..].Trim();
+            if (line.Length == 0 && (output.Count == 0 || output[^1].Length == 0)) continue;
+            output.Add(line);
+        }
+        return string.Join("\n", output).Replace('\u0001', '\n').Trim();
+    }
+
+    private static string CollapseWhitespace(string html)
+    {
+        var sb = new StringBuilder();
+        var last = 0;
+        foreach (Match m in PreBlock().Matches(html))
+        {
+            sb.Append(Whitespace().Replace(html[last..m.Index], " "));
+            sb.Append(m.Value.Replace('\n', '\u0001'));
+            last = m.Index + m.Length;
+        }
+        sb.Append(Whitespace().Replace(html[last..], " "));
+        return sb.ToString();
     }
 
     public static DateTimeOffset? Date(string? raw)
@@ -118,14 +149,26 @@ public static class JiraAuth
     public static string Authorization(string email, string token) =>
         string.IsNullOrEmpty(email) ? $"Bearer {token}" : "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{email}:{token}"));
 
+    private static readonly string[] UiPaths = { "/browse/", "/secure/", "/projects/", "/issues/", "/rest/", "/plugins/", "/servicedesk/" };
+
     public static Uri? BaseUrl(string? site)
     {
         var s = (site ?? "").Trim();
         if (s.Length == 0) return null;
         if (!s.StartsWith("http", StringComparison.OrdinalIgnoreCase)) s = "https://" + s;
-        s = s.TrimEnd('/');
         if (!Uri.TryCreate(s, UriKind.Absolute, out var url) || url.Scheme != Uri.UriSchemeHttps || string.IsNullOrEmpty(url.Host)) return null;
-        return url;
+        var path = url.AbsolutePath;
+        if (url.Host.EndsWith(".atlassian.net", StringComparison.OrdinalIgnoreCase)) path = "";
+        else
+        {
+            foreach (var marker in UiPaths)
+            {
+                var i = path.IndexOf(marker, StringComparison.Ordinal);
+                if (i >= 0) path = path[..i];
+            }
+        }
+        path = path.TrimEnd('/');
+        return new Uri($"https://{url.Authority}{path}");
     }
 
     public static string BaseString(Uri url) => url.GetLeftPart(UriPartial.Path).TrimEnd('/');
@@ -192,7 +235,7 @@ public sealed class JiraClient
         catch (JsonException)
         {
         }
-        throw new ApiException("Unexpected response from Jira");
+        throw new ApiException("Jira sent a web page instead of data. Check the address: it should be just your site, like acme.atlassian.net.");
     }
 
     public async Task<string> Myself(CancellationToken ct = default)
@@ -203,7 +246,7 @@ public sealed class JiraClient
 
     public async Task<JiraIssue> Issue(string key, CancellationToken ct = default)
     {
-        const string fields = "summary,status,issuetype,priority,assignee,reporter,description,updated";
+        const string fields = "summary,status,issuetype,priority,assignee,reporter,description,updated,parent";
         var o = Parse(await Request($"/rest/api/2/issue/{Uri.EscapeDataString(key)}?fields={fields}&expand=renderedFields", ct: ct).ConfigureAwait(false));
         return ParseIssue(o, Base);
     }
@@ -238,6 +281,7 @@ public sealed class JiraClient
         var status = f.Obj("status");
         var rendered = o.Obj("renderedFields").Str("description");
         var assignee = f.Obj("assignee");
+        var parent = f.Obj("parent");
         return new JiraIssue(
             key,
             f.Str("summary") ?? "",
@@ -250,7 +294,9 @@ public sealed class JiraClient
             f.Obj("reporter").Str("displayName"),
             rendered is not null ? JiraText.PlainText(rendered) : f.Str("description") ?? "",
             JiraAuth.BaseString(baseUrl) + "/browse/" + key,
-            JiraText.Date(f.Str("updated")));
+            JiraText.Date(f.Str("updated")),
+            parent.Str("key"),
+            parent.Obj("fields").Str("summary"));
     }
 }
 
@@ -262,6 +308,7 @@ public sealed class JiraAccount
     private const string HasTokenKey = "jira.hasToken";
     private const string NameKey = "jira.name";
     private const string LinksPrefix = "jira.links.";
+    private const string HiddenPrefix = "jira.hidden.";
     public static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(60);
 
     private readonly Settings settings;
@@ -339,6 +386,11 @@ public sealed class JiraAccount
         lock (gate) return cache.TryGetValue(key, out var hit) && now() - hit.At < CacheLifetime ? hit.Issue : null;
     }
 
+    public void ClearCache()
+    {
+        lock (gate) cache.Clear();
+    }
+
     public void Remember(JiraIssue issue)
     {
         lock (gate) cache[issue.Key] = (issue, now());
@@ -353,18 +405,39 @@ public sealed class JiraAccount
         Changed?.Invoke();
     }
 
+    public List<string> HiddenKeys(string prUrl) => settings.GetObject<List<string>>(HiddenPrefix + prUrl) ?? new List<string>();
+
+    public void SetHiddenKeys(string prUrl, List<string> keys)
+    {
+        if (keys.Count == 0) settings.Remove(HiddenPrefix + prUrl);
+        else settings.Set(HiddenPrefix + prUrl, keys);
+        Changed?.Invoke();
+    }
+
+    public void Hide(string prUrl, string key)
+    {
+        var hidden = HiddenKeys(prUrl);
+        if (hidden.Contains(key)) return;
+        hidden.Add(key);
+        SetHiddenKeys(prUrl, hidden);
+    }
+
+    public void ShowHidden(string prUrl) => SetHiddenKeys(prUrl, new List<string>());
+
     public string? Link(string prUrl, string manual)
     {
         if (JiraKeys.Normalize(manual) is not { } key) return null;
+        var hidden = HiddenKeys(prUrl);
+        if (hidden.Remove(key)) SetHiddenKeys(prUrl, hidden);
         var linked = LinkedKeys(prUrl);
-        if (!linked.Contains(key)) linked.Add(key);
+        if (!linked.Contains(key)) linked.Insert(0, key);
         SetLinkedKeys(prUrl, linked);
         return key;
     }
 
     public void Unlink(string prUrl, string key) => SetLinkedKeys(prUrl, LinkedKeys(prUrl).Where(k => k != key).ToList());
 
-    public List<string> Keys(PullRequestDetail pr) => JiraKeys.ForPullRequest(LinkedKeys(pr.Url), pr.Title, pr.HeadRefName, pr.Body);
+    public List<string> Keys(PullRequestDetail pr) => JiraKeys.ForPullRequest(LinkedKeys(pr.Url), pr.Title, pr.HeadRefName, pr.Body, HiddenKeys(pr.Url));
 
     public bool ShowsTab(PullRequestDetail pr) => IsConfigured || Keys(pr).Count > 0;
 

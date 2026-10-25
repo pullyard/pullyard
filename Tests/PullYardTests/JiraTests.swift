@@ -32,4 +32,18 @@ final class JiraTests: XCTestCase {
         XCTAssertEqual(JiraAccount.authorization(email: "", token: "abc"), "Bearer abc")
         XCTAssertEqual(JiraAccount.authorization(email: "a@b.c", token: "t"), "Basic " + Data("a@b.c:t".utf8).base64EncodedString())
     }
+
+    func testSiteNormalization() {
+        XCTAssertEqual(JiraAccount.normalizedSite("https://minitok.atlassian.net/jira/software/c/projects/COM/list?jql=project%20%3D%20COM")?.absoluteString, "https://minitok.atlassian.net")
+        XCTAssertEqual(JiraAccount.normalizedSite("acme.atlassian.net/browse/PAY-1")?.absoluteString, "https://acme.atlassian.net")
+        XCTAssertEqual(JiraAccount.normalizedSite("https://jira.corp.example/jira/browse/PAY-1")?.absoluteString, "https://jira.corp.example/jira")
+        XCTAssertEqual(JiraAccount.normalizedSite("https://corp.example/tracker/browse/PAY-1")?.absoluteString, "https://corp.example/tracker")
+        XCTAssertNil(JiraAccount.normalizedSite("http://insecure.example"))
+        XCTAssertNil(JiraAccount.normalizedSite("  "))
+    }
+
+    func testTablesAndPanelsBecomeReadableText() {
+        let html = "<p>PR 2 of 2 for</p><div class=\"table-wrap\"><table><tbody><tr><td>\n  <a href=\"x\">COM-1563</a>\n</td><td>\n\n DONE \n</td></tr></tbody></table></div><p>&nbsp;</p><p>Next</p>"
+        XCTAssertEqual(JiraClient.plainText(html), "PR 2 of 2 for\nCOM-1563 · DONE\n\nNext")
+    }
 }

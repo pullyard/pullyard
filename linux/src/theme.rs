@@ -377,13 +377,27 @@ listview.stack-list > row { padding: 0; margin: 1px 0; background: none; }
 .update-row { background-color: alpha(@sy_sky, 0.12); border-radius: 8px; padding: 8px 10px; margin: 0 8px 8px 8px; }
 .user-footer { border-top: 1px solid @sy_line; padding: 10px; }
 .new-row { background-color: alpha(@sy_accent, 0.10); }
+.jira-panel { background-color: @sy_raised; border: 1px solid @sy_line; border-radius: 12px; padding: 16px; }
+.jira-card { background-color: @sy_raised; border: 1px solid @sy_line; border-radius: 14px; padding: 18px; }
+.jira-link-panel { background-color: alpha(@sy_text, 0.04); border-radius: 10px; padding: 12px; }
+.jira-empty { padding: 36px 0; }
+.jira-summary { font-size: 1.2em; font-weight: 600; }
+.jira-desc { background-color: @sy_sunken; border-radius: 10px; padding: 12px; }
+.jira-chip { background-color: alpha(@sy_text, 0.05); border-radius: 999px; padding: 4px 8px; }
+.jira-status { padding: 4px 10px; border-radius: 999px; font-size: 0.82em; font-weight: 700; }
+.jira-dot { border-radius: 999px; min-width: 6px; min-height: 6px; }
+flowbox.jira-meta > flowboxchild { padding: 0; }
+button.jira-row { padding: 11px 14px; border-radius: 10px; background-color: alpha(@sy_text, 0.03); border: 1px solid @sy_line; box-shadow: none; }
+button.jira-row:hover { background-color: alpha(@sy_text, 0.06); }
+button.jira-parent { padding: 0 2px; min-height: 0; }
+menubutton.jira-status-menu > button { padding: 0; min-height: 0; background: none; box-shadow: none; }
 "#;
 
 fn color_css() -> String {
     let mut css = String::new();
     for name in ACCENTS {
         css.push_str(&format!(
-            ".fg-{name} {{ color: @sy_{name}; }}\n.bg-{name} {{ background-color: alpha(@sy_{name}, 0.12); }}\n.tile-{name} {{ background-color: alpha(@sy_{name}, 0.14); color: @sy_{name}; }}\n.chip.{name} {{ background-color: alpha(@sy_{name}, 0.12); color: @sy_{name}; }}\n.state-dot.{name} {{ background-color: alpha(@sy_{name}, 0.15); color: @sy_{name}; }}\n.state-pill.{name} {{ background-color: @sy_{name}; }}\n.banner-box.{name} {{ background-color: alpha(@sy_{name}, 0.08); }}\nbutton.tint-{name} {{ background-color: @sy_{name}; color: white; }}\n.edge-{name} {{ background-color: @sy_{name}; min-width: 3px; border-radius: 2px; }}\n"
+            ".fg-{name} {{ color: @sy_{name}; }}\n.bg-{name} {{ background-color: alpha(@sy_{name}, 0.12); }}\n.tile-{name} {{ background-color: alpha(@sy_{name}, 0.14); color: @sy_{name}; }}\n.chip.{name} {{ background-color: alpha(@sy_{name}, 0.12); color: @sy_{name}; }}\n.state-dot.{name} {{ background-color: alpha(@sy_{name}, 0.15); color: @sy_{name}; }}\n.state-pill.{name} {{ background-color: @sy_{name}; }}\n.banner-box.{name} {{ background-color: alpha(@sy_{name}, 0.08); }}\nbutton.tint-{name} {{ background-color: @sy_{name}; color: white; }}\n.edge-{name} {{ background-color: @sy_{name}; min-width: 3px; border-radius: 2px; }}\n.jira-status.{name} {{ background-color: alpha(@sy_{name}, 0.14); color: @sy_{name}; }}\n.jira-status.{name} .jira-dot {{ background-color: @sy_{name}; }}\n"
         ));
     }
     css

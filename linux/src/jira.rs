@@ -30,6 +30,8 @@ pub struct JiraIssue {
     pub description: String,
     pub url: String,
     pub updated: Option<DateTime<Utc>>,
+    pub parent_key: Option<String>,
+    pub parent_summary: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -105,35 +107,82 @@ pub fn base_url(site: &str) -> Option<String> {
     if s.is_empty() {
         return None;
     }
-    if !s.starts_with("http") {
+    if !s.to_lowercase().starts_with("http") {
         s = format!("https://{s}");
     }
-    while s.ends_with('/') {
-        s.pop();
-    }
     let url = url::Url::parse(&s).ok()?;
-    if url.scheme() != "https" || url.host_str().is_none_or(|h| h.is_empty()) {
+    let host = url.host_str().filter(|h| !h.is_empty())?;
+    if url.scheme() != "https" {
         return None;
     }
-    Some(s)
+    let mut path = url.path().to_string();
+    if host.to_lowercase().ends_with(".atlassian.net") {
+        path.clear();
+    } else {
+        for marker in ["/browse/", "/secure/", "/projects/", "/issues/", "/rest/", "/plugins/", "/servicedesk/"] {
+            if let Some(i) = path.find(marker) {
+                path.truncate(i);
+            }
+        }
+    }
+    while path.ends_with('/') {
+        path.pop();
+    }
+    let authority = match url.port() {
+        Some(p) => format!("{host}:{p}"),
+        None => host.to_string(),
+    };
+    Some(format!("https://{authority}{path}"))
 }
 
 pub fn plain_text(html: &str) -> String {
     static RULES: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
-        [(r"(?i)<br\s*/?>", "\n"), (r"(?i)</p>", "\n\n"), (r"(?i)<li>", "• "), (r"(?i)</li>", "\n"), (r"(?i)</h[1-6]>", "\n\n"), (r"<[^>]+>", "")]
+        [(r"(?i)<br\s*/?>", "\n"), (r"(?i)</(p|div|h[1-6]|tr|table|blockquote|pre)>", "\n"), (r"(?i)<li[^>]*>", "\n• "), (r"(?i)</t[dh]>", " · "), (r"(?i)<[^>]+>", "")]
             .into_iter()
             .map(|(p, r)| (Regex::new(p).expect("jira html regex"), r))
             .collect()
     });
-    static BLANK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n{3,}").expect("blank regex"));
-    let mut s = html.to_string();
+    static SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[ \t\x{00A0}]+").expect("spaces regex"));
+    let mut s = collapse_whitespace(html);
     for (re, with) in RULES.iter() {
-        s = re.replace_all(&s, *with).to_string();
+        s = re.replace_all(&s, *with).into_owned();
     }
-    for (entity, c) in [("&nbsp;", " "), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&amp;", "&")] {
+    for (entity, c) in [("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'")] {
         s = s.replace(entity, c);
     }
-    BLANK.replace_all(&s, "\n\n").trim().to_string()
+    let mut out: Vec<String> = vec![];
+    for line in s.split('\n') {
+        let mut l = SPACES.replace_all(line, " ").trim_matches(is_inline_space).to_string();
+        while let Some(rest) = l.strip_suffix('·') {
+            l = rest.trim_matches(is_inline_space).to_string();
+        }
+        while let Some(rest) = l.strip_prefix('·') {
+            l = rest.trim_matches(is_inline_space).to_string();
+        }
+        if l.is_empty() && out.last().is_none_or(|p| p.is_empty()) {
+            continue;
+        }
+        out.push(l);
+    }
+    out.join("\n").replace('\u{1}', "\n").trim().to_string()
+}
+
+fn is_inline_space(c: char) -> bool {
+    c == '\t' || (c.is_whitespace() && !matches!(c, '\n' | '\r' | '\u{b}' | '\u{c}' | '\u{85}' | '\u{2028}' | '\u{2029}'))
+}
+
+fn collapse_whitespace(html: &str) -> String {
+    static PRE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<pre[^>]*>.*?</pre>").expect("pre regex"));
+    static WS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("whitespace regex"));
+    let mut out = String::new();
+    let mut last = 0;
+    for m in PRE.find_iter(html) {
+        out.push_str(&WS.replace_all(&html[last..m.start()], " "));
+        out.push_str(&m.as_str().replace('\n', "\u{1}"));
+        last = m.end();
+    }
+    out.push_str(&WS.replace_all(&html[last..], " "));
+    out
 }
 
 fn s(v: &Value, path: &[&str]) -> Option<String> {
@@ -164,6 +213,8 @@ pub fn parse_issue(o: &Value, base: &str) -> JiraIssue {
         description: rendered.map(|h| plain_text(&h)).unwrap_or_else(|| s(&f, &["description"]).unwrap_or_default()),
         url: format!("{base}/browse/{key}"),
         updated: s(&f, &["updated"]).and_then(|u| parse_date(&u)),
+        parent_key: s(&f, &["parent", "key"]),
+        parent_summary: s(&f, &["parent", "fields", "summary"]),
         key,
     }
 }
@@ -231,7 +282,7 @@ impl Client {
 
     async fn json(&self, path: &str) -> ApiResult<Value> {
         let bytes = self.request(path, reqwest::Method::GET, None).await?;
-        serde_json::from_slice::<Value>(&bytes).ok().filter(|v| v.is_object()).ok_or_else(|| ApiError::new("Unexpected response from Jira"))
+        serde_json::from_slice::<Value>(&bytes).ok().filter(|v| v.is_object()).ok_or_else(|| ApiError::new("Jira sent a web page instead of data. Check the address: it should be just your site, like acme.atlassian.net."))
     }
 
     pub async fn myself(&self) -> ApiResult<String> {
@@ -240,7 +291,7 @@ impl Client {
     }
 
     pub async fn issue(&self, key: &str) -> ApiResult<JiraIssue> {
-        let o = self.json(&format!("/rest/api/2/issue/{key}?fields=summary,status,issuetype,priority,assignee,reporter,description,updated&expand=renderedFields")).await?;
+        let o = self.json(&format!("/rest/api/2/issue/{key}?fields=summary,status,issuetype,priority,assignee,reporter,description,updated,parent&expand=renderedFields")).await?;
         Ok(parse_issue(&o, &self.base))
     }
 
@@ -343,6 +394,14 @@ pub fn cached(key: &str) -> Option<JiraIssue> {
     CACHE.with(|c| c.borrow().get(key).filter(|(_, at)| at.elapsed() < CACHE_TTL).map(|(i, _)| i.clone()))
 }
 
+pub fn clear_cache() {
+    CACHE.with(|c| c.borrow_mut().clear());
+}
+
+pub fn browse_url(key: &str) -> Option<String> {
+    base_url(&site()).map(|b| format!("{b}/browse/{key}"))
+}
+
 pub fn remember(issue: &JiraIssue) {
     CACHE.with(|c| c.borrow_mut().insert(issue.key.clone(), (issue.clone(), Instant::now())));
 }
@@ -361,13 +420,40 @@ pub fn set_linked(pr_url: &str, keys: Vec<String>) {
     });
 }
 
+pub fn hidden(pr_url: &str) -> Vec<String> {
+    settings::read(|s| s.jira_hidden.get(pr_url).cloned().unwrap_or_default())
+}
+
+pub fn set_hidden(pr_url: &str, keys: Vec<String>) {
+    settings::update(|s| {
+        if keys.is_empty() {
+            s.jira_hidden.remove(pr_url);
+        } else {
+            s.jira_hidden.insert(pr_url.to_string(), keys);
+        }
+    });
+}
+
+pub fn hide(pr_url: &str, key: &str) {
+    let mut keys = hidden(pr_url);
+    if !keys.iter().any(|k| k == key) {
+        keys.push(key.to_string());
+    }
+    set_hidden(pr_url, keys);
+}
+
+pub fn parse_key(raw: &str) -> Option<String> {
+    extract(&[&raw.trim().to_uppercase()]).into_iter().next()
+}
+
 pub fn link(pr_url: &str, raw: &str) -> Option<String> {
-    let key = extract(&[&raw.trim().to_uppercase()]).into_iter().next()?;
+    let key = parse_key(raw)?;
     let mut keys = linked(pr_url);
     if !keys.contains(&key) {
-        keys.push(key.clone());
+        keys.insert(0, key.clone());
     }
     set_linked(pr_url, keys);
+    set_hidden(pr_url, hidden(pr_url).into_iter().filter(|k| *k != key).collect());
     Some(key)
 }
 
@@ -376,9 +462,13 @@ pub fn unlink(pr_url: &str, key: &str) {
 }
 
 pub fn keys_for(pr_url: &str, title: &str, branch: &str, body: &str) -> Vec<String> {
-    let mut out = linked(pr_url);
-    for k in detected(title, branch, body) {
-        if !out.contains(&k) {
+    merge_keys(linked(pr_url), detected(title, branch, body), &hidden(pr_url))
+}
+
+fn merge_keys(linked: Vec<String>, detected: Vec<String>, hidden: &[String]) -> Vec<String> {
+    let mut out = linked;
+    for k in detected {
+        if !out.contains(&k) && !hidden.contains(&k) {
             out.push(k);
         }
     }
@@ -405,6 +495,12 @@ mod tests {
     }
 
     #[test]
+    fn hidden_keys_drop_detected_tickets_but_keep_linked_ones() {
+        let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(merge_keys(v(&["OPS-1"]), v(&["WEB-2", "OPS-1", "WEB-3"]), &v(&["WEB-2", "OPS-1"])), v(&["OPS-1", "WEB-3"]));
+    }
+
+    #[test]
     fn authorization_uses_basic_with_email_and_bearer_without() {
         assert_eq!(authorization("", "tok"), "Bearer tok");
         assert_eq!(authorization("a@b.c", "tok"), format!("Basic {}", base64::engine::general_purpose::STANDARD.encode("a@b.c:tok")));
@@ -415,12 +511,26 @@ mod tests {
         assert_eq!(base_url(" acme.atlassian.net/ ").as_deref(), Some("https://acme.atlassian.net"));
         assert_eq!(base_url("https://jira.corp/").as_deref(), Some("https://jira.corp"));
         assert_eq!(base_url("http://jira.corp"), None);
+        assert_eq!(base_url("https://minitok.atlassian.net/jira/software/c/projects/COM/list?jql=project%20%3D%20COM").as_deref(), Some("https://minitok.atlassian.net"));
+        assert_eq!(base_url("https://jira.corp/jira/browse/PAY-1").as_deref(), Some("https://jira.corp/jira"));
         assert_eq!(base_url(""), None);
     }
 
     #[test]
     fn html_descriptions_become_plain_text() {
         assert_eq!(plain_text("<p>Hello&nbsp;<b>world</b></p><ul><li>one</li><li>two &amp; three</li></ul><br/><br/><br/>"), "Hello world\n\n• one\n• two & three");
+        assert_eq!(plain_text("<p>Webhooks fail &amp; never retry.</p><ul><li>Add backoff</li></ul>"), "Webhooks fail & never retry.\n\n• Add backoff");
+    }
+
+    #[test]
+    fn tables_and_panels_become_readable_text() {
+        let html = "<p>PR 2 of 2 for</p><div class=\"table-wrap\"><table><tbody><tr><td>\n  <a href=\"x\">COM-1563</a>\n</td><td>\n\n DONE \n</td></tr></tbody></table></div><p>&nbsp;</p><p>Next</p>";
+        assert_eq!(plain_text(html), "PR 2 of 2 for\nCOM-1563 · DONE\n\nNext");
+    }
+
+    #[test]
+    fn preformatted_blocks_keep_their_lines() {
+        assert_eq!(plain_text("<p>Run   this:</p><pre>cargo   build\ncargo test</pre><p>Done</p>"), "Run this:\ncargo build\ncargo test\nDone");
     }
 
     #[test]
@@ -434,7 +544,8 @@ mod tests {
                 "priority": { "name": "High" },
                 "assignee": { "displayName": "Ann", "avatarUrls": { "48x48": "https://a/48.png" } },
                 "description": "raw",
-                "updated": "2024-05-01T10:20:30.000+0200"
+                "updated": "2024-05-01T10:20:30.000+0200",
+                "parent": { "key": "WEB-1", "fields": { "summary": "Accounts epic" } }
             },
             "renderedFields": { "description": "<p>Rendered</p>" }
         });
@@ -442,6 +553,9 @@ mod tests {
         assert_eq!(i.url, "https://acme.atlassian.net/browse/WEB-42");
         assert_eq!(i.status_category, "indeterminate");
         assert_eq!(i.description, "Rendered");
+        assert_eq!(i.parent_key.as_deref(), Some("WEB-1"));
+        assert_eq!(i.parent_summary.as_deref(), Some("Accounts epic"));
+        assert_eq!(parse_issue(&json!({ "key": "WEB-2", "fields": { "summary": "x" } }), "https://acme.atlassian.net").parent_key, None);
         assert_eq!(i.assignee_avatar.as_deref(), Some("https://a/48.png"));
         assert_eq!(i.updated.map(|d| d.to_rfc3339()), Some("2024-05-01T08:20:30+00:00".into()));
         let t = parse_transitions(&json!({ "transitions": [{ "id": "31", "name": "Done", "to": { "name": "Done", "statusCategory": { "key": "done" } } }, { "id": "21", "name": "Start", "to": { "name": "In Progress" } }] }));
