@@ -248,6 +248,9 @@ public sealed class JiraTab : Grid
         if (linking) content.Children.Add(LinkField());
         if (keys.Count == 0) content.Children.Add(EmptyState());
         for (var i = 0; i < keys.Count; i++) content.Children.Add(Entry(keys[i], i == 0, linked.Contains(keys[i])));
+        var hiddenCount = account.HiddenKeys(pr.Url).Count;
+        if (hiddenCount > 0)
+            content.Children.Add(Ui.Link(hiddenCount == 1 ? L.T("Jira_ShowHiddenOne", "Show 1 hidden ticket") : L.F("Jira_ShowHiddenMany", "Show {0} hidden tickets", hiddenCount), ShowHidden));
         foreach (var stale in cards.Keys.Where(k => !keys.Contains(k)).ToList()) cards.Remove(stale);
         var signature = $"{account.IsConfigured}|{string.Join(",", keys)}";
         if (signature != loadedFor)
@@ -261,7 +264,21 @@ public sealed class JiraTab : Grid
     {
         var title = Ui.Text(count == 1 ? L.T("Jira_LinkedOne", "1 linked ticket") : L.F("Jira_LinkedMany", "{0} linked tickets", count), 14, "text", FontWeights.SemiBold);
         var info = Ui.V(1, title, Ui.Caption(account.BaseUrl?.Host ?? ""));
-        var toggle = JiraUi.Small(L.T("Jira_LinkTicket", "Link ticket"), linking ? "" : "", () => SetLinking(!linking));
+        Button toggle;
+        if (linking)
+        {
+            toggle = Ui.Button(L.T("Jira_Cancel", "Cancel"), () => SetLinking(false));
+            toggle.Padding = new Thickness(10, 4, 10, 5);
+            var escape = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.Escape };
+            escape.Invoked += (_, e) =>
+            {
+                e.Handled = true;
+                SetLinking(false);
+            };
+            toggle.KeyboardAccelerators.Add(escape);
+            toggle.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
+        }
+        else toggle = JiraUi.Small(L.T("Jira_LinkTicket", "Link ticket"), "", () => SetLinking(true));
         var refresh = Ui.IconButton("", L.T("Jira_Reload", "Reload from Jira"), Reload, "text");
         var actions = Ui.H(8, pending.Count > 0 ? Ui.Spinner(14) : null, toggle, refresh);
         var row = Ui.Columns((Ui.IconTile("", "sky", 26), Ui.Auto), (info, Ui.Star), (actions, Ui.Auto));
@@ -308,7 +325,7 @@ public sealed class JiraTab : Grid
         if (issues.TryGetValue(key, out var issue))
         {
             if (primary || open.Contains(key)) return Card(key, issue, primary, isManual);
-            return new JiraIssueRow(issue, () =>
+            return new JiraIssueRow(issue, isManual ? null : () => Hide(key), () =>
             {
                 open.Add(key);
                 Render();
@@ -332,7 +349,7 @@ public sealed class JiraTab : Grid
             open.Remove(key);
             Render();
         };
-        var card = new JiraIssueCard(issue, isManual, () => Unlink(key), collapse, updated =>
+        var card = new JiraIssueCard(issue, isManual, () => Unlink(key), isManual ? null : () => Hide(key), collapse, updated =>
         {
             account.Remember(updated);
             issues[updated.Key] = updated;
@@ -367,6 +384,22 @@ public sealed class JiraTab : Grid
         manual.Text = "";
         linking = false;
         Render();
+    }
+
+    private void Hide(string key)
+    {
+        if (model.Pr is not { } pr) return;
+        issues.Remove(key);
+        errors.Remove(key);
+        open.Remove(key);
+        cards.Remove(key);
+        account.Hide(pr.Url, key);
+    }
+
+    private void ShowHidden()
+    {
+        if (model.Pr is not { } pr) return;
+        account.ShowHidden(pr.Url);
     }
 
     private void Unlink(string key)
@@ -415,7 +448,7 @@ public sealed class JiraTab : Grid
 
 public sealed class JiraIssueRow : Button
 {
-    public JiraIssueRow(JiraIssue issue, Action onOpen)
+    public JiraIssueRow(JiraIssue issue, Action? onHide, Action onOpen)
     {
         var (glyph, color) = JiraService.TypeIcon(issue.Type);
         var summary = Ui.Text(issue.Summary, 13, "muted");
@@ -442,6 +475,9 @@ public sealed class JiraIssueRow : Button
         Resources["ButtonBorderBrushPressed"] = JiraUi.LineBrush();
         Ui.Tip(this, L.T("Jira_ShowDetails", "Show details"));
         Click += (_, _) => onOpen();
+        ContextFlyout = Ui.Menu(
+            Ui.MenuItem(L.T("Jira_Open", "Open in Jira"), () => LinkBrowser.Open(issue.Url), ""),
+            onHide is not null ? Ui.MenuItem(L.T("Jira_HideOnPr", "Hide on this pull request"), onHide, "") : null);
     }
 }
 
@@ -461,7 +497,7 @@ public sealed class JiraIssueCard : Grid
     private readonly TextBlock? description;
     private readonly HyperlinkButton? more;
 
-    public JiraIssueCard(JiraIssue issue, bool manual, Action onUnlink, Action? onCollapse, Action<JiraIssue> onChange)
+    public JiraIssueCard(JiraIssue issue, bool manual, Action onUnlink, Action? onHide, Action? onCollapse, Action<JiraIssue> onChange)
     {
         this.issue = issue;
         this.onChange = onChange;
@@ -529,6 +565,12 @@ public sealed class JiraIssueCard : Grid
         if (manual)
         {
             var b = JiraUi.Plain(Ui.H(6, Ui.Glyph("", 12, "red"), Ui.Text(L.T("Jira_Unlink", "Unlink"), 13, "red")), onUnlink);
+            b.Padding = new Thickness(8, 4, 8, 5);
+            unlink = b;
+        }
+        else if (onHide is not null)
+        {
+            var b = JiraUi.Plain(Ui.H(6, Ui.Glyph("", 12, "muted"), Ui.Text(L.T("Jira_Hide", "Hide"), 13, "muted")), onHide, L.T("Jira_HideTip", "Hide this ticket on this pull request"));
             b.Padding = new Thickness(8, 4, 8, 5);
             unlink = b;
         }

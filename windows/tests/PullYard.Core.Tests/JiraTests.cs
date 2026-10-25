@@ -52,6 +52,7 @@ public class JiraTests : IDisposable
         Assert.Equal(new[] { "ONE-1", "TWO-2", "THREE-3" }, JiraKeys.Detected("ONE-1: thing", "feature/two-2-login", "Closes THREE-3 and ONE-1"));
         Assert.Empty(JiraKeys.Detected("plain", "feature/utf-8", ""));
         Assert.Equal(new[] { "MAN-9", "ONE-1" }, JiraKeys.ForPullRequest(new[] { "MAN-9", "ONE-1" }, "ONE-1", "", ""));
+        Assert.Equal(new[] { "MAN-9", "TWO-2" }, JiraKeys.ForPullRequest(new[] { "MAN-9" }, "ONE-1 TWO-2", "", "", new[] { "ONE-1", "MAN-9" }));
         Assert.Equal("ABC-7", JiraKeys.Normalize(" abc-7 "));
         Assert.Null(JiraKeys.Normalize("nope"));
     }
@@ -214,6 +215,17 @@ public class JiraTests : IDisposable
         Assert.NotNull(reloaded.Client());
         account.Unlink(pr.Url, "MAN-5");
         Assert.Empty(account.LinkedKeys(pr.Url));
+
+        account.Hide(pr.Url, "ONE-1");
+        Assert.Empty(account.Keys(pr));
+        Assert.Equal(new[] { "ONE-1" }, account.HiddenKeys(pr.Url));
+        account.ShowHidden(pr.Url);
+        Assert.Equal(new[] { "ONE-1" }, account.Keys(pr));
+        account.Hide(pr.Url, "ONE-1");
+        Assert.Equal("ONE-1", account.Link(pr.Url, "one-1"));
+        Assert.Empty(account.HiddenKeys(pr.Url));
+        Assert.Equal(new[] { "ONE-1" }, account.Keys(pr));
+        account.Unlink(pr.Url, "ONE-1");
 
         account.Disconnect();
         Assert.False(account.IsConfigured);

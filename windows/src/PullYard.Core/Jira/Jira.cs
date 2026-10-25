@@ -64,11 +64,13 @@ public static partial class JiraKeys
         return output;
     }
 
-    public static List<string> ForPullRequest(IEnumerable<string> linked, string? title, string? branch, string? body)
+    public static List<string> ForPullRequest(IEnumerable<string> linked, string? title, string? branch, string? body, IEnumerable<string>? hidden = null)
     {
+        var manual = linked.ToList();
+        var skip = new HashSet<string>(hidden ?? Enumerable.Empty<string>());
         var output = new List<string>();
-        foreach (var k in linked.Concat(Detected(title, branch, body)))
-            if (!output.Contains(k)) output.Add(k);
+        foreach (var k in manual.Concat(Detected(title, branch, body)))
+            if (!output.Contains(k) && (manual.Contains(k) || !skip.Contains(k))) output.Add(k);
         return output;
     }
 
@@ -306,6 +308,7 @@ public sealed class JiraAccount
     private const string HasTokenKey = "jira.hasToken";
     private const string NameKey = "jira.name";
     private const string LinksPrefix = "jira.links.";
+    private const string HiddenPrefix = "jira.hidden.";
     public static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(60);
 
     private readonly Settings settings;
@@ -402,9 +405,30 @@ public sealed class JiraAccount
         Changed?.Invoke();
     }
 
+    public List<string> HiddenKeys(string prUrl) => settings.GetObject<List<string>>(HiddenPrefix + prUrl) ?? new List<string>();
+
+    public void SetHiddenKeys(string prUrl, List<string> keys)
+    {
+        if (keys.Count == 0) settings.Remove(HiddenPrefix + prUrl);
+        else settings.Set(HiddenPrefix + prUrl, keys);
+        Changed?.Invoke();
+    }
+
+    public void Hide(string prUrl, string key)
+    {
+        var hidden = HiddenKeys(prUrl);
+        if (hidden.Contains(key)) return;
+        hidden.Add(key);
+        SetHiddenKeys(prUrl, hidden);
+    }
+
+    public void ShowHidden(string prUrl) => SetHiddenKeys(prUrl, new List<string>());
+
     public string? Link(string prUrl, string manual)
     {
         if (JiraKeys.Normalize(manual) is not { } key) return null;
+        var hidden = HiddenKeys(prUrl);
+        if (hidden.Remove(key)) SetHiddenKeys(prUrl, hidden);
         var linked = LinkedKeys(prUrl);
         if (!linked.Contains(key)) linked.Insert(0, key);
         SetLinkedKeys(prUrl, linked);
@@ -413,7 +437,7 @@ public sealed class JiraAccount
 
     public void Unlink(string prUrl, string key) => SetLinkedKeys(prUrl, LinkedKeys(prUrl).Where(k => k != key).ToList());
 
-    public List<string> Keys(PullRequestDetail pr) => JiraKeys.ForPullRequest(LinkedKeys(pr.Url), pr.Title, pr.HeadRefName, pr.Body);
+    public List<string> Keys(PullRequestDetail pr) => JiraKeys.ForPullRequest(LinkedKeys(pr.Url), pr.Title, pr.HeadRefName, pr.Body, HiddenKeys(pr.Url));
 
     public bool ShowsTab(PullRequestDetail pr) => IsConfigured || Keys(pr).Count > 0;
 

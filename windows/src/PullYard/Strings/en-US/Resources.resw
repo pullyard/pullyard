@@ -372,6 +372,7 @@
   <data name="Issue_Reopen" xml:space="preserve"><value>Reopen issue</value></data>
   <data name="Item_StackedOn" xml:space="preserve"><value>stacked on {0}</value></data>
   <data name="Jira_Assignee" xml:space="preserve"><value>Assignee</value></data>
+  <data name="Jira_Cancel" xml:space="preserve"><value>Cancel</value></data>
   <data name="Jira_ChangeStatus" xml:space="preserve"><value>Change status</value></data>
   <data name="Jira_Collapse" xml:space="preserve"><value>Collapse</value></data>
   <data name="Jira_Connect" xml:space="preserve"><value>Connect</value></data>
@@ -383,6 +384,9 @@
   <data name="Jira_Description" xml:space="preserve"><value>Description</value></data>
   <data name="Jira_Disconnect" xml:space="preserve"><value>Disconnect</value></data>
   <data name="Jira_EmailPlaceholder" xml:space="preserve"><value>Atlassian account email (empty for a Data Center token)</value></data>
+  <data name="Jira_Hide" xml:space="preserve"><value>Hide</value></data>
+  <data name="Jira_HideOnPr" xml:space="preserve"><value>Hide on this pull request</value></data>
+  <data name="Jira_HideTip" xml:space="preserve"><value>Hide this ticket on this pull request</value></data>
   <data name="Jira_KeyPlaceholder" xml:space="preserve"><value>Ticket key, e.g. ABC-123</value></data>
   <data name="Jira_Link" xml:space="preserve"><value>Link</value></data>
   <data name="Jira_LinkATicket" xml:space="preserve"><value>Link a ticket</value></data>
@@ -401,6 +405,8 @@
   <data name="Jira_Reload" xml:space="preserve"><value>Reload from Jira</value></data>
   <data name="Jira_Reporter" xml:space="preserve"><value>Reporter</value></data>
   <data name="Jira_ShowDetails" xml:space="preserve"><value>Show details</value></data>
+  <data name="Jira_ShowHiddenMany" xml:space="preserve"><value>Show {0} hidden tickets</value></data>
+  <data name="Jira_ShowHiddenOne" xml:space="preserve"><value>Show 1 hidden ticket</value></data>
   <data name="Jira_ShowLess" xml:space="preserve"><value>Show less</value></data>
   <data name="Jira_ShowMore" xml:space="preserve"><value>Show more</value></data>
   <data name="Jira_SitePlaceholder" xml:space="preserve"><value>Jira address — acme.atlassian.net</value></data>
