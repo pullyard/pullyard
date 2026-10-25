@@ -67,6 +67,8 @@ public class JiraTests : IDisposable
     [InlineData("acme.atlassian.net", "https://acme.atlassian.net")]
     [InlineData(" https://acme.atlassian.net/ ", "https://acme.atlassian.net")]
     [InlineData("jira.example.com/jira//", "https://jira.example.com/jira")]
+    [InlineData("https://minitok.atlassian.net/jira/software/c/projects/COM/list?jql=project%20%3D%20COM", "https://minitok.atlassian.net")]
+    [InlineData("https://jira.example.com/jira/browse/PAY-1", "https://jira.example.com/jira")]
     public void NormalizesSite(string site, string expected)
     {
         Assert.Equal(expected, JiraAuth.BaseString(JiraAuth.BaseUrl(site)!));

@@ -14,6 +14,8 @@ struct JiraIssue: Identifiable, Equatable {
     let description: String
     let url: String
     let updated: Date?
+    var parentKey: String? = nil
+    var parentSummary: String? = nil
 }
 
 struct JiraTransition: Identifiable, Equatable {
@@ -76,17 +78,32 @@ final class JiraAccount {
 
     var isConfigured: Bool { baseURL != nil && hasToken }
 
-    var baseURL: URL? {
-        var s = site.trimmingCharacters(in: .whitespacesAndNewlines)
+    var baseURL: URL? { Self.normalizedSite(site) }
+
+    nonisolated static func normalizedSite(_ raw: String) -> URL? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return nil }
-        if !s.hasPrefix("http") { s = "https://" + s }
-        while s.hasSuffix("/") { s.removeLast() }
-        guard let url = URL(string: s), url.scheme == "https", url.host != nil else { return nil }
-        return url
+        if !s.lowercased().hasPrefix("http") { s = "https://" + s }
+        guard var c = URLComponents(string: s), c.scheme?.lowercased() == "https", let host = c.host, !host.isEmpty else { return nil }
+        c.query = nil
+        c.fragment = nil
+        c.user = nil
+        c.password = nil
+        var path = c.path
+        if host.lowercased().hasSuffix(".atlassian.net") {
+            path = ""
+        } else {
+            for marker in ["/browse/", "/secure/", "/projects/", "/issues/", "/rest/", "/plugins/", "/servicedesk/"] {
+                if let r = path.range(of: marker) { path = String(path[..<r.lowerBound]) }
+            }
+        }
+        while path.hasSuffix("/") { path.removeLast() }
+        c.path = path
+        return c.url
     }
 
     func connect(site: String, email: String, token: String) async throws {
-        self.site = site
+        self.site = Self.normalizedSite(site)?.absoluteString ?? site
         self.email = email.trimmingCharacters(in: .whitespaces)
         let t = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let base = baseURL else { throw APIError(message: "Enter your Jira address, for example acme.atlassian.net") }
@@ -128,6 +145,10 @@ final class JiraAccount {
     func cachedIssue(_ key: String) -> JiraIssue? {
         guard let hit = issueCache[key], Date().timeIntervalSince(hit.at) < 60 else { return nil }
         return hit.issue
+    }
+
+    func clearCache() {
+        issueCache = [:]
     }
 
     func remember(_ issue: JiraIssue) {
@@ -177,7 +198,9 @@ struct JiraClient: Sendable {
     }
 
     private func json(_ data: Data) throws -> [String: Any] {
-        guard let o = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw APIError(message: "Unexpected response from Jira") }
+        guard let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            throw APIError(message: "Jira sent a web page instead of data. Check the address: it should be just your site, like acme.atlassian.net.")
+        }
         return o
     }
 
@@ -187,7 +210,7 @@ struct JiraClient: Sendable {
     }
 
     func issue(_ key: String) async throws -> JiraIssue {
-        let fields = "summary,status,issuetype,priority,assignee,reporter,description,updated"
+        let fields = "summary,status,issuetype,priority,assignee,reporter,description,updated,parent"
         let o = try json(try await request("/rest/api/2/issue/\(key)?fields=\(fields)&expand=renderedFields"))
         return Self.parseIssue(o, base: base)
     }
@@ -229,7 +252,9 @@ struct JiraClient: Sendable {
             reporter: (f["reporter"] as? [String: Any])?["displayName"] as? String,
             description: rendered.map(plainText) ?? (f["description"] as? String ?? ""),
             url: base.absoluteString + "/browse/" + key,
-            updated: updated
+            updated: updated,
+            parentKey: (f["parent"] as? [String: Any])?["key"] as? String,
+            parentSummary: ((f["parent"] as? [String: Any])?["fields"] as? [String: Any])?["summary"] as? String
         )
     }
 
@@ -240,14 +265,46 @@ struct JiraClient: Sendable {
     }()
 
     nonisolated static func plainText(_ html: String) -> String {
-        var s = html
-        for (pattern, replacement) in [("<br\\s*/?>", "\n"), ("</p>", "\n\n"), ("<li>", "• "), ("</li>", "\n"), ("</h[1-6]>", "\n\n"), ("<[^>]+>", "")] {
-            s = s.replacingOccurrences(of: pattern, with: replacement, options: [.regularExpression, .caseInsensitive])
+        var s = collapseWhitespace(html)
+        let rules: [(String, String)] = [
+            ("(?i)<br\\s*/?>", "\n"),
+            ("(?i)</(p|div|h[1-6]|tr|table|blockquote|pre)>", "\n"),
+            ("(?i)<li[^>]*>", "\n• "),
+            ("(?i)</t[dh]>", " · "),
+            ("(?i)<[^>]+>", "")
+        ]
+        for (pattern, replacement) in rules {
+            s = s.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
         }
         for (entity, char) in [("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'")] {
             s = s.replacingOccurrences(of: entity, with: char)
         }
-        s = s.replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
-        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = s.components(separatedBy: "\n").map { line -> String in
+            var l = line.replacingOccurrences(of: "[ \\t\\x{00A0}]+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+            while l.hasSuffix("·") { l = String(l.dropLast()).trimmingCharacters(in: .whitespaces) }
+            while l.hasPrefix("·") { l = String(l.dropFirst()).trimmingCharacters(in: .whitespaces) }
+            return l
+        }
+        var out: [String] = []
+        for line in lines {
+            if line.isEmpty, out.last?.isEmpty ?? true { continue }
+            out.append(line)
+        }
+        return out.joined(separator: "\n").replacingOccurrences(of: "\u{1}", with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    nonisolated private static let preBlock = try! NSRegularExpression(pattern: "(?is)<pre[^>]*>.*?</pre>")
+
+    nonisolated private static func collapseWhitespace(_ html: String) -> String {
+        let ns = html as NSString
+        var out = ""
+        var last = 0
+        for m in preBlock.matches(in: html, range: NSRange(location: 0, length: ns.length)) {
+            out += ns.substring(with: NSRange(location: last, length: m.range.location - last)).replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            out += ns.substring(with: m.range).replacingOccurrences(of: "\n", with: "\u{1}")
+            last = m.range.location + m.range.length
+        }
+        out += ns.substring(from: last).replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return out
     }
 }

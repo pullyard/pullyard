@@ -105,17 +105,32 @@ pub fn base_url(site: &str) -> Option<String> {
     if s.is_empty() {
         return None;
     }
-    if !s.starts_with("http") {
+    if !s.to_lowercase().starts_with("http") {
         s = format!("https://{s}");
     }
-    while s.ends_with('/') {
-        s.pop();
-    }
     let url = url::Url::parse(&s).ok()?;
-    if url.scheme() != "https" || url.host_str().is_none_or(|h| h.is_empty()) {
+    let host = url.host_str().filter(|h| !h.is_empty())?;
+    if url.scheme() != "https" {
         return None;
     }
-    Some(s)
+    let mut path = url.path().to_string();
+    if host.to_lowercase().ends_with(".atlassian.net") {
+        path.clear();
+    } else {
+        for marker in ["/browse/", "/secure/", "/projects/", "/issues/", "/rest/", "/plugins/", "/servicedesk/"] {
+            if let Some(i) = path.find(marker) {
+                path.truncate(i);
+            }
+        }
+    }
+    while path.ends_with('/') {
+        path.pop();
+    }
+    let authority = match url.port() {
+        Some(p) => format!("{host}:{p}"),
+        None => host.to_string(),
+    };
+    Some(format!("https://{authority}{path}"))
 }
 
 pub fn plain_text(html: &str) -> String {
@@ -231,7 +246,7 @@ impl Client {
 
     async fn json(&self, path: &str) -> ApiResult<Value> {
         let bytes = self.request(path, reqwest::Method::GET, None).await?;
-        serde_json::from_slice::<Value>(&bytes).ok().filter(|v| v.is_object()).ok_or_else(|| ApiError::new("Unexpected response from Jira"))
+        serde_json::from_slice::<Value>(&bytes).ok().filter(|v| v.is_object()).ok_or_else(|| ApiError::new("Jira sent a web page instead of data. Check the address: it should be just your site, like acme.atlassian.net."))
     }
 
     pub async fn myself(&self) -> ApiResult<String> {
@@ -415,6 +430,8 @@ mod tests {
         assert_eq!(base_url(" acme.atlassian.net/ ").as_deref(), Some("https://acme.atlassian.net"));
         assert_eq!(base_url("https://jira.corp/").as_deref(), Some("https://jira.corp"));
         assert_eq!(base_url("http://jira.corp"), None);
+        assert_eq!(base_url("https://minitok.atlassian.net/jira/software/c/projects/COM/list?jql=project%20%3D%20COM").as_deref(), Some("https://minitok.atlassian.net"));
+        assert_eq!(base_url("https://jira.corp/jira/browse/PAY-1").as_deref(), Some("https://jira.corp/jira"));
         assert_eq!(base_url(""), None);
     }
 

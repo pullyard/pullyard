@@ -118,14 +118,26 @@ public static class JiraAuth
     public static string Authorization(string email, string token) =>
         string.IsNullOrEmpty(email) ? $"Bearer {token}" : "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{email}:{token}"));
 
+    private static readonly string[] UiPaths = { "/browse/", "/secure/", "/projects/", "/issues/", "/rest/", "/plugins/", "/servicedesk/" };
+
     public static Uri? BaseUrl(string? site)
     {
         var s = (site ?? "").Trim();
         if (s.Length == 0) return null;
         if (!s.StartsWith("http", StringComparison.OrdinalIgnoreCase)) s = "https://" + s;
-        s = s.TrimEnd('/');
         if (!Uri.TryCreate(s, UriKind.Absolute, out var url) || url.Scheme != Uri.UriSchemeHttps || string.IsNullOrEmpty(url.Host)) return null;
-        return url;
+        var path = url.AbsolutePath;
+        if (url.Host.EndsWith(".atlassian.net", StringComparison.OrdinalIgnoreCase)) path = "";
+        else
+        {
+            foreach (var marker in UiPaths)
+            {
+                var i = path.IndexOf(marker, StringComparison.Ordinal);
+                if (i >= 0) path = path[..i];
+            }
+        }
+        path = path.TrimEnd('/');
+        return new Uri($"https://{url.Authority}{path}");
     }
 
     public static string BaseString(Uri url) => url.GetLeftPart(UriPartial.Path).TrimEnd('/');
@@ -192,7 +204,7 @@ public sealed class JiraClient
         catch (JsonException)
         {
         }
-        throw new ApiException("Unexpected response from Jira");
+        throw new ApiException("Jira sent a web page instead of data. Check the address: it should be just your site, like acme.atlassian.net.");
     }
 
     public async Task<string> Myself(CancellationToken ct = default)
