@@ -48,23 +48,14 @@ struct ChatView: View {
                     .allowsHitTesting(!follow.scrolling)
                     .padding(.horizontal, 28)
                     .padding(.vertical, 20)
-                    .animation(Motion.smooth, value: chat.items.count)
-                    .animation(Motion.fade, value: chat.busy)
+                    .animation(unlessPinned(Motion.smooth), value: chat.items.count)
+                    .animation(unlessPinned(Motion.fade), value: chat.busy)
                     .animation(Motion.spring, value: chat.lastError)
                     .frame(maxWidth: 920)
                     .frame(maxWidth: .infinity)
-                    .background {
-                        GeometryReader { g in
-                            Color.clear.preference(key: ChatContentFrameKey.self, value: CGRect(origin: .zero, size: g.size))
-                        }
-                    }
                     .background(ChatScrollObserver(follow: follow))
                 }
-                .scrollPosition(id: Binding(get: { follow.topID }, set: { id in
-                    follow.topID = id
-                    if !follow.resizing { follow.keptTopID = id }
-                }))
-                .coordinateSpace(name: ChatContentFrameKey.space)
+                .scrollPosition(id: topAnchor)
                 .background {
                     GeometryReader { g in
                         Color.clear.preference(key: ChatViewportKey.self, value: g.size.height)
@@ -72,7 +63,6 @@ struct ChatView: View {
                 }
                 .modifier(InitialBottomAnchor())
                 .onPreferenceChange(ChatViewportKey.self) { follow.viewportHeight = $0 }
-                .onPreferenceChange(ChatContentFrameKey.self) { if follow.track($0) { scrollDown(proxy) } }
                 .onChange(of: chat.items.count) {
                     if case .user? = chat.items.last { follow.stick = true }
                     scrollDown(proxy)
@@ -120,6 +110,17 @@ struct ChatView: View {
         .background(Theme.isBrand ? Color.syPanel : Color(nsColor: .textBackgroundColor).opacity(0.35))
     }
 
+    private var topAnchor: Binding<String?> {
+        Binding(get: { follow.stick ? nil : follow.topID }, set: { id in
+            follow.topID = id
+            if !follow.resizing { follow.keptTopID = id }
+        })
+    }
+
+    private func unlessPinned(_ animation: Animation?) -> Animation? {
+        follow.stick ? nil : animation
+    }
+
     private func jumpToBottom(_ proxy: ScrollViewProxy) {
         follow.stick = true
         proxy.scrollTo("bottom", anchor: .bottom)
@@ -154,13 +155,6 @@ final class ChatFollow {
     var resizeTick = 0
     @ObservationIgnored var resizing = false
     @ObservationIgnored var viewportHeight: CGFloat = 0
-    @ObservationIgnored private var contentHeight: CGFloat = 0
-
-    func track(_ frame: CGRect) -> Bool {
-        let grew = frame.height > contentHeight + 1
-        contentHeight = frame.height
-        return grew && stick
-    }
 }
 
 private struct ChatScrollObserver: NSViewRepresentable {
@@ -381,14 +375,6 @@ private struct DiveLogo: View {
         default:
             return (34, 0, 0)
         }
-    }
-}
-
-private struct ChatContentFrameKey: PreferenceKey {
-    static let space = "chatScroll"
-    static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
     }
 }
 
