@@ -141,11 +141,7 @@ struct ChatView: View {
 
     private func scrollDown(_ proxy: ScrollViewProxy) {
         guard follow.stick else { return }
-        if chat.busy {
-            proxy.scrollTo("bottom", anchor: .bottom)
-        } else {
-            withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom", anchor: .bottom) }
-        }
+        proxy.scrollTo("bottom", anchor: .bottom)
     }
 }
 
@@ -228,16 +224,16 @@ private struct ChatScrollObserver: NSViewRepresentable {
                 MainActor.assumeIsolated { self?.layoutChanged() }
             })
             observers.append(center.addObserver(forName: NSView.frameDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.layoutChanged() }
+                MainActor.assumeIsolated { self?.layoutChanged(resized: true) }
             })
             if let doc = s.documentView {
                 observers.append(center.addObserver(forName: NSView.frameDidChangeNotification, object: doc, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.layoutChanged() }
+                    MainActor.assumeIsolated { self?.layoutChanged(resized: true) }
                 })
             }
         }
 
-        private func layoutChanged() {
+        private func layoutChanged(resized: Bool = false) {
             guard let s = scroll, let doc = s.documentView, let follow else { return }
             let clip = s.contentView
             let width = clip.bounds.width
@@ -253,7 +249,7 @@ private struct ChatScrollObserver: NSViewRepresentable {
                     self.follow?.resizing = false
                 }
             }
-            guard restoreUntil > Date(), follow.stick else { return }
+            guard follow.stick, resized || restoreUntil > Date() else { return }
             let y = max(0, doc.frame.height - clip.bounds.height)
             guard abs(clip.bounds.origin.y - y) > 0.5 else { return }
             clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
