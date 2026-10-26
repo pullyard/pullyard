@@ -144,14 +144,27 @@
     if (stick && window.innerHeight > 0) window.scrollTo(0, document.body.scrollHeight);
   }
 
+  var lastY = window.scrollY;
+
+  window.addEventListener("wheel", function (e) {
+    if (e.deltaY >= 0 || jumping || !stick) return;
+    stick = false;
+    awayCount = items.length;
+    updateJump();
+  }, { passive: true });
+
   window.addEventListener("scroll", function () {
     if (window.innerHeight <= 0) return;
+    var y = window.scrollY;
+    var down = y > lastY;
+    lastY = y;
     if (jumping) {
       if (atBottom()) finishJump();
       return;
     }
     var was = stick;
-    stick = atBottom();
+    if (!atBottom()) stick = false;
+    else if (down) stick = true;
     if (was && !stick) awayCount = items.length;
     if (stick) awayCount = null;
     updateJump();

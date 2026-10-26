@@ -270,14 +270,16 @@ private struct ChatScrollObserver: NSViewRepresentable {
             guard let s = scroll, let window = s.window, event.window === window else { return }
             let point = s.convert(event.locationInWindow, from: nil)
             guard s.bounds.contains(point) else { return }
-            if event.scrollingDeltaY > 0 {
-                if follow?.stick == true { follow?.stick = false }
-            }
             if follow?.scrolling == false { follow?.scrolling = true }
             scrollEnd?.cancel()
             let end = DispatchWorkItem { [weak self] in self?.follow?.scrolling = false }
             scrollEnd = end
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: end)
+            if event.scrollingDeltaY > 0 {
+                if follow?.stick == true { follow?.stick = false }
+                return
+            }
+            guard event.scrollingDeltaY < 0 || event.phase == .ended || event.momentumPhase == .ended else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self, let follow = self.follow else { return }
                 if !follow.stick, self.distanceToBottom < 24 { follow.stick = true }
