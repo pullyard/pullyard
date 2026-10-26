@@ -63,6 +63,7 @@ GitHub in a browser tab can take up a gigabyte of memory to show a single diff. 
 - **Fix with agent**: one click starts a new session with the review feedback. If the reviewer left a "Fix prompt", PullYard uses it; otherwise it writes one from the comments
 - Session history grouped by project, showing the branch and the PR for each session
 - Change the model, effort and permission mode, approve tool calls in the chat, and see a diff for every edit
+- A Tasks tab that lists every command and subagent Claude runs, live, with its duration, failures and full output
 - Idle sessions go to sleep to free memory and pick up again on your next message
 - An overlay with context and plan usage
 - Several Claude accounts (say, personal and work), each with its own sign-in and history
