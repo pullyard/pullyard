@@ -800,25 +800,34 @@ struct ControlMenu<Content: View>: View {
 }
 
 enum InspectorTab: String, CaseIterable, Identifiable {
-    case changes, files, pr
+    case changes, tasks, files, pr
     var id: String { rawValue }
 }
 
 struct ClaudeInspector: View {
     let tab: ClaudeTab
-    @State private var selection: InspectorTab = .changes
+    @AppStorage("agents.inspectorTab") private var selection: InspectorTab = .changes
+
+    private var tabs: [TabItem<InspectorTab>] {
+        var items = [TabItem(id: InspectorTab.changes, title: "Changes", icon: "plusminus", badge: tab.git.changes.isEmpty ? nil : "\(tab.git.changes.count)", badgeColor: .syAmber)]
+        if let chat = tab.chat {
+            let running = chat.taskCalls.filter { ChatTaskState($0) == .running }.count
+            items.append(TabItem(id: InspectorTab.tasks, title: "Tasks", icon: "terminal", badge: running > 0 ? "\(running)" : nil, badgeColor: .sySky))
+        }
+        items.append(TabItem(id: InspectorTab.files, title: "Files", icon: "folder"))
+        items.append(TabItem(id: InspectorTab.pr, title: "PR", icon: "arrow.triangle.pull"))
+        return items
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            TabStrip(items: [
-                TabItem(id: InspectorTab.changes, title: "Changes", icon: "plusminus", badge: tab.git.changes.isEmpty ? nil : "\(tab.git.changes.count)", badgeColor: .syAmber),
-                TabItem(id: InspectorTab.files, title: "Files", icon: "folder"),
-                TabItem(id: InspectorTab.pr, title: "PR", icon: "arrow.triangle.pull")
-            ], selection: $selection)
+            TabStrip(items: tabs, selection: $selection)
             .padding(.top, 4)
             ClaudeHairline()
             switch selection {
             case .changes: ChangesPanel(tab: tab)
+            case .tasks:
+                if let chat = tab.chat { ChatTasksPanel(chat: chat) } else { ChangesPanel(tab: tab) }
             case .files: LocalFilesPanel(root: tab.folder)
             case .pr: BranchPRPanel(tab: tab)
             }

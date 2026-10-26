@@ -5,6 +5,7 @@ pub mod indicator;
 pub mod inspector;
 pub mod open_in;
 pub mod quick_open;
+pub mod tasks;
 pub mod workspace_view;
 
 use adw::prelude::*;

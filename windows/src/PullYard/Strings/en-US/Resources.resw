@@ -366,6 +366,7 @@
   <data name="Inspector_OpenPRAgent" xml:space="preserve"><value>Open PR with agent</value></data>
   <data name="Inspector_PR" xml:space="preserve"><value>PR</value></data>
   <data name="Inspector_SendToSession" xml:space="preserve"><value>Send to this session</value></data>
+  <data name="Inspector_Tasks" xml:space="preserve"><value>Tasks</value></data>
   <data name="Inspector_ThisBranch" xml:space="preserve"><value>This branch</value></data>
   <data name="Inspector_Unresolved" xml:space="preserve"><value>Unresolved comments ({0})</value></data>
   <data name="Issue_Close" xml:space="preserve"><value>Close issue</value></data>
@@ -739,6 +740,14 @@
   <data name="Support_Pizza" xml:space="preserve"><value>Buy me a pizza 🍕</value></data>
   <data name="Support_PizzaDescription" xml:space="preserve"><value>Pay what you want, from $3. PullYard stays free and open source.</value></data>
   <data name="Support_Title" xml:space="preserve"><value>Support {0}</value></data>
+  <data name="Tasks_Background" xml:space="preserve"><value>Background</value></data>
+  <data name="Tasks_CopyCommand" xml:space="preserve"><value>Copy Command</value></data>
+  <data name="Tasks_CopyOutput" xml:space="preserve"><value>Copy Output</value></data>
+  <data name="Tasks_Empty" xml:space="preserve"><value>Commands and agents Claude runs will show up here</value></data>
+  <data name="Tasks_Failed" xml:space="preserve"><value>Failed</value></data>
+  <data name="Tasks_Finished" xml:space="preserve"><value>Finished</value></data>
+  <data name="Tasks_Running" xml:space="preserve"><value>Running</value></data>
+  <data name="Tasks_Stopped" xml:space="preserve"><value>Stopped</value></data>
   <data name="Terminal_CloseTab" xml:space="preserve"><value>Close tab</value></data>
   <data name="Terminal_Ended" xml:space="preserve"><value>Session ended</value></data>
   <data name="Terminal_Resume" xml:space="preserve"><value>Resume session</value></data>

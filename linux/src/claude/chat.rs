@@ -54,7 +54,24 @@ pub struct ToolCall {
     pub structured: RefCell<Option<Map<String, Value>>>,
     pub permission: RefCell<Option<Rc<PermissionRequest>>>,
     pub parent: RefCell<Option<String>>,
+    pub started_at: Cell<Option<Instant>>,
+    pub finished_at: Cell<Option<Instant>>,
+    pub task_id: RefCell<Option<String>>,
+    pub backgrounded: Cell<bool>,
+    pub task_status: RefCell<Option<String>>,
+    pub task_summary: RefCell<Option<String>>,
+    pub task_tokens: Cell<Option<i64>>,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TaskState {
+    Running,
+    Done,
+    Failed,
+    Stopped,
+}
+
+pub const TASK_TOOLS: [&str; 3] = ["Bash", "Agent", "Task"];
 
 impl ToolCall {
     pub(crate) fn new(id: &str, name: &str) -> Rc<Self> {
@@ -68,7 +85,43 @@ impl ToolCall {
             structured: RefCell::new(None),
             permission: RefCell::new(None),
             parent: RefCell::new(None),
+            started_at: Cell::new(None),
+            finished_at: Cell::new(None),
+            task_id: RefCell::new(None),
+            backgrounded: Cell::new(false),
+            task_status: RefCell::new(None),
+            task_summary: RefCell::new(None),
+            task_tokens: Cell::new(None),
         })
+    }
+
+    pub fn is_task(&self) -> bool {
+        self.parent.borrow().is_none() && TASK_TOOLS.contains(&self.name.as_str())
+    }
+
+    pub fn task_state(&self) -> TaskState {
+        let from_status = match self.status.get() {
+            ToolStatus::Running => TaskState::Running,
+            ToolStatus::Done => TaskState::Done,
+            ToolStatus::Error => TaskState::Failed,
+            ToolStatus::Denied => TaskState::Stopped,
+        };
+        let status = self.task_status.borrow().clone();
+        if !self.backgrounded.get() && status.is_none() {
+            return from_status;
+        }
+        match status.as_deref() {
+            None | Some("running") | Some("pending") => {
+                if self.backgrounded.get() {
+                    TaskState::Running
+                } else {
+                    from_status
+                }
+            }
+            Some("completed") => TaskState::Done,
+            Some("failed") => TaskState::Failed,
+            Some(_) => TaskState::Stopped,
+        }
     }
 
     pub fn string(&self, key: &str) -> Option<String> {
@@ -750,7 +803,64 @@ impl ChatSession {
                     self.emit(Event::Updated(format!("c{id}")));
                 }
             }
+            Some("task_started") => {
+                let Some(tool) = self.task_tool(o) else { return };
+                if let Some(id) = s(o, "task_id") {
+                    *tool.task_id.borrow_mut() = Some(id);
+                }
+                if o.get("is_backgrounded").and_then(|v| v.as_bool()) == Some(true) {
+                    tool.backgrounded.set(true);
+                }
+                self.emit_task(&tool);
+            }
+            Some("task_progress") => {
+                let Some(tool) = self.task_tool(o) else { return };
+                if let Some(tokens) = o.get("usage").and_then(|u| u.get("total_tokens")).and_then(|v| v.as_i64()) {
+                    tool.task_tokens.set(Some(tokens));
+                    self.emit_task(&tool);
+                }
+            }
+            Some("task_updated") => {
+                let Some(tool) = self.task_tool(o) else { return };
+                let Some(patch) = o.get("patch") else { return };
+                if patch.get("is_backgrounded").and_then(|v| v.as_bool()) == Some(true) {
+                    tool.backgrounded.set(true);
+                }
+                if let Some(st) = s(patch, "status") {
+                    if st != "running" && st != "pending" && tool.finished_at.get().is_none() {
+                        tool.finished_at.set(Some(Instant::now()));
+                    }
+                    *tool.task_status.borrow_mut() = Some(st);
+                }
+                self.emit_task(&tool);
+            }
+            Some("task_notification") => {
+                let Some(tool) = self.task_tool(o) else { return };
+                *tool.task_status.borrow_mut() = Some(s(o, "status").unwrap_or_else(|| "completed".into()));
+                if let Some(summary) = s(o, "summary").filter(|v| !v.is_empty()) {
+                    *tool.task_summary.borrow_mut() = Some(summary);
+                }
+                if tool.backgrounded.get() || tool.finished_at.get().is_none() {
+                    tool.finished_at.set(Some(Instant::now()));
+                }
+                self.emit_task(&tool);
+            }
             _ => {}
+        }
+    }
+
+    fn task_tool(&self, o: &Value) -> Option<Rc<ToolCall>> {
+        let tools = self.tools.borrow();
+        if let Some(t) = s(o, "tool_use_id").and_then(|id| tools.get(&id)) {
+            return Some(t.clone());
+        }
+        let task_id = s(o, "task_id")?;
+        tools.values().find(|t| t.task_id.borrow().as_deref() == Some(task_id.as_str())).cloned()
+    }
+
+    fn emit_task(&self, tool: &ToolCall) {
+        if tool.parent.borrow().is_none() {
+            self.emit(Event::Updated(format!("c{}", tool.id)));
         }
     }
 
@@ -793,6 +903,7 @@ impl ChatSession {
                         }
                         let call = ToolCall::new(&id, &name);
                         *call.parent.borrow_mut() = parent.clone();
+                        call.started_at.set(Some(Instant::now()));
                         self.tools.borrow_mut().insert(id.clone(), call.clone());
                         self.tool_streams.borrow_mut().insert(key, id);
                         if parent.is_none() {
@@ -872,6 +983,7 @@ impl ChatSession {
                         None => {
                             let c = ToolCall::new(&id, &name);
                             *c.parent.borrow_mut() = parent.clone();
+                            c.started_at.set(Some(Instant::now()));
                             self.tools.borrow_mut().insert(id.clone(), c.clone());
                             if parent.is_none() {
                                 self.items.borrow_mut().push(ChatItem::Tool(c.clone()));
@@ -903,6 +1015,14 @@ impl ChatSession {
             }
             *tool.result_text.borrow_mut() = result_text(block.get("content")).map(payload::cap_text);
             *tool.structured.borrow_mut() = payload::trimmed(o.get("tool_use_result").and_then(|v| v.as_object()).cloned());
+            let background = tool.structured.borrow().as_ref().and_then(|m| m.get("backgroundTaskId")).and_then(|v| v.as_str()).map(|v| v.to_string());
+            if let Some(bg) = background {
+                *tool.task_id.borrow_mut() = Some(bg);
+                tool.backgrounded.set(true);
+            }
+            if !tool.backgrounded.get() {
+                tool.finished_at.set(Some(Instant::now()));
+            }
             if tool.name == "Bash" && tool.string("command").map(|c| ship::is_pr_create(&c)).unwrap_or(false) {
                 if let Some(url) = tool.result_text.borrow().as_deref().and_then(ship::pull_request_url) {
                     *self.created_pr.borrow_mut() = Some(url);

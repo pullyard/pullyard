@@ -489,7 +489,54 @@ public sealed partial class ChatSession : ObservableObject
                     Touch(tool);
                 }
                 break;
+            case "task_started":
+                if (TaskTool(o) is { } started)
+                {
+                    started.TaskId = o.Str("task_id") ?? started.TaskId;
+                    if (o.Bool("is_backgrounded") == true) started.Backgrounded = true;
+                    TouchTask(started);
+                }
+                break;
+            case "task_progress":
+                if (TaskTool(o) is { } progress && o.Obj("usage").Int("total_tokens") is { } tokens)
+                {
+                    progress.TaskTokens = tokens;
+                    TouchTask(progress);
+                }
+                break;
+            case "task_updated":
+                if (TaskTool(o) is { } updated && o.Obj("patch") is { } patch)
+                {
+                    if (patch.Bool("is_backgrounded") == true) updated.Backgrounded = true;
+                    if (patch.Str("status") is { } st)
+                    {
+                        updated.TaskStatus = st;
+                        if (st is not "running" and not "pending") updated.FinishedAt ??= DateTime.Now;
+                    }
+                    TouchTask(updated);
+                }
+                break;
+            case "task_notification":
+                if (TaskTool(o) is { } done)
+                {
+                    done.TaskStatus = o.Str("status") ?? "completed";
+                    if (o.Str("summary") is { Length: > 0 } summary) done.TaskSummary = summary;
+                    if (done.Backgrounded || done.FinishedAt is null) done.FinishedAt = DateTime.Now;
+                    TouchTask(done);
+                }
+                break;
         }
+    }
+
+    private ToolItem? TaskTool(JsonObject o)
+    {
+        if (o.Str("tool_use_id") is { } id && tools.TryGetValue(id, out var tool)) return tool;
+        return o.Str("task_id") is { } taskId ? tools.Values.FirstOrDefault(t => t.TaskId == taskId) : null;
+    }
+
+    private void TouchTask(ToolItem tool)
+    {
+        if (tool.ParentToolUseId is null) Touch(tool);
     }
 
     private static string StreamKey(JsonObject o, int index) => $"{o.Str("api_message_id") ?? "m"}:{index}";
@@ -528,7 +575,7 @@ public sealed partial class ChatSession : ObservableObject
                     case "tool_use":
                     {
                         if (block.Str("id") is not { } id || block.Str("name") is not { } name || tools.ContainsKey(id)) return;
-                        var call = new ToolItem(id, name) { ParentToolUseId = parent };
+                        var call = new ToolItem(id, name) { ParentToolUseId = parent, StartedAt = DateTime.Now };
                         tools[id] = call;
                         streamTools[key] = id;
                         if (parent is null) Append(call);
@@ -605,7 +652,7 @@ public sealed partial class ChatSession : ObservableObject
                     if (block.Str("id") is not { } id || block.Str("name") is not { } name) continue;
                     if (!tools.TryGetValue(id, out var call))
                     {
-                        call = new ToolItem(id, name) { ParentToolUseId = parent };
+                        call = new ToolItem(id, name) { ParentToolUseId = parent, StartedAt = DateTime.Now };
                         tools[id] = call;
                         if (parent is null) Append(call);
                     }
@@ -627,6 +674,12 @@ public sealed partial class ChatSession : ObservableObject
             if (tool.Status != ToolStatus.Denied) tool.Status = block.Bool("is_error") == true ? ToolStatus.Error : ToolStatus.Done;
             tool.ResultText = ResultText(block["content"]);
             tool.Structured = o.Obj("tool_use_result")?.DeepClone() as JsonObject;
+            if (tool.Structured.Str("backgroundTaskId") is { } bg)
+            {
+                tool.TaskId = bg;
+                tool.Backgrounded = true;
+            }
+            if (!tool.Backgrounded) tool.FinishedAt = DateTime.Now;
             if (tool.ParentToolUseId is null && AgentShip.CreatedPullRequest(tool) is { } url) CreatedPR = url;
             if (tool.ParentToolUseId is null) Touch(tool);
         }

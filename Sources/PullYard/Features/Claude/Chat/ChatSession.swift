@@ -55,6 +55,13 @@ final class ChatToolCall: Identifiable {
     var parentToolUseId: String?
     var children: [ChatToolCall] = []
     var agentText: String?
+    var startedAt: Date?
+    var finishedAt: Date?
+    var taskId: String?
+    var backgrounded = false
+    var taskStatus: String?
+    var taskSummary: String?
+    var taskTokens: Int?
 
     init(id: String, name: String) {
         self.id = id
@@ -500,9 +507,34 @@ final class ChatSession {
                 tool.status = .denied
                 tool.resultText = o["message"] as? String
             }
+        case "task_started":
+            guard let tool = taskTool(o) else { return }
+            tool.taskId = o["task_id"] as? String ?? tool.taskId
+            if o["is_backgrounded"] as? Bool == true { tool.backgrounded = true }
+        case "task_progress":
+            guard let tool = taskTool(o) else { return }
+            if let tokens = (o["usage"] as? [String: Any])?["total_tokens"] as? Int { tool.taskTokens = tokens }
+        case "task_updated":
+            guard let tool = taskTool(o), let patch = o["patch"] as? [String: Any] else { return }
+            if patch["is_backgrounded"] as? Bool == true { tool.backgrounded = true }
+            if let status = patch["status"] as? String {
+                tool.taskStatus = status
+                if status != "running", status != "pending" { tool.finishedAt = tool.finishedAt ?? Date() }
+            }
+        case "task_notification":
+            guard let tool = taskTool(o) else { return }
+            tool.taskStatus = o["status"] as? String ?? "completed"
+            if let summary = o["summary"] as? String, !summary.isEmpty { tool.taskSummary = summary }
+            if tool.backgrounded || tool.finishedAt == nil { tool.finishedAt = Date() }
         default:
             break
         }
+    }
+
+    private func taskTool(_ o: [String: Any]) -> ChatToolCall? {
+        if let id = o["tool_use_id"] as? String, let tool = tools[id] { return tool }
+        guard let taskId = o["task_id"] as? String else { return nil }
+        return tools.values.first { $0.taskId == taskId }
     }
 
     private func streamKey(_ o: [String: Any], index: Int) -> String {
@@ -533,6 +565,7 @@ final class ChatSession {
                 guard let id = block["id"] as? String, let name = block["name"] as? String, tools[id] == nil else { return }
                 let call = ChatToolCall(id: id, name: name)
                 call.parentToolUseId = parent
+                call.startedAt = Date()
                 tools[id] = call
                 streamTexts[key] = ChatText(id: "tool:" + id, text: "")
                 if let parent { tools[parent]?.children.append(call) } else { items.append(.tool(call)) }
@@ -584,6 +617,7 @@ final class ChatSession {
                 let call = tools[id] ?? {
                     let c = ChatToolCall(id: id, name: name)
                     c.parentToolUseId = parent
+                    c.startedAt = Date()
                     tools[id] = c
                     if let parent { tools[parent]?.children.append(c) } else { items.append(.tool(c)) }
                     return c
@@ -603,6 +637,11 @@ final class ChatSession {
             if tool.status != .denied { tool.status = (block["is_error"] as? Bool == true) ? .error : .done }
             tool.resultText = ChatSession.resultText(block["content"])
             tool.structured = ChatSession.trimmed(o["tool_use_result"] as? [String: Any])
+            if let bg = tool.structured?["backgroundTaskId"] as? String {
+                tool.taskId = bg
+                tool.backgrounded = true
+            }
+            if !tool.backgrounded { tool.finishedAt = Date() }
             if tool.name == "Bash", (tool.input["command"] as? String)?.contains("gh pr create") == true,
                let url = tool.resultText.flatMap(AgentShip.pullRequestURL) {
                 createdPR = url
