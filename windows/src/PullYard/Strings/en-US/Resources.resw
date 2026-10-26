@@ -355,6 +355,15 @@
   <data name="Inspector_Changes" xml:space="preserve"><value>Changes</value></data>
   <data name="Inspector_CommitAgent" xml:space="preserve"><value>Commit and push to #{0} with agent</value></data>
   <data name="Inspector_CreatePR" xml:space="preserve"><value>Create PR in browser</value></data>
+  <data name="Inspector_Tasks" xml:space="preserve"><value>Tasks</value></data>
+  <data name="Tasks_Empty" xml:space="preserve"><value>Commands and agents Claude runs will show up here</value></data>
+  <data name="Tasks_Running" xml:space="preserve"><value>Running</value></data>
+  <data name="Tasks_Finished" xml:space="preserve"><value>Finished</value></data>
+  <data name="Tasks_Background" xml:space="preserve"><value>Background</value></data>
+  <data name="Tasks_Failed" xml:space="preserve"><value>Failed</value></data>
+  <data name="Tasks_Stopped" xml:space="preserve"><value>Stopped</value></data>
+  <data name="Tasks_CopyCommand" xml:space="preserve"><value>Copy Command</value></data>
+  <data name="Tasks_CopyOutput" xml:space="preserve"><value>Copy Output</value></data>
   <data name="Inspector_Files" xml:space="preserve"><value>Files</value></data>
   <data name="Inspector_FilesChanged" xml:space="preserve"><value>Files changed · {0}</value></data>
   <data name="Inspector_FromSession" xml:space="preserve"><value>from this session</value></data>

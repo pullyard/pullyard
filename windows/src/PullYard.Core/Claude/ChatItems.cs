@@ -105,6 +105,8 @@ public sealed class PermissionRequest
 
 public enum ToolStatus { Running, Done, Error, Denied }
 
+public enum ChatTaskState { Running, Done, Failed, Stopped }
+
 public sealed class ToolItem : ChatItem
 {
     public string ToolId { get; }
@@ -116,6 +118,43 @@ public sealed class ToolItem : ChatItem
     public JsonObject? Structured { get; set; }
     public PermissionRequest? Permission { get; set; }
     public string? ParentToolUseId { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? FinishedAt { get; set; }
+    public string? TaskId { get; set; }
+    public bool Backgrounded { get; set; }
+    public string? TaskStatus { get; set; }
+    public string? TaskSummary { get; set; }
+    public int? TaskTokens { get; set; }
+
+    public static readonly HashSet<string> TaskTools = new() { "Bash", "Agent", "Task" };
+
+    public bool IsTask => ParentToolUseId is null && TaskTools.Contains(Name);
+
+    public ChatTaskState TaskState
+    {
+        get
+        {
+            if (Backgrounded || TaskStatus is not null)
+            {
+                switch (TaskStatus)
+                {
+                    case null or "running" or "pending":
+                        if (Backgrounded || Status == ToolStatus.Running) return ChatTaskState.Running;
+                        break;
+                    case "completed": return ChatTaskState.Done;
+                    case "failed": return ChatTaskState.Failed;
+                    default: return ChatTaskState.Stopped;
+                }
+            }
+            return Status switch
+            {
+                ToolStatus.Running => ChatTaskState.Running,
+                ToolStatus.Error => ChatTaskState.Failed,
+                ToolStatus.Denied => ChatTaskState.Stopped,
+                _ => ChatTaskState.Done
+            };
+        }
+    }
 
     public ToolItem(string id, string name)
     {

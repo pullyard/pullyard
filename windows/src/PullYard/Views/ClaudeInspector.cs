@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -19,6 +20,7 @@ public sealed class ClaudeInspector : Grid
     private readonly TabStrip tabs = new("changes");
     private readonly ContentControl host = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch, IsTabStop = false };
     private ChangesPanel? changes;
+    private TasksPanel? tasks;
     private LocalFilesPanel? files;
     private BranchPRPanel? prs;
 
@@ -35,14 +37,36 @@ public sealed class ClaudeInspector : Grid
         Children.Add(host);
         tabs.SelectionChanged += _ => Show();
         tab.Git.PropertyChanged += OnGit;
-        Unloaded += (_, _) => tab.Git.PropertyChanged -= OnGit;
+        if (tab.Chat is { } chat) chat.ItemsChanged += OnItems;
+        Unloaded += (_, _) =>
+        {
+            tab.Git.PropertyChanged -= OnGit;
+            if (tab.Chat is { } c) c.ItemsChanged -= OnItems;
+        };
         Loaded += (_, _) =>
         {
             tab.Git.PropertyChanged -= OnGit;
             tab.Git.PropertyChanged += OnGit;
+            if (tab.Chat is { } c)
+            {
+                c.ItemsChanged -= OnItems;
+                c.ItemsChanged += OnItems;
+            }
         };
         RenderTabs();
         Show();
+    }
+
+    private int shownRunning = -1;
+
+    private int RunningTasks => tab.Chat?.Items.OfType<ToolItem>().Count(t => t.IsTask && t.TaskState == ChatTaskState.Running) ?? 0;
+
+    private void OnItems()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (RunningTasks != shownRunning) RenderTabs();
+        });
     }
 
     private void OnGit(object? sender, PropertyChangedEventArgs e)
@@ -53,12 +77,12 @@ public sealed class ClaudeInspector : Grid
     private void RenderTabs()
     {
         var count = tab.Git.Changes.Count;
-        tabs.SetTabs(new[]
-        {
-            new TabSpec("changes", L.T("Inspector_Changes", "Changes"), "", count > 0 ? count.ToString() : null, "amber"),
-            new TabSpec("files", L.T("Inspector_Files", "Files"), ""),
-            new TabSpec("pr", L.T("Inspector_PR", "PR"), "")
-        });
+        shownRunning = RunningTasks;
+        var specs = new List<TabSpec> { new("changes", L.T("Inspector_Changes", "Changes"), "", count > 0 ? count.ToString() : null, "amber") };
+        if (tab.Chat is not null) specs.Add(new TabSpec("tasks", L.T("Inspector_Tasks", "Tasks"), "\uE756", shownRunning > 0 ? shownRunning.ToString() : null, "sky"));
+        specs.Add(new TabSpec("files", L.T("Inspector_Files", "Files"), ""));
+        specs.Add(new TabSpec("pr", L.T("Inspector_PR", "PR"), ""));
+        tabs.SetTabs(specs);
     }
 
     private void Show()
@@ -67,8 +91,203 @@ public sealed class ClaudeInspector : Grid
         {
             "files" => files ??= new LocalFilesPanel(tab.Folder),
             "pr" => prs ??= new BranchPRPanel(tab),
+            "tasks" when tab.Chat is { } chat => tasks ??= new TasksPanel(chat),
             _ => changes ??= new ChangesPanel(tab)
         };
+    }
+}
+
+public sealed class TasksPanel : Grid
+{
+    private readonly ChatSession chat;
+    private readonly StackPanel list = Ui.V(2);
+    private readonly ContentControl empty = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch, IsTabStop = false };
+    private readonly HashSet<string> expanded = new();
+    private bool showFinished = true;
+    private DispatcherQueueTimer? pending;
+    private DispatcherQueueTimer? clock;
+
+    public TasksPanel(ChatSession chat)
+    {
+        this.chat = chat;
+        list.Padding = new Thickness(8);
+        Children.Add(new ScrollViewer { Content = list });
+        Children.Add(empty);
+        chat.ItemsChanged += Schedule;
+        Unloaded += (_, _) =>
+        {
+            chat.ItemsChanged -= Schedule;
+            clock?.Stop();
+        };
+        Loaded += (_, _) =>
+        {
+            chat.ItemsChanged -= Schedule;
+            chat.ItemsChanged += Schedule;
+            Render();
+        };
+        Render();
+    }
+
+    private void Schedule()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (pending is not null) return;
+            pending = DispatcherQueue.CreateTimer();
+            pending.Interval = TimeSpan.FromMilliseconds(250);
+            pending.IsRepeating = false;
+            pending.Tick += (_, _) =>
+            {
+                pending = null;
+                Render();
+            };
+            pending.Start();
+        });
+    }
+
+    private void Render()
+    {
+        var calls = chat.Items.OfType<ToolItem>().Where(t => t.IsTask).Reverse().ToList();
+        var running = calls.Where(t => t.TaskState == ChatTaskState.Running).ToList();
+        var finished = calls.Where(t => t.TaskState != ChatTaskState.Running).ToList();
+        list.Children.Clear();
+        empty.Content = calls.Count == 0 ? Ui.Empty("", "dim", L.T("Tasks_Empty", "Commands and agents Claude runs will show up here")) : null;
+        empty.Visibility = calls.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (running.Count > 0)
+        {
+            list.Children.Add(Header(L.T("Tasks_Running", "Running") + $" {running.Count}", false));
+            foreach (var t in running) list.Children.Add(Row(t));
+        }
+        if (finished.Count > 0)
+        {
+            list.Children.Add(Header(L.T("Tasks_Finished", "Finished") + $" {finished.Count}", true));
+            if (showFinished)
+                foreach (var t in finished) list.Children.Add(Row(t));
+        }
+        if (running.Count > 0)
+        {
+            if (clock is null)
+            {
+                clock = DispatcherQueue.CreateTimer();
+                clock.Interval = TimeSpan.FromSeconds(1);
+                clock.Tick += (_, _) => Render();
+            }
+            if (!clock.IsRunning) clock.Start();
+        }
+        else clock?.Stop();
+    }
+
+    private UIElement Header(string title, bool collapsible)
+    {
+        var row = Ui.H(4, Ui.Text(title, 12, "muted", FontWeights.SemiBold), collapsible ? Ui.Glyph(showFinished ? "" : "", 9, "dim") : null);
+        row.Margin = new Thickness(6, 8, 6, 4);
+        if (!collapsible) return row;
+        var b = new Button { Content = row, Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left };
+        b.Click += (_, _) =>
+        {
+            showFinished = !showFinished;
+            Render();
+        };
+        return b;
+    }
+
+    private static string Title(ToolItem t)
+    {
+        if (t.Str("description") is { Length: > 0 } d) return d;
+        if (t.Str("command") is { Length: > 0 } c) return c.Split('\n')[0];
+        if (t.Str("prompt") is { Length: > 0 } p) return p.Length > 80 ? p[..80] : p;
+        return t.Name;
+    }
+
+    private static string? Subtitle(ToolItem t)
+    {
+        if (t.Name == "Bash") return t.Backgrounded ? L.T("Tasks_Background", "Background") : null;
+        var parts = new List<string>();
+        if (t.Str("subagent_type") is { Length: > 0 } type) parts.Add(type);
+        if (t.TaskTokens is { } n) parts.Add((n >= 1000 ? (n / 1000.0).ToString("0.0") + "k" : n.ToString()) + " tokens");
+        return parts.Count == 0 ? null : string.Join(" · ", parts);
+    }
+
+    private static string? Output(ToolItem t)
+    {
+        if (t.Structured is { } s)
+        {
+            var joined = string.Join("\n", new[] { s.Str("stdout"), s.Str("stderr") }.Where(x => !string.IsNullOrEmpty(x)));
+            if (joined.Length > 0) return joined;
+        }
+        return t.TaskSummary ?? t.ResultText;
+    }
+
+    public static string Duration(TimeSpan span)
+    {
+        var s = Math.Max(0, (int)Math.Round(span.TotalSeconds));
+        if (s < 60) return $"{s}s";
+        if (s < 3600) return $"{s / 60}m {s % 60}s";
+        return $"{s / 3600}h {s % 3600 / 60}m";
+    }
+
+    private static UIElement Trailing(ToolItem t) => t.TaskState switch
+    {
+        ChatTaskState.Running => Ui.H(6, t.StartedAt is { } start ? Ui.Caption(Duration(DateTime.Now - start)) : null, Ui.Spinner(12)),
+        ChatTaskState.Failed => Ui.Text(L.T("Tasks_Failed", "Failed"), 12, "red", FontWeights.Medium),
+        ChatTaskState.Stopped => Ui.Caption(L.T("Tasks_Stopped", "Stopped")),
+        _ => Ui.Caption(t.StartedAt is { } a && t.FinishedAt is { } b ? Duration(b - a) : "")
+    };
+
+    private UIElement Row(ToolItem t)
+    {
+        var open = expanded.Contains(t.ToolId);
+        var titles = Ui.V(2, Ui.Text(Title(t), 13, "text", maxLines: 1), Subtitle(t) is { } sub ? Ui.Caption(sub) : null);
+        var line = Ui.Columns(
+            (Ui.Glyph(t.Name == "Bash" ? "" : "", 12, "dim"), Ui.Auto),
+            (titles, Ui.Star),
+            (Trailing(t), Ui.Auto),
+            (Ui.Glyph(open ? "" : "", 9, "dim"), Ui.Auto));
+        var button = new Button
+        {
+            Content = line,
+            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(6),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch
+        };
+        button.Click += (_, _) =>
+        {
+            if (!expanded.Remove(t.ToolId)) expanded.Add(t.ToolId);
+            Render();
+        };
+        var command = t.Str("command");
+        var output = Output(t);
+        button.ContextFlyout = Ui.Menu(
+            string.IsNullOrEmpty(command) ? null : Ui.MenuItem(L.T("Tasks_CopyCommand", "Copy Command"), () => WindowInterop.Copy(command)),
+            string.IsNullOrEmpty(output) ? null : Ui.MenuItem(L.T("Tasks_CopyOutput", "Copy Output"), () => WindowInterop.Copy(output)));
+        var box = Ui.V(6, button);
+        if (open)
+        {
+            var details = Ui.V(6);
+            details.Margin = new Thickness(6, 0, 6, 8);
+            if (!string.IsNullOrEmpty(command))
+                details.Children.Add(new Border
+                {
+                    Child = Ui.Text("$ " + command, 12, "text", wrap: true, mono: true, select: true),
+                    Background = Palette.Brush("sunken"),
+                    BorderBrush = Palette.Brush("text", 0.1),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(8)
+                });
+            if (!string.IsNullOrEmpty(output))
+                details.Children.Add(new Border
+                {
+                    Child = new ScrollViewer { Content = Ui.Text(output.Length > 8000 ? output[^8000..] : output, 12, t.TaskState == ChatTaskState.Failed ? "red" : "muted", wrap: true, mono: true, select: true), MaxHeight = 180 },
+                    Background = Palette.Brush("text", 0.06),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(8)
+                });
+            box.Children.Add(details);
+        }
+        return new Border { Child = box, CornerRadius = new CornerRadius(8), Background = open ? Palette.Brush("text", 0.05) : null };
     }
 }
 
