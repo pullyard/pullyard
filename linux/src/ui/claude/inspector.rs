@@ -15,6 +15,7 @@ use crate::ui::menu::{context_menu, Menu};
 use crate::ui::pr::model::{Change, PrModel};
 use crate::ui::repos::entry_row;
 use crate::ui::tabstrip::{TabItem, TabStrip};
+use super::tasks::TasksPanel;
 use crate::ui::widgets::*;
 use crate::{app, util};
 
@@ -31,11 +32,13 @@ pub struct Inspector {
 
 impl Inspector {
     pub fn new(tab: Rc<Tab>) -> Rc<Self> {
-        let strip = TabStrip::new(vec![
-            TabItem { id: "changes", title: "Changes".into(), icon: "sy-plusminus-symbolic" },
-            TabItem { id: "files", title: "Files".into(), icon: "sy-folder-symbolic" },
-            TabItem { id: "pr", title: "PR".into(), icon: "sy-pr-symbolic" },
-        ]);
+        let mut items = vec![TabItem { id: "changes", title: "Changes".into(), icon: "sy-plusminus-symbolic" }];
+        if tab.chat.is_some() {
+            items.push(TabItem { id: "tasks", title: "Tasks".into(), icon: "sy-terminal-symbolic" });
+        }
+        items.push(TabItem { id: "files", title: "Files".into(), icon: "sy-folder-symbolic" });
+        items.push(TabItem { id: "pr", title: "PR".into(), icon: "sy-pr-symbolic" });
+        let strip = TabStrip::new(items);
         let stack = gtk::Stack::new();
         stack.set_vexpand(true);
         let changes = vbox(0);
@@ -63,6 +66,12 @@ impl Inspector {
         changes.append(&line());
         changes.append(&changes_stack);
         stack.add_named(&changes, Some("changes"));
+        let tasks = tab.chat.clone().map(TasksPanel::new);
+        if let Some(t) = &tasks {
+            stack.add_named(&t.widget, Some("tasks"));
+            let s = strip.clone();
+            t.on_running(move |n| s.set_badge("tasks", if n > 0 { Some(n.to_string()) } else { None }.as_deref(), Some("sky")));
+        }
         let files = LocalFiles::new(&tab.folder);
         stack.add_named(&files.widget, Some("files"));
         let pr = BranchPrs::new(tab.clone());
@@ -101,6 +110,9 @@ impl Inspector {
         });
         me.render_changes();
         keep_alive(&me.widget, strip);
+        if let Some(t) = tasks {
+            keep_alive(&me.widget, t);
+        }
         tab.git.refresh();
         me
     }
