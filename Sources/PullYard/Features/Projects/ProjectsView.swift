@@ -13,8 +13,8 @@ struct ProjectsListView: View {
         List(selection: Binding(get: { app.detailRoot }, set: { app.select($0) })) {
             if !app.hasProjectScope || (error?.contains("scope") ?? false) {
                 ScopeHint()
-            } else if let error {
-                Text(error).foregroundStyle(Color.syRed).font(.syCaption)
+            } else if let error, !projects.isEmpty {
+                ListErrorNote(message: error) { await load() }
             }
             ForEach(projects.filter { showClosed || !$0.closed }) { p in
                 HStack(alignment: .top, spacing: 9) {
@@ -22,7 +22,7 @@ struct ProjectsListView: View {
                         .padding(.top, 1)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 5) {
-                            Text(p.title).font(.syBody).fontWeight(.semibold).foregroundStyle(Color.syText).lineLimit(1)
+                            Text(p.title).font(.syBody).fontWeight(.medium).foregroundStyle(Color.syText).lineLimit(1)
                             if p.closed { ChipView(text: "closed", color: .sySlate) }
                         }
                         if let d = p.shortDescription, !d.isEmpty { Text(d).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(2) }
@@ -41,11 +41,21 @@ struct ProjectsListView: View {
                 .tag(Route.project(p.ref))
                 .contextMenu { Button("Open in Browser") { openInBrowser(p.url) } }
             }
-            if projects.isEmpty, !loading, error == nil {
-                Text("No projects").font(.syBody).foregroundStyle(Color.syMuted)
+        }
+        .overlay {
+            if loading && projects.isEmpty {
+                PullYardLoader(size: 44)
+            } else if app.hasProjectScope, let error, !error.contains("scope"), projects.isEmpty {
+                ListErrorNote(message: error, centered: true) { await load() }
+            } else if app.hasProjectScope, error == nil, !loading, !projects.contains(where: { showClosed || !$0.closed }) {
+                ListEmptyNote(
+                    title: projects.isEmpty ? "No projects" : "No open projects",
+                    message: projects.isEmpty ? "Projects you can access show up here." : "Closed projects are hidden.",
+                    actionTitle: projects.isEmpty ? nil : "Show closed",
+                    action: { showClosed = true }
+                )
             }
         }
-        .overlay { if loading && projects.isEmpty { PullYardLoader(size: 44) } }
         .liveRefresh(updated: lastUpdated, refreshing: loading, error: projects.isEmpty ? nil : error) { await load() }
         .navigationTitle("Projects")
         .panelToolbar {
@@ -267,6 +277,7 @@ struct ProjectBoardView: View {
         .panelToolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { openInBrowser(project.url) } label: { Label("Open in Browser", systemImage: "safari") }
+                    .help("Open in browser")
             }
         }
         .alert("Error", isPresented: Binding(get: { model.actionError != nil }, set: { if !$0 { model.actionError = nil } })) {
@@ -384,7 +395,7 @@ struct ProjectCard: View {
         let content = VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 5) {
                 if let s = c?.visualState {
-                    Image(systemName: s.icon).foregroundStyle(s.color).font(.syCaption)
+                    Image(systemName: s.icon).foregroundStyle(s.color).font(.syCaption).accessibilityLabel(s.title)
                 } else {
                     Image(systemName: "doc.text").foregroundStyle(Color.syDim).font(.syCaption)
                 }

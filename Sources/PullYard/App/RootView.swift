@@ -70,6 +70,7 @@ struct MainView: View {
                     ClipboardBanner()
                 }
             }
+            .overlay { CommandPaletteOverlay() }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 app.checkClipboard()
                 app.didBecomeActive()
@@ -123,8 +124,8 @@ struct AppShell: View {
             .tint(Color.syAccent)
             .environment(\.locale, .app)
         }
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
+        .toolbar(id: "main") {
+            ToolbarItem(id: "sidebar", placement: .navigation) {
                 SidebarToggleButton(hidden: $hidden)
             }
         }
@@ -142,13 +143,13 @@ struct DetailColumn: View {
                     .surface(.panel)
             } else if app.forge != nil {
                 ForgeDetailColumn()
-                    .animation(Motion.smooth, value: app.forgeSelection?.id)
+                    .animation(Motion.swap, value: app.forgeSelection?.id)
                     .surface(.panel)
             } else {
                 NavigationStack(path: $app.detailPath) {
                     Group {
                         if let root = app.detailRoot {
-                            RouteView(route: root).id(root).transition(.rise)
+                            RouteView(route: root).id(root).transition(.routeSwap)
                         } else {
                             VStack(spacing: 12) {
                                 IconTile(systemImage: "arrow.triangle.pull", color: .syViolet, size: 56)
@@ -160,7 +161,7 @@ struct DetailColumn: View {
                             .transition(.opacity)
                         }
                     }
-                    .animation(Motion.smooth, value: app.detailRoot)
+                    .animation(Motion.swap, value: app.detailRoot)
                     .navigationDestination(for: Route.self) { RouteView(route: $0) }
                 }
                 .surface(.panel)
@@ -184,6 +185,7 @@ struct ColumnResizeHandle: View {
     @Binding var width: Double
     let range: ClosedRange<Double>
     let edge: HorizontalEdge
+    var reset: Double?
     @State private var start: Double?
 
     var body: some View {
@@ -205,6 +207,12 @@ struct ColumnResizeHandle: View {
                                 width = min(range.upperBound, max(range.lowerBound, base + (edge == .leading ? g.translation.width : -g.translation.width)))
                             }
                             .onEnded { _ in start = nil }
+                    )
+                    .simultaneousGesture(
+                        TapGesture(count: 2).onEnded {
+                            guard let reset else { return }
+                            withAnimation(Motion.smooth) { width = min(range.upperBound, max(range.lowerBound, reset)) }
+                        }
                     )
             }
     }
@@ -607,6 +615,8 @@ struct ClipboardBanner: View {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(.borderless)
+                .help("Dismiss")
+                .accessibilityLabel("Dismiss")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)

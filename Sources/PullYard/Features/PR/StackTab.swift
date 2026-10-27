@@ -145,6 +145,7 @@ struct StackTab: View {
                 .foregroundStyle(Color.syMuted)
                 .disabled(refreshingStack)
                 .help("Refresh stack")
+                .accessibilityLabel("Refresh stack")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -393,6 +394,7 @@ struct StackTab: View {
         }
         .buttonStyle(.borderless)
         .help(help)
+        .accessibilityLabel(help)
     }
 }
 
@@ -775,7 +777,7 @@ private struct StackListRow: View {
                 Text(key).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
             }
             if hasSession {
-                Image(systemName: "terminal").font(.syCaption).foregroundStyle(Color.syMuted).help("Has a Claude Code session")
+                Image(systemName: "terminal").font(.syCaption).foregroundStyle(Color.syMuted).help("Has a Claude Code session").accessibilityLabel("Has a Claude Code session")
             }
             BranchChip(name: node.headRefName, color: current ? .syViolet : .sySlate)
             Button(action: onNote) {
@@ -788,6 +790,7 @@ private struct StackListRow: View {
             .buttonStyle(.plain)
             .font(.syCaption.weight(.semibold))
             .help(noteCount > 0 ? plural(noteCount, "note", "notes") + " — click to open" : "Add a note")
+            .accessibilityLabel(noteCount > 0 ? plural(noteCount, "note", "notes") : "Add a note")
             if opening {
                 ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
             }
@@ -861,6 +864,7 @@ private struct StackCard: View, Equatable {
                 .buttonStyle(.plain)
                 .font(.syCaption.weight(.semibold))
                 .help(noteCount > 0 ? plural(noteCount, "note", "notes") + " — click to open" : "Add a note")
+                .accessibilityLabel(noteCount > 0 ? plural(noteCount, "note", "notes") : "Add a note")
                 if opening {
                     ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
                 }

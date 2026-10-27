@@ -28,8 +28,10 @@ struct CommitDetailView: View {
         .panelToolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { copyToPasteboard(sha) } label: { Label("Copy SHA", systemImage: "doc.on.doc") }
+                    .help("Copy commit SHA")
                 if let url = commit?.htmlUrl {
                     Button { openInBrowser(url) } label: { Label("Open in browser", systemImage: "safari") }
+                        .help("Open in browser")
                 }
             }
         }

@@ -31,6 +31,20 @@ private struct PanelToolbar<Items: ToolbarContent>: ViewModifier {
     }
 }
 
+private struct CustomizablePanelToolbar<Items: CustomizableToolbarContent>: ViewModifier {
+    @Environment(\.inEdgePanel) private var inEdgePanel
+    let id: String
+    let items: Items
+
+    func body(content: Content) -> some View {
+        if inEdgePanel {
+            content
+        } else {
+            content.toolbar(id: id) { items }
+        }
+    }
+}
+
 extension View {
     func toolbarSearch(text: Binding<String>, prompt: String) -> some View {
         modifier(ToolbarSearch(text: text, prompt: prompt))
@@ -38,5 +52,9 @@ extension View {
 
     func panelToolbar<Items: ToolbarContent>(@ToolbarContentBuilder _ items: () -> Items) -> some View {
         modifier(PanelToolbar(items: items()))
+    }
+
+    func panelToolbar<Items: CustomizableToolbarContent>(id: String, @ToolbarContentBuilder _ items: () -> Items) -> some View {
+        modifier(CustomizablePanelToolbar(id: id, items: items()))
     }
 }

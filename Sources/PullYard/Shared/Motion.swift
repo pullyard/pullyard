@@ -8,6 +8,7 @@ enum Motion {
     static var smooth: Animation? { reduced ? nil : .smooth(duration: 0.26) }
     static var spring: Animation? { reduced ? nil : .spring(response: 0.32, dampingFraction: 0.82) }
     static var fade: Animation? { reduced ? nil : .easeOut(duration: 0.14) }
+    static var swap: Animation? { reduced ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.22) }
     static var insert: Animation { reduced ? .easeOut(duration: 0.2) : .timingCurve(0.22, 1, 0.36, 1, duration: 0.7) }
 
     static func rowIn(_ index: Int) -> Animation { rowIn(delay: Double(index) * 0.07) }
@@ -28,6 +29,10 @@ extension AnyTransition {
 
     static var reveal: AnyTransition {
         Motion.reduced ? .opacity : .asymmetric(insertion: .opacity.combined(with: .offset(y: -6)), removal: .opacity.combined(with: .offset(y: -4)))
+    }
+
+    static var routeSwap: AnyTransition {
+        Motion.reduced ? .identity : .asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .opacity.animation(.easeOut(duration: 0.08)))
     }
 
     static var pop: AnyTransition {

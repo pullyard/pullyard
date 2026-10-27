@@ -27,6 +27,8 @@ struct LoginView: View {
         provider == .github ? "oauthClientID" : "oauthClientID.\(provider.rawValue)"
     }
 
+    private var pace: Double { GitAccounts.shared.accounts.isEmpty ? 1 : 0.5 }
+
     private var supportsDevice: Bool { provider.isGitHub || provider == .gitlab }
 
     static var bundledGitHubClientID: String? {
@@ -48,122 +50,121 @@ struct LoginView: View {
         ScrollView {
             VStack(spacing: 18) {
                 if !embedded {
-                    VStack(spacing: 6) {
-                        Image(nsImage: NSApp.applicationIconImage)
-                            .resizable()
-                            .frame(width: 104, height: 104)
-                            .shadow(color: Color.syAccent.opacity(0.25), radius: 18, y: 6)
-                        Text("PullYard").font(.syLargeTitle.weight(.bold)).foregroundStyle(Color.syText)
-                        Text("Fast PR browsing without a browser").foregroundStyle(Color.syMuted)
-                    }
-                    .padding(.bottom, 6)
+                    WelcomeHero(pace: pace)
+                    WelcomeFeatures(pace: pace)
+                        .padding(.bottom, 4)
                     savedAccounts
+                        .welcomeStage(1.85 * pace, enabled: !embedded)
                 }
 
-                Picker("Service", selection: $providerRaw) {
-                    ForEach(GitProvider.allCases) { Text($0.shortTitle).tag($0.rawValue) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-
-                if provider.hostEditable {
-                    card {
-                        cardTitle("\(provider.title) server", icon: "server.rack", color: .syTeal)
-                        TextField(provider.hostPlaceholder, text: $host)
-                            .textFieldStyle(.roundedBorder)
+                VStack(spacing: 18) {
+                    Picker("Service", selection: $providerRaw) {
+                        ForEach(GitProvider.allCases) { Text($0.shortTitle).tag($0.rawValue) }
                     }
-                }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
 
-                if oneClick {
-                    card {
-                        cardTitle("Sign in with GitHub", icon: "globe", color: .syIndigo)
-                        Text("Opens github.com in your browser. Enter the code shown here and you're in — no token to copy.")
-                            .font(.syCallout).foregroundStyle(Color.syMuted)
-                        if let device, deviceUsesBundled {
-                            deviceCodeRow(device)
-                        } else {
+                    if provider.hostEditable {
+                        card {
+                            cardTitle("\(provider.title) server", icon: "server.rack", color: .syTeal)
+                            TextField(provider.hostPlaceholder, text: $host)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+
+                    if oneClick {
+                        card {
+                            cardTitle("Sign in with GitHub", icon: "globe", color: .syIndigo)
+                            Text("Opens github.com in your browser. Enter the code shown here and you're in — no token to copy.")
+                                .font(.syCallout).foregroundStyle(Color.syMuted)
+                            if let device, deviceUsesBundled {
+                                deviceCodeRow(device)
+                            } else {
+                                Button {
+                                    startDevice(clientOverride: Self.bundledGitHubClientID)
+                                } label: {
+                                    Label("Sign in with GitHub", systemImage: "arrow.up.forward.app").frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.large)
+                            }
+                        }
+                    }
+
+                    if let _ = cliBinary {
+                        card {
+                            cardTitle(provider == .gitlab ? "GitLab CLI" : "GitHub CLI", icon: "terminal.fill", color: .sySky)
+                            Text(provider == .gitlab ? "Use the token you're signed in with in `glab`." : "Use the token you're signed in with in `gh`.").font(.syCallout).foregroundStyle(Color.syMuted)
                             Button {
-                                startDevice(clientOverride: Self.bundledGitHubClientID)
+                                signInWithCLI()
                             } label: {
-                                Label("Sign in with GitHub", systemImage: "arrow.up.forward.app").frame(maxWidth: .infinity)
+                                Label(provider == .gitlab ? "Sign in with glab" : "Sign in with gh", systemImage: "terminal").frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.large)
+                            .disabled(effectiveHost.isEmpty)
                         }
                     }
-                }
 
-                if let _ = cliBinary {
                     card {
-                        cardTitle(provider == .gitlab ? "GitLab CLI" : "GitHub CLI", icon: "terminal.fill", color: .sySky)
-                        Text(provider == .gitlab ? "Use the token you're signed in with in `glab`." : "Use the token you're signed in with in `gh`.").font(.syCallout).foregroundStyle(Color.syMuted)
-                        Button {
-                            signInWithCLI()
-                        } label: {
-                            Label(provider == .gitlab ? "Sign in with glab" : "Sign in with gh", systemImage: "terminal").frame(maxWidth: .infinity)
+                        cardTitle(provider == .bitbucket ? "API token" : "Personal Access Token", icon: "key.fill", color: .syAmber)
+                        Text(provider.tokenHint).font(.syCallout).foregroundStyle(Color.syMuted)
+                        if provider == .bitbucket {
+                            TextField("Atlassian account email", text: $email)
+                                .textFieldStyle(.roundedBorder)
+                                .textContentType(.username)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .disabled(effectiveHost.isEmpty)
-                    }
-                }
-
-                card {
-                    cardTitle(provider == .bitbucket ? "API token" : "Personal Access Token", icon: "key.fill", color: .syAmber)
-                    Text(provider.tokenHint).font(.syCallout).foregroundStyle(Color.syMuted)
-                    if provider == .bitbucket {
-                        TextField("Atlassian account email", text: $email)
-                            .textFieldStyle(.roundedBorder)
-                            .textContentType(.username)
-                    }
-                    HStack {
-                        SecureField(provider.tokenPlaceholder, text: $token)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit(loginWithToken)
-                        Button("Sign in", action: loginWithToken)
-                            .buttonStyle(.borderedProminent)
-                            .disabled(!canSubmitToken)
-                    }
-                    if let url = provider.tokenCreateURL(host: effectiveHost) {
-                        Button(provider == .bitbucket ? "Create an API token at id.atlassian.com" : "Create a token on \(effectiveHost)") {
-                            openInBrowser(url)
+                        HStack {
+                            SecureField(provider.tokenPlaceholder, text: $token)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit(loginWithToken)
+                            Button("Sign in", action: loginWithToken)
+                                .buttonStyle(.borderedProminent)
+                                .disabled(!canSubmitToken)
                         }
-                        .buttonStyle(.link)
-                    }
-                }
-
-                if supportsDevice {
-                    card {
-                        DisclosureGroup(isExpanded: $showDevice) {
-                            deviceContent.padding(.top, 6)
-                        } label: {
-                            cardTitle(oneClick ? "Use your own OAuth App" : "Sign in via browser (OAuth Device Flow)", icon: oneClick ? "gearshape" : "globe", color: .syIndigo)
+                        if let url = provider.tokenCreateURL(host: effectiveHost) {
+                            Button(provider == .bitbucket ? "Create an API token at id.atlassian.com" : "Create a token on \(effectiveHost)") {
+                                openInBrowser(url)
+                            }
+                            .buttonStyle(.link)
                         }
                     }
-                }
 
-                if embedded {
-                    Label("Adding an account switches to it. A new account gets its own Claude Code sign-in; the first account keeps the Claude you already use.", systemImage: "info.circle")
-                        .font(.syCaption)
-                        .foregroundStyle(Color.syMuted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                    if supportsDevice {
+                        card {
+                            DisclosureGroup(isExpanded: $showDevice) {
+                                deviceContent.padding(.top, 6)
+                            } label: {
+                                cardTitle(oneClick ? "Use your own OAuth App" : "Sign in via browser (OAuth Device Flow)", icon: oneClick ? "gearshape" : "globe", color: .syIndigo)
+                            }
+                        }
+                    }
 
-                if busy { ProgressView().controlSize(.small) }
-                if let error {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(Color.syRed)
-                        .multilineTextAlignment(.center)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .card(radius: 10, fill: Color.syRed.opacity(0.08))
+                    if embedded {
+                        Label("Adding an account switches to it. A new account gets its own Agents sign-in; the first account keeps the one you already use.", systemImage: "info.circle")
+                            .font(.syCaption)
+                            .foregroundStyle(Color.syMuted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    if busy { ProgressView().controlSize(.small) }
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Color.syRed)
+                            .multilineTextAlignment(.center)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .card(radius: 10, fill: Color.syRed.opacity(0.08))
+                    }
                 }
+                .welcomeStage(1.95 * pace, enabled: !embedded)
             }
             .padding(embedded ? 20 : 40)
             .frame(maxWidth: 520)
             .frame(maxWidth: .infinity)
         }
+        .background { if !embedded { WelcomeBackdrop() } }
         .onAppear(perform: providerChanged)
         .onChange(of: providerRaw) { providerChanged() }
         .onChange(of: clientID) { UserDefaults.standard.set(clientID, forKey: clientIDKey) }
@@ -340,5 +341,130 @@ struct LoginView: View {
             }
             device = nil
         }
+    }
+}
+
+private struct WelcomeHero: View {
+    let pace: Double
+
+    var body: some View {
+        VStack(spacing: 10) {
+            LogoDrawOn(size: 210, duration: 1.7)
+                .shadow(color: Color.syViolet.opacity(0.18), radius: 28, y: 10)
+                .padding(.bottom, 4)
+            Text("PullYard")
+                .font(.sy(size: 36, weight: .bold))
+                .foregroundStyle(Color.syText)
+                .welcomeStage(1.15 * pace)
+            Text("Pull requests, without the browser")
+                .font(.syTitle3)
+                .foregroundStyle(Color.syMuted)
+                .welcomeStage(1.3 * pace)
+        }
+        .padding(.top, 8)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct WelcomeFeature {
+    let icon: String
+    let color: Color
+    let title: String
+    let detail: String
+
+    static let all = [
+        WelcomeFeature(icon: "tray.full.fill", color: .sySky, title: "Inbox for reviews", detail: "Review requests, mentions and your PRs in one live list."),
+        WelcomeFeature(icon: "arrow.triangle.merge", color: .syViolet, title: "Review & merge", detail: "Diffs, threads and checks — no browser tab needed."),
+        WelcomeFeature(icon: "wand.and.sparkles", color: .syCoral, title: "Fix with agent", detail: "Hand a failing check or review comment to an agent.")
+    ]
+}
+
+private struct WelcomeFeatures: View {
+    let pace: Double
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ForEach(Array(WelcomeFeature.all.enumerated()), id: \.offset) { index, feature in
+                VStack(alignment: .leading, spacing: 8) {
+                    IconTile(systemImage: feature.icon, color: feature.color, size: 28)
+                    Text(feature.title)
+                        .font(.syHeadline)
+                        .foregroundStyle(Color.syText)
+                    Text(feature.detail)
+                        .font(.syCaption)
+                        .foregroundStyle(Color.syMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .card(radius: 12)
+                .accessibilityElement(children: .combine)
+                .welcomeStage((1.5 + Double(index) * 0.1) * pace)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct WelcomeBackdrop: View {
+    @Environment(\.colorScheme) private var scheme
+    @State private var start = Date()
+
+    private static let blobs: [(color: Color, x: Double, y: Double, phase: Double, speed: Double)] = [
+        (.syViolet, 0.18, 0.12, 0, 0.11),
+        (.sySky, 0.86, 0.3, 2.1, 0.09),
+        (.syCoral, 0.4, 0.95, 4.2, 0.07)
+    ]
+
+    var body: some View {
+        ZStack {
+            Color(nsColor: Theme.isBrand ? .syWindow : .windowBackgroundColor)
+            TimelineView(.animation(minimumInterval: 1 / 30, paused: Motion.reduced)) { context in
+                let t = Motion.reduced ? 0 : context.date.timeIntervalSince(start)
+                let strength = scheme == .dark ? 0.2 : 0.13
+                Canvas { ctx, size in
+                    let radius = max(size.width, size.height) * 0.6
+                    for blob in Self.blobs {
+                        let center = CGPoint(
+                            x: size.width * (blob.x + 0.1 * cos(t * blob.speed + blob.phase)),
+                            y: size.height * (blob.y + 0.08 * sin(t * blob.speed * 0.8 + blob.phase))
+                        )
+                        let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+                        ctx.fill(
+                            Path(ellipseIn: rect),
+                            with: .radialGradient(Gradient(colors: [blob.color.opacity(strength), blob.color.opacity(0)]), center: center, startRadius: 0, endRadius: radius)
+                        )
+                    }
+                }
+            }
+        }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
+    }
+}
+
+private struct WelcomeStage: ViewModifier {
+    let delay: Double
+    let enabled: Bool
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .opacity(shown ? 1 : 0)
+                .offset(y: shown || Motion.reduced ? 0 : 12)
+                .onAppear {
+                    guard !shown else { return }
+                    withAnimation(Motion.rowIn(delay: delay)) { shown = true }
+                }
+        } else {
+            content
+        }
+    }
+}
+
+private extension View {
+    func welcomeStage(_ delay: Double, enabled: Bool = true) -> some View {
+        modifier(WelcomeStage(delay: delay, enabled: enabled))
     }
 }

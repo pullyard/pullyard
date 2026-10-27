@@ -483,7 +483,7 @@ struct ChatWelcome: View {
                     }
                 }
             }
-            Text("/ commands · @ files · ⇧↩ new line · paste a screenshot ⌘V · ⌘K switch session")
+            Text("/ commands · @ files · ⇧↩ new line · paste a screenshot ⌘V · ⇧⌘K switch session")
                 .font(.syCaption)
                 .foregroundStyle(Color.syDim)
         }
@@ -753,6 +753,7 @@ struct MessageActionButton: View {
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .help(help)
+        .accessibilityLabel(help)
     }
 }
 
@@ -794,6 +795,7 @@ struct ThinkingView: View {
                     .foregroundStyle(Color.syMuted)
                 }
                 .buttonStyle(.plain)
+                .accessibilityValue(open ? "Expanded" : "Collapsed")
                 if open {
                     Text(text.text).font(.syCallout).foregroundStyle(Color.syMuted).textSelection(.enabled).padding(.leading, 18)
                         .transition(.reveal)
@@ -902,6 +904,7 @@ struct ToolCallView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
             if isOpen {
                 Rectangle().fill(Color.syLine).frame(height: 1)
                 ToolDetails(call: call, folder: folder)
@@ -934,13 +937,13 @@ struct ToolCallView: View {
         switch call.status {
         case .running:
             if call.permission?.resolved == false {
-                Image(systemName: "hand.raised.fill").foregroundStyle(Color.syAmber)
+                Image(systemName: "hand.raised.fill").foregroundStyle(Color.syAmber).accessibilityLabel("Waiting for permission")
             } else {
                 WakeLoader()
             }
-        case .done: Image(systemName: "checkmark").foregroundStyle(Color.syDim)
-        case .error: Image(systemName: "xmark.circle.fill").foregroundStyle(Color.syRed)
-        case .denied: Image(systemName: "nosign").foregroundStyle(Color.syAmber)
+        case .done: Image(systemName: "checkmark").foregroundStyle(Color.syDim).accessibilityLabel("Done")
+        case .error: Image(systemName: "xmark.circle.fill").foregroundStyle(Color.syRed).accessibilityLabel("Failed")
+        case .denied: Image(systemName: "nosign").foregroundStyle(Color.syAmber).accessibilityLabel("Denied")
         }
     }
 
@@ -1087,6 +1090,7 @@ struct TodoListView: View {
                 HStack(spacing: 8) {
                     Image(systemName: status == "completed" ? "checkmark.circle.fill" : status == "in_progress" ? "circle.dotted.circle" : "circle")
                         .foregroundStyle(status == "completed" ? Color.syMuted : status == "in_progress" ? Color.syText : Color.syDim)
+                        .accessibilityLabel(status == "completed" ? "Completed" : status == "in_progress" ? "In progress" : "Pending")
                     Text(todo["content"] as? String ?? todo["subject"] as? String ?? "")
                         .strikethrough(status == "completed")
                         .foregroundStyle(status == "completed" ? Color.syMuted : Color.syText)
@@ -1192,6 +1196,7 @@ struct PermissionCard: View {
                         HStack(alignment: .top) {
                             Image(systemName: answers[text] == label ? "largecircle.fill.circle" : "circle")
                                 .foregroundStyle(answers[text] == label ? Color.syAccent : Color.syDim)
+                                .accessibilityLabel(answers[text] == label ? "Selected" : "Not selected")
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(label)
                                 if let d = o["description"] as? String { Text(d).font(.syCaption).foregroundStyle(Color.syMuted) }

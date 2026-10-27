@@ -26,7 +26,7 @@ struct UnlockView: View {
             }
             Text(title).font(.syHeadline).foregroundStyle(Color.syText).padding(.top, 4)
             if blocked {
-                Text("Too many wrong PINs. Reset the PIN with your Mac password to continue. This also signs out the Claude Code accounts linked to this account.")
+                Text("Too many wrong PINs. Reset the PIN with your Mac password to continue. This also signs out the Agents accounts linked to this account.")
                     .font(.syCallout)
                     .foregroundStyle(Color.syRed)
                     .multilineTextAlignment(.center)

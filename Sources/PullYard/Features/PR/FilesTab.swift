@@ -5,6 +5,10 @@ struct FilesTab: View {
     @Environment(AppModel.self) private var app
     @State private var showList = true
     @State private var filter = ""
+    @State private var navigator = DiffNavigator()
+    @State private var splitFits = false
+    @AppStorage(DiffPrefs.wrapKey) private var wrap = true
+    @AppStorage(DiffPrefs.splitKey) private var split = false
 
     var body: some View {
         Group {
@@ -17,8 +21,16 @@ struct FilesTab: View {
                         }
                         .transition(.move(edge: .leading).combined(with: .opacity))
                     }
-                    diff
-                        .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false) { await model.load(full: true) }
+                    VStack(spacing: 0) {
+                        reviewBar
+                        diff
+                            .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false) { await model.load(full: true) }
+                    }
+                    .background(GeometryReader { g in
+                        Color.clear
+                            .onAppear { measure(g.size.width) }
+                            .onChange(of: g.size.width) { _, w in measure(w) }
+                    })
                 }
             } else if let e = model.filesError {
                 ErrorStateView(message: e) { Task { await model.loadFiles(force: true) } }
@@ -27,6 +39,18 @@ struct FilesTab: View {
             }
         }
         .task { await model.loadFiles() }
+    }
+
+    private var splitAvailable: Bool { splitFits }
+
+    private func measure(_ width: CGFloat) {
+        let fits = width >= DiffPrefs.splitMinWidth
+        if fits != splitFits { splitFits = fits }
+    }
+    private var splitActive: Bool { split && splitAvailable }
+
+    private var reviewOptions: DiffReviewOptions {
+        DiffReviewOptions(wrap: wrap, split: splitActive, splitAvailable: splitAvailable) { key in perform(key) }
     }
 
     private var blameAction: ((DiffFile) -> Void)? {
@@ -38,6 +62,81 @@ struct FilesTab: View {
 
     private var visibleFiles: [DiffFile] {
         filter.isEmpty ? model.files : model.files.filter { $0.id.localizedCaseInsensitiveContains(filter) }
+    }
+
+    private var currentFile: String? {
+        if let id = navigator.currentGroupID(), id.hasPrefix("h:") { return String(id.dropFirst(2)) }
+        return visibleFiles.first?.id
+    }
+
+    @discardableResult
+    private func perform(_ key: String) -> Bool {
+        switch key {
+        case "n": stepFile(1)
+        case "p": stepFile(-1)
+        case "]": navigator.jumpHunk(1)
+        case "[": navigator.jumpHunk(-1)
+        case "v":
+            guard let path = currentFile else { return false }
+            Task { await model.toggleViewed(path) }
+        case "w": wrap.toggle()
+        case "s":
+            guard splitAvailable else { return false }
+            split = !splitActive
+        default: return false
+        }
+        return true
+    }
+
+    private func stepFile(_ step: Int) {
+        let files = visibleFiles
+        guard !files.isEmpty else { return }
+        let index = currentFile.flatMap { current in files.firstIndex { $0.id == current } }
+        let path = files[index.map { min(max($0 + step, 0), files.count - 1) } ?? 0].id
+        navigator.scroll(to: "h:" + path)
+        model.revealFile(path)
+    }
+
+    private var reviewBar: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 2) {
+                navButton("chevron.up", "Previous file", key: "P") { perform("p") }
+                navButton("chevron.down", "Next file", key: "N") { perform("n") }
+            }
+            HStack(spacing: 2) {
+                navButton("arrow.up.to.line", "Previous hunk", key: "[") { perform("[") }
+                navButton("arrow.down.to.line", "Next hunk", key: "]") { perform("]") }
+            }
+            Spacer()
+            Toggle("Wrap lines", isOn: $wrap)
+                .toggleStyle(.checkbox)
+                .help("Wrap long lines (W)")
+                .accessibilityLabel("Wrap lines")
+            Picker("Diff layout", selection: Binding(get: { splitActive }, set: { split = $0 })) {
+                Text("Unified").tag(false)
+                Text("Split").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .disabled(!splitAvailable)
+            .help(splitAvailable ? "Unified or side-by-side diff (S)" : "Widen the window to use split view")
+            .accessibilityLabel("Diff layout")
+        }
+        .font(.syCaption)
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.syLine).frame(height: 1) }
+    }
+
+    private func navButton(_ symbol: String, _ title: String, key: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).frame(width: 18, height: 16)
+        }
+        .buttonStyle(.borderless)
+        .help("\(title) (\(key))")
+        .accessibilityLabel(title)
     }
 
     private var fileList: some View {
@@ -60,10 +159,10 @@ struct FilesTab: View {
                     }
                     Spacer(minLength: 2)
                     if model.threadCount(f.id) > 0 {
-                        Image(systemName: "text.bubble").font(.syCaption2).foregroundStyle(Color.syMuted)
+                        Image(systemName: "text.bubble").font(.syCaption2).foregroundStyle(Color.syMuted).accessibilityLabel("Has comments")
                     }
                     if model.viewedPaths.contains(f.id) {
-                        Image(systemName: "checkmark.circle.fill").font(.syCaption).foregroundStyle(Color.ghGreen)
+                        Image(systemName: "checkmark.circle.fill").font(.syCaption).foregroundStyle(Color.ghGreen).accessibilityLabel("Viewed")
                     }
                 }
                 .rowAppear(f.id, model.fileRows)
@@ -75,24 +174,77 @@ struct FilesTab: View {
     }
 
     private var diff: some View {
-        let flat = model.flatRows(filter: filter)
-        var fileOf: [String: String] = [:]
-        let rows: [DiffTableRow] = flat.map { row in
-            switch row {
-            case .header(let file):
-                return .view(id: row.id, group: true) { AnyView(FileHeader(model: model, file: file, showList: $showList, onBlame: blameAction)) }
-            case .row(let file, let r):
-                if case .line(let line) = r {
-                    fileOf[row.id] = file.id
-                    return .line(id: row.id, line: line, commentable: true)
-                }
-                return .view(id: row.id, group: false) { AnyView(rowView(r, file: file)) }
-            }
-        }
-        return DiffTableView(rows: rows, scrollTarget: model.scrollTarget.map { "h:" + $0 }) { id, line in
+        let built = tableRows(model.flatRows(filter: filter), split: splitActive)
+        let fileOf = built.fileOf
+        return DiffTableView(rows: built.rows, scrollTarget: model.scrollTarget.map { "h:" + $0 }, wrap: wrap, navigator: navigator, onKey: { perform($0) }, onComment: { id, line in
             guard let path = fileOf[id], let n = line.anchorLine else { return }
             model.composer = DiffAnchor(path: path, line: n, side: line.anchorSide)
+        })
+    }
+
+    private func tableRows(_ flat: [FlatDiffRow], split: Bool) -> (rows: [DiffTableRow], fileOf: [String: String]) {
+        var rows: [DiffTableRow] = []
+        rows.reserveCapacity(flat.count)
+        var fileOf: [String: String] = [:]
+        var ext = ""
+        var segmentFile: DiffFile?
+        var segment: [(line: DiffLine, extras: [FlatDiffRow])] = []
+        let options = reviewOptions
+
+        func appendExtra(_ row: FlatDiffRow) {
+            guard case .row(let file, let r) = row else { return }
+            rows.append(.view(id: row.id, group: false) { AnyView(rowView(r, file: file)) })
         }
+
+        func flush() {
+            defer { segment = [] }
+            guard let file = segmentFile, !segment.isEmpty else { return }
+            let extras = Dictionary(segment.map { ($0.line.id, $0.extras) }, uniquingKeysWith: { a, _ in a })
+            for pair in DiffSplit.pair(segment.map(\.line)) {
+                switch pair {
+                case .full(let line):
+                    let id = "r:" + file.id + ":l\(line.id)"
+                    fileOf[id] = file.id
+                    rows.append(.line(id: id, line: line, commentable: true, ext: ext))
+                    extras[line.id]?.forEach(appendExtra)
+                case .pair(let left, let right):
+                    let id = "s:" + file.id + ":\(left?.id ?? -1):\(right?.id ?? -1)"
+                    fileOf[id] = file.id
+                    rows.append(.split(id: id, left: left, right: right, commentable: true, ext: ext))
+                    if let left { extras[left.id]?.forEach(appendExtra) }
+                    if let right, right.id != left?.id { extras[right.id]?.forEach(appendExtra) }
+                }
+            }
+        }
+
+        for row in flat {
+            switch row {
+            case .header(let file):
+                flush()
+                ext = file.syntaxExt
+                rows.append(.view(id: row.id, group: true) { AnyView(FileHeader(model: model, file: file, showList: $showList, review: options, onBlame: blameAction)) })
+            case .row(let file, let r):
+                if case .line(let line) = r {
+                    if split {
+                        if segmentFile?.id != file.id {
+                            flush()
+                            segmentFile = file
+                        }
+                        segment.append((line, []))
+                    } else {
+                        fileOf[row.id] = file.id
+                        rows.append(.line(id: row.id, line: line, commentable: true, ext: ext))
+                    }
+                } else if split, segmentFile?.id == file.id, !segment.isEmpty {
+                    segment[segment.count - 1].extras.append(row)
+                } else {
+                    flush()
+                    appendExtra(row)
+                }
+            }
+        }
+        flush()
+        return (rows, fileOf)
     }
 
     @ViewBuilder
@@ -125,14 +277,23 @@ struct FilesTab: View {
     }
 }
 
+struct DiffReviewOptions {
+    var wrap: Bool
+    var split: Bool
+    var splitAvailable: Bool
+    var perform: (String) -> Void
+}
+
 struct FileHeader: View {
     @Bindable var model: PRDetailModel
     let file: DiffFile
     @Binding var showList: Bool
+    var review: DiffReviewOptions?
     var onBlame: ((DiffFile) -> Void)?
 
     var body: some View {
         let collapsed = model.collapsed.contains(file.id)
+        let viewed = model.viewedPaths.contains(file.id)
         HStack(spacing: 8) {
             Button {
                 if collapsed { model.collapsed.remove(file.id) } else { model.collapsed.insert(file.id) }
@@ -140,6 +301,8 @@ struct FileHeader: View {
                 Image(systemName: collapsed ? "chevron.right" : "chevron.down").frame(width: 12)
             }
             .buttonStyle(.plain)
+            .help(collapsed ? "Expand file" : "Collapse file")
+            .accessibilityLabel(collapsed ? "Expand file" : "Collapse file")
             Group {
                 if let prev = file.previousFilename {
                     Text("\(prev) → \(file.id)")
@@ -153,9 +316,10 @@ struct FileHeader: View {
             .textSelection(.enabled)
             DiffStat(additions: file.additions, deletions: file.deletions)
             Spacer()
-            Toggle("Viewed", isOn: Binding(get: { model.viewedPaths.contains(file.id) }, set: { _ in Task { await model.toggleViewed(file.id) } }))
+            Toggle("Viewed", isOn: Binding(get: { viewed }, set: { _ in Task { await model.toggleViewed(file.id) } }))
                 .toggleStyle(.checkbox)
                 .controlSize(.small)
+                .help(review == nil ? "Mark file as viewed" : "Mark file as viewed (V)")
             Menu {
                 Button("Copy path") { copyToPasteboard(file.id) }
                 if file.status != "removed", let onBlame {
@@ -164,12 +328,26 @@ struct FileHeader: View {
                 Button(showList ? "Hide file list" : "Show file list") { withAnimation(Motion.smooth) { showList.toggle() } }
                 Button("Collapse all") { model.collapsed = Set(model.files.map(\.id)) }
                 Button("Expand all") { model.collapsed = [] }
+                if let review {
+                    Divider()
+                    Button("Next file (N)") { review.perform("n") }
+                    Button("Previous file (P)") { review.perform("p") }
+                    Button("Next hunk (])") { review.perform("]") }
+                    Button("Previous hunk ([)") { review.perform("[") }
+                    Button(viewed ? "Mark as not viewed (V)" : "Mark as viewed (V)") { Task { await model.toggleViewed(file.id) } }
+                    Divider()
+                    Toggle("Wrap lines (W)", isOn: Binding(get: { review.wrap }, set: { _ in review.perform("w") }))
+                    Toggle("Split view (S)", isOn: Binding(get: { review.split }, set: { _ in review.perform("s") }))
+                        .disabled(!review.splitAvailable)
+                }
             } label: {
                 Image(systemName: "ellipsis")
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .help("More actions")
+            .accessibilityLabel("More actions")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -258,6 +436,8 @@ struct InlineThreadView: View {
                     Image(systemName: open ? "chevron.down" : "chevron.right").frame(width: 10)
                 }
                 .buttonStyle(.plain)
+                .help(open ? "Collapse thread" : "Expand thread")
+                .accessibilityLabel(open ? "Collapse thread" : "Expand thread")
                 Image(systemName: "text.bubble")
                 Text(plural(thread.comments.nodes.count, "comment", "comments")).font(.syCaption)
                 if thread.isOutdated { Text("outdated").font(.syCaption2).foregroundStyle(Color.syMuted) }
@@ -345,6 +525,7 @@ struct PendingCommentView: View {
             }
             .buttonStyle(.borderless)
             .help("Delete pending comment")
+            .accessibilityLabel("Delete pending comment")
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.ghYellow.opacity(0.08)))

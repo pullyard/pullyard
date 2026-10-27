@@ -142,6 +142,7 @@ struct JiraTab: View {
             }
             .controlSize(.small)
             .help("Reload from Jira")
+            .accessibilityLabel("Reload from Jira")
         }
     }
 
@@ -401,6 +402,7 @@ struct JiraIssueCard: View {
                     Button(action: onCollapse) { Image(systemName: "chevron.up") }
                         .buttonStyle(.borderless)
                         .help("Collapse")
+                        .accessibilityLabel("Collapse")
                 }
             }
             Text(issue.summary).font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText).textSelection(.enabled)

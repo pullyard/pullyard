@@ -21,7 +21,7 @@ struct ReposView: View {
 
     var body: some View {
         List(selection: Binding(get: { app.detailRoot }, set: { app.select($0) })) {
-            if let error { Text(error).foregroundStyle(Color.syRed).font(.syCaption) }
+            if let error, !repos.isEmpty { ListErrorNote(message: error) { await load() } }
             ForEach(visible) { r in
                 RepoRow(repo: r)
                     .rowAppear(r.id, rows)
@@ -34,7 +34,20 @@ struct ReposView: View {
                     .onAppear { if r.id == repos.last?.id { Task { await loadMore() } } }
             }
         }
-        .overlay { if loading && !checkingCache && repos.isEmpty { PullYardLoader(size: 44) } }
+        .overlay {
+            if loading && !checkingCache && repos.isEmpty {
+                PullYardLoader(size: 44)
+            } else if let error, repos.isEmpty {
+                ListErrorNote(message: error, centered: true) { await load() }
+            } else if visible.isEmpty, !loading, !checkingCache, error == nil {
+                let archivedHidden = hideArchived && repos.contains(where: \.isArchived)
+                ListEmptyNote(
+                    title: archivedHidden ? "No active repositories" : "No repositories",
+                    message: archivedHidden ? "Archived repositories are hidden." : "Repositories you can access show up here.",
+                    filter: text
+                ) { text = "" }
+            }
+        }
         .liveRefresh(updated: lastUpdated, refreshing: refreshing, error: repos.isEmpty ? nil : error) { await load() }
         .toolbarSearch(text: $text, prompt: "Filter repositories")
         .navigationTitle("Repositories")
@@ -135,9 +148,9 @@ struct RepoRow: View {
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
-                    Text(repo.nameWithOwner).font(.syBody).fontWeight(.semibold).foregroundStyle(Color.syText).lineLimit(1)
+                    Text(repo.nameWithOwner).font(.syBody).fontWeight(.medium).foregroundStyle(Color.syText).lineLimit(1).help(repo.nameWithOwner)
                     if repo.isArchived { ChipView(text: "archived", color: .syAmber) }
-                    if repo.isFork { Image(systemName: "tuningfork").font(.syCaption2).foregroundStyle(Color.syDim) }
+                    if repo.isFork { Image(systemName: "tuningfork").font(.syCaption2).foregroundStyle(Color.syDim).accessibilityLabel("Fork") }
                 }
                 if let d = repo.description, !d.isEmpty {
                     Text(d).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(2)
@@ -149,9 +162,9 @@ struct RepoRow: View {
                             Text(lang.name).foregroundStyle(Color.syMuted)
                         }
                     }
-                    if repo.pullRequests.totalCount > 0 { Label("\(repo.pullRequests.totalCount)", systemImage: "arrow.triangle.pull").foregroundStyle(Color.syViolet) }
-                    if repo.issues.totalCount > 0 { Label("\(repo.issues.totalCount)", systemImage: "smallcircle.filled.circle").foregroundStyle(Color.syGreen) }
-                    if repo.stargazerCount > 0 { Label("\(repo.stargazerCount)", systemImage: "star").foregroundStyle(Color.syAmber) }
+                    if repo.pullRequests.totalCount > 0 { Label("\(repo.pullRequests.totalCount)", systemImage: "arrow.triangle.pull").foregroundStyle(Color.syViolet).accessibilityLabel(plural(repo.pullRequests.totalCount, "pull request", "pull requests")) }
+                    if repo.issues.totalCount > 0 { Label("\(repo.issues.totalCount)", systemImage: "smallcircle.filled.circle").foregroundStyle(Color.syGreen).accessibilityLabel(plural(repo.issues.totalCount, "issue", "issues")) }
+                    if repo.stargazerCount > 0 { Label("\(repo.stargazerCount)", systemImage: "star").foregroundStyle(Color.syAmber).accessibilityLabel(plural(repo.stargazerCount, "star", "stars")) }
                     Spacer()
                     Text(Fmt.rel(repo.pushedAt)).foregroundStyle(Color.syDim)
                 }
@@ -207,6 +220,7 @@ struct RepoDetailView: View {
                 Button { copyToPasteboard("gh repo clone \(repo.full)") } label: { Label("Copy clone", systemImage: "terminal") }
                     .help("Copy “gh repo clone”")
                 Button { openInBrowser(code?.webURL ?? "https://github.com/\(repo.full)") } label: { Label("Open in browser", systemImage: "safari") }
+                    .help("Open in browser")
             }
         }
         .task(id: repo) {
@@ -284,15 +298,23 @@ struct RepoDetailView: View {
 
     private var itemsList: some View {
         List {
-            if let e = model.error { Text(e).font(.syBody).foregroundStyle(Color.syRed) }
+            if let e = model.error, !model.items.isEmpty { ListErrorNote(message: e) { await model.load(api: app.api, account: app.cacheAccount, query: query) } }
             ForEach(model.items) { item in
                 NavigationLink(value: item.route) { ItemRow(item: item).rowAppear(item.id, model.rows) }
                     .contextMenu { ItemContextMenu(item: item) }
                     .onAppear { if item.id == model.items.last?.id { Task { await model.loadMore(api: app.api) } } }
             }
-            if model.items.isEmpty, !model.loading { Text("Nothing here").font(.syBody).foregroundStyle(Color.syMuted) }
         }
-        .overlay { if model.loading && model.items.isEmpty { PullYardLoader(size: 44) } }
+        .overlay {
+            if model.loading && model.items.isEmpty {
+                PullYardLoader(size: 44)
+            } else if let e = model.error, model.items.isEmpty {
+                ListErrorNote(message: e, centered: true) { await model.load(api: app.api, account: app.cacheAccount, query: query) }
+            } else if model.items.isEmpty, !model.loading {
+                let noun = tab == .issue ? "issues" : "pull requests"
+                ListEmptyNote(title: stateFilter == .all ? "No \(noun)" : "No \(stateFilter.title.lowercased()) \(noun)", message: "\(noun.prefix(1).uppercased() + noun.dropFirst()) in \(repo.full) show up here.")
+            }
+        }
         .liveRefresh(updated: model.lastUpdated, refreshing: model.refreshing, error: model.items.isEmpty ? nil : model.error) {
             await model.load(api: app.api, account: app.cacheAccount, query: query, silent: true)
         }

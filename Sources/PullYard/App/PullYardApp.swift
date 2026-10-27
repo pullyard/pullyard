@@ -32,23 +32,34 @@ struct PullYardApp: App {
         }
         .defaultSize(width: 1380, height: 860)
         .commands {
+            ToolbarCommands()
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesButton()
                 Button("Buy Me a Pizza…") { openInBrowser(Support.pizzaURL) }
             }
+            CommandGroup(after: .pasteboard) {
+                Divider()
+                Button("Copy Short Link") { if let ref = app.frontItem { app.copyShortLink(ref) } }
+                    .keyboardShortcut("c", modifiers: [.command, .shift])
+                    .disabled(app.frontItem == nil)
+            }
             CommandGroup(after: .toolbar) {
                 Button("Refresh") { app.refresh() }
                     .keyboardShortcut("r")
+                BlameCommand()
+                Divider()
+                TextZoomCommands()
+                Divider()
+            }
+            CommandMenu("Go") {
+                Button("Command Palette…") { app.showCommandPalette.toggle() }
+                    .keyboardShortcut("k")
+                    .disabled(app.phase != .loggedIn)
                 Button("Open by Link…") { app.showOpenLink = true }
                     .keyboardShortcut("l")
-                Button("Go to Session…") { app.showQuickOpen = true }
-                    .keyboardShortcut("k")
-                Button("New Agent Session") { app.newAgentSession() }
-                    .keyboardShortcut("n")
-                Button("Next Session") { app.claude.cycleTab(1) }
-                    .keyboardShortcut("]", modifiers: [.command, .shift])
-                Button("Previous Session") { app.claude.cycleTab(-1) }
-                    .keyboardShortcut("[", modifiers: [.command, .shift])
+                Button("Back") { if !app.detailPath.isEmpty { app.detailPath.removeLast() } }
+                    .keyboardShortcut("[")
+                    .disabled(app.detailPath.isEmpty)
                 Divider()
                 Button("Review Requests") { app.section = .prs(.reviewRequested) }.keyboardShortcut("1")
                 Button("My Pull Requests") { app.section = .prs(.mine) }.keyboardShortcut("2")
@@ -57,15 +68,14 @@ struct PullYardApp: App {
                 Button("Projects") { app.section = .projects }.keyboardShortcut("5")
                 Button("Agents") { app.section = .claude }.keyboardShortcut("6")
                 Divider()
-                Button("Copy Short Link") { if let ref = app.frontItem { app.copyShortLink(ref) } }
-                    .keyboardShortcut("c", modifiers: [.command, .shift])
-                    .disabled(app.frontItem == nil)
-                BlameCommand()
-                Divider()
-                Button("Back") { if !app.detailPath.isEmpty { app.detailPath.removeLast() } }
-                    .keyboardShortcut("[")
-                Divider()
-                TextZoomCommands()
+                Button("Go to Session…") { app.showQuickOpen = true }
+                    .keyboardShortcut("k", modifiers: [.command, .shift])
+                Button("New Agent Session") { app.newAgentSession() }
+                    .keyboardShortcut("n")
+                Button("Next Session") { app.claude.cycleTab(1) }
+                    .keyboardShortcut("]", modifiers: [.command, .shift])
+                Button("Previous Session") { app.claude.cycleTab(-1) }
+                    .keyboardShortcut("[", modifiers: [.command, .shift])
             }
         }
 

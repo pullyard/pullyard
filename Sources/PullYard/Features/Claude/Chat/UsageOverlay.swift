@@ -166,6 +166,7 @@ struct UsageOverlay: View {
                 Button { openInBrowser("https://claude.ai/settings/usage") } label: { Image(systemName: "arrow.up.right") }
                     .buttonStyle(.borderless)
                     .help("Open usage page")
+                    .accessibilityLabel("Open usage page")
             }
             .font(.syCallout)
             if usage.windows.isEmpty {

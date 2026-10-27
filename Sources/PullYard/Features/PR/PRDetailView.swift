@@ -79,7 +79,7 @@ struct PRDetailContent: View {
         .navigationTitle(pr.title)
         .navigationSubtitle("\(model.ref.repo.full) #\(pr.number)")
         .task(id: pr.url) { app.noteCanonical(model.ref, url: pr.url) }
-        .panelToolbar { toolbar }
+        .panelToolbar(id: "pr-detail") { toolbar }
         .sheet(isPresented: $showReview) { ReviewSheet(model: model, pr: pr) }
         .sheet(isPresented: $showMerge) { MergeSheet(model: model, pr: pr) }
         .sheet(isPresented: $showEdit) { EditPRSheet(model: model, pr: pr) }
@@ -195,49 +195,71 @@ struct PRDetailContent: View {
     }
 
     @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            if model.busy {
-                ProgressView().controlSize(.small)
+    private var toolbar: some CustomizableToolbarContent {
+        ToolbarItem(id: "pr.status", placement: .primaryAction) {
+            HStack(spacing: 6) {
+                if model.busy {
+                    ProgressView().controlSize(.small)
+                }
+                RefreshStatus(updated: model.lastUpdated, refreshing: model.loading, error: model.refreshError, compact: true) {
+                    Task { await model.load(full: true) }
+                }
             }
-            RefreshStatus(updated: model.lastUpdated, refreshing: model.loading, error: model.refreshError, compact: true) {
-                Task { await model.load(full: true) }
-            }
-            if pr.isOpen {
+        }
+        if pr.isOpen {
+            ToolbarItem(id: "pr.review", placement: .primaryAction) {
                 Menu {
                     Button("Write review…") { showReview = true }
                     if !pr.viewerDidAuthor {
                         Button("Approve") { confirm = .approve }
                     }
+                    Divider()
+                    Button("Request review…") { showReviewers = true }
                 } label: {
                     Label(model.pending.isEmpty ? "Review" : "Review (\(model.pending.count))", systemImage: "checkmark.bubble")
                 } primaryAction: {
                     showReview = true
                 }
+                .labelStyle(.titleAndIcon)
                 .help("Submit review")
             }
-            if pr.isOpen {
+            ToolbarItem(id: "pr.requestReview", placement: .primaryAction, showsByDefault: false) {
                 Button { showReviewers = true } label: { Label("Request review", systemImage: "person.crop.circle.badge.plus") }
                     .help("Request or re-request review")
             }
+        }
+        ToolbarItem(id: "pr.fix", placement: .primaryAction) {
             Button { showFix = true } label: { Label("Fix with agent", systemImage: "wrench.and.screwdriver") }
-                .help("Send review comments to a new Claude Code session")
-            if canMerge {
+                .labelStyle(.titleAndIcon)
+                .help("Send review comments to a new agent session")
+        }
+        if canMerge {
+            ToolbarItem(id: "pr.merge", placement: .primaryAction) {
                 Button { showMerge = true } label: { Label("Merge", systemImage: "arrow.triangle.merge") }
+                    .labelStyle(.titleAndIcon)
                     .help("Merge pull request")
             }
-            Menu {
-                moreMenu
+        }
+        ToolbarItem(id: "pr.more", placement: .primaryAction) {
+            ControlGroup {
+                Button { openInBrowser(pr.url) } label: { Label("Open in browser", systemImage: "safari") }
+                    .help("Open on github.com")
+                Menu {
+                    moreMenu
+                } label: {
+                    Label("More", systemImage: "ellipsis.circle")
+                }
+                .help("More actions")
             } label: {
-                Label("More", systemImage: "ellipsis.circle")
+                Label("Browser and more", systemImage: "ellipsis.circle")
             }
-            Button { openInBrowser(pr.url) } label: { Label("Open in browser", systemImage: "safari") }
-                .help("Open on github.com")
         }
     }
 
     @ViewBuilder
     private var moreMenu: some View {
+        Button("Open in browser") { openInBrowser(pr.url) }
+        Divider()
         Button("Copy link") { copyToPasteboard(pr.url) }
         Button("Copy short link") { app.copyShortLink(ShortLink.ref(url: pr.url) ?? model.ref) }
         Button("Copy “gh pr checkout \(pr.number)”") { copyToPasteboard("gh pr checkout \(pr.number) -R \(model.ref.repo.full)") }
@@ -288,7 +310,7 @@ struct StackPreviewContent: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(node.title).font(.syTitle2.weight(.bold)).lineLimit(1)
                     Text("#\(node.number)").font(.syTitle2).foregroundStyle(Color.syDim)
-                    ProgressView().controlSize(.small)
+                    PullYardLoader(size: 22)
                 }
                 HStack(spacing: 8) {
                     StateBadge(state: node.visualState)
@@ -426,11 +448,14 @@ struct StackStrip: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
                 .help("Up the stack: \(ups.count) pull requests are stacked on this one")
+                .accessibilityLabel("Up the stack: \(ups.count) pull requests are stacked on this one")
             }
             Button(action: onShow) {
                 Image(systemName: "chevron.right").font(.syCaption2).foregroundStyle(Color.syDim)
             }
             .buttonStyle(.plain)
+            .help("Show stack")
+            .accessibilityLabel("Show stack")
         }
         .font(.syCallout)
         .padding(.horizontal, 10)
@@ -446,6 +471,7 @@ struct StackStrip: View {
         }
         .buttonStyle(.borderless)
         .help("\(help): #\(s.number) \(s.title)")
+        .accessibilityLabel("\(help): #\(s.number) \(s.title)")
     }
 }
 
@@ -484,6 +510,8 @@ struct ReviewerBadge: View {
             .font(.syCaption.weight(.bold))
         }
         .help("\(login): \(stateTitle)")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(login): \(stateTitle)")
     }
 
     private var stateTitle: String {
@@ -557,6 +585,8 @@ struct MergeStatusBar: View {
             }
             .buttonStyle(.plain)
             .help("Checks")
+            .accessibilityLabel("Checks")
+            .accessibilityValue("\(failed) failed, \(pending) pending, \(ok) passed")
         }
     }
 
@@ -610,10 +640,7 @@ struct ConversationTab: View {
             HStack(alignment: .bottom, spacing: 8) {
                 ComposerBox(text: $text, placeholder: "Comment (Markdown) — ⌘↩ to send", minHeight: 56).frame(height: 64)
                 VStack(spacing: 6) {
-                    Button("Comment") { send() }
-                        .keyboardShortcut(.return, modifiers: .command)
-                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy)
-                        .buttonStyle(.borderedProminent)
+                    CommentSendButton(text: text, busy: model.busy, action: send)
                 }
             }
             .padding(10)
@@ -736,6 +763,7 @@ struct ChecksTab: View {
                         Button { openInBrowser(link) } label: { Image(systemName: "arrow.up.right.square") }
                             .buttonStyle(.borderless)
                             .help("Open in browser")
+                            .accessibilityLabel("Open in browser")
                     }
                 }
                 .padding(.vertical, 2)

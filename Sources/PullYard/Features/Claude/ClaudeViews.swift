@@ -314,6 +314,7 @@ struct ProjectHeader: View {
                 .foregroundStyle(Color.syMuted)
                 .opacity(hover ? 1 : 0.5)
                 .help("New session")
+                .accessibilityLabel("New session")
                 .disabled(!project.exists)
         }
         .contentShape(Rectangle())
@@ -403,10 +404,12 @@ struct SessionRow: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .help(collapsed ? "Expand" : "Collapse")
+                .accessibilityLabel(collapsed ? "Expand" : "Collapse")
             }
             Spacer(minLength: 8)
             if session.prNumber != nil {
-                Image(systemName: "arrow.triangle.pull").font(.syCaption).foregroundStyle(Color.syViolet.opacity(0.85))
+                Image(systemName: "arrow.triangle.pull").font(.syCaption).foregroundStyle(Color.syViolet.opacity(0.85)).accessibilityLabel("Pull request")
             }
             if childCount > 0 {
                 Text("\(childCount)").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
@@ -511,6 +514,10 @@ struct CompactLabelStyle: LabelStyle {
 struct ClaudeWorkspaceView: View {
     @Environment(AppModel.self) private var app
     @AppStorage("agents.inspectorWidth") private var inspectorWidth: Double = 380
+    @State private var inspectorExpanded = false
+
+    private static let inspectorMin: Double = 280
+    private static let inspectorDefault: Double = 380
 
     var body: some View {
         let ws = app.claude
@@ -521,57 +528,82 @@ struct ClaudeWorkspaceView: View {
             } else if case .notInstalled = account.status {
                 ClaudeAuthView()
             } else if let tab = ws.selectedTab {
-                HStack(spacing: 0) {
-                    VStack(spacing: 0) {
-                        ClaudeTabBar()
-                        ClaudeControlBar(tab: tab)
-                        if !Theme.isBrand { Divider() }
-                        Group {
-                            if let chat = tab.chat {
-                                ChatView(tab: tab, chat: chat)
-                            } else {
-                                ZStack {
-                                    ClaudeTerminalHost(tab: tab)
-                                    if !tab.running {
-                                        VStack(spacing: 10) {
-                                            if tab.terminalSleeping {
-                                                Label("Session is sleeping — memory freed", systemImage: "moon.zzz").foregroundStyle(Color.syMuted)
-                                            } else {
-                                                Text("Session ended" + (tab.exitCode.map { " (\($0))" } ?? "")).foregroundStyle(Color.syMuted)
+                GeometryReader { geo in
+                    let maxWidth = max(Self.inspectorMin, Double(geo.size.width) * 0.6)
+                    let width = min(max(inspectorWidth, Self.inspectorMin), maxWidth)
+                    let expanded = inspectorExpanded && ws.showInspector
+                    ZStack(alignment: .trailing) {
+                        VStack(spacing: 0) {
+                            ClaudeTabBar()
+                            ClaudeControlBar(tab: tab)
+                            if !Theme.isBrand { Divider() }
+                            Group {
+                                if let chat = tab.chat {
+                                    ChatView(tab: tab, chat: chat)
+                                } else {
+                                    ZStack {
+                                        ClaudeTerminalHost(tab: tab)
+                                        if !tab.running {
+                                            VStack(spacing: 10) {
+                                                if tab.terminalSleeping {
+                                                    Label("Session is sleeping — memory freed", systemImage: "moon.zzz").foregroundStyle(Color.syMuted)
+                                                } else {
+                                                    Text("Session ended" + (tab.exitCode.map { " (\($0))" } ?? "")).foregroundStyle(Color.syMuted)
+                                                }
+                                                HStack {
+                                                    Button("Resume session") { ws.restart(tab) }.buttonStyle(.borderedProminent).tint(.syAgentAccent)
+                                                    Button("Close tab") { ws.close(tab) }
+                                                }
                                             }
-                                            HStack {
-                                                Button("Resume session") { ws.restart(tab) }.buttonStyle(.borderedProminent).tint(.syAgentAccent)
-                                                Button("Close tab") { ws.close(tab) }
-                                            }
+                                            .padding(16)
+                                            .card(radius: 12)
+                                            .transition(.pop)
                                         }
-                                        .padding(16)
-                                        .card(radius: 12)
-                                        .transition(.pop)
                                     }
+                                    .animation(Motion.spring, value: tab.running)
                                 }
-                                .animation(Motion.spring, value: tab.running)
+                            }
+                            .id(tab.id)
+                            .transition(.opacity)
+                        }
+                        .animation(Motion.fade, value: tab.id)
+                        .frame(minWidth: 420, maxWidth: .infinity)
+                        .surface(.panel)
+                        .padding(.trailing, ws.showInspector ? width + 1 : 0)
+                        .allowsHitTesting(!expanded)
+                        .accessibilityHidden(expanded)
+                        if ws.showInspector {
+                            HStack(spacing: 0) {
+                                if !expanded {
+                                    ColumnResizeHandle(
+                                        width: Binding(get: { width }, set: { inspectorWidth = $0 }),
+                                        range: Self.inspectorMin...maxWidth,
+                                        edge: .trailing,
+                                        reset: Self.inspectorDefault
+                                    )
+                                }
+                                ClaudeInspector(tab: tab, expanded: expanded, onToggleExpand: toggleExpanded)
+                            }
+                            .frame(width: expanded ? geo.size.width : width + 1)
+                            .background {
+                                if expanded {
+                                    Button("Collapse inspector") { toggleExpanded() }
+                                        .keyboardShortcut(.cancelAction)
+                                        .frame(width: 0, height: 0)
+                                        .opacity(0)
+                                        .accessibilityHidden(true)
+                                }
                             }
                         }
-                        .id(tab.id)
-                        .transition(.opacity)
                     }
-                    .animation(Motion.fade, value: tab.id)
-                    .frame(minWidth: 420, maxWidth: .infinity)
-                    .surface(.panel)
-                    .layoutPriority(1)
-                    if ws.showInspector {
-                        ColumnResizeHandle(width: $inspectorWidth, range: 300...640, edge: .trailing)
+                    .edgeReveal(.trailing, enabled: !ws.showInspector, width: width) {
                         ClaudeInspector(tab: tab)
-                            .frame(width: inspectorWidth)
+                            .surface(.panel)
+                            .environment(app)
+                            .font(.syBody)
+                            .tint(Color.syAccent)
+                            .environment(\.locale, .app)
                     }
-                }
-                .edgeReveal(.trailing, enabled: !ws.showInspector, width: inspectorWidth) {
-                    ClaudeInspector(tab: tab)
-                        .surface(.panel)
-                        .environment(app)
-                        .font(.syBody)
-                        .tint(Color.syAccent)
-                        .environment(\.locale, .app)
                 }
             } else {
                 ClaudeEmptyState()
@@ -583,14 +615,19 @@ struct ClaudeWorkspaceView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 if ws.selectedTab != nil {
                     Button { toggleInspector() } label: { Label("Inspector", systemImage: "sidebar.right") }
-                        .help("Toggle changes panel")
+                        .help(ws.showInspector ? "Hide changes panel" : "Show changes panel")
                 }
             }
         }
     }
 
     private func toggleInspector() {
+        if app.claude.showInspector { inspectorExpanded = false }
         app.claude.showInspector.toggle()
+    }
+
+    private func toggleExpanded() {
+        withAnimation(Motion.smooth) { inspectorExpanded.toggle() }
     }
 }
 
@@ -650,6 +687,7 @@ struct ClaudeTabBar: View {
                             .buttonStyle(.borderless)
                             .foregroundStyle(Color.syDim)
                             .help("Close")
+                            .accessibilityLabel("Close")
                     }
                     .font(.syCallout)
                     .padding(.horizontal, 10)
@@ -674,6 +712,7 @@ struct ClaudeTabBar: View {
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .help("New session")
+                .accessibilityLabel("New session")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -724,14 +763,15 @@ struct ClaudeControlBar: View {
                 if k == .terminal && tab.kind == .chat { ws.openInTerminal(tab) }
                 if k == .chat && tab.kind == .terminal { ws.openInChat(tab) }
             })) {
-                Image(systemName: "bubble.left.and.text.bubble.right").tag(ClaudeTabKind.chat)
-                Image(systemName: "terminal").tag(ClaudeTabKind.terminal)
+                Image(systemName: "bubble.left.and.text.bubble.right").accessibilityLabel("Chat").tag(ClaudeTabKind.chat)
+                Image(systemName: "terminal").accessibilityLabel("Terminal").tag(ClaudeTabKind.terminal)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
             .disabled(tab.sessionId.isEmpty)
             .help("Chat or terminal (same session)")
+            .accessibilityLabel("Chat or terminal")
             Menu {
                 Button("Restart with new settings") {
                     if tab.kind == .chat { tab.chat?.stop() } else if tab.running { tab.terminal.terminate() }
@@ -763,6 +803,8 @@ struct ClaudeControlBar: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .help("More actions")
+            .accessibilityLabel("More actions")
         }
         .font(.syCallout)
         .padding(.horizontal, 12)
@@ -806,6 +848,8 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 
 struct ClaudeInspector: View {
     let tab: ClaudeTab
+    var expanded = false
+    var onToggleExpand: (() -> Void)?
     @AppStorage("agents.inspectorTab") private var selection: InspectorTab = .changes
 
     private var tabs: [TabItem<InspectorTab>] {
@@ -821,7 +865,19 @@ struct ClaudeInspector: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TabStrip(items: tabs, selection: $selection)
+            HStack(spacing: 0) {
+                TabStrip(items: tabs, selection: $selection)
+                if let onToggleExpand {
+                    Button(action: onToggleExpand) {
+                        Image(systemName: expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Color.syMuted)
+                    .padding(.trailing, 10)
+                    .help(expanded ? "Collapse (Esc)" : "Expand over the chat")
+                    .accessibilityLabel(expanded ? "Collapse inspector" : "Expand inspector")
+                }
+            }
             .padding(.top, 4)
             ClaudeHairline()
             switch selection {
@@ -856,6 +912,7 @@ struct ChangesPanel: View {
                 Button { Task { await git.refresh() } } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless)
                     .help("Refresh")
+                    .accessibilityLabel("Refresh")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -906,6 +963,8 @@ struct LocalFilesPanel: View {
                     Button { if !dir.isEmpty { dir = (dir as NSString).deletingLastPathComponent } } label: { Image(systemName: "chevron.left") }
                         .buttonStyle(.borderless)
                         .disabled(dir.isEmpty)
+                        .help("Parent folder")
+                        .accessibilityLabel("Parent folder")
                     Text(dir.isEmpty ? (root as NSString).lastPathComponent : dir).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.head)
                     Spacer()
                 }
@@ -1058,7 +1117,7 @@ struct BranchPRPanel: View {
                 .listRowSeparator(.hidden)
                 if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
                 if list.isEmpty, !listLoading, error == nil {
-                    Text("Nothing here").font(.syCallout).foregroundStyle(Color.syDim)
+                    ListEmptyNote(title: scope == .mine ? "No pull requests by you" : "No \(scope.title.lowercased()) pull requests", compact: true)
                 }
                 ForEach(list) { item in row(item) }
             } header: {
@@ -1186,6 +1245,7 @@ struct InspectorPRDetail: View {
                 Button { openInBrowser("https://github.com/\(ref.repo.full)/pull/\(ref.number)") } label: { Image(systemName: "safari") }
                     .buttonStyle(.borderless)
                     .help("Open in browser")
+                    .accessibilityLabel("Open in browser")
                 Button("Open full") { app.section = .prs(.mine); app.open(.pr(ref)) }
                     .controlSize(.small)
             }
@@ -1243,9 +1303,11 @@ struct InspectorPRDetail: View {
                 let checks = pr.checks
                 Label("\(checks.filter { $0.outcome == .success }.count)/\(checks.count)", systemImage: "checklist")
                     .foregroundStyle(checks.contains { $0.outcome == .failure } ? Color.syRed : Color.syMuted)
+                    .accessibilityLabel("\(checks.filter { $0.outcome == .success }.count) of \(checks.count) checks passed")
                 Label("\(unresolved.count)", systemImage: "text.bubble")
                     .foregroundStyle(unresolved.isEmpty ? Color.syMuted : Color.syAmber)
                     .help("Unresolved comments")
+                    .accessibilityLabel("\(unresolved.count) unresolved comments")
                 if !model!.reviewers.isEmpty {
                     HStack(spacing: 3) {
                         ForEach(model!.reviewers, id: \.login) { ReviewerBadge(login: $0.login, avatar: $0.avatar, state: $0.state) }
@@ -1313,7 +1375,7 @@ struct InspectorPRDetail: View {
                             }
                         }
                     } else {
-                        ProgressView().controlSize(.small)
+                        PullYardLoader(size: 28).frame(maxWidth: .infinity)
                     }
                 }
                 .padding(.top, 4)

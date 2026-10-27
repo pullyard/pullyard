@@ -98,6 +98,7 @@ struct ChatTasksPanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityValue(collapsible ? (showFinished ? "Expanded" : "Collapsed") : "")
     }
 
     private func row(_ call: ChatToolCall) -> some View {
@@ -173,6 +174,7 @@ private struct ChatTaskRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityValue(open ? "Expanded" : "Collapsed")
             if open { details }
         }
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.syText.opacity(hover || open ? 0.05 : 0)))
