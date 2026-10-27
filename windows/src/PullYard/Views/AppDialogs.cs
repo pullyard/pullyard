@@ -175,6 +175,8 @@ public static class SettingsDialog
         tray.Toggled += (_, _) => Settings.Shared.Set(Keys.CloseToTray, tray.IsOn);
         panel.Children.Add(Group(L.T("Settings_Refresh", "Refresh"), "", "green", Row(L.T("Settings_AutoRefresh", "Auto-refresh pull requests"), poll), Row(L.T("Settings_CloseToTray", "Keep running in the notification area when the window is closed"), tray)));
 
+        panel.Children.Add(Group(L.T("Settings_Notifications", "Notifications"), "\uEA8F", "amber", NotificationSettings()));
+
         if (app.Phase == Phase.LoggedIn) panel.Children.Add(Group(L.T("Section_Claude", "Agents"), "", "coral", ClaudeSettings(app)));
 
         panel.Children.Add(Group(L.T("Jira_Title", "Jira"), "\uE8EC", "sky", new JiraConnectForm()));
@@ -357,11 +359,46 @@ public static class SettingsDialog
         return panel;
     }
 
+    private static string NotifyTitle(NotifyKind kind) => kind switch
+    {
+        NotifyKind.ReviewRequest => L.T("Notify_ReviewRequest", "New review requests"),
+        NotifyKind.CiFailed => L.T("Notify_CiFailed", "Checks failed on my pull requests"),
+        NotifyKind.ReviewDecision => L.T("Notify_ReviewDecision", "My pull requests approved or changes requested"),
+        NotifyKind.AgentInput => L.T("Notify_AgentInput", "Agent needs permission or an answer"),
+        _ => L.T("Notify_AgentFinished", "Agent finished")
+    };
+
+    private static FrameworkElement NotificationSettings()
+    {
+        var rows = new List<UIElement>();
+        foreach (var kind in NotifyKinds.All)
+        {
+            var toggle = new ToggleSwitch { IsOn = kind.Enabled(Settings.Shared), OnContent = "", OffContent = "" };
+            var k = kind;
+            toggle.Toggled += (_, _) => k.SetEnabled(Settings.Shared, toggle.IsOn);
+            rows.Add(Row(NotifyTitle(kind), toggle));
+        }
+        rows.Add(Ui.Text(L.F("Notify_Help", "Pull request alerts compare each refresh with the previous one, so nothing fires for what was already waiting when {0} opened or switched accounts. Agent alerts only appear when you aren't looking at that session.", AppInfo.DisplayName), 12.5, "muted", wrap: true));
+        var badge = new ToggleSwitch { IsOn = AppBadge.Enabled, OnContent = "", OffContent = "" };
+        var agents = new ToggleSwitch { IsOn = AppBadge.IncludesAgents, IsEnabled = AppBadge.Enabled, OnContent = "", OffContent = "" };
+        badge.Toggled += (_, _) =>
+        {
+            AppBadge.Enabled = badge.IsOn;
+            agents.IsEnabled = badge.IsOn;
+        };
+        agents.Toggled += (_, _) => AppBadge.IncludesAgents = agents.IsOn;
+        rows.Add(Row(L.T("Notify_TaskbarBadge", "Show pending reviews on the taskbar icon"), badge));
+        rows.Add(Row(L.T("Notify_TaskbarAgents", "Count agents waiting for you"), agents));
+        rows.Add(Ui.Link(L.T("Notify_WindowsSettings", "Open Windows notification settings"), () => Windows.System.Launcher.LaunchUriAsync(new Uri("ms-settings:notifications")).AsTask().Forget(), 12.5));
+        return Ui.V(10, rows.ToArray());
+    }
+
     private static FrameworkElement Row(string label, UIElement control)
     {
         var l = Ui.Text(label, 13, "text", wrap: true);
         l.MaxWidth = 260;
         l.HorizontalAlignment = HorizontalAlignment.Left;
+        if (string.IsNullOrEmpty(Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(control))) Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(control, label);
         var g = Ui.Columns((l, Ui.Star), (control, Ui.Auto));
         g.ColumnSpacing = 16;
         return g;

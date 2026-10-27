@@ -17,6 +17,7 @@ public sealed class SearchListView : ListPane
     private StateFilter stateFilter = StateFilter.Open;
     private string text = "";
     private readonly HashSet<string> collapsed = new();
+    private readonly TextBox filterBox;
     private bool syncing;
 
     public SearchListView(string title, string kind, string baseQuery, bool grouped) : base(title, "FeedRowTemplate")
@@ -29,11 +30,12 @@ public sealed class SearchListView : ListPane
             stateFilter = f;
             Reload().Forget();
         }));
-        FilterRow.Children.Add(SearchBox(L.T("Search_Placeholder", "Filter: text, repo:org/name, label:bug"), t =>
+        filterBox = SearchBox(L.T("Search_Placeholder", "Filter: text, repo:org/name, label:bug"), t =>
         {
             text = t.Trim();
             Reload(typing: true).Forget();
-        }));
+        });
+        FilterRow.Children.Add(filterBox);
         List.SelectionChanged += OnSelection;
         List.ItemClick += OnItemClick;
         List.ContainerContentChanging += (_, e) =>
@@ -100,7 +102,11 @@ public sealed class SearchListView : ListPane
             if (vm.CheckingCache) ShowOverlay(null);
             else if (vm.Loading) ShowOverlay(Ui.Loading());
             else if (vm.Error is { } e) ShowOverlay(Ui.Error(e, () => Reload().Forget()));
-            else ShowOverlay(Ui.Empty("", "green", L.T("Common_NothingHere", "Nothing here")));
+            else
+            {
+                var copy = EmptyCopy.Search(kind, baseQuery, stateFilter);
+                ShowOverlay(Ui.EmptyState(copy.Title, copy.Message, text, () => filterBox.Text = ""));
+            }
         }
         else
         {
@@ -311,7 +317,9 @@ public sealed class NotificationsView : ListPane
         {
             if (loading) ShowOverlay(Ui.Loading());
             else if (error is { } e) ShowOverlay(Ui.Error(e, () => Load(true).Forget()));
-            else ShowOverlay(Ui.Empty(showAll ? "" : "", showAll ? "slate" : "green", showAll ? L.T("Notifications_None", "No notifications") : L.T("Notifications_CaughtUp", "All caught up")));
+            else ShowOverlay(showAll
+                ? Ui.EmptyState(L.T("Notifications_None", "No notifications"), L.T("Notifications_NoneMessage", "Activity on your repositories shows up here."))
+                : Ui.EmptyState(L.T("Notifications_CaughtUp", "All caught up"), L.T("Notifications_CaughtUpMessage", "You’ve read everything. New activity shows up here.")));
         }
         else
         {
@@ -377,15 +385,17 @@ public sealed class ReposView : ListPane
     private bool hideArchived = true;
     private DateTimeOffset? lastUpdated;
     private bool syncing;
+    private readonly TextBox filterBox;
 
     public ReposView() : base(L.T("Section_Repositories", "Repositories"), "RepoRowTemplate")
     {
-        FilterRow.Children.Add(SearchBox(L.T("Repos_Filter", "Filter repositories"), t =>
+        filterBox = SearchBox(L.T("Repos_Filter", "Filter repositories"), t =>
         {
             text = t.Trim();
             Render();
             if (text.Length > 0 && hasMore) LoadAll().Forget();
-        }, 200));
+        }, 200);
+        FilterRow.Children.Add(filterBox);
         Tools.Children.Add(Toggle("", L.T("Repos_HideArchived", "Hide archived"), hideArchived, on =>
         {
             hideArchived = on;
@@ -497,11 +507,15 @@ public sealed class ReposView : ListPane
     {
         SetLoading(refreshing, repos.Count > 0);
         Footer.Update(lastUpdated, refreshing, repos.Count == 0 ? null : error);
-        if (repos.Count == 0)
+        if (repos.Count == 0 && loading) ShowOverlay(Ui.Loading());
+        else if (repos.Count == 0 && error is { } e) ShowOverlay(Ui.Error(e, () => Load().Forget()));
+        else if (!Visible.Any() && !loading)
         {
-            if (loading) ShowOverlay(Ui.Loading());
-            else if (error is { } e) ShowOverlay(Ui.Error(e, () => Load().Forget()));
-            else ShowOverlay(Ui.Empty("", "teal", L.T("Common_NothingHere", "Nothing here")));
+            var archivedHidden = hideArchived && repos.Any(r => r.IsArchived);
+            ShowOverlay(Ui.EmptyState(
+                archivedHidden ? L.T("Repos_NoActive", "No active repositories") : L.T("Repos_None", "No repositories"),
+                archivedHidden ? L.T("Repos_ArchivedHidden", "Archived repositories are hidden.") : L.T("Repos_NoneMessage", "Repositories you can access show up here."),
+                text, () => filterBox.Text = ""));
         }
         else
         {
@@ -520,14 +534,16 @@ public sealed class ProjectsView : ListPane
     private DateTimeOffset? lastUpdated;
     private bool syncing;
     private readonly ContentControl hint = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, IsTabStop = false };
+    private readonly AppBarToggleButton closedToggle;
 
     public ProjectsView() : base(L.T("Section_Projects", "Projects"), "ProjectRowTemplate")
     {
-        Tools.Children.Add(Toggle("", L.T("Projects_ShowClosed", "Show closed"), showClosed, on =>
+        closedToggle = Toggle("", L.T("Projects_ShowClosed", "Show closed"), showClosed, on =>
         {
             showClosed = on;
             Render();
-        }));
+        });
+        Tools.Children.Add(closedToggle);
         FilterRow.Children.Add(hint);
         List.SelectionChanged += (_, _) =>
         {
@@ -591,11 +607,18 @@ public sealed class ProjectsView : ListPane
         hint.Content = scopeProblem ? ScopeHint() : null;
         SetLoading(shownLoads > 0, projects.Count > 0);
         Footer.Update(lastUpdated, loading, projects.Count == 0 ? null : error);
-        if (projects.Count == 0)
+        if (projects.Count == 0 && loading) ShowOverlay(Ui.Loading());
+        else if (projects.Count == 0 && error is { } e && !scopeProblem) ShowOverlay(Ui.Error(e, () => Load().Forget()));
+        else if (!scopeProblem && error is null && !loading && !projects.Any(p => showClosed || !p.Closed))
         {
-            if (loading) ShowOverlay(Ui.Loading());
-            else if (error is { } e && !scopeProblem) ShowOverlay(Ui.Error(e, () => Load().Forget()));
-            else ShowOverlay(Ui.Empty("", "indigo", L.T("Projects_None", "No projects")));
+            ShowOverlay(projects.Count == 0
+                ? Ui.EmptyState(L.T("Projects_None", "No projects"), L.T("Projects_NoneMessage", "Projects you can access show up here."))
+                : Ui.EmptyState(L.T("Projects_NoOpen", "No open projects"), L.T("Projects_ClosedHidden", "Closed projects are hidden."), actionTitle: L.T("Projects_ShowClosed", "Show closed"), action: () =>
+                {
+                    showClosed = true;
+                    closedToggle.IsChecked = true;
+                    Render();
+                }));
         }
         else
         {

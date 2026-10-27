@@ -290,7 +290,7 @@ pub fn markdown_page(inner: &str, look: Look) -> String {
 
 pub fn css(look: Look) -> String {
     if look.brand {
-        format!("{BRAND_VARS}{BASE_CSS}{BRAND_OVERRIDES}")
+        format!("{}{BASE_CSS}{BRAND_OVERRIDES}", brand_vars())
     } else {
         format!("{SYSTEM_VARS}{BASE_CSS}")
     }
@@ -300,9 +300,14 @@ const SYSTEM_VARS: &str = ":root{--fg:#1f2328;--muted:#59636e;--border:#d1d9e0;-
 :root.dark{--fg:#e6edf3;--muted:#9198a1;--border:#3d444d;--sub:#151b23;--link:#4493f8;--green:#3fb950;--red:#f85149;--purple:#ab7df8;--add:rgba(46,160,67,.18);--del:rgba(248,81,73,.18);--mine:rgba(56,139,253,.12);--code:transparent;color-scheme:dark}
 ";
 
-const BRAND_VARS: &str = ":root{--fg:#1a2333;--muted:#5f6b7e;--border:rgba(26,35,51,.09);--sub:#f3f1ec;--card:#ffffff;--link:#1f7fb8;--green:#2e8a57;--red:#c2412f;--purple:#6b55d6;--add:rgba(46,138,87,.10);--del:rgba(194,65,47,.09);--mine:rgba(31,127,184,.07);--code:#f7f5f0;color-scheme:light}
-:root.dark{--fg:#e6ebf2;--muted:#8693a8;--border:rgba(160,174,196,.10);--sub:#111a2c;--card:#152036;--link:#5bb8ec;--green:#5dbe8a;--red:#e8746a;--purple:#9d8cf0;--add:rgba(93,190,138,.10);--del:rgba(232,116,106,.10);--mine:rgba(91,184,236,.07);--code:#0a101c;color-scheme:dark}
-";
+fn brand_vars() -> String {
+    let (sky, sky_dark) = crate::brand::SKY;
+    let (green, green_dark) = crate::brand::GREEN;
+    let (violet, violet_dark) = crate::brand::VIOLET;
+    format!(
+        ":root{{--fg:#1a2333;--muted:#5f6b7e;--border:rgba(26,35,51,.09);--sub:#f3f1ec;--card:#ffffff;--link:{sky};--green:{green};--red:#c2412f;--purple:{violet};--add:rgba(46,138,87,.10);--del:rgba(194,65,47,.09);--mine:rgba(31,127,184,.07);--code:#f7f5f0;color-scheme:light}}\n:root.dark{{--fg:#e6ebf2;--muted:#8693a8;--border:rgba(160,174,196,.10);--sub:#111a2c;--card:#152036;--link:{sky_dark};--green:{green_dark};--red:#e8746a;--purple:{violet_dark};--add:rgba(93,190,138,.10);--del:rgba(232,116,106,.10);--mine:rgba(91,184,236,.07);--code:#0a101c;color-scheme:dark}}\n"
+    )
+}
 
 const BRAND_OVERRIDES: &str = ".box,.thread,.hunk,.event .ic,.pill,button,.md pre{border:0}
 .head{border-bottom:0}

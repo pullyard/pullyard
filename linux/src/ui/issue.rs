@@ -183,7 +183,11 @@ impl IssuePage {
         let Some(api) = app::api() else { return };
         let Some(id) = self.issue.borrow().as_ref().map(|i| i.id.clone()) else { return };
         let me = self.clone();
+        let commenting = body.is_some();
         me.busy.set(true);
+        if commenting {
+            me.composer.set_busy(true);
+        }
         me.render_status();
         crate::rt::spawn_local(async move {
             let res = crate::rt::run(async move {
@@ -194,6 +198,9 @@ impl IssuePage {
             })
             .await;
             me.busy.set(false);
+            if commenting {
+                me.composer.set_busy(false);
+            }
             match res {
                 Ok(()) => {
                     if mutation.is_empty() {
@@ -219,7 +226,7 @@ pub fn page_child(r: &ItemRef) -> gtk::Widget {
     let html = HtmlView::new();
     let composer = Composer::new("Comment (Markdown) — Ctrl+Enter to send", 56);
     composer.widget.set_hexpand(true);
-    let send = suggested("Comment");
+    let send = composer.send_button("Comment");
     send.set_valign(gtk::Align::End);
     let row = hbox(8);
     row.add_css_class("sy-bar-top");

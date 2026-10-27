@@ -12,7 +12,15 @@ use crate::claude::workspace::{apply_terminal_colors, Tab, WsEvent};
 use crate::claude::{launcher, notifier, ClaudeMode, Indicator, ModelOption, TabKind, TabState, EFFORTS};
 use crate::ui::menu::Menu;
 use crate::ui::widgets::*;
-use crate::{app, util};
+use crate::{app, settings, util};
+
+const INSPECTOR_DEFAULT: i32 = 380;
+const INSPECTOR_MIN: i32 = 280;
+
+pub fn clamp_inspector(width: i32, total: i32) -> i32 {
+    let max = (total as f64 * 0.6).floor() as i32;
+    width.clamp(INSPECTOR_MIN, max.max(INSPECTOR_MIN))
+}
 
 struct View {
     outer: gtk::Stack,
@@ -31,6 +39,10 @@ struct View {
     tab_bar_key: RefCell<String>,
     control_key: RefCell<String>,
     control_badge: RefCell<Option<gtk::Box>>,
+    left: gtk::Box,
+    expand_btn: gtk::ToggleButton,
+    applying: Cell<bool>,
+    save_pending: Cell<bool>,
 }
 
 struct TabBadge {
@@ -74,6 +86,59 @@ fn control_menu(icon_name: &str, title: &str, help: &str, menu: &Menu) -> gtk::M
 }
 
 impl View {
+    fn apply_inspector_width(&self) {
+        let total = self.paned.width();
+        if total <= 0 || self.expand_btn.is_active() {
+            return;
+        }
+        let width = clamp_inspector(settings::read(|s| s.inspector_width).unwrap_or(INSPECTOR_DEFAULT), total);
+        self.applying.set(true);
+        self.paned.set_position(total - width);
+        self.applying.set(false);
+    }
+
+    fn on_position(self: &Rc<Self>) {
+        if self.applying.get() || self.expand_btn.is_active() || !self.inspector_bin.is_visible() {
+            return;
+        }
+        let total = self.paned.width();
+        if total <= 0 {
+            return;
+        }
+        let width = total - self.paned.position();
+        let clamped = clamp_inspector(width, total);
+        if clamped != width {
+            self.applying.set(true);
+            self.paned.set_position(total - clamped);
+            self.applying.set(false);
+        }
+        if self.save_pending.replace(true) {
+            return;
+        }
+        let w = Rc::downgrade(self);
+        gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(400), move || {
+            let Some(me) = w.upgrade() else { return };
+            me.save_pending.set(false);
+            let total = me.paned.width();
+            if total > 0 && !me.expand_btn.is_active() && me.inspector_bin.is_visible() {
+                let width = clamp_inspector(total - me.paned.position(), total);
+                settings::update(|s| s.inspector_width = Some(width));
+            }
+        });
+    }
+
+    fn set_expanded(&self, on: bool) {
+        if self.expand_btn.is_active() != on {
+            self.expand_btn.set_active(on);
+        }
+        self.left.set_visible(!on);
+        set_label(&self.expand_btn, if on { "Collapse changes panel" } else { "Expand changes panel" });
+        self.expand_btn.set_tooltip_text(Some(if on { "Show the chat again (Esc)" } else { "Expand the changes panel over the chat" }));
+        if !on {
+            self.apply_inspector_width();
+        }
+    }
+
     fn render_all(self: &Rc<Self>) {
         let store = accounts::store();
         let status = store.status.borrow().clone();
@@ -82,6 +147,8 @@ impl View {
             self.title.set_title("Agents");
             self.title.set_subtitle("");
             self.inspector_btn.set_visible(false);
+            self.set_expanded(false);
+            self.expand_btn.set_visible(false);
             return;
         }
         let ws = app::get().claude.clone();
@@ -91,10 +158,13 @@ impl View {
             self.title.set_title("Agents");
             self.title.set_subtitle("");
             self.inspector_btn.set_visible(false);
+            self.set_expanded(false);
+            self.expand_btn.set_visible(false);
             return;
         };
         self.outer.set_visible_child_name("tabs");
         self.inspector_btn.set_visible(true);
+        self.expand_btn.set_visible(app::get().claude.show_inspector.get());
         self.title.set_title(&tab.title.borrow());
         self.title.set_subtitle(&util::tilde(&tab.folder));
         self.render_tab_bar();
@@ -309,9 +379,11 @@ impl View {
         let chat_btn = gtk::ToggleButton::new();
         crate::icons::set_button_icon(&chat_btn, "sy-comment-symbolic");
         chat_btn.set_tooltip_text(Some("Chat"));
+        set_label(&chat_btn, "Chat");
         let term_btn = gtk::ToggleButton::new();
         crate::icons::set_button_icon(&term_btn, "sy-terminal-symbolic");
         term_btn.set_tooltip_text(Some("Terminal"));
+        set_label(&term_btn, "Terminal");
         term_btn.set_group(Some(&chat_btn));
         if tab.kind == TabKind::Chat {
             chat_btn.set_active(true);
@@ -534,11 +606,17 @@ pub fn build() -> gtk::Widget {
     let inspector_btn = gtk::ToggleButton::new();
     crate::icons::set_button_icon(&inspector_btn, "sy-panel-right-symbolic");
     inspector_btn.set_tooltip_text(Some("Toggle changes panel"));
+    set_label(&inspector_btn, "Changes panel");
     inspector_btn.set_active(true);
+    let expand_btn = gtk::ToggleButton::new();
+    expand_btn.set_icon_name("view-fullscreen-symbolic");
+    expand_btn.set_tooltip_text(Some("Expand the changes panel over the chat"));
+    set_label(&expand_btn, "Expand changes panel");
     let tv = adw::ToolbarView::new();
     let hb = adw::HeaderBar::new();
     hb.set_title_widget(Some(&title));
     hb.pack_end(&inspector_btn);
+    hb.pack_end(&expand_btn);
     tv.add_top_bar(&hb);
     tv.set_content(Some(&outer));
     let view = Rc::new(View {
@@ -558,21 +636,72 @@ pub fn build() -> gtk::Widget {
         tab_bar_key: RefCell::new(String::new()),
         control_key: RefCell::new(String::new()),
         control_badge: RefCell::new(None),
+        left: left.clone(),
+        expand_btn: expand_btn.clone(),
+        applying: Cell::new(false),
+        save_pending: Cell::new(false),
     });
     let ib = inspector_bin.clone();
+    let w = Rc::downgrade(&view);
     inspector_btn.connect_toggled(move |b| {
         app::get().claude.show_inspector.set(b.is_active());
         ib.set_visible(b.is_active());
-    });
-    let w = Rc::downgrade(&view);
-    paned.connect_realize(move |p| {
-        if w.upgrade().is_some() {
-            let width = p.width();
-            if width > 900 {
-                p.set_position(width - 380);
+        if let Some(v) = w.upgrade() {
+            if !b.is_active() {
+                v.set_expanded(false);
             }
+            v.expand_btn.set_visible(b.is_active());
         }
     });
+    let w = Rc::downgrade(&view);
+    expand_btn.connect_toggled(move |b| {
+        if let Some(v) = w.upgrade() {
+            v.set_expanded(b.is_active());
+        }
+    });
+    let w = Rc::downgrade(&view);
+    paned.add_tick_callback(move |p, _| {
+        let Some(v) = w.upgrade() else { return gtk::glib::ControlFlow::Break };
+        if p.width() <= 0 {
+            return gtk::glib::ControlFlow::Continue;
+        }
+        v.apply_inspector_width();
+        gtk::glib::ControlFlow::Break
+    });
+    let w = Rc::downgrade(&view);
+    paned.connect_position_notify(move |_| {
+        if let Some(v) = w.upgrade() {
+            v.on_position();
+        }
+    });
+    let reset = gtk::GestureClick::new();
+    reset.set_button(1);
+    reset.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let w = Rc::downgrade(&view);
+    reset.connect_pressed(move |g, n, x, _| {
+        let Some(v) = w.upgrade() else { return };
+        if n != 2 || v.expand_btn.is_active() || !v.inspector_bin.is_visible() {
+            return;
+        }
+        if (x - v.paned.position() as f64).abs() <= 8.0 {
+            g.set_state(gtk::EventSequenceState::Claimed);
+            settings::update(|s| s.inspector_width = None);
+            v.apply_inspector_width();
+        }
+    });
+    paned.add_controller(reset);
+    let keys = gtk::EventControllerKey::new();
+    let w = Rc::downgrade(&view);
+    keys.connect_key_pressed(move |_, key, _, _| {
+        if key == gtk::gdk::Key::Escape {
+            if let Some(v) = w.upgrade().filter(|v| v.expand_btn.is_active()) {
+                v.set_expanded(false);
+                return gtk::glib::Propagation::Stop;
+            }
+        }
+        gtk::glib::Propagation::Proceed
+    });
+    tv.add_controller(keys);
     let w = Rc::downgrade(&view);
     app::get().claude.changed.connect(move |e| match w.upgrade() {
         Some(v) => {
@@ -618,4 +747,17 @@ pub fn build() -> gtk::Widget {
     let _ = &view.paned;
     keep_alive(&tv, view);
     tv.upcast()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inspector_width_stays_between_minimum_and_sixty_percent() {
+        assert_eq!(clamp_inspector(100, 1400), 280);
+        assert_eq!(clamp_inspector(500, 1400), 500);
+        assert_eq!(clamp_inspector(1000, 1400), 840);
+        assert_eq!(clamp_inspector(400, 300), 280);
+    }
 }

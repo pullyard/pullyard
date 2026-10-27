@@ -40,7 +40,7 @@ public partial class App : Application
         {
             ShowMainWindow();
             if (action == "update") AppViewModel.Shared.Updater.Present();
-            else AgentNotifier.Handle(action);
+            else if (!ActivityNotifier.Handle(action)) AgentNotifier.Handle(action);
         });
         Notifications.Register();
         DiagnosticsService.Restore();
@@ -48,6 +48,7 @@ public partial class App : Application
         if (Program.SmokeTour) Settings.Shared.Set(Keys.ThemeStyle, AppInfo.Env("TOUR_STYLE") == "system" ? "system" : "brand");
         MainWindow = new MainWindow();
         MainWindow.Activate();
+        ActivityNotifier.Attach(AppViewModel.Shared, MainWindow);
         AgentNotifier.Attach(AppViewModel.Shared, MainWindow);
         CreateTray();
         AppViewModel.Shared.HandleArguments(Environment.CommandLine);
@@ -137,11 +138,11 @@ public partial class App : Application
         {
             var forge = m.Forge is not null;
             var prefix = m.Provider.NumberPrefix();
-            void AddSection(string title, int count, List<SearchItem> list, PRFilter filter)
+            void AddSection(string title, int count, List<SearchItem> list, PRFilter filter, string empty)
             {
                 if (forge && !m.ForgeSupports(Section.Prs(filter))) return;
                 items.Add(new() { Text = $"{title.ToUpperInvariant()}  ({count})", Action = () => { m.Section = Section.Prs(filter); ShowMainWindow(); } });
-                if (list.Count == 0) items.Add(new() { Text = "    " + L.T("Common_NothingHere", "Nothing here"), Disabled = true });
+                if (list.Count == 0) items.Add(new() { Text = "    " + empty, Disabled = true });
                 foreach (var item in list.Take(10))
                 {
                     var ci = item.CiState switch
@@ -175,8 +176,8 @@ public partial class App : Application
                 }
                 items.Add(new() { Separator = true });
             }
-            AddSection(L.T("Tray_ReviewRequests", "Review requests"), m.ReviewRequestCount, m.ReviewRequests, PRFilter.ReviewRequested);
-            AddSection(m.Provider.UsesMergeRequests() ? L.T("Tray_MyOpenMRs", "My open MRs") : L.T("Tray_MyOpenPRs", "My open PRs"), m.MyPRCount, m.MyPRs, PRFilter.Mine);
+            AddSection(L.T("Tray_ReviewRequests", "Review requests"), m.ReviewRequestCount, m.ReviewRequests, PRFilter.ReviewRequested, L.T("Empty_NoReviews", "No reviews waiting"));
+            AddSection(m.Provider.UsesMergeRequests() ? L.T("Tray_MyOpenMRs", "My open MRs") : L.T("Tray_MyOpenPRs", "My open PRs"), m.MyPRCount, m.MyPRs, PRFilter.Mine, m.Provider.UsesMergeRequests() ? L.T("Tray_NoOpenMRs", "No open MRs") : L.T("Tray_NoOpenPRs", "No open PRs"));
             if (!forge || m.ForgeCaps.HasInbox)
             {
                 var unread = m.UnreadCount >= 50 ? "50+" : m.UnreadCount.ToString();

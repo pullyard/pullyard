@@ -167,7 +167,7 @@ struct TabStateBadge: View {
             if state == .working {
                 ProgressView().controlSize(.mini).frame(width: 10, height: 10)
             } else {
-                Image(systemName: state.icon).font(.system(size: state == .active ? 6 : 9))
+                Image(systemName: state.icon).font(.system(size: state == .active ? 6 : 9)).accessibilityLabel(state.title).accessibilityHidden(!compact)
             }
             if !compact {
                 Text(state.title)

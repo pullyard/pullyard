@@ -13,6 +13,7 @@ use super::git::WorkingCopy;
 use super::sessions::{self, Project, SessionInfo};
 use super::{notifier, prefs, ClaudeMode, Indicator, ModelOption, TabKind, TabState};
 use crate::host::{self, HostCmd};
+use crate::activity::NotifyKind;
 use crate::signal::Signal;
 use crate::{demo, settings, util};
 
@@ -171,8 +172,11 @@ pub fn apply_terminal_colors(t: &vte4::Terminal) {
     let dark = crate::theme::is_dark();
     let brand = crate::theme::is_brand();
     let (bg, fg, cursor) = match (brand, dark) {
-        (true, true) => ("#101828", "#E6EBF2", "#5BB8EC"),
-        (true, false) => ("#FDFCFA", "#1A2333", "#2A8BC8"),
+        (true, _) => (
+            crate::theme::token_hex("panel").unwrap_or(if dark { "#101828" } else { "#FDFCFA" }),
+            crate::theme::token_hex("text").unwrap_or(if dark { "#E6EBF2" } else { "#1A2333" }),
+            crate::theme::token_hex("accent").unwrap_or(crate::brand::pick(crate::brand::SKY, dark)),
+        ),
         (false, true) => ("#1e1e1f", "#e6e6e6", "#3584e4"),
         (false, false) => ("#fcfcfc", "#1f1f1f", "#1c71d8"),
     };
@@ -746,8 +750,8 @@ impl Workspace {
                 prefs::mark_seen(&t.session_id.borrow());
             } else {
                 t.unread.set(true);
-                let title = format!("Claude finished · {}", t.title.borrow());
-                notifier::post(t.id, &title, &notifier::snippet(t.last_assistant_text().as_deref()));
+                let title = format!("Agent finished · {}", t.title.borrow());
+                notifier::post(t.id, NotifyKind::AgentFinished, &title, &notifier::snippet(t.last_assistant_text().as_deref()));
                 w.emit(WsEvent::TabState);
             }
         }));
@@ -759,7 +763,7 @@ impl Workspace {
             w.emit(WsEvent::TabState);
             if !w.is_watching(&t) {
                 let title = t.title.borrow().clone();
-                notifier::post(t.id, &title, &notifier::needs_input_body(&t.pending_tool()));
+                notifier::post(t.id, NotifyKind::AgentInput, &title, &notifier::needs_input_body(&t.pending_tool()));
             }
         }));
         let m = mode.unwrap_or_else(|| self.mode());

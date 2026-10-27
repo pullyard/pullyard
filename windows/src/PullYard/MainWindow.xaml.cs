@@ -98,14 +98,15 @@ public sealed partial class MainWindow : Window
     private void ApplyBackground()
     {
         RootGrid.Background = ThemeService.IsBrand
-            ? new SolidColorBrush(Palette.Hex(RootGrid.ActualTheme == ElementTheme.Dark ? 0x0C1220u : 0xF7F5F0u))
+            ? Palette.Brush("window")
             : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         var titleBar = AppWindow.TitleBar;
         var dark = ThemeService.IsDark;
         titleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
         titleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
-        titleBar.ButtonForegroundColor = dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
-        titleBar.ButtonHoverBackgroundColor = dark ? Windows.UI.Color.FromArgb(0x20, 255, 255, 255) : Windows.UI.Color.FromArgb(0x18, 0, 0, 0);
+        titleBar.ButtonForegroundColor = Palette.Get("text");
+        titleBar.ButtonHoverForegroundColor = Palette.Get("text");
+        titleBar.ButtonHoverBackgroundColor = Palette.Get("text", (byte)(dark ? 0x20 : 0x18));
     }
 
     private void OnActivated(object sender, WindowActivatedEventArgs args)
@@ -160,12 +161,14 @@ public sealed partial class MainWindow : Window
         Add(VirtualKey.Number5, VirtualKeyModifiers.Control, () => model.Section = Section.Projects);
         Add(VirtualKey.Number6, VirtualKeyModifiers.Control, () => model.Section = Section.Claude);
         Add(VirtualKey.Left, VirtualKeyModifiers.Menu, () => ShellView.Current?.GoBack());
-        Add(VirtualKey.K, VirtualKeyModifiers.Control, () => { if (model.Phase == Phase.LoggedIn) AgentQuickOpen.Show(RootGrid.XamlRoot).Forget(); });
+        Add(VirtualKey.K, VirtualKeyModifiers.Control, () => CommandPalette.Toggle(RootGrid.XamlRoot));
+        Add(VirtualKey.K, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => { if (model.Phase == Phase.LoggedIn) AgentQuickOpen.Show(RootGrid.XamlRoot).Forget(); });
         AppShortcut = id =>
         {
             switch (id)
             {
                 case "quickopen": if (model.Phase == Phase.LoggedIn) AgentQuickOpen.Show(RootGrid.XamlRoot).Forget(); break;
+                case "palette": CommandPalette.Toggle(RootGrid.XamlRoot); break;
                 case "new": NewAgentSession().Forget(); break;
                 case "next": CycleAgent(1); break;
                 case "prev": CycleAgent(-1); break;

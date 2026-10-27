@@ -27,7 +27,7 @@ struct RefreshStatus: View {
                 if refreshing {
                     ProgressView().controlSize(.mini)
                 } else if error != nil {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.syAmber)
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.syAmber).accessibilityLabel("Refresh failed")
                 } else {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -105,6 +105,7 @@ private struct LiveRefreshModifier: ViewModifier {
     @State private var phase: PullPhase = .idle
     @State private var lastPull: Date?
     @State private var scrollTopToken = 0
+    @State private var settleToken = 0
     @State private var revealing = false
     @State private var sawRefreshing = false
     @State private var manual = false
@@ -114,7 +115,7 @@ private struct LiveRefreshModifier: ViewModifier {
     func body(content: Content) -> some View {
         VStack(spacing: 0) {
             scrollArea(content)
-                .background(ScrollPullProbe(pull: $pull, scrollTopToken: scrollTopToken, onTrigger: pulled))
+                .background(ScrollPullProbe(pull: $pull, scrollTopToken: scrollTopToken, settleToken: settleToken, onTrigger: pulled))
                 .overlay(alignment: .top) {
                     PullIndicator(pull: pull, phase: phase)
                         .allowsHitTesting(false)
@@ -135,7 +136,7 @@ private struct LiveRefreshModifier: ViewModifier {
                     Button(action: manualRefresh) {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
-                    .help("Refresh")
+                    .help("Refresh (⌘R)")
                     .disabled(phase != .idle)
                 }
             }
@@ -207,6 +208,8 @@ private struct LiveRefreshModifier: ViewModifier {
                 phase = .idle
                 manual = false
             }
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            settleToken += 1
         }
     }
 }
@@ -302,6 +305,7 @@ final class PullWebView: WKWebView {
 private struct ScrollPullProbe: NSViewRepresentable {
     @Binding var pull: CGFloat
     var scrollTopToken = 0
+    var settleToken = 0
     let onTrigger: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -321,6 +325,10 @@ private struct ScrollPullProbe: NSViewRepresentable {
         if context.coordinator.scrollTopToken != scrollTopToken {
             context.coordinator.scrollTopToken = scrollTopToken
             context.coordinator.scrollToTop()
+        }
+        if context.coordinator.settleToken != settleToken {
+            context.coordinator.settleToken = settleToken
+            DispatchQueue.main.async { context.coordinator.settleOvershoot() }
         }
     }
 
@@ -394,6 +402,7 @@ private struct ScrollPullProbe: NSViewRepresentable {
         var onPull: (CGFloat) -> Void = { _ in }
         var onTrigger: () -> Void = {}
         var scrollTopToken = 0
+        var settleToken = 0
         private var monitor: Any?
         private var gesture = PullGesture()
         private var settle: DispatchWorkItem?
@@ -441,6 +450,22 @@ private struct ScrollPullProbe: NSViewRepresentable {
                 ctx.duration = Motion.reduced ? 0 : 0.28
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 clip.animator().setBoundsOrigin(top)
+            } completionHandler: {
+                MainActor.assumeIsolated { scroll.reflectScrolledClipView(clip) }
+            }
+        }
+
+        func settleOvershoot() {
+            guard let scroll = scrollView else { return }
+            let clip = scroll.contentView
+            guard clip.isFlipped else { return }
+            let top = -clip.contentInsets.top
+            guard clip.bounds.minY < top - 0.5 else { return }
+            let origin = NSPoint(x: clip.bounds.minX, y: top)
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = Motion.reduced ? 0 : 0.22
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                clip.animator().setBoundsOrigin(origin)
             } completionHandler: {
                 MainActor.assumeIsolated { scroll.reflectScrolledClipView(clip) }
             }

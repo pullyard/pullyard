@@ -58,6 +58,7 @@ struct StacksList {
     pages: gtk::Stack,
     title: adw::WindowTitle,
     status: Rc<RefreshStatus>,
+    me: RefCell<std::rc::Weak<StacksList>>,
 }
 
 pub fn build() -> gtk::Widget {
@@ -67,8 +68,8 @@ pub fn build() -> gtk::Widget {
     let pages = gtk::Stack::new();
     pages.add_named(&scrolled(&list), Some("list"));
     pages.add_named(&loading(), Some("loading"));
-    pages.add_named(&empty_state("sy-stack-symbolic", "indigo", "No stacked pull requests", Some("Open a pull request on another pull request's branch and it shows up here.")), Some("empty"));
-    pages.add_named(&vbox(8), Some("error"));
+    pages.add_named(&empty_note("No stacked pull requests", Some("Open a pull request on another pull request’s branch and it shows up here.")), Some("empty"));
+    pages.add_named(&vbox(0), Some("error"));
     let title = adw::WindowTitle::new("Stacks", "");
     let holder: Rc<RefCell<Option<std::rc::Weak<StacksList>>>> = Rc::new(RefCell::new(None));
     let h = holder.clone();
@@ -88,8 +89,10 @@ pub fn build() -> gtk::Widget {
         pages: pages.clone(),
         title: title.clone(),
         status,
+        me: RefCell::new(std::rc::Weak::new()),
     });
     *holder.borrow_mut() = Some(Rc::downgrade(&me));
+    *me.me.borrow_mut() = Rc::downgrade(&me);
     ACTIVE.with(|a| *a.borrow_mut() = Rc::downgrade(&me));
     let content = vbox(0);
     content.append(&pages);
@@ -213,10 +216,12 @@ impl StacksList {
         if entries.is_empty() {
             if let Some(e) = err {
                 if let Some(page) = self.pages.child_by_name("error").and_downcast::<gtk::Box>() {
-                    clear(&page);
-                    let l = wrap_label(&e, &["fg-red", "sy-small"]);
-                    pad(&l, 12);
-                    page.append(&l);
+                    let weak = self.me.borrow().clone();
+                    set_status(&page, &error_state(&e, Some(Box::new(move || {
+                        if let Some(me) = weak.upgrade() {
+                            me.reload(true);
+                        }
+                    }))));
                 }
                 self.pages.set_visible_child_name("error");
             } else if self.loading.get() || !self.loaded.get() {

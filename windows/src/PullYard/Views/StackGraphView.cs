@@ -457,6 +457,7 @@ public sealed class StackGraphView : Grid
         };
         zoomText.TextAlignment = TextAlignment.Center;
         Ui.Tip(actual, L.T("Stack_ActualSize", "Actual size"));
+        Ui.Named(actual, L.T("Stack_ActualSize", "Actual size"));
         actual.Click += (_, _) => ZoomAt(1, Middle, true);
         var row = Ui.H(0,
             Icon("", L.T("Stack_ZoomOut", "Zoom out (Ctrl+wheel or pinch works too)"), () => ZoomAt(vp.Zoom - 0.15, Middle, true)),

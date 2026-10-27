@@ -27,7 +27,7 @@ enum Q {
     """ + itemFragments
 
     static let badgeFragment = """
-    fragment BadgeItem on PullRequest { number title url prState: state isDraft createdAt updatedAt author { login } repository { nameWithOwner } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }
+    fragment BadgeItem on PullRequest { number title url prState: state isDraft createdAt updatedAt reviewDecision author { login } repository { nameWithOwner } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }
     """
 
     static let badges = """

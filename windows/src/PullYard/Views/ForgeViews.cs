@@ -22,6 +22,7 @@ public sealed class ForgeListView : ListPane
     private string text = "";
     private List<SearchItem> visible = new();
     private bool syncing;
+    private readonly TextBox filterBox;
 
     public ForgeListView(Section kind, string title) : base(title, "FeedRowTemplate")
     {
@@ -32,11 +33,12 @@ public sealed class ForgeListView : ListPane
             stateFilter = f;
             Reload().Forget();
         }));
-        FilterRow.Children.Add(SearchBox(L.T("Forge_SearchPlaceholder", "Filter: title, repository, author"), t =>
+        filterBox = SearchBox(L.T("Forge_SearchPlaceholder", "Filter: title, repository, author"), t =>
         {
             text = t.Trim();
             Render();
-        }, 150));
+        }, 150);
+        FilterRow.Children.Add(filterBox);
         List.SelectionChanged += OnSelection;
         List.ItemClick += OnItemClick;
         List.ContextRequested += OnContext;
@@ -123,13 +125,24 @@ public sealed class ForgeListView : ListPane
         {
             if (vm.Loading && vm.Items.Count == 0) ShowOverlay(Ui.Loading());
             else if (vm.Error is { } e && vm.Items.Count == 0) ShowOverlay(Ui.Error(e, () => Reload().Forget()));
-            else ShowOverlay(Ui.Empty("\uE73E", "green", L.T("Common_NothingHere", "Nothing here")));
+            else
+            {
+                var copy = EmptyCopyFor();
+                ShowOverlay(Ui.EmptyState(copy.Title, copy.Message, text, () => filterBox.Text = ""));
+            }
         }
         else
         {
             ShowOverlay(null);
         }
     }
+
+    private EmptyCopy EmptyCopyFor() => kind.Kind switch
+    {
+        SectionKind.Issues => EmptyCopy.Issues(kind.Issue, stateFilter),
+        SectionKind.MyPrsByRepo => EmptyCopy.Prs(PRFilter.Mine, Model.Provider.RequestTitle(), stateFilter),
+        _ => EmptyCopy.Prs(kind.Pr, Model.Provider.RequestTitle(), stateFilter)
+    };
 
     private static SearchItem? ItemOf(object? row) => row switch
     {
@@ -181,6 +194,8 @@ public sealed class ForgeListView : ListPane
 
 public sealed record ForgeNotificationItem(ForgeNotification Notification, Action Done) : IRowContent
 {
+    public string? SpokenName => string.Join(", ", new[] { Notification.Unread ? L.T("A11y_Unread", "Unread") : null, Notification.Title, Notification.Reason, Notification.Repo.Length > 0 ? Notification.Repo : null, L.F("A11y_Updated", "updated {0}", Fmt.Rel(Notification.UpdatedAt)) }.Where(x => x is not null));
+
     public UIElement BuildRow()
     {
         var n = Notification;
@@ -192,11 +207,13 @@ public sealed record ForgeNotificationItem(ForgeNotification Notification, Actio
         }
         meta.Children.Add(Ui.Caption("·"));
         meta.Children.Add(Ui.Caption(Fmt.Rel(n.UpdatedAt)));
-        var body = Ui.V(3, Ui.Text(n.Title, 13.5, n.Unread ? "text" : "muted", FontWeights.SemiBold, maxLines: 2), meta);
+        var title = Ui.Text(n.Title, 13.5, n.Unread ? "text" : "muted", FontWeights.Medium, maxLines: 2);
+        Ui.Tip(title, n.Title);
+        var body = Ui.V(3, title, meta);
         if (n.Author is { } author) body.Children.Add(Ui.Caption($"{n.Kind} · @{author.Login}", "dim"));
         var done = Ui.IconButton("\uE73E", L.T("Forge_MarkDone", "Mark as done"), Done);
         done.VerticalAlignment = VerticalAlignment.Top;
-        var avatar = Ui.Avatar(n.Author?.AvatarUrl, 22);
+        var avatar = Ui.Avatar(n.Author?.AvatarUrl, 22, ring: true);
         avatar.VerticalAlignment = VerticalAlignment.Top;
         var grid = Ui.Columns((avatar, Ui.Auto), (body, Ui.Star), (done, Ui.Auto));
         grid.ColumnSpacing = 10;
@@ -207,12 +224,16 @@ public sealed record ForgeNotificationItem(ForgeNotification Notification, Actio
 
 public sealed record ForgeRepoItem(ForgeRepo Repo) : IRowContent
 {
+    public string? SpokenName => string.IsNullOrEmpty(Repo.Description) ? Repo.FullName : $"{Repo.FullName}, {Repo.Description}";
+
     public UIElement BuildRow()
     {
         var r = Repo;
         var tile = Ui.IconTile(r.IsPrivate ? "\uE72E" : "\uE8F1", Palette.ProjectKey(r.FullName), 22);
         tile.VerticalAlignment = VerticalAlignment.Top;
-        var body = Ui.V(3, Ui.Text(r.FullName, 13.5, "text", FontWeights.SemiBold, maxLines: 1));
+        var name = Ui.Text(r.FullName, 13.5, "text", FontWeights.Medium, maxLines: 1);
+        Ui.Tip(name, r.FullName);
+        var body = Ui.V(3, name);
         if (!string.IsNullOrEmpty(r.Description)) body.Children.Add(Ui.Text(r.Description, 12, "muted", maxLines: 2));
         var stats = Ui.H(10);
         if (r.DefaultBranch is { } branch) stats.Children.Add(Ui.H(3, Ui.Glyph("\uE8F1", 11), Ui.Caption(branch)));
@@ -308,7 +329,7 @@ public sealed class ForgeInboxView : ListPane
         if (items.Count > 0) ShowOverlay(null);
         else if (loading) ShowOverlay(Ui.Loading());
         else if (error is { } e) ShowOverlay(Ui.Error(e, () => Load(true).Forget()));
-        else ShowOverlay(Ui.Empty("\uE73E", "green", L.T("Forge_AllDone", "All done")));
+        else ShowOverlay(Ui.EmptyState(L.T("Forge_AllCaughtUp", "All caught up"), L.T("Forge_AllCaughtUpMessage", "New review requests and mentions show up here.")));
     }
 }
 
@@ -319,14 +340,16 @@ public sealed class ForgeReposView : ListPane
     private bool loading;
     private string? error;
     private DateTimeOffset? lastUpdated;
+    private readonly TextBox filterBox;
 
     public ForgeReposView(string title) : base(title, "GenericRowTemplate")
     {
-        FilterRow.Children.Add(SearchBox(L.F("Forge_FilterRepos", "Filter {0}", title.ToLower(Fmt.Culture)), t =>
+        filterBox = SearchBox(L.F("Forge_FilterRepos", "Filter {0}", title.ToLower(Fmt.Culture)), t =>
         {
             text = t.Trim();
             Render();
-        }, 150));
+        }, 150);
+        FilterRow.Children.Add(filterBox);
         List.IsItemClickEnabled = true;
         List.SelectionMode = ListViewSelectionMode.None;
         List.ItemClick += (_, e) =>
@@ -382,7 +405,11 @@ public sealed class ForgeReposView : ListPane
         if (visible.Count > 0) ShowOverlay(null);
         else if (loading) ShowOverlay(Ui.Loading());
         else if (error is { } e && repos.Count == 0) ShowOverlay(Ui.Error(e, () => Load().Forget()));
-        else ShowOverlay(Ui.Empty("\uE8F1", "teal", L.T("Common_NothingHere", "Nothing here")));
+        else
+        {
+            var reposTitle = Model.Provider.RepositoriesTitle();
+            ShowOverlay(Ui.EmptyState(L.F("Empty_NoItems", "No {0}", reposTitle.ToLower(Fmt.Culture)), L.F("Forge_ReposMessage", "{0} you can access show up here.", reposTitle), text, () => filterBox.Text = ""));
+        }
     }
 }
 

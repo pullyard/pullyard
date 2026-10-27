@@ -73,6 +73,8 @@ public sealed class TabStrip : StackPanel
                 CornerRadius = new CornerRadius(6)
             };
             var id = spec.Id;
+            Ui.Named(button, spec.Badge is { } count ? $"{spec.Title}, {count}" : spec.Title);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(button, isSelected ? L.T("A11y_Selected", "Selected") : "");
             button.Click += (_, _) =>
             {
                 Selected = id;

@@ -92,7 +92,8 @@ public static class VisualStates
 
     public static string Glyph(this VisualState s) => s switch
     {
-        VisualState.Open or VisualState.Draft => "",
+        VisualState.Open => "",
+        VisualState.Draft => "\uE70F",
         VisualState.Merged => "",
         VisualState.Closed => "",
         VisualState.IssueOpen => "",

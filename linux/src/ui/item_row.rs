@@ -5,46 +5,100 @@ use super::widgets::*;
 use crate::api::models::{Route, SearchItem};
 use crate::{app, util};
 
+fn prefix(item: &SearchItem) -> &'static str {
+    if item.forge && item.is_pr() {
+        app::number_prefix()
+    } else {
+        "#"
+    }
+}
+
+pub fn spoken_label(item: &SearchItem) -> String {
+    let mut parts = vec![item.title.clone(), format!("{}{}{}", item.repository.name_with_owner, prefix(item), item.number)];
+    if let Some(login) = item.author.as_ref().map(|a| a.login.as_str()).filter(|l| !l.is_empty()) {
+        parts.push(format!("by {login}"));
+    }
+    parts.push(item.visual_state().title().to_string());
+    if item.is_pr() {
+        match item.ci_state().as_deref() {
+            Some("SUCCESS") => parts.push("checks passed".into()),
+            Some("FAILURE") | Some("ERROR") => parts.push("checks failed".into()),
+            Some("PENDING") | Some("EXPECTED") => parts.push("checks running".into()),
+            _ => {}
+        }
+        match item.review_decision.as_deref() {
+            Some("APPROVED") => parts.push("approved".into()),
+            Some("CHANGES_REQUESTED") => parts.push("changes requested".into()),
+            Some("REVIEW_REQUIRED") => parts.push("review required".into()),
+            _ => {}
+        }
+    }
+    let comments = item.comments.total_count;
+    if comments > 0 {
+        parts.push(format!("{comments} {}", if comments == 1 { "comment" } else { "comments" }));
+    }
+    parts.push(format!("updated {}", util::rel(Some(item.updated_at))));
+    parts.join(", ")
+}
+
+pub fn describe_row(row: &gtk::ListBoxRow, item: &SearchItem) {
+    row.set_tooltip_text(Some(&item.title));
+    row.update_property(&[gtk::accessible::Property::Label(&spoken_label(item))]);
+}
+
 pub fn item_row(item: &SearchItem, show_repo: bool) -> gtk::Box {
     let row = hbox(10);
-    margins(&row, 5, 0, 5, 0);
+    margins(&row, 4, 0, 4, 0);
     row.append(&state_badge(item.visual_state(), true));
-    let col = vbox(3);
+    let col = vbox(4);
     col.set_hexpand(true);
-    let title = wrap_label(&item.title, &["sy-bold", "sy-text"]);
+    let title = wrap_label(&item.title, &["sy-row-title"]);
     title.set_lines(2);
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     col.append(&title);
     let meta = hbox(5);
-    let prefix = if item.forge && item.is_pr() { app::number_prefix() } else { "#" };
-    let where_ = if show_repo { format!("{}{prefix}{}", item.repository.name_with_owner, item.number) } else { format!("{prefix}{}", item.number) };
-    meta.append(&ellipsized(&where_, &["sy-muted", "sy-small"]));
-    meta.append(&label_with("·", &["sy-muted", "sy-small"]));
-    meta.append(&label_with(&util::rel(Some(item.updated_at)), &["sy-muted", "sy-small"]));
+    meta.add_css_class("sy-row-meta");
+    let where_ = if show_repo { format!("{}{}{}", item.repository.name_with_owner, prefix(item), item.number) } else { format!("{}{}", prefix(item), item.number) };
+    let reference = label(&where_);
+    reference.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+    meta.append(&reference);
+    meta.append(&label_with("·", &["sy-dim"]));
+    meta.append(&label(&util::rel(Some(item.updated_at))));
+    meta.append(&spacer());
+    if item.is_pr() {
+        if let (Some(a), Some(d)) = (item.additions, item.deletions) {
+            meta.append(&diff_stat(a, d));
+        }
+    }
     col.append(&meta);
     let info = hbox(6);
-    info.append(&avatar(item.author.as_ref().and_then(|a| a.avatar_url.as_deref()), 14, None));
-    info.append(&label_with(item.author.as_ref().map(|a| a.login.as_str()).unwrap_or(""), &["sy-muted", "sy-small"]));
+    info.add_css_class("sy-row-meta");
+    info.append(&ringed_avatar(item.author.as_ref().and_then(|a| a.avatar_url.as_deref()), 18, None));
+    let author = label(item.author.as_ref().map(|a| a.login.as_str()).unwrap_or(""));
+    author.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    info.append(&author);
+    info.append(&spacer());
+    let status = hbox(8);
     if item.is_pr() {
         if let Some(ci) = ci_icon(item.ci_state().as_deref()) {
-            info.append(&ci);
+            status.append(&ci);
         }
         match item.review_decision.as_deref() {
-            Some("APPROVED") => info.append(&tooltip(colored_icon("sy-check-symbolic", 12, "green"), "Approved")),
-            Some("CHANGES_REQUESTED") => info.append(&tooltip(colored_icon("sy-plusminus-symbolic", 12, "red"), "Changes requested")),
-            Some("REVIEW_REQUIRED") => info.append(&tooltip(colored_icon("sy-eye-symbolic", 12, "muted"), "Review required")),
+            Some("APPROVED") => status.append(&status_icon("sy-check-symbolic", 12, "green", "Approved")),
+            Some("CHANGES_REQUESTED") => status.append(&status_icon("sy-plusminus-symbolic", 12, "red", "Changes requested")),
+            Some("REVIEW_REQUIRED") => status.append(&status_icon("sy-eye-symbolic", 12, "muted", "Review required")),
             _ => {}
-        }
-        if let (Some(a), Some(d)) = (item.additions, item.deletions) {
-            info.append(&diff_stat(a, d));
         }
     }
     if item.comments.total_count > 0 {
         let c = hbox(3);
         c.append(&colored_icon("sy-comment-symbolic", 11, "muted"));
-        c.append(&label_with(&item.comments.total_count.to_string(), &["sy-muted", "sy-small"]));
-        info.append(&c);
+        c.append(&label(&item.comments.total_count.to_string()));
+        let n = item.comments.total_count;
+        c.set_tooltip_text(Some(&format!("{n} {}", if n == 1 { "comment" } else { "comments" })));
+        status.append(&c);
     }
+    info.append(&status);
     col.append(&info);
     if let Some(base) = item.stacked_on() {
         let s = hbox(4);
@@ -81,6 +135,7 @@ pub fn short_link_button(route: &Route) -> gtk::Button {
     b.add_css_class("sy-bold");
     let link = route.short_link().unwrap_or_default();
     b.set_tooltip_text(Some(&format!("Copy short link {link} (Ctrl+Shift+C)")));
+    set_label(&b, "Copy short link");
     let r = route.clone();
     b.connect_clicked(move |_| copy_short_link(&r));
     b

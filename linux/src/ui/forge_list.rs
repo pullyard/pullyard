@@ -6,7 +6,7 @@ use adw::prelude::*;
 use chrono::{DateTime, Utc};
 use gtk::glib;
 
-use super::item_row::{item_menu, item_row};
+use super::item_row::{describe_row, item_menu, item_row};
 use super::lists::{group_header, state_toggles, StateFilter};
 use super::menu::context_menu;
 use super::widgets::*;
@@ -60,6 +60,11 @@ pub fn reset_cache() {
     CACHE.with(|c| c.borrow_mut().clear());
 }
 
+pub fn cached_items() -> Vec<SearchItem> {
+    let prefix = format!("{}\n", app::cache_account());
+    CACHE.with(|c| c.borrow().iter().filter(|(k, _)| k.starts_with(&prefix)).flat_map(|(_, (items, _))| items.clone()).collect())
+}
+
 fn cache_key(kind: Kind, state: StateFilter) -> String {
     format!("{}\n{}\n{}", app::cache_account(), kind.key(), state.title())
 }
@@ -99,6 +104,9 @@ struct ForgeList {
     status: Rc<RefreshStatus>,
     stack: gtk::Stack,
     rendered: RefCell<String>,
+    search: gtk::SearchEntry,
+    status_key: RefCell<String>,
+    me: RefCell<std::rc::Weak<ForgeList>>,
 }
 
 impl ForgeList {
@@ -161,13 +169,17 @@ impl ForgeList {
                 self.stack.set_visible_child_name("loading");
             } else if let Some(e) = err {
                 if let Some(page) = self.stack.child_by_name("error").and_downcast::<gtk::Box>() {
-                    clear(&page);
-                    let l = wrap_label(&e, &["fg-red", "sy-small"]);
-                    pad(&l, 12);
-                    page.append(&l);
+                    let weak = self.me.borrow().clone();
+                    set_status(&page, &error_state(&e, Some(Box::new(move || {
+                        if let Some(me) = weak.upgrade() {
+                            me.reload(false);
+                        }
+                    }))));
                 }
+                self.status_key.borrow_mut().clear();
                 self.stack.set_visible_child_name("error");
             } else {
+                self.show_empty(&text);
                 self.stack.set_visible_child_name("empty");
             }
             self.list.remove_all();
@@ -196,9 +208,32 @@ impl ForgeList {
         self.sync_selection();
     }
 
+    fn show_empty(&self, filter: &str) {
+        let Some(page) = self.stack.child_by_name("empty").and_downcast::<gtk::Box>() else { return };
+        let state = self.state.get();
+        let key = format!("{filter}|{}", state.title());
+        if *self.status_key.borrow() == key && page.first_child().is_some() {
+            return;
+        }
+        *self.status_key.borrow_mut() = key;
+        if filter.is_empty() {
+            let noun = app::provider().request_title().to_lowercase();
+            let copy = match self.kind {
+                Kind::Pulls(f) => super::empty_copy::prs(f, &noun, state),
+                Kind::PullsByProject => super::empty_copy::prs(PrFilter::Mine, &noun, state),
+                Kind::Issues(f) => super::empty_copy::issues(f, state),
+            };
+            set_status(&page, &empty_note(&copy.title, Some(&copy.message)));
+        } else {
+            let entry = self.search.clone();
+            set_status(&page, &no_matches(filter, move || entry.set_text("")));
+        }
+    }
+
     fn append_item(&self, item: &SearchItem, show_repo: bool) -> Option<Route> {
         let row = gtk::ListBoxRow::new();
         row.set_child(Some(&item_row(item, show_repo)));
+        describe_row(&row, item);
         let it = item.clone();
         context_menu(&row, move || item_menu(&it));
         self.list.append(&row);
@@ -213,6 +248,8 @@ impl ForgeList {
             row.set_widget_name(&format!("group:{repo}"));
             row.set_child(Some(&group_header(&repo, group.len(), open)));
             row.set_selectable(false);
+            set_label(&row, &format!("{repo}, {} items", group.len()));
+            set_expanded(&row, open);
             self.list.append(&row);
             keys.push(None);
             if open {
@@ -258,6 +295,7 @@ pub fn build(kind: Kind) -> gtk::Widget {
     let spinner = spinner(14);
     spinner.set_visible(false);
     let stack = gtk::Stack::new();
+    let search = gtk::SearchEntry::new();
     let (toggles, state) = state_toggles(|_| {});
     let holder: Rc<RefCell<Option<std::rc::Weak<ForgeList>>>> = Rc::new(RefCell::new(None));
     let h = holder.clone();
@@ -284,8 +322,12 @@ pub fn build(kind: Kind) -> gtk::Widget {
         status,
         stack: stack.clone(),
         rendered: RefCell::new(String::new()),
+        search: search.clone(),
+        status_key: RefCell::new(String::new()),
+        me: RefCell::new(std::rc::Weak::new()),
     });
     *holder.borrow_mut() = Some(Rc::downgrade(&me));
+    *me.me.borrow_mut() = Rc::downgrade(&me);
 
     let mut child = toggles.first_child();
     while let Some(w) = child {
@@ -302,7 +344,6 @@ pub fn build(kind: Kind) -> gtk::Widget {
         child = w.next_sibling();
     }
 
-    let search = gtk::SearchEntry::new();
     search.set_placeholder_text(Some("Filter: text, repo:name, label:bug"));
     search.set_hexpand(true);
     let weak = Rc::downgrade(&me);
@@ -335,12 +376,8 @@ pub fn build(kind: Kind) -> gtk::Widget {
 
     stack.add_named(&scrolled(&list), Some("list"));
     stack.add_named(&loading(), Some("loading"));
-    let empty = label_with("Nothing here", &["sy-muted"]);
-    empty.set_valign(gtk::Align::Start);
-    empty.set_halign(gtk::Align::Center);
-    empty.set_margin_top(30);
-    stack.add_named(&empty, Some("empty"));
-    stack.add_named(&vbox(8), Some("error"));
+    stack.add_named(&vbox(0), Some("empty"));
+    stack.add_named(&vbox(0), Some("error"));
 
     let toggles_bar = hbox(0);
     margins(&toggles_bar, 6, 10, 6, 10);
@@ -365,6 +402,7 @@ pub fn build(kind: Kind) -> gtk::Widget {
     let search_btn = gtk::ToggleButton::new();
     search_btn.set_icon_name("system-search-symbolic");
     search_btn.set_tooltip_text(Some("Filter"));
+    set_label(&search_btn, "Filter");
     search_btn.bind_property("active", &search_bar, "search-mode-enabled").bidirectional().build();
     hb.pack_start(&search_btn);
     tv.add_top_bar(&hb);

@@ -306,7 +306,13 @@ pub fn show() {
     page.add(&refresh);
 
     let bg = group("Notifications", "sy-bell-symbolic", "amber");
-    bg.add(&switch("Notify about new review requests", None, settings::read(|s| s.notify_review_requests), |v| settings::update(|s| s.notify_review_requests = v)));
+    bg.set_description(Some(&format!(
+        "Pull request alerts compare each refresh with the previous one, so nothing fires for what was already waiting when {} opened or switched accounts. Agent alerts only appear when you aren't looking at that session.",
+        crate::brand::APP_NAME
+    )));
+    for kind in crate::activity::NotifyKind::ALL {
+        bg.add(&switch(kind.title(), None, crate::notify::enabled(kind), move |v| crate::notify::set_enabled(kind, v)));
+    }
     bg.add(&switch(
         "Keep running after the window is closed",
         Some("Reopen the window from the app launcher. Review requests and updates still notify you."),

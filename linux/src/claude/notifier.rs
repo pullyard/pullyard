@@ -5,24 +5,25 @@ use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
 
-use crate::{brand, settings};
+use crate::activity::NotifyKind;
+use crate::brand;
 
 pub const TAB_ACTION: &str = "agent-tab";
 
 pub fn enabled() -> bool {
-    settings::read(|s| s.agents_notify)
+    crate::notify::enabled(NotifyKind::AgentFinished)
 }
 
 pub fn set_enabled(v: bool) {
-    settings::update(|s| s.agents_notify = v);
+    crate::notify::set_enabled(NotifyKind::AgentFinished, v);
 }
 
 pub fn notification_id(tab: u64) -> String {
     format!("agent-{tab}")
 }
 
-pub fn post(tab: u64, title: &str, body: &str) {
-    if !enabled() {
+pub fn post(tab: u64, kind: NotifyKind, title: &str, body: &str) {
+    if !crate::notify::enabled(kind) {
         return;
     }
     let Some(app) = gio::Application::default() else {
@@ -56,10 +57,10 @@ pub fn snippet(text: Option<&str>) -> String {
 
 pub fn needs_input_body(tool: &str) -> String {
     match tool {
-        "AskUserQuestion" => "Claude has a question for you".into(),
-        "ExitPlanMode" => "Claude has a plan ready for review".into(),
-        "" => "Claude needs your input".into(),
-        t => format!("Claude needs permission: {t}"),
+        "AskUserQuestion" => "Your agent has a question for you".into(),
+        "ExitPlanMode" => "Your agent has a plan ready for review".into(),
+        "" => "Your agent needs your input".into(),
+        t => format!("Your agent needs permission: {t}"),
     }
 }
 
@@ -116,8 +117,8 @@ mod tests {
         let long = "x".repeat(200);
         assert_eq!(snippet(Some(&long)).chars().count(), 141);
         assert_eq!(snippet(None), "");
-        assert_eq!(needs_input_body("Bash"), "Claude needs permission: Bash");
-        assert_eq!(needs_input_body("AskUserQuestion"), "Claude has a question for you");
+        assert_eq!(needs_input_body("Bash"), "Your agent needs permission: Bash");
+        assert_eq!(needs_input_body("AskUserQuestion"), "Your agent has a question for you");
     }
 
     #[test]

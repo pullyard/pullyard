@@ -133,7 +133,7 @@ struct StickyNote: View {
                     Circle().fill(n.kind.color).frame(width: 6, height: 6)
                     Text(n.kind.title).font(.syCaption2.weight(.semibold)).foregroundStyle(n.kind.color)
                     if n.source != nil {
-                        Image(systemName: "terminal").font(.syCaption2).foregroundStyle(Color.syMuted).help("Added by Claude")
+                        Image(systemName: "terminal").font(.syCaption2).foregroundStyle(Color.syMuted).help("Added by Claude").accessibilityLabel("Added by Claude")
                     }
                     Text(n.text.replacingOccurrences(of: "\n", with: " "))
                         .font(.syCaption)
@@ -181,6 +181,7 @@ struct StackNotesEditor: View {
                 .buttonStyle(.borderless)
                 .keyboardShortcut(.cancelAction)
                 .help("Close (Esc)")
+                .accessibilityLabel("Close")
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -266,6 +267,7 @@ private struct NoteEditorRow: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Delete note")
+                .accessibilityLabel("Delete note")
             }
             TextEditor(text: $note.text)
                 .font(.syCallout)

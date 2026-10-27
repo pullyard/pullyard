@@ -170,6 +170,28 @@ struct PullYardLogoMark: View {
     }
 }
 
+struct LogoDrawOn: View {
+    var size: CGFloat
+    var duration: Double
+    @State private var start = Date()
+    @State private var done = false
+
+    var body: some View {
+        if Motion.reduced || done {
+            PullYardLogoMark(progress: 1, size: size)
+        } else {
+            TimelineView(.animation(minimumInterval: 1 / 60)) { context in
+                let t = min(1, context.date.timeIntervalSince(start) / duration)
+                PullYardLogoMark(progress: (1 - cos(t * .pi)) / 2, size: size)
+            }
+            .task {
+                try? await Task.sleep(for: .seconds(duration))
+                done = true
+            }
+        }
+    }
+}
+
 struct PullYardLoader: View {
     var size: CGFloat = 40
     private static let draw: Double = 1.7

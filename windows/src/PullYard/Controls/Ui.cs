@@ -1,5 +1,7 @@
+using System.Text.RegularExpressions;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
@@ -43,6 +45,32 @@ public static class Ui
         Foreground = Palette.Brush(color),
         VerticalAlignment = VerticalAlignment.Center
     }, size);
+
+    public static T Named<T>(T element, string? name, string? help = null) where T : DependencyObject
+    {
+        if (!string.IsNullOrEmpty(name)) AutomationProperties.SetName(element, name);
+        if (!string.IsNullOrEmpty(help)) AutomationProperties.SetHelpText(element, help);
+        return element;
+    }
+
+    public static T Expandable<T>(T element, string name, bool expanded) where T : DependencyObject
+    {
+        AutomationProperties.SetName(element, name);
+        AutomationProperties.SetItemStatus(element, expanded ? L.T("A11y_Expanded", "Expanded") : L.T("A11y_Collapsed", "Collapsed"));
+        return element;
+    }
+
+    private static readonly Regex ShortcutHint = new(@"\s*\((?:Ctrl|Alt|Shift|Esc|F\d)[^)]*\)\s*$", RegexOptions.Compiled);
+
+    public static string SpokenName(string tooltip) => ShortcutHint.Replace(tooltip, "");
+
+    public static FontIcon StatusGlyph(string glyph, double size, string color, string label)
+    {
+        var icon = Glyph(glyph, size, color);
+        Tip(icon, label);
+        AutomationProperties.SetName(icon, label);
+        return icon;
+    }
 
     public static StackPanel H(double spacing, params UIElement?[] children)
     {
@@ -108,7 +136,7 @@ public static class Ui
         var key = Palette.StateKey(state);
         if (compact)
         {
-            return new Border
+            var badge = new Border
             {
                 Width = 22,
                 Height = 22,
@@ -117,6 +145,9 @@ public static class Ui
                 Child = TextZoom.Track(new FontIcon { Glyph = state.Glyph(), FontFamily = Icons, Foreground = Palette.Brush(key), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }, 11),
                 VerticalAlignment = VerticalAlignment.Top
             };
+            Tip(badge, StateTitle(state));
+            AutomationProperties.SetName(badge, StateTitle(state));
+            return badge;
         }
         var (fill, white) = Palette.Filled(key);
         return new Border
@@ -127,13 +158,25 @@ public static class Ui
             VerticalAlignment = VerticalAlignment.Center,
             Child = H(5,
                 TextZoom.Track(new FontIcon { Glyph = state.Glyph(), FontFamily = Icons, Foreground = white }, 11),
-                TextZoom.Track(new TextBlock { Text = state.Title(), FontWeight = FontWeights.SemiBold, Foreground = white }, 12.5))
+                TextZoom.Track(new TextBlock { Text = StateTitle(state), FontWeight = FontWeights.SemiBold, Foreground = white }, 12.5))
         };
     }
 
-    public static FrameworkElement Avatar(string? url, double size = 20)
+    public static string StateTitle(VisualState state) => state switch
+    {
+        VisualState.Open or VisualState.IssueOpen => L.T("State_Open", "Open"),
+        VisualState.Draft => L.T("State_Draft", "Draft"),
+        VisualState.Merged => L.T("State_Merged", "Merged"),
+        VisualState.Closed => L.T("State_Closed", "Closed"),
+        VisualState.Completed => L.T("State_Completed", "Completed"),
+        VisualState.NotPlanned => L.T("State_NotPlanned", "Not planned"),
+        _ => state.Title()
+    };
+
+    public static FrameworkElement Avatar(string? url, double size = 20, bool ring = false)
     {
         var p = new PersonPicture { Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetAccessibilityView(p, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
         if (!string.IsNullOrEmpty(url))
         {
             try
@@ -146,7 +189,17 @@ public static class Ui
             {
             }
         }
-        return p;
+        if (!ring) return p;
+        return new Border
+        {
+            Width = size + 1,
+            Height = size + 1,
+            CornerRadius = new CornerRadius((size + 1) / 2),
+            BorderBrush = Palette.Brush("text", ThemeService.IsDark ? 0.22 : 0.16),
+            BorderThickness = new Thickness(0.5),
+            Child = p,
+            VerticalAlignment = VerticalAlignment.Center
+        };
     }
 
     public static StackPanel DiffStat(int additions, int deletions, double size = 12) =>
@@ -155,8 +208,25 @@ public static class Ui
     public static FrameworkElement? CiIcon(string? state, double size = 12)
     {
         if (Palette.CiIcon(state) is not { } ci) return null;
-        return Glyph(ci.Glyph, size, ci.Key);
+        return StatusGlyph(ci.Glyph, size, ci.Key, CiTitle(state) ?? "");
     }
+
+    public static FontIcon CheckIcon(CheckOutcome outcome, double size) => StatusGlyph(Palette.CheckGlyph(outcome), size, Palette.CheckKey(outcome), outcome switch
+    {
+        CheckOutcome.Success => L.T("Check_Passed", "Passed"),
+        CheckOutcome.Failure => L.T("Check_Failed", "Failed"),
+        CheckOutcome.Pending => L.T("Check_Pending", "Pending"),
+        CheckOutcome.Skipped => L.T("Check_Skipped", "Skipped"),
+        _ => L.T("Check_Neutral", "Neutral")
+    });
+
+    public static string? CiTitle(string? state) => state switch
+    {
+        "SUCCESS" => L.T("Ci_Passed", "Checks passed"),
+        "FAILURE" or "ERROR" => L.T("Ci_Failed", "Checks failed"),
+        "PENDING" or "EXPECTED" => L.T("Ci_Running", "Checks running"),
+        _ => null
+    };
 
     public static Border Card(UIElement child, double radius = 10, string fill = "raised", double padding = 12) => new()
     {
@@ -169,7 +239,11 @@ public static class Ui
     public static Button Button(string text, Action onClick, bool accent = false, string? glyph = null, string? tooltip = null)
     {
         var b = new Button();
-        if (glyph is not null) b.Content = H(6, Glyph(glyph, 12, accent ? "text" : "text"), new TextBlock { Text = text });
+        if (glyph is not null)
+        {
+            b.Content = H(6, Glyph(glyph, 12, accent ? "text" : "text"), new TextBlock { Text = text });
+            AutomationProperties.SetName(b, text);
+        }
         else b.Content = text;
         if (accent) b.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
         b.Click += (_, _) => onClick();
@@ -187,6 +261,9 @@ public static class Ui
             Padding = new Thickness(8, 5, 8, 5)
         };
         ToolTipService.SetToolTip(b, tooltip);
+        var spoken = SpokenName(tooltip);
+        AutomationProperties.SetName(b, spoken);
+        if (spoken != tooltip) AutomationProperties.SetHelpText(b, tooltip);
         b.Click += (_, _) => onClick();
         return b;
     }
@@ -256,11 +333,18 @@ public static class Ui
         return Task.CompletedTask;
     }, tooltip);
 
-    public static FrameworkElement Error(string message, Action? retry = null)
+    public static FrameworkElement Error(string message, Action? retry = null, string? title = null)
     {
-        var panel = V(10, IconTile("", "amber", 44), Text(message, 13, "muted", wrap: true, select: true));
-        ((TextBlock)panel.Children[1]).TextAlignment = TextAlignment.Center;
-        ((FrameworkElement)panel.Children[0]).HorizontalAlignment = HorizontalAlignment.Center;
+        var tile = IconTile("\uE7BA", "red", 44);
+        tile.HorizontalAlignment = HorizontalAlignment.Center;
+        AutomationProperties.SetAccessibilityView(tile, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+        var heading = Text(title ?? L.T("Common_CouldntLoad", "Couldn’t load"), 13.5, "text", FontWeights.SemiBold, wrap: true);
+        heading.TextAlignment = TextAlignment.Center;
+        heading.HorizontalAlignment = HorizontalAlignment.Center;
+        var detail = Text(message, 12.5, "muted", wrap: true, select: true);
+        detail.TextAlignment = TextAlignment.Center;
+        detail.HorizontalAlignment = HorizontalAlignment.Center;
+        var panel = V(12, tile, V(4, heading, detail));
         if (retry is not null)
         {
             var b = Button(L.T("Common_Retry", "Retry"), retry);
@@ -269,8 +353,63 @@ public static class Ui
         }
         panel.HorizontalAlignment = HorizontalAlignment.Center;
         panel.VerticalAlignment = VerticalAlignment.Center;
-        panel.MaxWidth = 520;
-        panel.Margin = new Thickness(30);
+        panel.MaxWidth = 340;
+        panel.Margin = new Thickness(24);
+        AutomationProperties.SetLiveSetting(panel, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
+        return panel;
+    }
+
+    public static FrameworkElement EmptyState(string title, string? message = null, string filter = "", Action? clear = null, string? actionTitle = null, Action? action = null)
+    {
+        var filtering = filter.Length > 0;
+        FrameworkElement mark;
+        if (filtering)
+        {
+            var tile = IconTile("\uE721", "muted", 44);
+            AutomationProperties.SetAccessibilityView(tile, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+            mark = tile;
+        }
+        else
+        {
+            mark = new DrawnLogoMark(title, 64);
+        }
+        mark.HorizontalAlignment = HorizontalAlignment.Center;
+        var heading = Text(filtering ? L.F("Empty_NoMatches", "No matches for “{0}”", filter) : title, 13.5, "text", FontWeights.SemiBold, maxLines: 2);
+        heading.TextAlignment = TextAlignment.Center;
+        heading.HorizontalAlignment = HorizontalAlignment.Center;
+        var words = V(4, heading);
+        if ((filtering ? L.T("Empty_TryDifferent", "Try a different search.") : message) is { Length: > 0 } detail)
+        {
+            var t = Text(detail, 12.5, "muted", wrap: true);
+            t.TextAlignment = TextAlignment.Center;
+            t.HorizontalAlignment = HorizontalAlignment.Center;
+            words.Children.Add(t);
+        }
+        var panel = V(12, mark, words);
+        if (filtering && clear is not null)
+        {
+            var b = Button(L.T("Empty_ClearFilter", "Clear filter"), clear);
+            b.HorizontalAlignment = HorizontalAlignment.Center;
+            panel.Children.Add(b);
+        }
+        else if (!filtering && actionTitle is not null && action is not null)
+        {
+            var b = Button(actionTitle, action);
+            b.HorizontalAlignment = HorizontalAlignment.Center;
+            panel.Children.Add(b);
+        }
+        panel.HorizontalAlignment = HorizontalAlignment.Center;
+        panel.VerticalAlignment = VerticalAlignment.Center;
+        panel.MaxWidth = 300;
+        panel.Margin = new Thickness(24);
+        return panel;
+    }
+
+    public static FrameworkElement EmptyNote(string title, string? message = null)
+    {
+        var panel = V(2, Text(title, 12.5, "muted", wrap: true));
+        if (message is { Length: > 0 }) panel.Children.Add(Text(message, 12, "dim", wrap: true));
+        panel.Padding = new Thickness(0, 4, 0, 4);
         return panel;
     }
 

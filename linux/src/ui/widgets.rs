@@ -157,10 +157,31 @@ pub fn link_button(label: &str) -> gtk::Button {
     b
 }
 
+pub fn spoken(text: &str) -> &str {
+    let t = text.trim();
+    match t.rfind(" (") {
+        Some(i) if t.ends_with(')') && i > 0 => t[..i].trim_end_matches('…').trim_end(),
+        _ => t.trim_end_matches('…').trim_end(),
+    }
+}
+
+pub fn set_label<W: IsA<gtk::Accessible>>(w: &W, text: &str) {
+    w.update_property(&[gtk::accessible::Property::Label(spoken(text))]);
+}
+
+pub fn set_expanded<W: IsA<gtk::Accessible>>(w: &W, expanded: bool) {
+    w.update_state(&[gtk::accessible::State::Expanded(Some(expanded))]);
+}
+
+pub fn decorative<W: IsA<gtk::Accessible>>(w: &W) {
+    w.update_state(&[gtk::accessible::State::Hidden(true)]);
+}
+
 pub fn icon_button(icon_name: &str, tooltip: &str) -> gtk::Button {
     let b = gtk::Button::new();
     crate::icons::set_button_icon(&b, icon_name);
     b.set_tooltip_text(Some(tooltip));
+    set_label(&b, tooltip);
     b.add_css_class("flat");
     b
 }
@@ -217,6 +238,8 @@ pub fn state_badge(state: VisualState, compact: bool) -> gtk::Widget {
         b.set_valign(gtk::Align::Start);
         centered_in(&b, &icon(state.icon(), 12), 22, 22);
         b.set_tooltip_text(Some(state.title()));
+        b.set_accessible_role(gtk::AccessibleRole::Img);
+        set_label(&b, state.title());
         b.upcast()
     } else {
         let b = hbox(5);
@@ -247,22 +270,33 @@ pub fn ci_icon(state: Option<&str>) -> Option<gtk::Image> {
         _ => return None,
     };
     let i = colored_icon(name, 12, color);
-    i.set_tooltip_text(Some(match color {
+    let text = match color {
         "green" => "Checks passed",
         "red" => "Checks failed",
         _ => "Checks running",
-    }));
+    };
+    i.set_tooltip_text(Some(text));
+    set_label(&i, text);
     Some(i)
 }
 
 pub fn outcome_icon(o: CheckOutcome) -> gtk::Image {
-    match o {
-        CheckOutcome::Success => colored_icon("sy-check-symbolic", 14, "green"),
-        CheckOutcome::Failure => colored_icon("sy-x-symbolic", 14, "red"),
-        CheckOutcome::Pending => colored_icon("sy-clock-symbolic", 14, "amber"),
-        CheckOutcome::Neutral => colored_icon("sy-dot-symbolic", 14, "muted"),
-        CheckOutcome::Skipped => colored_icon("sy-issue-skip-symbolic", 14, "muted"),
-    }
+    let (i, text) = match o {
+        CheckOutcome::Success => (colored_icon("sy-check-symbolic", 14, "green"), "Passed"),
+        CheckOutcome::Failure => (colored_icon("sy-x-symbolic", 14, "red"), "Failed"),
+        CheckOutcome::Pending => (colored_icon("sy-clock-symbolic", 14, "amber"), "Pending"),
+        CheckOutcome::Neutral => (colored_icon("sy-dot-symbolic", 14, "muted"), "Neutral"),
+        CheckOutcome::Skipped => (colored_icon("sy-issue-skip-symbolic", 14, "muted"), "Skipped"),
+    };
+    set_label(&i, text);
+    i
+}
+
+pub fn status_icon(name: &str, size: i32, color: &str, text: &str) -> gtk::Image {
+    let i = colored_icon(name, size, color);
+    i.set_tooltip_text(Some(text));
+    set_label(&i, text);
+    i
 }
 
 pub fn rebuild_rows(list: &gtk::ListBox, build: impl FnOnce()) {
@@ -338,27 +372,88 @@ pub fn logo_loader(size: i32) -> Loader {
     s
 }
 
-pub fn error_state(message: &str, retry: Option<Box<dyn Fn()>>) -> gtk::Widget {
-    let b = vbox(10);
+fn status_box() -> gtk::Box {
+    let b = vbox(12);
+    b.add_css_class("sy-status");
     b.set_valign(gtk::Align::Center);
     b.set_halign(gtk::Align::Center);
     b.set_vexpand(true);
     b.set_hexpand(true);
-    pad(&b, 30);
-    b.append(&icon_tile("sy-attention-symbolic", "amber", 44));
-    let l = wrap_label(message, &["sy-muted"]);
-    l.set_justify(gtk::Justification::Center);
-    l.set_xalign(0.5);
-    l.set_selectable(true);
-    l.set_max_width_chars(60);
-    b.append(&l);
+    pad(&b, 24);
+    b
+}
+
+fn status_texts(b: &gtk::Box, title: &str, message: Option<&str>, selectable: bool) {
+    let texts = vbox(4);
+    let t = label_with(title, &["sy-status-title"]);
+    t.set_xalign(0.5);
+    t.set_justify(gtk::Justification::Center);
+    t.set_wrap(true);
+    t.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    t.set_lines(2);
+    t.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+    t.set_max_width_chars(36);
+    texts.append(&t);
+    if let Some(m) = message.filter(|m| !m.is_empty()) {
+        let l = wrap_label(m, &["sy-status-message"]);
+        l.set_justify(gtk::Justification::Center);
+        l.set_xalign(0.5);
+        l.set_max_width_chars(if selectable { 60 } else { 40 });
+        l.set_selectable(selectable);
+        texts.append(&l);
+    }
+    b.append(&texts);
+}
+
+fn status_button(b: &gtk::Box, title: &str, action: impl Fn() + 'static) -> gtk::Button {
+    let btn = button(title);
+    btn.add_css_class("pill");
+    btn.add_css_class("sy-status-button");
+    btn.set_halign(gtk::Align::Center);
+    btn.connect_clicked(move |_| action());
+    b.append(&btn);
+    btn
+}
+
+pub fn error_state(message: &str, retry: Option<Box<dyn Fn()>>) -> gtk::Widget {
+    let b = status_box();
+    let tile = icon_tile("sy-attention-symbolic", "red", 44);
+    decorative(&tile);
+    b.append(&tile);
+    status_texts(&b, "Couldn't load", Some(message), true);
     if let Some(retry) = retry {
-        let btn = button("Retry");
-        btn.set_halign(gtk::Align::Center);
-        btn.connect_clicked(move |_| retry());
-        b.append(&btn);
+        status_button(&b, "Retry", retry);
     }
     b.upcast()
+}
+
+pub fn empty_note(title: &str, message: Option<&str>) -> gtk::Widget {
+    empty_note_action(title, message, None)
+}
+
+pub fn empty_note_action(title: &str, message: Option<&str>, action: Option<(&str, Box<dyn Fn()>)>) -> gtk::Widget {
+    let b = status_box();
+    b.append(&Loader::draw_once(64, title, 1.4));
+    status_texts(&b, title, message, false);
+    if let Some((label, f)) = action {
+        status_button(&b, label, f);
+    }
+    b.upcast()
+}
+
+pub fn no_matches(filter: &str, clear: impl Fn() + 'static) -> gtk::Widget {
+    let b = status_box();
+    let tile = icon_tile("system-search-symbolic", "muted", 44);
+    decorative(&tile);
+    b.append(&tile);
+    status_texts(&b, &format!("No matches for “{filter}”"), Some("Try a different search."), false);
+    status_button(&b, "Clear filter", clear);
+    b.upcast()
+}
+
+pub fn set_status<W: IsA<gtk::Widget>>(holder: &gtk::Box, child: &W) {
+    clear(holder);
+    holder.append(child);
 }
 
 pub fn empty_state(icon_name: &str, color: &str, title: &str, subtitle: Option<&str>) -> gtk::Widget {
@@ -387,6 +482,12 @@ pub fn empty_state(icon_name: &str, color: &str, title: &str, subtitle: Option<&
 thread_local! {
     static TEXTURES: RefCell<HashMap<String, Option<gdk::Texture>>> = RefCell::new(HashMap::new());
     static WAITING: RefCell<HashMap<String, Vec<glib::WeakRef<adw::Avatar>>>> = RefCell::new(HashMap::new());
+}
+
+pub fn ringed_avatar(url: Option<&str>, size: i32, name: Option<&str>) -> adw::Avatar {
+    let a = avatar(url, size, name);
+    a.add_css_class("sy-avatar-ring");
+    a
 }
 
 pub fn avatar(url: Option<&str>, size: i32, name: Option<&str>) -> adw::Avatar {
@@ -453,7 +554,7 @@ impl RefreshStatus {
         widget.set_valign(gtk::Align::Center);
         let icon_stack = gtk::Stack::new();
         icon_stack.add_named(&spinner(12), Some("spin"));
-        icon_stack.add_named(&colored_icon("sy-attention-symbolic", 12, "amber"), Some("warn"));
+        icon_stack.add_named(&status_icon("sy-attention-symbolic", 12, "amber", "Refresh failed"), Some("warn"));
         icon_stack.add_named(&icon("view-refresh-symbolic", 12), Some("idle"));
         icon_stack.set_visible_child_name("idle");
         let text = label("");

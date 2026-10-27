@@ -141,27 +141,21 @@ struct StacksListView: View {
 
     var body: some View {
         List(selection: Binding(get: { app.detailRoot }, set: select)) {
-            if let e = model.error, model.entries.isEmpty {
-                Text(e).foregroundStyle(.red).font(.syCaption)
-            }
             ForEach(model.entries) { entry in
                 StackRow(entry: entry)
                     .tag(Route.pr(entry.ref))
                     .listRowSeparator(.visible)
                     .listRowSeparatorTint(Color.syLine)
             }
-            if model.entries.isEmpty, !model.loading, model.error == nil, loaded {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("No stacked pull requests").font(.syBody).foregroundStyle(Color.syMuted)
-                    Text("Open a pull request on another pull request's branch and it shows up here.")
-                        .font(.syCaption)
-                        .foregroundStyle(Color.syDim)
-                }
-                .padding(.vertical, 6)
-            }
         }
         .overlay {
-            if model.loading && model.entries.isEmpty { PullYardLoader(size: 44) }
+            if model.loading && model.entries.isEmpty {
+                PullYardLoader(size: 44)
+            } else if let e = model.error, model.entries.isEmpty {
+                ListErrorNote(message: e, centered: true) { await model.load(api: app.api, account: app.cacheAccount, force: true) }
+            } else if model.entries.isEmpty, !model.loading, loaded {
+                ListEmptyNote(title: "No stacked pull requests", message: "Open a pull request on another pull request’s branch and it shows up here.")
+            }
         }
         .liveRefresh(updated: model.lastUpdated, refreshing: model.refreshing, error: model.entries.isEmpty ? nil : model.error) {
             await model.load(api: app.api, account: app.cacheAccount, force: true)
@@ -192,7 +186,7 @@ private struct StackRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Image(systemName: "square.stack.3d.up.fill").foregroundStyle(Color.syIndigo)
-                Text(root.map { "#\($0.number) \($0.title)" } ?? "").font(.syBody).fontWeight(.semibold).lineLimit(1)
+                Text(root.map { "#\($0.number) \($0.title)" } ?? "").font(.syBody).fontWeight(.medium).lineLimit(1)
             }
             HStack(spacing: 5) {
                 Text(entry.repo.full).lineLimit(1)

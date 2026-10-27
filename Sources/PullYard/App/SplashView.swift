@@ -31,21 +31,8 @@ struct SplashView: View {
 struct SplashLogo: View {
     static let duration: Double = 0.9
     static var hold: Double { Motion.reduced ? 0.6 : duration + 0.15 }
-    @State private var start = Date()
-    @State private var done = false
 
     var body: some View {
-        if Motion.reduced || done {
-            PullYardLogoMark(progress: 1, size: 200)
-        } else {
-            TimelineView(.animation(minimumInterval: 1 / 60)) { context in
-                let t = context.date.timeIntervalSince(start) / Self.duration
-                PullYardLogoMark(progress: min(1, t), size: 200)
-            }
-            .task {
-                try? await Task.sleep(for: .seconds(Self.duration))
-                done = true
-            }
-        }
+        LogoDrawOn(size: 200, duration: Self.duration)
     }
 }

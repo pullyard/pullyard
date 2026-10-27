@@ -82,7 +82,8 @@ struct AccountSwitcherFooter: View {
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .help("Switch account")
-                SettingsLink { Image(systemName: "gearshape") }.buttonStyle(.borderless)
+                .accessibilityLabel("Switch account")
+                SettingsLink { Image(systemName: "gearshape") }.buttonStyle(.borderless).help("Settings").accessibilityLabel("Settings")
             }
             .modifier(AccountDialogs(pendingSwitch: $pendingSwitch, confirmSignOut: $confirmSignOut, showAdd: $app.showAddAccount))
         }

@@ -51,6 +51,7 @@ struct RepoCodeView: View {
                 Button { showQuickOpen = true } label: { Image(systemName: "magnifyingglass").foregroundStyle(Color.syMuted) }
                     .buttonStyle(.borderless)
                     .help("Go to file (⌘P)")
+                    .accessibilityLabel("Go to file")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -170,6 +171,8 @@ struct RepoCodeView: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .help("More actions")
+            .accessibilityLabel("More actions")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

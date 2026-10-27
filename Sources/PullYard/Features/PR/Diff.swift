@@ -32,6 +32,10 @@ struct DiffFile: Identifiable {
         lines = f.patch.map(DiffParser.parse) ?? []
     }
 
+    var syntaxExt: String {
+        lines.count > 20_000 ? "" : SyntaxHighlighter.ext(forPath: id)
+    }
+
     var statusLetter: String {
         switch status {
         case "added": return "A"

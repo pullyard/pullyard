@@ -116,7 +116,126 @@
       e.preventDefault();
       send({ type: "key", id: "blame" });
     }
+    if (e.ctrlKey && !e.altKey && !e.metaKey && !altGraph && e.code === "KeyK") {
+      e.preventDefault();
+      send({ type: "app", id: e.shiftKey ? "quickopen" : "palette" });
+    }
+    if (!e.ctrlKey && !e.altKey && !e.metaKey && !altGraph && !typing && document.body.classList.contains("review") && reviewKeys.indexOf(e.key) >= 0) {
+      e.preventDefault();
+      send({ type: "review", id: e.key });
+    }
   });
+
+  var reviewKeys = ["n", "p", "[", "]", "v", "w", "s"];
+
+  function headerHeight() {
+    var h = document.querySelector("section.file .fh");
+    return h ? h.getBoundingClientRect().height : 0;
+  }
+
+  function currentFile() {
+    var sections = document.querySelectorAll("section.file");
+    var current = null;
+    for (var i = 0; i < sections.length; i++) {
+      if (sections[i].getBoundingClientRect().top > 4) break;
+      current = sections[i];
+    }
+    return { sections: sections, current: current || sections[0] || null };
+  }
+
+  function stepFile(delta) {
+    var info = currentFile();
+    if (!info.current) return;
+    var index = Array.prototype.indexOf.call(info.sections, info.current);
+    var next = Math.min(Math.max(index + delta, 0), info.sections.length - 1);
+    var target = info.sections[next];
+    if (target === info.current && info.current.getBoundingClientRect().top >= -1) return;
+    send({ type: "reveal", id: target.getAttribute("data-path") });
+  }
+
+  function stepHunk(delta) {
+    var hunks = document.querySelectorAll("section.file tr.hk");
+    var top = headerHeight();
+    var target = null;
+    for (var i = 0; i < hunks.length; i++) {
+      var y = hunks[i].getBoundingClientRect().top;
+      if (delta > 0 && y > top + 2) {
+        target = hunks[i];
+        break;
+      }
+      if (delta < 0 && y < top - 2) target = hunks[i];
+    }
+    if (target) window.scrollBy(0, target.getBoundingClientRect().top - top);
+  }
+
+  function review(key) {
+    if (key === "n") stepFile(1);
+    else if (key === "p") stepFile(-1);
+    else if (key === "]") stepHunk(1);
+    else if (key === "[") stepHunk(-1);
+    else if (key === "v") {
+      var info = currentFile();
+      if (info.current) send({ type: "viewed", id: info.current.getAttribute("data-path") });
+    }
+  }
+
+  var shift = 0;
+  var shiftMax = 0;
+
+  function setShift(value) {
+    shift = Math.max(0, Math.min(value, shiftMax));
+    var root = document.querySelector(".diff.nw");
+    if (root) root.style.setProperty("--sx", shift.toFixed(2) + "ch");
+  }
+
+  function syncBar() {
+    var bar = document.getElementById("hbar");
+    var root = document.querySelector(".diff.nw");
+    if (!bar || !root) return;
+    var widest = 0;
+    var tables = root.querySelectorAll("table.dt.nw");
+    for (var i = 0; i < tables.length; i++) widest = Math.max(widest, +tables[i].getAttribute("data-maxch") || 0);
+    var code = root.querySelector("table.dt.nw td.c > .w");
+    var visible = 0;
+    if (code) {
+      var probe = document.createElement("span");
+      probe.textContent = "0000000000";
+      probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
+      code.appendChild(probe);
+      var ch = probe.offsetWidth / 10;
+      code.removeChild(probe);
+      if (ch > 0) visible = Math.max(1, (code.parentElement.clientWidth - 8) / ch);
+    }
+    shiftMax = visible > 0 ? Math.max(0, widest - visible) : 0;
+    if (shiftMax < 0.5) {
+      bar.classList.remove("on");
+      setShift(0);
+      return;
+    }
+    bar.classList.add("on");
+    bar.firstElementChild.style.width = Math.round(bar.clientWidth * widest / visible) + "px";
+    setShift(shift);
+    var range = bar.scrollWidth - bar.clientWidth;
+    if (range > 0) bar.scrollLeft = shift / shiftMax * range;
+  }
+
+  document.addEventListener("scroll", function (e) {
+    var bar = e.target;
+    if (!(bar instanceof Element) || bar.id !== "hbar") return;
+    var range = bar.scrollWidth - bar.clientWidth;
+    setShift(range > 0 ? bar.scrollLeft / range * shiftMax : 0);
+  }, true);
+
+  document.addEventListener("wheel", function (e) {
+    var bar = document.getElementById("hbar");
+    if (!bar || !bar.classList.contains("on") || !(e.target instanceof Element) || !e.target.closest("table.dt.nw")) return;
+    var dx = e.deltaX || (e.shiftKey ? e.deltaY : 0);
+    if (!dx) return;
+    e.preventDefault();
+    bar.scrollLeft += dx;
+  }, { passive: false });
+
+  window.addEventListener("resize", syncBar);
 
   function scrollToFile(path) {
     var sections = document.querySelectorAll("section.file");
@@ -146,6 +265,7 @@
     } else {
       window.scrollTo(0, y);
     }
+    syncBar();
   }
 
   function onMessage(e) {
@@ -173,8 +293,12 @@
             }
           }
         }
+        syncBar();
         break;
       }
+      case "review":
+        review(msg.key);
+        break;
       case "scrollToFile":
         scrollToFile(msg.path);
         break;

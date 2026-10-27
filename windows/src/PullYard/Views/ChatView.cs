@@ -493,6 +493,7 @@ public sealed class ChatView : Grid
         if (chat.Busy) right.Children.Add(Ui.IconButton("\uE71A", L.T("Chat_Stop", "Stop (Esc)"), chat.Interrupt, "red"));
         var send = new Button { Content = Ui.Glyph("\uE724", 13, "text"), Style = (Style)Application.Current.Resources["AccentButtonStyle"], Padding = new Thickness(10, 5, 10, 5) };
         Ui.Tip(send, L.T("Chat_Send", "Send (Enter)"));
+        Ui.Named(send, L.T("Chat_SendName", "Send"), L.T("Chat_Send", "Send (Enter)"));
         send.Click += (_, _) => Submit();
         right.Children.Add(send);
         bottomBar.Children.Add(left);
@@ -511,6 +512,7 @@ public sealed class ChatView : Grid
             BorderThickness = new Thickness(0)
         };
         Ui.Tip(b, help);
+        Ui.Named(b, $"{help}: {text}");
         return b;
     }
 
@@ -521,6 +523,7 @@ public sealed class ChatView : Grid
         var ring = new ProgressRing { IsIndeterminate = false, Value = Math.Clamp(pct, 1, 100), Maximum = 100, Width = 18, Height = 18, Foreground = Palette.Brush(color) };
         var b = new Button { Content = ring, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(4) };
         Ui.Tip(b, L.F("Chat_ContextHelp", "Context {0}% — click for usage and limits", pct));
+        Ui.Named(b, L.F("Chat_ContextName", "Context {0}% used", pct), L.T("Chat_ContextHint", "Show usage and limits"));
         var flyout = new Flyout();
         b.Click += (_, _) =>
         {

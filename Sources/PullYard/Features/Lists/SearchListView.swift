@@ -21,6 +21,54 @@ enum StateFilter: String, CaseIterable, Identifiable {
     }
 }
 
+struct EmptyCopy {
+    let title: String
+    let message: String
+
+    static func prs(_ filter: PRFilter, noun: String = "pull request", state: StateFilter = .open) -> EmptyCopy {
+        let nouns = "\(noun)s"
+        let lead = nouns.prefix(1).uppercased() + nouns.dropFirst()
+        let message: String
+        switch filter {
+        case .reviewRequested: message = "When someone requests your review, it shows up here."
+        case .mine: message = "\(lead) you open show up here."
+        case .assigned: message = "\(lead) assigned to you show up here."
+        case .mentioned: message = "\(lead) that mention you show up here."
+        case .reviewed: message = "\(lead) you’ve reviewed show up here."
+        }
+        if state == .closed { return EmptyCopy(title: "No closed \(nouns)", message: message) }
+        switch filter {
+        case .reviewRequested: return EmptyCopy(title: "No reviews waiting", message: message)
+        case .mine: return EmptyCopy(title: state == .open ? "No open \(nouns)" : "No \(nouns) yet", message: message)
+        case .assigned: return EmptyCopy(title: "Nothing assigned to you", message: message)
+        case .mentioned: return EmptyCopy(title: "No mentions", message: message)
+        case .reviewed: return EmptyCopy(title: "Nothing reviewed yet", message: message)
+        }
+    }
+
+    static func issues(_ filter: IssueFilter, state: StateFilter = .open) -> EmptyCopy {
+        let message: String
+        switch filter {
+        case .assigned: message = "Issues assigned to you show up here."
+        case .mine: message = "Issues you open show up here."
+        case .mentioned: message = "Issues that mention you show up here."
+        }
+        if state == .closed { return EmptyCopy(title: "No closed issues", message: message) }
+        switch filter {
+        case .assigned: return EmptyCopy(title: "No issues assigned to you", message: message)
+        case .mine: return EmptyCopy(title: state == .open ? "No open issues" : "No issues yet", message: message)
+        case .mentioned: return EmptyCopy(title: "No mentions", message: message)
+        }
+    }
+
+    static func search(kind: String, baseQuery: String, state: StateFilter) -> EmptyCopy {
+        if kind == "issue", let f = IssueFilter.allCases.first(where: { $0.query == baseQuery }) { return issues(f, state: state) }
+        if kind == "pr", let f = PRFilter.allCases.first(where: { $0.query == baseQuery }) { return prs(f, state: state) }
+        let noun = kind == "issue" ? "issues" : "pull requests"
+        return EmptyCopy(title: state == .all ? "No \(noun)" : "No \(state.title.lowercased()) \(noun)", message: "Matching \(noun) show up here.")
+    }
+}
+
 @Observable
 @MainActor
 final class SearchListModel {
@@ -33,6 +81,10 @@ final class SearchListModel {
     }
 
     private static var cache: [String: Snapshot] = [:]
+
+    static var cachedItems: [SearchItem] {
+        cache.values.flatMap(\.items)
+    }
 
     static func resetCache() {
         cache = [:]
@@ -238,9 +290,6 @@ struct SearchListView: View {
             LoadingBar(active: model.loading && !model.showingCached && !model.items.isEmpty)
             Divider()
             List(selection: Binding(get: { app.detailRoot }, set: { app.select($0) })) {
-                if let e = model.error, model.items.isEmpty {
-                    Text(e).foregroundStyle(.red).font(.syCaption)
-                }
                 if grouped {
                     ForEach(model.groups) { group in
                         let open = !collapsed.contains(group.id) || !text.isEmpty
@@ -257,14 +306,18 @@ struct SearchListView: View {
                 } else {
                     ForEach(model.items) { row($0) }
                 }
-                if model.items.isEmpty, !model.loading, model.error == nil {
-                    Text("Nothing here").font(.syBody).foregroundStyle(Color.syMuted)
-                }
             }
             .opacity(model.loading && !model.showingCached && !model.items.isEmpty ? 0.55 : 1)
             .animation(.easeOut(duration: 0.15), value: model.loading)
             .overlay {
-                if model.loading && !model.checkingCache && model.items.isEmpty { PullYardLoader(size: 44) }
+                if model.loading && !model.checkingCache && model.items.isEmpty {
+                    PullYardLoader(size: 44)
+                } else if let e = model.error, model.items.isEmpty {
+                    ListErrorNote(message: e, centered: true) { await reload() }
+                } else if model.items.isEmpty, !model.loading {
+                    let copy = EmptyCopy.search(kind: kind, baseQuery: baseQuery, state: stateFilter)
+                    ListEmptyNote(title: copy.title, message: copy.message, filter: text.trimmingCharacters(in: .whitespaces)) { text = "" }
+                }
             }
             .liveRefresh(updated: model.lastUpdated, refreshing: model.refreshing, error: model.items.isEmpty ? nil : model.error) {
                 await reload(silent: true)
@@ -351,30 +404,69 @@ struct ItemRow: View {
     var showRepo = true
     var numberPrefix = "#"
 
+    private var reference: String {
+        showRepo ? "\(item.repository.nameWithOwner)\(numberPrefix)\(item.number)" : "\(numberPrefix)\(item.number)"
+    }
+
+    private var spokenLabel: String {
+        var parts = [item.title, "\(item.repository.nameWithOwner)\(numberPrefix)\(item.number)"]
+        if let login = item.author?.login, !login.isEmpty { parts.append("by \(login)") }
+        parts.append(item.visualState.title)
+        if item.isPR {
+            switch item.ciState {
+            case "SUCCESS": parts.append("checks passed")
+            case "FAILURE", "ERROR": parts.append("checks failed")
+            case "PENDING", "EXPECTED": parts.append("checks running")
+            default: break
+            }
+            switch item.reviewDecision {
+            case "APPROVED": parts.append("approved")
+            case "CHANGES_REQUESTED": parts.append("changes requested")
+            case "REVIEW_REQUIRED": parts.append("review required")
+            default: break
+            }
+        }
+        if let comments = item.comments?.totalCount, comments > 0 { parts.append(plural(comments, "comment", "comments")) }
+        parts.append("updated \(Fmt.rel(item.updatedAt))")
+        return parts.joined(separator: ", ")
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             StateBadge(state: item.visualState, compact: true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.title).font(.syBody).lineLimit(2).fontWeight(.semibold)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.syBody.weight(.medium))
+                    .foregroundStyle(Color.syText)
+                    .lineLimit(2)
+                    .lineSpacing(0)
+                    .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 5) {
-                    Text(showRepo ? "\(item.repository.nameWithOwner)\(numberPrefix)\(item.number)" : "\(numberPrefix)\(item.number)").lineLimit(1)
-                    Text("·")
-                    Text(Fmt.rel(item.updatedAt)).lineLimit(1)
+                    Text(reference).lineLimit(1).truncationMode(.middle)
+                    Text("·").foregroundStyle(Color.syDim)
+                    Text(Fmt.rel(item.updatedAt)).lineLimit(1).fixedSize()
+                    Spacer(minLength: 6)
+                    if item.isPR, let a = item.additions, let d = item.deletions { DiffStat(additions: a, deletions: d) }
                 }
                 .font(.syCaption)
                 .foregroundStyle(Color.syMuted)
                 HStack(spacing: 6) {
-                    Avatar(url: item.author?.avatarUrl, size: 14)
-                    Text(item.author?.login ?? "").font(.syCaption).lineLimit(1).foregroundStyle(Color.syMuted)
-                    if item.isPR {
-                        CIIcon(state: item.ciState).font(.syCaption)
-                        reviewBadge
-                        if let a = item.additions, let d = item.deletions { DiffStat(additions: a, deletions: d) }
+                    Avatar(url: item.author?.avatarUrl, size: 18, ring: true)
+                    Text(item.author?.login ?? "").lineLimit(1)
+                    Spacer(minLength: 6)
+                    HStack(spacing: 8) {
+                        if item.isPR {
+                            CIIcon(state: item.ciState)
+                            reviewBadge
+                        }
+                        if let comments = item.comments?.totalCount, comments > 0 {
+                            Label("\(comments)", systemImage: "bubble.left").labelStyle(.titleAndIcon).monospacedDigit()
+                        }
                     }
-                    if let comments = item.comments?.totalCount, comments > 0 {
-                        Label("\(comments)", systemImage: "bubble.left").font(.syCaption).foregroundStyle(Color.syMuted).labelStyle(.titleAndIcon)
-                    }
+                    .fixedSize()
                 }
+                .font(.syCaption)
+                .foregroundStyle(Color.syMuted)
                 if let base = item.stackedOn {
                     Label("stacked on \(base)", systemImage: "square.stack.3d.up")
                         .font(.syCaption)
@@ -388,7 +480,14 @@ struct ItemRow: View {
                 }
             }
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .contentShape(Rectangle())
+        .hoverHighlight(radius: 7)
+        .padding(.horizontal, -6)
+        .help(item.title)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenLabel)
     }
 
     @ViewBuilder

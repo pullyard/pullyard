@@ -37,6 +37,8 @@ public sealed partial class SearchListViewModel : ObservableObject
 
     public static void ClearCache() => Cache.Clear();
 
+    public static IEnumerable<SearchItem> CachedItems => Cache.Values.SelectMany(s => s.Items).ToList();
+
     public async Task Load(GitHubApi? api, string query, bool silent = false, bool persist = true)
     {
         if (api is null) return;
@@ -210,6 +212,8 @@ public sealed partial class ForgeListViewModel : ObservableObject
     public RowAppearMode AppearMode { get; private set; }
 
     public static void ClearCache() => Cache.Clear();
+
+    public static IEnumerable<SearchItem> CachedItems => Cache.Values.SelectMany(c => c.Items).ToList();
 
     public static Task<List<SearchItem>> Fetch(IForgeClient forge, Section kind, StateFilter state) => kind.Kind switch
     {

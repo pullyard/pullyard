@@ -195,6 +195,7 @@ struct ToolGroupView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityValue(open ? "Expanded" : "Collapsed")
                 if open {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
@@ -252,6 +253,7 @@ struct ThinkingStepRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityValue(open ? "Expanded" : "Collapsed")
             if open {
                 Text(text.text).font(.syCallout).foregroundStyle(Color.syMuted).textSelection(.enabled)
                     .padding(.horizontal, 10)
@@ -300,6 +302,7 @@ struct ToolRowView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityValue(open ? "Expanded" : "Collapsed")
             if open {
                 details
                     .padding(.horizontal, framed ? 10 : 0)
@@ -314,8 +317,8 @@ struct ToolRowView: View {
     private var statusGlyph: some View {
         switch call.status {
         case .running: WakeLoader()
-        case .error: Image(systemName: "xmark.circle.fill").foregroundStyle(Color.syRed)
-        case .denied: Image(systemName: "nosign").foregroundStyle(Color.syAmber)
+        case .error: Image(systemName: "xmark.circle.fill").foregroundStyle(Color.syRed).accessibilityLabel("Failed")
+        case .denied: Image(systemName: "nosign").foregroundStyle(Color.syAmber).accessibilityLabel("Denied")
         case .done: EmptyView()
         }
     }

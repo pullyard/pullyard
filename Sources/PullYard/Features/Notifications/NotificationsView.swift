@@ -24,7 +24,7 @@ struct NotificationsView: View {
             .padding(.vertical, 8)
             Rectangle().fill(Color.syLine).frame(height: 1)
             List(selection: $selection) {
-                if let error { Text(error).foregroundStyle(Color.syRed).font(.syCaption) }
+                if let error, !items.isEmpty { ListErrorNote(message: error) { await load() } }
                 ForEach(items) { n in
                     NotificationRow(item: n)
                         .rowAppear(n.id, rows)
@@ -38,16 +38,19 @@ struct NotificationsView: View {
                             }
                         }
                 }
-                if items.isEmpty, !loading, error == nil {
-                    VStack(spacing: 8) {
-                        IconTile(systemImage: showAll ? "tray.fill" : "checkmark", color: showAll ? .sySlate : .syGreen, size: 40)
-                        Text(showAll ? "No notifications" : "All caught up").font(.syBody).foregroundStyle(Color.syMuted)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 30)
+            }
+            .overlay {
+                if loading && !checkingCache && items.isEmpty {
+                    PullYardLoader(size: 44)
+                } else if let error, items.isEmpty {
+                    ListErrorNote(message: error, centered: true) { await load() }
+                } else if items.isEmpty, !loading {
+                    ListEmptyNote(
+                        title: showAll ? "No notifications" : "All caught up",
+                        message: showAll ? "Activity on your repositories shows up here." : "You’ve read everything. New activity shows up here."
+                    )
                 }
             }
-            .overlay { if loading && !checkingCache && items.isEmpty { PullYardLoader(size: 44) } }
             .liveRefresh(updated: lastUpdated, refreshing: loading, error: items.isEmpty ? nil : error) { await load() }
         }
         .navigationTitle("Notifications")
@@ -147,12 +150,13 @@ struct NotificationRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Circle().fill(item.unread ? Color.sySky : .clear).frame(width: 7, height: 7).padding(.top, 7)
+            Circle().fill(item.unread ? Color.sySky : .clear).frame(width: 7, height: 7).padding(.top, 7).accessibilityLabel("Unread").accessibilityHidden(!item.unread)
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(color)
                 .frame(width: 22, height: 22)
                 .background(RoundedRectangle(cornerRadius: 6).fill(color.opacity(0.14)))
+                .accessibilityLabel(typeTitle)
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.subject.title).font(.syBody)
                     .lineLimit(2)
@@ -181,6 +185,18 @@ struct NotificationRow: View {
         case "CheckSuite": return "xmark.octagon"
         case "Commit": return "point.3.connected.trianglepath.dotted"
         default: return "bell"
+        }
+    }
+
+    private var typeTitle: String {
+        switch item.subject.type {
+        case "PullRequest": return "Pull request"
+        case "Issue": return "Issue"
+        case "Release": return "Release"
+        case "Discussion": return "Discussion"
+        case "CheckSuite": return "Check suite"
+        case "Commit": return "Commit"
+        default: return "Notification"
         }
     }
 

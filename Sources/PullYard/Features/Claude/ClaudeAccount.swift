@@ -257,7 +257,7 @@ struct ClaudeAuthView: View {
                 ClaudeProfileSwitcher()
                 switch store.status {
                 case .notInstalled: installCard
-                case .unknown, .checking: ProgressView().controlSize(.small)
+                case .unknown, .checking: PullYardLoader(size: 36)
                 case .loggedOut: loginCard
                 case .loggedIn(let info): ClaudeAccountCard(info: info)
                 }
@@ -400,6 +400,8 @@ struct ClaudeAccountCard: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .help("More actions")
+            .accessibilityLabel("More actions")
         }
         .padding(compact ? 8 : 14)
         .card(radius: 10)

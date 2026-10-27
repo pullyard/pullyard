@@ -119,7 +119,8 @@ enum VisualState {
 
     var icon: String {
         switch self {
-        case .open, .draft: return "arrow.triangle.pull"
+        case .open: return "arrow.triangle.pull"
+        case .draft: return "pencil.circle"
         case .merged: return "arrow.triangle.merge"
         case .closed: return "xmark.circle"
         case .issueOpen: return "smallcircle.filled.circle"
@@ -143,6 +144,7 @@ enum VisualState {
 struct Avatar: View {
     let url: String?
     var size: CGFloat = 20
+    var ring = false
 
     var body: some View {
         AsyncImage(url: resolved) { image in
@@ -152,6 +154,7 @@ struct Avatar: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
+        .overlay { if ring { Circle().strokeBorder(Color.syLineStrong, lineWidth: 0.5) } }
     }
 
     private var resolved: URL? {
@@ -175,6 +178,8 @@ struct StateBadge: View {
                 .foregroundStyle(state.color)
                 .frame(width: 22, height: 22)
                 .background(Circle().fill(state.color.opacity(0.15)))
+                .help(state.title)
+                .accessibilityLabel(state.title)
         } else {
             Label(state.title, systemImage: state.icon)
                 .font(.syCallout.weight(.semibold))
@@ -206,9 +211,9 @@ struct CIIcon: View {
 
     var body: some View {
         switch state {
-        case "SUCCESS": Image(systemName: "checkmark").foregroundStyle(Color.ghGreen)
-        case "FAILURE", "ERROR": Image(systemName: "xmark").foregroundStyle(Color.ghRed)
-        case "PENDING", "EXPECTED": Image(systemName: "circle.dotted").foregroundStyle(Color.ghYellow)
+        case "SUCCESS": Image(systemName: "checkmark").foregroundStyle(Color.ghGreen).help("Checks passed").accessibilityLabel("Checks passed")
+        case "FAILURE", "ERROR": Image(systemName: "xmark").foregroundStyle(Color.ghRed).help("Checks failed").accessibilityLabel("Checks failed")
+        case "PENDING", "EXPECTED": Image(systemName: "circle.dotted").foregroundStyle(Color.ghYellow).help("Checks running").accessibilityLabel("Checks running")
         default: EmptyView()
         }
     }
@@ -219,11 +224,11 @@ struct OutcomeIcon: View {
 
     var body: some View {
         switch outcome {
-        case .success: Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.ghGreen)
-        case .failure: Image(systemName: "xmark.circle.fill").foregroundStyle(Color.ghRed)
-        case .pending: Image(systemName: "clock.fill").foregroundStyle(Color.ghYellow)
-        case .neutral: Image(systemName: "minus.circle.fill").foregroundStyle(Color.syMuted)
-        case .skipped: Image(systemName: "arrow.uturn.right.circle").foregroundStyle(Color.syMuted)
+        case .success: Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.ghGreen).accessibilityLabel("Passed")
+        case .failure: Image(systemName: "xmark.circle.fill").foregroundStyle(Color.ghRed).accessibilityLabel("Failed")
+        case .pending: Image(systemName: "clock.fill").foregroundStyle(Color.ghYellow).accessibilityLabel("Pending")
+        case .neutral: Image(systemName: "minus.circle.fill").foregroundStyle(Color.syMuted).accessibilityLabel("Neutral")
+        case .skipped: Image(systemName: "arrow.uturn.right.circle").foregroundStyle(Color.syMuted).accessibilityLabel("Skipped")
         }
     }
 }
@@ -294,12 +299,169 @@ struct ComposerBox: View {
                 .font(.syBody)
                 .scrollContentBackground(.hidden)
                 .padding(4)
+                .accessibilityLabel(placeholder)
             if text.isEmpty {
-                Text(placeholder).foregroundStyle(Color.syDim).padding(.horizontal, 9).padding(.vertical, 4).allowsHitTesting(false)
+                Text(placeholder).foregroundStyle(Color.syDim).padding(.horizontal, 9).padding(.vertical, 4).allowsHitTesting(false).accessibilityHidden(true)
             }
         }
         .frame(minHeight: minHeight)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.sySunken))
+    }
+}
+
+struct DrawnLogoMark: View {
+    var key: String
+    var size: CGFloat
+    var duration: Double
+    private static var drawn: Set<String> = []
+    @State private var start = Date()
+    @State private var done: Bool
+
+    init(key: String = "", size: CGFloat = 56, duration: Double = 1.4) {
+        self.key = key
+        self.size = size
+        self.duration = duration
+        _done = State(initialValue: Motion.reduced || Self.drawn.contains(key))
+    }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 60, paused: done)) { context in
+            PullYardLogoMark(progress: done ? 1 : eased(context.date.timeIntervalSince(start) / duration), size: size)
+        }
+        .task {
+            guard !done else { return }
+            guard Self.drawn.insert(key).inserted else {
+                done = true
+                return
+            }
+            start = Date()
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
+            done = true
+        }
+    }
+
+    private func eased(_ x: Double) -> Double {
+        let t = min(1, max(0, x))
+        return t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+    }
+}
+
+struct ListEmptyNote: View {
+    var title = "Nothing here"
+    var message: String?
+    var filter = ""
+    var compact = false
+    var clear: (() -> Void)?
+    var actionTitle: String?
+    var action: (() -> Void)?
+
+    private var filtering: Bool { !filter.isEmpty }
+
+    var body: some View {
+        if compact { inline } else { centered }
+    }
+
+    private var inline: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(filtering ? "No matches for “\(filter)”" : title).font(.syCallout).foregroundStyle(Color.syMuted)
+            if !filtering, let message {
+                Text(message).font(.syCaption).foregroundStyle(Color.syDim)
+            }
+            if filtering, let clear {
+                Button("Clear filter", action: clear).buttonStyle(.link).font(.syCaption)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var centered: some View {
+        VStack(spacing: 12) {
+            if filtering {
+                IconTile(systemImage: "magnifyingglass", color: .syMuted, size: 44)
+            } else {
+                DrawnLogoMark(key: title, size: 64)
+            }
+            VStack(spacing: 4) {
+                Text(filtering ? "No matches for “\(filter)”" : title)
+                    .font(.syBody.weight(.semibold))
+                    .foregroundStyle(Color.syText)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                if let detail = filtering ? "Try a different search." : message {
+                    Text(detail).font(.syCallout).foregroundStyle(Color.syMuted)
+                }
+            }
+            .multilineTextAlignment(.center)
+            if filtering, let clear {
+                Button("Clear filter", action: clear).buttonStyle(.bordered).controlSize(.small)
+            } else if !filtering, let actionTitle, let action {
+                Button(actionTitle, action: action).buttonStyle(.bordered).controlSize(.small)
+            }
+        }
+        .frame(maxWidth: 300)
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+        .transition(.opacity)
+    }
+}
+
+struct ListErrorNote: View {
+    let message: String
+    var centered = false
+    var retry: (() async -> Void)?
+
+    var body: some View {
+        if centered {
+            VStack(spacing: 12) {
+                IconTile(systemImage: "exclamationmark.triangle.fill", color: .syRed, size: 44)
+                VStack(spacing: 4) {
+                    Text("Couldn’t load").font(.syBody.weight(.semibold)).foregroundStyle(Color.syText)
+                    Text(message).font(.syCallout).foregroundStyle(Color.syMuted).textSelection(.enabled)
+                }
+                .multilineTextAlignment(.center)
+                if let retry {
+                    Button("Retry") { Task { await retry() } }.buttonStyle(.bordered).controlSize(.small)
+                }
+            }
+            .frame(maxWidth: 320)
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .contain)
+            .transition(.opacity)
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.syRed).accessibilityHidden(true)
+                Text(message).font(.syCaption).foregroundStyle(Color.syRed).textSelection(.enabled)
+                Spacer(minLength: 4)
+                if let retry {
+                    Button("Retry") { Task { await retry() } }.buttonStyle(.bordered).controlSize(.small)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+}
+
+struct CommentSendButton: View {
+    let text: String
+    let busy: Bool
+    let action: () -> Void
+
+    private var empty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if busy { ProgressView().controlSize(.small) }
+                Text(busy ? "Sending…" : "Comment")
+            }
+        }
+        .keyboardShortcut(.return, modifiers: .command)
+        .buttonStyle(.borderedProminent)
+        .tint(empty && !busy ? Color.sySlate : nil)
+        .disabled(empty || busy)
+        .help(empty ? "Write a comment to send it" : "Send comment (⌘↩)")
     }
 }
 

@@ -14,10 +14,10 @@ namespace PullYard.Controls;
 
 public sealed class SessionDot : Grid
 {
-    private static readonly Windows.UI.Color Violet = Palette.Hex(0xA78BFAu);
-    private static readonly Windows.UI.Color Sky = Palette.Hex(0x38BDF8u);
-    private static readonly Windows.UI.Color HullTop = Palette.Hex(0xFB7185u);
-    private static readonly Windows.UI.Color HullBottom = Palette.Hex(0xD61F4Eu);
+    private static Windows.UI.Color Violet => LogoArt.Violet;
+    private static Windows.UI.Color Sky => LogoArt.Sky;
+    private static Windows.UI.Color HullTop => LogoArt.HullTop;
+    private static Windows.UI.Color HullBottom => LogoArt.HullBottom;
 
     private SessionIndicator shown = (SessionIndicator)(-1);
     private Storyboard? story;
@@ -138,7 +138,7 @@ public sealed class SessionDot : Grid
     private void BuildSpinner()
     {
         var host = new Grid { Width = 10, Height = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        host.Children.Add(new Ellipse { Width = 10, Height = 10, Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(51, Violet.R, Violet.G, Violet.B)), StrokeThickness = 2 });
+        host.Children.Add(new Ellipse { Width = 10, Height = 10, Stroke = new SolidColorBrush(LogoArt.Alpha(Violet, 0.2)), StrokeThickness = 2 });
         const double r = 4;
         var sweep = 0.34 * 360 * Math.PI / 180;
         var startAngle = -Math.PI / 2;
@@ -185,7 +185,7 @@ public sealed class SessionDot : Grid
     {
         var host = new Grid { Width = 12, Height = 12, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var scale = new ScaleTransform { CenterX = 6, CenterY = 6 };
-        var pulse = new Ellipse { Width = 12, Height = 12, Fill = new SolidColorBrush(Windows.UI.Color.FromArgb(77, HullTop.R, HullTop.G, HullTop.B)), RenderTransform = scale };
+        var pulse = new Ellipse { Width = 12, Height = 12, Fill = new SolidColorBrush(LogoArt.Alpha(HullTop, 0.3)), RenderTransform = scale };
         host.Children.Add(pulse);
         host.Children.Add(new Ellipse { Width = 12, Height = 12, Fill = Gradient(HullTop, HullBottom, new Point(0.5, 0), new Point(0.5, 1)) });
         var mark = new TextBlock
@@ -193,7 +193,7 @@ public sealed class SessionDot : Grid
             Text = "?",
             FontSize = 8.5,
             FontWeight = FontWeights.Black,
-            Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+            Foreground = new SolidColorBrush(LogoArt.Cabin),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             TextLineBounds = TextLineBounds.Tight,

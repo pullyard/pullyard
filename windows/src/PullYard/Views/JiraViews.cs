@@ -167,6 +167,7 @@ public static class JiraUi
         };
         b.Click += (_, _) => onClick();
         Ui.Tip(b, tooltip);
+        if (tooltip is not null) Ui.Named(b, Ui.SpokenName(tooltip));
         return b;
     }
 

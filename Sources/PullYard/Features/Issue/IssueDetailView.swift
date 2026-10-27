@@ -144,13 +144,10 @@ struct IssueDetailView: View {
             Rectangle().fill(Color.syLine).frame(height: 1)
             HStack(alignment: .bottom, spacing: 8) {
                 ComposerBox(text: $text, placeholder: "Comment (Markdown) — ⌘↩ to send", minHeight: 56).frame(height: 64)
-                Button("Comment") {
+                CommentSendButton(text: text, busy: model.busy) {
                     let body = text
                     Task { if await model.comment(body) { text = "" } }
                 }
-                .keyboardShortcut(.return, modifiers: .command)
-                .buttonStyle(.borderedProminent)
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy)
             }
             .padding(10)
             .background(Theme.isBrand ? Color.syBar : Color.clear)
@@ -167,14 +164,22 @@ struct IssueDetailView: View {
                 if issue.viewerCanUpdate {
                     if issue.issueState == "OPEN" {
                         Button { Task { await model.setOpen(false) } } label: { Label("Close", systemImage: "checkmark.circle") }
+                            .labelStyle(.titleAndIcon)
                             .help("Close issue")
                     } else {
                         Button { Task { await model.setOpen(true) } } label: { Label("Reopen", systemImage: "arrow.uturn.backward.circle") }
+                            .labelStyle(.titleAndIcon)
                             .help("Reopen issue")
                     }
                 }
-                Button { copyToPasteboard(issue.url) } label: { Label("Copy Link", systemImage: "link") }
-                Button { openInBrowser(issue.url) } label: { Label("Open in Browser", systemImage: "safari") }
+                ControlGroup {
+                    Button { copyToPasteboard(issue.url) } label: { Label("Copy Link", systemImage: "link") }
+                        .help("Copy link")
+                    Button { openInBrowser(issue.url) } label: { Label("Open in Browser", systemImage: "safari") }
+                        .help("Open on github.com")
+                } label: {
+                    Label("Share", systemImage: "link")
+                }
             }
         }
         .alert("Error", isPresented: Binding(get: { model.actionError != nil }, set: { if !$0 { model.actionError = nil } })) {

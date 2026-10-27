@@ -451,7 +451,7 @@ pub fn run(_app: Rc<App>) {
     });
     step(next(300), "agents notifications", || {
         let id = app::get().claude.tabs.borrow().first().map(|t| t.id).unwrap_or(0);
-        crate::claude::notifier::post(id, "Smoke finished", "Body");
+        crate::claude::notifier::post(id, crate::activity::NotifyKind::AgentFinished, "Smoke finished", "Body");
         crate::claude::notifier::withdraw(id);
         crate::claude::notifier::set_badge(2);
         crate::claude::notifier::set_badge(0);

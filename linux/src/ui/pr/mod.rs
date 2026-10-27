@@ -1,3 +1,4 @@
+pub mod diff_view;
 pub mod files;
 pub mod model;
 pub mod sheets;
@@ -352,7 +353,7 @@ impl PrPage {
         let html = HtmlView::new();
         let composer = Composer::new("Comment (Markdown) — Ctrl+Enter to send", 56);
         composer.widget.set_hexpand(true);
-        let send = suggested("Comment");
+        let send = composer.send_button("Comment");
         send.set_valign(gtk::Align::End);
         let row = hbox(8);
         pad(&row, 10);
@@ -374,8 +375,11 @@ impl PrPage {
             let body = comp.text();
             let comp = comp.clone();
             let m = me.model.clone();
+            comp.set_busy(true);
             crate::rt::spawn_local(async move {
-                if m.comment(body).await {
+                let sent = m.comment(body).await;
+                comp.set_busy(false);
+                if sent {
                     comp.set_text("");
                 }
             });
@@ -863,23 +867,34 @@ impl PrPage {
             rr.connect_clicked(move |_| sheets::reviewers(mm.clone()));
             self.actions.append(&rr);
         }
-        let fix = icon_button("sy-sparkles-symbolic", "Send review comments to a new Claude Code session");
+        let fix = icon_label_button("sy-sparkles-symbolic", "Fix with agent");
+        fix.set_tooltip_text(Some("Send review comments and failing checks to a new agent session"));
+        set_label(&fix, "Fix with agent");
         let mm = m.clone();
         fix.connect_clicked(move |_| fix_claude::show(mm.clone()));
         self.actions.append(&fix);
         if pr.is_open() && !pr.is_draft && m.can_write() {
-            let merge = icon_button("sy-merge-symbolic", "Merge pull request");
+            let merge = icon_label_button("sy-merge-symbolic", "Merge");
+            merge.add_css_class("suggested-action");
+            merge.set_tooltip_text(Some("Merge pull request"));
+            set_label(&merge, "Merge");
             let mm = m.clone();
             merge.connect_clicked(move |_| sheets::merge(mm.clone()));
             self.actions.append(&merge);
         }
-        self.actions.append(&super::item_row::short_link_button(&Route::Pr(m.r.clone())));
-        let more = self.more_menu(pr);
-        self.actions.append(&more.button("view-more-symbolic", "More"));
-        let open = icon_button("sy-external-symbolic", "Open on github.com");
+        let group = hbox(0);
+        group.add_css_class("linked");
+        let short = super::item_row::short_link_button(&Route::Pr(m.r.clone()));
+        short.remove_css_class("flat");
+        group.append(&short);
+        let open = icon_button("sy-external-symbolic", "Open in browser");
+        open.remove_css_class("flat");
         let url = pr.url.clone();
         open.connect_clicked(move |_| util::open_url(&url));
-        self.actions.append(&open);
+        group.append(&open);
+        let more = self.more_menu(pr);
+        group.append(&more.button("view-more-symbolic", "More actions"));
+        self.actions.append(&group);
     }
 
     fn more_menu(self: &Rc<Self>, pr: &PullRequestDetail) -> Menu {
@@ -1234,6 +1249,7 @@ pub fn stack_strip(model: &Rc<PrModel>, tree: &StackTree, interactive: bool) -> 
         mb.add_css_class("flat");
         mb.set_child(Some(&icon_label_content("sy-up-symbolic", &ups.len().to_string())));
         mb.set_tooltip_text(Some(&format!("Up the stack: {} pull requests are stacked on this one", ups.len())));
+        set_label(&mb, &format!("Up the stack, {} pull requests", ups.len()));
         menu.apply_to(&mb);
         b.append(&mb);
     }

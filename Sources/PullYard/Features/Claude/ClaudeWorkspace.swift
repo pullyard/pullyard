@@ -534,14 +534,14 @@ final class ClaudeWorkspace {
                 SessionSeen.shared.mark(tab.sessionId)
             } else {
                 tab.unread = true
-                AgentNotifier.post(tab: tab.id, title: "Claude finished · " + tab.title, body: AgentNotifier.snippet(tab.chat?.lastAssistantText))
+                AgentNotifier.post(tab: tab.id, kind: .agentFinished, title: "Agent finished · " + tab.title, body: AgentNotifier.snippet(tab.chat?.lastAssistantText))
             }
             Task { await tab.git.refresh() }
         }
         chat.onNeedsInput = { [weak self, weak tab] request in
             guard let tab, self?.isWatching(tab) != true else { return }
-            let body = request.toolName == "AskUserQuestion" ? "Claude has a question for you" : request.toolName == "ExitPlanMode" ? "Claude has a plan ready for review" : "Claude needs permission: " + request.toolName
-            AgentNotifier.post(tab: tab.id, title: tab.title, body: body)
+            let body = request.toolName == "AskUserQuestion" ? "Your agent has a question for you" : request.toolName == "ExitPlanMode" ? "Your agent has a plan ready for review" : "Your agent needs permission: " + request.toolName
+            AgentNotifier.post(tab: tab.id, kind: .agentInput, title: tab.title, body: body)
         }
         let m = modeOverride ?? mode
         chat.start(

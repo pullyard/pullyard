@@ -19,8 +19,7 @@ struct View {
     stack: gtk::Stack,
     status: Rc<RefreshStatus>,
     mark_all: gtk::Button,
-    empty_label: gtk::Label,
-    empty_icon: gtk::Box,
+    empty: gtk::Box,
     rendered: RefCell<String>,
 }
 
@@ -70,9 +69,7 @@ fn row(n: &NotificationThread) -> gtk::Box {
     dot.set_valign(gtk::Align::Start);
     dot.set_margin_top(7);
     if n.unread {
-        dot.add_css_class("hex-5bb8ec");
-        dot.add_css_class("dot");
-        crate::theme::hex_class("5bb8ec");
+        dot.add_css_class("sy-unread-dot");
     }
     b.append(&dot);
     let (ic, color) = icon_for(&n.subject.kind);
@@ -100,6 +97,31 @@ fn row(n: &NotificationThread) -> gtk::Box {
     b
 }
 
+fn type_title(kind: &str) -> &'static str {
+    match kind {
+        "PullRequest" => "Pull request",
+        "Issue" => "Issue",
+        "Release" => "Release",
+        "Discussion" => "Discussion",
+        "CheckSuite" => "Check suite",
+        "Commit" => "Commit",
+        _ => "Notification",
+    }
+}
+
+fn spoken(n: &NotificationThread) -> String {
+    let mut parts = vec![];
+    if n.unread {
+        parts.push("Unread".to_string());
+    }
+    parts.push(type_title(&n.subject.kind).to_string());
+    parts.push(n.subject.title.clone());
+    parts.push(n.repository.full_name.clone());
+    parts.push(reason_text(&n.reason));
+    parts.push(util::rel(Some(n.updated_at)));
+    parts.join(", ")
+}
+
 fn signature(items: &[NotificationThread]) -> String {
     items
         .iter()
@@ -120,13 +142,20 @@ impl View {
             if self.loading.get() {
                 self.stack.set_visible_child_name("loading");
             } else if let Some(e) = self.error.borrow().clone() {
-                self.empty_label.set_text(&e);
-                self.empty_label.add_css_class("fg-red");
+                let weak = Rc::downgrade(self);
+                set_status(&self.empty, &error_state(&e, Some(Box::new(move || {
+                    if let Some(me) = weak.upgrade() {
+                        me.load(true);
+                    }
+                }))));
                 self.stack.set_visible_child_name("empty");
             } else {
-                self.empty_label.remove_css_class("fg-red");
-                self.empty_label.set_text(if self.show_all.get() { "No notifications" } else { "All caught up" });
-                self.empty_icon.set_visible(true);
+                let (title, message) = if self.show_all.get() {
+                    ("No notifications", "Activity on your repositories shows up here.")
+                } else {
+                    ("All caught up", "You’ve read everything. New activity shows up here.")
+                };
+                set_status(&self.empty, &empty_note(title, Some(message)));
                 self.stack.set_visible_child_name("empty");
             }
             return;
@@ -144,6 +173,8 @@ impl View {
         for n in items {
             let r = gtk::ListBoxRow::new();
             r.set_child(Some(&row(&n)));
+            r.set_tooltip_text(Some(&n.subject.title));
+            r.update_property(&[gtk::accessible::Property::Label(&spoken(&n))]);
             let weak = Rc::downgrade(self);
             let nn = n.clone();
             context_menu(&r, move || {
@@ -260,16 +291,7 @@ pub fn build() -> gtk::Widget {
     let stack = gtk::Stack::new();
     stack.add_named(&scrolled(&list), Some("list"));
     stack.add_named(&loading(), Some("loading"));
-    let empty = vbox(8);
-    empty.set_margin_top(30);
-    empty.set_halign(gtk::Align::Center);
-    let empty_icon = icon_tile("sy-check-symbolic", "green", 40);
-    empty.append(&empty_icon);
-    let empty_label = label_with("All caught up", &["sy-muted"]);
-    empty_label.set_xalign(0.5);
-    empty_label.set_wrap(true);
-    empty_label.set_natural_wrap_mode(gtk::NaturalWrapMode::None);
-    empty.append(&empty_label);
+    let empty = vbox(0);
     stack.add_named(&empty, Some("empty"));
     let mark_all = icon_button("sy-check-symbolic", "Mark all as read");
     let holder: Rc<RefCell<Option<std::rc::Weak<View>>>> = Rc::new(RefCell::new(None));
@@ -289,8 +311,7 @@ pub fn build() -> gtk::Widget {
         stack,
         status,
         mark_all: mark_all.clone(),
-        empty_label,
-        empty_icon,
+        empty,
         rendered: RefCell::new(String::new()),
     });
     *holder.borrow_mut() = Some(Rc::downgrade(&view));

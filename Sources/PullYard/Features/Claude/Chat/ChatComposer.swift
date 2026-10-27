@@ -190,6 +190,8 @@ struct ChatComposer: View {
                                     Image(systemName: "xmark.circle.fill").foregroundStyle(.white, .black.opacity(0.6))
                                 }
                                 .buttonStyle(.plain)
+                                .help("Remove image")
+                                .accessibilityLabel("Remove image")
                                 .offset(x: 4, y: -4)
                             }
                         }
@@ -299,10 +301,12 @@ struct ChatComposer: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(Color.syMuted)
                 .help("Attach image")
+                .accessibilityLabel("Attach image")
             Button { dictate() } label: { Image(systemName: "mic") }
                 .buttonStyle(.borderless)
                 .foregroundStyle(Color.syMuted)
                 .help("Dictate a prompt (macOS dictation)")
+                .accessibilityLabel("Dictate a prompt")
             Spacer()
             UsageRingButton(chat: chat)
             if chat.busy {
@@ -549,6 +553,7 @@ struct ComposerRoundButton: View {
         .disabled(!enabled)
         .onHover { h in withAnimation(Motion.quick) { hover = h } }
         .help(help)
+        .accessibilityLabel(style == .stop ? "Stop" : "Send")
     }
 
     private var foreground: Color {
@@ -613,6 +618,7 @@ struct TodoProgressBar: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityValue(open ? "Expanded" : "Collapsed")
                 .animation(Motion.smooth, value: current.map(title))
                 if open {
                     TodoListView(todos: todos)

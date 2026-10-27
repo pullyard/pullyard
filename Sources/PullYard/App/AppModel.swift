@@ -108,12 +108,14 @@ final class AppModel {
     var liveTick = 0
     var showOpenLink = false
     var showQuickOpen = false
+    var showCommandPalette = false
+    var recentRoutes: [Route] = []
     var clipboardRoute: Route?
     var toast: String?
     var pendingCode: CodeOpenRequest?
     var reviewRequests: [SearchItem] = []
     var myPRs: [SearchItem] = []
-    var reviewRequestCount = 0
+    var reviewRequestCount = 0 { didSet { DockBadge.set(reviews: reviewRequestCount) } }
     var myPRCount = 0
     var unreadCount = 0
     var lastBadgeRefresh: Date?
@@ -147,6 +149,10 @@ final class AppModel {
                 tab.unread = false
                 SessionSeen.shared.mark(tab.sessionId)
             }
+        }
+        NotificationCenter.default.addObserver(forName: .openActivity, object: nil, queue: .main) { [weak self] note in
+            guard let target = note.object as? ActivityTarget else { return }
+            MainActor.assumeIsolated { self?.open(target) }
         }
         NotificationCenter.default.addObserver(forName: .openAgentTab, object: nil, queue: .main) { [weak self] note in
             guard let id = note.object as? UUID else { return }
@@ -523,9 +529,11 @@ final class AppModel {
         detailRoot = nil
         detailPath = []
         forgeSelection = nil
+        recentRoutes = []
         resetStacks()
         reviewRequests = []
         myPRs = []
+        ActivityNotifier.shared.reset()
         reviewRequestCount = 0
         myPRCount = 0
         unreadCount = 0
@@ -551,6 +559,13 @@ final class AppModel {
     func select(_ route: Route?) {
         detailRoot = route
         detailPath = []
+        if let route { remember(route) }
+    }
+
+    private func remember(_ route: Route) {
+        recentRoutes.removeAll { $0 == route }
+        recentRoutes.insert(route, at: 0)
+        if recentRoutes.count > 20 { recentRoutes.removeLast(recentRoutes.count - 20) }
     }
 
     func open(_ route: Route, push: Bool = false) {
@@ -558,15 +573,32 @@ final class AppModel {
             section = .prs(.mine)
             detailPath = []
             detailRoot = route
+            remember(route)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
         if push, detailRoot != nil {
             detailPath.append(route)
+            remember(route)
         } else {
             select(route)
         }
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func open(_ target: ActivityTarget) {
+        guard phase == .loggedIn else { return }
+        guard target.account == nil || target.account == cacheAccount else { return openInBrowser(target.url) }
+        if forge != nil {
+            guard let item = (reviewRequests + myPRs).first(where: { $0.url == target.url }) else { return openInBrowser(target.url) }
+            if section == .claude || section == nil { section = .prs(forgeCaps.pullFilters.first ?? .mine) }
+            forgeSelection = item
+            NSApp.activate(ignoringOtherApps: true)
+        } else if let repo = RepoRef(full: target.repo) {
+            open(.pr(ItemRef(repo: repo, number: target.number)))
+        } else {
+            openInBrowser(target.url)
+        }
     }
 
     static let maxLinkPromptLength = 8000
@@ -760,11 +792,15 @@ final class AppModel {
             unreadCount = 12
             return
         }
-        if let b = try? await api.badges() {
+        let b = try? await api.badges()
+        if let b {
             reviewRequests = b.rr.nodes
             reviewRequestCount = b.rr.issueCount
             myPRs = b.mine.nodes
             myPRCount = b.mine.issueCount
+        }
+        if self.api === api {
+            ActivityNotifier.shared.observe(account: cacheAccount, reviews: b?.rr.nodes, reviewTotal: b?.rr.issueCount ?? 0, mine: b?.mine.nodes)
         }
         if let n = try? await api.unreadNotificationCount(live: live) {
             unreadCount = n
@@ -786,13 +822,20 @@ final class AppModel {
 
     private func refreshForgeBadges(_ forge: ForgeClient) async {
         let supported = forgeCaps.pullFilters
+        var seenReviews: [SearchItem]?
+        var seenMine: [SearchItem]?
         if supported.contains(.reviewRequested), let rr = try? await forge.pullRequests(.reviewRequested, state: .open), self.forge === forge {
             reviewRequests = Array(rr.prefix(10))
             reviewRequestCount = rr.count
+            seenReviews = rr
         }
         if supported.contains(.mine), let mine = try? await forge.pullRequests(.mine, state: .open), self.forge === forge {
             myPRs = Array(mine.prefix(10))
             myPRCount = mine.count
+            seenMine = mine
+        }
+        if self.forge === forge {
+            ActivityNotifier.shared.observe(account: cacheAccount, reviews: seenReviews, reviewTotal: seenReviews?.count ?? 0, mine: seenMine)
         }
         if forgeCaps.hasInbox, let inbox = try? await forge.notifications(), self.forge === forge {
             unreadCount = inbox.filter(\.unread).count

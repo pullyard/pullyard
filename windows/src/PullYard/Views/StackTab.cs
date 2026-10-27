@@ -336,6 +336,7 @@ public sealed record StackListRow(StackNode Node, int Depth, bool Current, bool 
             VerticalAlignment = VerticalAlignment.Center
         };
         Ui.Tip(b, StackTab.NoteTip(count));
+        Ui.Named(b, count > 0 ? Fmt.Plural(count, "note", "notes") : L.T("Notes_AddName", "Add a note"));
         b.Click += (_, _) => onClick();
         return b;
     }

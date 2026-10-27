@@ -7,11 +7,11 @@ struct MenuBarLabel: View {
         let count = app.reviewRequestCount
         if count > 0 {
             HStack(spacing: 2) {
-                Image(systemName: "ferry")
+                Image(systemName: "ferry").accessibilityLabel("PullYard")
                 Text("\(count)")
             }
         } else {
-            Image(systemName: "ferry")
+            Image(systemName: "ferry").accessibilityLabel("PullYard")
         }
     }
 }
@@ -32,6 +32,7 @@ struct MenuBarView: View {
                 Button { Task { await app.refreshBadges() } } label: { Image(systemName: "arrow.clockwise").foregroundStyle(Color.syMuted) }
                     .buttonStyle(.borderless)
                     .help("Refresh")
+                    .accessibilityLabel("Refresh")
             }
             .padding(12)
             .background(Theme.isBrand ? Color.syBar : Color.clear)
@@ -65,8 +66,8 @@ struct MenuBarView: View {
             } else if ready {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
-                        section("Review requests", count: app.reviewRequestCount, items: app.reviewRequests, filter: .reviewRequested)
-                        section("My open \(app.provider.requestShort)s", count: app.myPRCount, items: app.myPRs, filter: .mine)
+                        section("Review requests", count: app.reviewRequestCount, items: app.reviewRequests, filter: .reviewRequested, empty: "No reviews waiting")
+                        section("My open \(app.provider.requestShort)s", count: app.myPRCount, items: app.myPRs, filter: .mine, empty: "No open \(app.provider.requestShort)s")
                         if app.forge == nil || app.forgeCaps.hasInbox {
                             Button {
                                 app.section = .notifications
@@ -113,7 +114,7 @@ struct MenuBarView: View {
     }
 
     @ViewBuilder
-    private func section(_ title: String, count: Int, items: [SearchItem], filter: PRFilter) -> some View {
+    private func section(_ title: String, count: Int, items: [SearchItem], filter: PRFilter, empty: String) -> some View {
         Button {
             app.section = .prs(filter)
             show(nil)
@@ -128,7 +129,7 @@ struct MenuBarView: View {
         }
         .buttonStyle(MenuRowStyle())
         if items.isEmpty {
-            Text("Nothing here").font(.syCallout).foregroundStyle(Color.syDim).padding(.horizontal, 8).padding(.bottom, 6)
+            ListEmptyNote(title: empty, compact: true).padding(.horizontal, 8).padding(.bottom, 2)
         }
         ForEach(items) { item in
             Button { open(item) } label: {
@@ -137,7 +138,7 @@ struct MenuBarView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(item.title).fontWeight(.medium).foregroundStyle(Color.syText).lineLimit(1)
                         Text("\(item.repository.nameWithOwner)\(app.provider.numberPrefix)\(item.number) · \(item.author?.login ?? "") · \(Fmt.rel(item.updatedAt))")
-                            .font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
+                            .font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.middle)
                     }
                     Spacer(minLength: 4)
                     CIIcon(state: item.ciState).font(.syCaption)
@@ -145,6 +146,8 @@ struct MenuBarView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(MenuRowStyle())
+            .help(item.title)
+            .accessibilityLabel(menuLabel(item))
             .contextMenu {
                 Button("Open in Browser") { openInBrowser(item.url) }
                 Button("Copy Link") { copyToPasteboard(item.url) }
@@ -155,6 +158,13 @@ struct MenuBarView: View {
             .rowAppear(item.id, rows, bleed: EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
         }
         Spacer().frame(height: 6)
+    }
+
+    private func menuLabel(_ item: SearchItem) -> String {
+        var parts = [item.title, "\(item.repository.nameWithOwner)\(app.provider.numberPrefix)\(item.number)"]
+        if let login = item.author?.login, !login.isEmpty { parts.append("by \(login)") }
+        parts.append(item.visualState.title)
+        return parts.joined(separator: ", ")
     }
 
     private func open(_ item: SearchItem) {

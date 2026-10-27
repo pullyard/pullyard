@@ -97,6 +97,7 @@ impl Menu {
             b.set_icon_name(icon_name);
         }
         b.set_tooltip_text(Some(tooltip));
+        super::widgets::set_label(&b, tooltip);
         b.set_menu_model(Some(&self.model));
         self.attach(&b);
         b

@@ -6,7 +6,7 @@ use adw::prelude::*;
 use chrono::{DateTime, Utc};
 use gtk::glib;
 
-use super::item_row::{item_menu, item_row};
+use super::item_row::{describe_row, item_menu, item_row};
 use super::menu::context_menu;
 use super::widgets::*;
 use crate::api::models::{Route, SearchItem};
@@ -54,6 +54,11 @@ thread_local! {
 
 pub fn reset_cache() {
     CACHE.with(|c| c.borrow_mut().clear());
+}
+
+pub fn cached_items() -> Vec<SearchItem> {
+    let prefix = format!("{}\n", account());
+    CACHE.with(|c| c.borrow().iter().filter(|(k, _)| k.starts_with(&prefix)).flat_map(|(_, s)| s.items.clone()).collect())
 }
 
 fn account() -> String {
@@ -277,6 +282,9 @@ pub struct SearchList {
     overlay_stack: gtk::Stack,
     debounce: RefCell<Option<glib::SourceId>>,
     rendered: RefCell<String>,
+    search: gtk::SearchEntry,
+    status_key: RefCell<String>,
+    me: RefCell<std::rc::Weak<SearchList>>,
 }
 
 impl SearchList {
@@ -289,6 +297,7 @@ impl SearchList {
         let spinner = spinner(14);
         spinner.set_visible(false);
         let overlay_stack = gtk::Stack::new();
+        let search = gtk::SearchEntry::new();
         let (toggles, state) = state_toggles(|_| {});
         let model_c = model.clone();
         let weak_holder: Rc<RefCell<Option<std::rc::Weak<SearchList>>>> = Rc::new(RefCell::new(None));
@@ -314,8 +323,12 @@ impl SearchList {
             overlay_stack: overlay_stack.clone(),
             debounce: RefCell::new(None),
             rendered: RefCell::new(String::new()),
+            search: search.clone(),
+            status_key: RefCell::new(String::new()),
+            me: RefCell::new(std::rc::Weak::new()),
         });
         *weak_holder.borrow_mut() = Some(Rc::downgrade(&me));
+        *me.me.borrow_mut() = Rc::downgrade(&me);
 
         let weak = Rc::downgrade(&me);
         for child in toggles_children(&toggles) {
@@ -329,7 +342,6 @@ impl SearchList {
             });
         }
 
-        let search = gtk::SearchEntry::new();
         search.set_placeholder_text(Some("Filter: text, repo:org/name, label:bug"));
         search.set_hexpand(true);
         let weak = Rc::downgrade(&me);
@@ -390,12 +402,8 @@ impl SearchList {
         });
         overlay_stack.add_named(&scroll, Some("list"));
         overlay_stack.add_named(&loading(), Some("loading"));
-        let empty = label_with("Nothing here", &["sy-muted"]);
-        empty.set_valign(gtk::Align::Start);
-        empty.set_halign(gtk::Align::Center);
-        empty.set_margin_top(30);
-        overlay_stack.add_named(&empty, Some("empty"));
-        let err_box = vbox(8);
+        overlay_stack.add_named(&vbox(0), Some("empty"));
+        let err_box = vbox(0);
         err_box.set_widget_name("error");
         overlay_stack.add_named(&err_box, Some("error"));
 
@@ -422,6 +430,7 @@ impl SearchList {
         let search_btn = gtk::ToggleButton::new();
         search_btn.set_icon_name("system-search-symbolic");
         search_btn.set_tooltip_text(Some("Filter"));
+        set_label(&search_btn, "Filter");
         search_btn.bind_property("active", &search_bar, "search-mode-enabled").bidirectional().build();
         hb.pack_start(&search_btn);
         tv.add_top_bar(&hb);
@@ -501,13 +510,17 @@ impl SearchList {
                 self.overlay_stack.set_visible_child_name("loading");
             } else if let Some(e) = err {
                 if let Some(page) = self.overlay_stack.child_by_name("error").and_downcast::<gtk::Box>() {
-                    clear(&page);
-                    let l = wrap_label(&e, &["fg-red", "sy-small"]);
-                    pad(&l, 12);
-                    page.append(&l);
+                    let weak = self.me.borrow().clone();
+                    set_status(&page, &error_state(&e, Some(Box::new(move || {
+                        if let Some(me) = weak.upgrade() {
+                            me.reload(false);
+                        }
+                    }))));
                 }
+                self.status_key.borrow_mut().clear();
                 self.overlay_stack.set_visible_child_name("error");
             } else {
+                self.show_empty();
                 self.overlay_stack.set_visible_child_name("empty");
             }
             self.list.remove_all();
@@ -524,6 +537,28 @@ impl SearchList {
         *self.rendered.borrow_mut() = sig;
         rebuild_rows(&self.list, || self.build_rows(&items));
         self.sync_selection();
+    }
+
+    fn show_empty(&self) {
+        let Some(page) = self.overlay_stack.child_by_name("empty").and_downcast::<gtk::Box>() else { return };
+        let filter = self.text.borrow().clone();
+        let state = self.state.get();
+        let key = format!("{filter}|{}", state.title());
+        if *self.status_key.borrow() == key && page.first_child().is_some() {
+            return;
+        }
+        *self.status_key.borrow_mut() = key;
+        if filter.is_empty() {
+            let copy = if self.grouped {
+                super::empty_copy::prs(crate::app::PrFilter::Mine, "pull request", state)
+            } else {
+                super::empty_copy::search(self.kind, &self.base_query, state)
+            };
+            set_status(&page, &empty_note(&copy.title, Some(&copy.message)));
+        } else {
+            let entry = self.search.clone();
+            set_status(&page, &no_matches(&filter, move || entry.set_text("")));
+        }
     }
 
     fn signature(&self, items: &[SearchItem]) -> String {
@@ -560,6 +595,8 @@ impl SearchList {
                 row.set_widget_name(&format!("group:{key}"));
                 row.set_child(Some(&group_header(&key, group.len(), open)));
                 row.set_selectable(false);
+                set_label(&row, &format!("{key}, {} items", group.len()));
+                set_expanded(&row, open);
                 self.list.append(&row);
                 keys.push(None);
                 if open {
@@ -581,6 +618,7 @@ impl SearchList {
     fn append_item(&self, item: &SearchItem, show_repo: bool) {
         let row = gtk::ListBoxRow::new();
         row.set_child(Some(&item_row(item, show_repo)));
+        describe_row(&row, item);
         let it = item.clone();
         context_menu(&row, move || item_menu(&it));
         self.list.append(&row);

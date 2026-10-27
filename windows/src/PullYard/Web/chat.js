@@ -1023,7 +1023,7 @@
   document.addEventListener("keydown", function (e) {
     if (!e.ctrlKey || e.altKey || e.metaKey) return;
     var key = e.key.toLowerCase();
-    var app = !e.shiftKey && key === "k" ? "quickopen" : !e.shiftKey && key === "n" ? "new" : e.shiftKey && (e.key === "}" || e.key === "]") ? "next" : e.shiftKey && (e.key === "{" || e.key === "[") ? "prev" : null;
+    var app = key === "k" ? (e.shiftKey ? "quickopen" : "palette") : !e.shiftKey && key === "n" ? "new" : e.shiftKey && (e.key === "}" || e.key === "]") ? "next" : e.shiftKey && (e.key === "{" || e.key === "[") ? "prev" : null;
     if (app) {
       e.preventDefault();
       send({ type: "app", id: app });

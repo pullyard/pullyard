@@ -10,9 +10,6 @@ struct ForgeInboxView: View {
 
     var body: some View {
         List {
-            if let error, items.isEmpty {
-                Text(error).foregroundStyle(.red).font(.syCaption).textSelection(.enabled)
-            }
             ForEach(items) { n in
                 ForgeNotificationRow(notification: n) {
                     Task { await markDone(n) }
@@ -27,12 +24,15 @@ struct ForgeInboxView: View {
                 .listRowSeparator(.visible)
                 .listRowSeparatorTint(Color.syLine)
             }
-            if items.isEmpty, !loading, error == nil {
-                Text("All done").font(.syBody).foregroundStyle(Color.syMuted)
-            }
         }
         .overlay {
-            if loading && items.isEmpty { PullYardLoader(size: 44) }
+            if loading && items.isEmpty {
+                PullYardLoader(size: 44)
+            } else if let error, items.isEmpty {
+                ListErrorNote(message: error, centered: true) { await load() }
+            } else if items.isEmpty, !loading {
+                ListEmptyNote(title: "All caught up", message: "New review requests and mentions show up here.")
+            }
         }
         .liveRefresh(updated: updated, refreshing: refreshing, error: items.isEmpty ? nil : error) {
             await load()
@@ -83,9 +83,9 @@ struct ForgeNotificationRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Avatar(url: notification.author?.avatarUrl, size: 22)
+            Avatar(url: notification.author?.avatarUrl, size: 22, ring: true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(notification.title).font(.syBody).fontWeight(.semibold).lineLimit(2).foregroundStyle(Color.syText)
+                Text(notification.title).font(.syBody).fontWeight(.medium).lineLimit(2).foregroundStyle(Color.syText).help(notification.title)
                 HStack(spacing: 5) {
                     Text(notification.reason).foregroundStyle(Color.syAccent)
                     if !notification.repo.isEmpty {
@@ -130,9 +130,6 @@ struct ForgeReposView: View {
 
     var body: some View {
         List {
-            if let error, repos.isEmpty {
-                Text(error).foregroundStyle(.red).font(.syCaption).textSelection(.enabled)
-            }
             ForEach(visible) { repo in
                 ForgeRepoRow(repo: repo)
                     .contentShape(Rectangle())
@@ -145,12 +142,15 @@ struct ForgeReposView: View {
                     .listRowSeparator(.visible)
                     .listRowSeparatorTint(Color.syLine)
             }
-            if visible.isEmpty, !loading, error == nil {
-                Text("Nothing here").font(.syBody).foregroundStyle(Color.syMuted)
-            }
         }
         .overlay {
-            if loading && repos.isEmpty { PullYardLoader(size: 44) }
+            if loading && repos.isEmpty {
+                PullYardLoader(size: 44)
+            } else if let error, repos.isEmpty {
+                ListErrorNote(message: error, centered: true) { await load() }
+            } else if visible.isEmpty, !loading {
+                ListEmptyNote(title: "No \(app.provider.repositoriesTitle.lowercased())", message: "\(app.provider.repositoriesTitle) you can access show up here.", filter: text.trimmingCharacters(in: .whitespaces)) { text = "" }
+            }
         }
         .liveRefresh(updated: updated, refreshing: loading, error: repos.isEmpty ? nil : error) {
             await load()
@@ -185,7 +185,7 @@ struct ForgeRepoRow: View {
         HStack(alignment: .top, spacing: 10) {
             IconTile(systemImage: repo.isPrivate ? "lock.fill" : "book.closed.fill", color: ProjectPalette.color(for: repo.fullName), size: 24)
             VStack(alignment: .leading, spacing: 3) {
-                Text(repo.fullName).font(.syBody).fontWeight(.semibold).lineLimit(1).foregroundStyle(Color.syText)
+                Text(repo.fullName).font(.syBody).fontWeight(.medium).lineLimit(1).foregroundStyle(Color.syText)
                 if let d = repo.description, !d.isEmpty {
                     Text(d).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(2)
                 }

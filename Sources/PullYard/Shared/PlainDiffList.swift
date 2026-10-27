@@ -19,6 +19,7 @@ struct PlainDiffList: View {
     @Binding var collapsed: Set<String>
     var scrollTarget: String?
     var onOpenFile: ((String) -> Void)?
+    @AppStorage(DiffPrefs.wrapKey) private var wrap = true
 
     private var rows: [PlainDiffRow] {
         var out: [PlainDiffRow] = []
@@ -39,20 +40,20 @@ struct PlainDiffList: View {
         let table: [DiffTableRow] = rows.map { row in
             switch row {
             case .header(let f): return .view(id: row.id, group: true) { AnyView(header(f)) }
-            case .line(_, let l): return .line(id: row.id, line: l, commentable: false)
+            case .line(let f, let l): return .line(id: row.id, line: l, commentable: false, ext: f.syntaxExt)
             case .note(_, let text):
                 return .view(id: row.id, group: false) {
                     AnyView(Text(text).font(.syCaption).foregroundStyle(Color.syMuted).padding(.horizontal, 12).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading))
                 }
             }
         }
-        return DiffTableView(rows: table, scrollTarget: scrollTarget.map { "h:" + $0 })
+        return DiffTableView(rows: table, scrollTarget: scrollTarget.map { "h:" + $0 }, wrap: wrap)
     }
 
     private func header(_ f: DiffFile) -> some View {
         let isCollapsed = collapsed.contains(f.id)
         return HStack(spacing: 8) {
-            Image(systemName: isCollapsed ? "chevron.right" : "chevron.down").frame(width: 12).foregroundStyle(Color.syMuted)
+            Image(systemName: isCollapsed ? "chevron.right" : "chevron.down").frame(width: 12).foregroundStyle(Color.syMuted).accessibilityLabel(isCollapsed ? "Collapsed" : "Expanded")
             Text(f.statusLetter)
                 .font(.syCaption2.weight(.bold).monospaced())
                 .foregroundStyle(statusColor(f.status))
@@ -66,6 +67,7 @@ struct PlainDiffList: View {
                 Button { onOpenFile(f.id) } label: { Image(systemName: "arrow.up.forward.square") }
                     .buttonStyle(.borderless)
                     .help("Open file")
+                    .accessibilityLabel("Open file")
             }
         }
         .padding(.horizontal, 12)
@@ -78,6 +80,7 @@ struct PlainDiffList: View {
         }
         .contextMenu {
             Button("Copy path") { copyToPasteboard(f.id) }
+            Toggle("Wrap lines", isOn: $wrap)
         }
         .padding(.top, 6)
     }

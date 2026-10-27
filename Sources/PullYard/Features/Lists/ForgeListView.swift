@@ -15,6 +15,14 @@ enum ForgeListKind: Hashable {
 
     var grouped: Bool { self == .pullsByProject }
 
+    func emptyCopy(_ provider: GitProvider, state: StateFilter) -> EmptyCopy {
+        switch self {
+        case .pulls(let f): return .prs(f, noun: provider.requestTitle, state: state)
+        case .pullsByProject: return .prs(.mine, noun: provider.requestTitle, state: state)
+        case .issues(let f): return .issues(f, state: state)
+        }
+    }
+
     func title(_ provider: GitProvider) -> String {
         switch self {
         case .pulls(let f): return f.title
@@ -37,6 +45,10 @@ enum ForgeListKind: Hashable {
 @MainActor
 final class ForgeListModel {
     private static var cache: [String: (items: [SearchItem], updated: Date)] = [:]
+
+    static var cachedItems: [SearchItem] {
+        cache.values.flatMap(\.items)
+    }
 
     static func resetCache() {
         cache = [:]
@@ -143,9 +155,6 @@ struct ForgeListView: View {
             LoadingBar(active: model.loading && !model.items.isEmpty)
             Divider()
             List(selection: Binding(get: { app.forgeSelection?.id }, set: { id in app.forgeSelection = model.items.first { $0.id == id } })) {
-                if let e = model.error, model.items.isEmpty {
-                    Text(e).foregroundStyle(.red).font(.syCaption).textSelection(.enabled)
-                }
                 if kind.grouped {
                     ForEach(groups(items)) { group in
                         let open = !collapsed.contains(group.id) || !text.isEmpty
@@ -160,14 +169,18 @@ struct ForgeListView: View {
                 } else {
                     ForEach(items) { row($0, showRepo: true) }
                 }
-                if items.isEmpty, !model.loading, model.error == nil {
-                    Text("Nothing here").font(.syBody).foregroundStyle(Color.syMuted)
-                }
             }
             .opacity(model.loading && !model.items.isEmpty ? 0.55 : 1)
             .animation(.easeOut(duration: 0.15), value: model.loading)
             .overlay {
-                if model.loading && model.items.isEmpty { PullYardLoader(size: 44) }
+                if model.loading && model.items.isEmpty {
+                    PullYardLoader(size: 44)
+                } else if let e = model.error, model.items.isEmpty {
+                    ListErrorNote(message: e, centered: true) { await reload() }
+                } else if items.isEmpty, !model.loading {
+                    let copy = kind.emptyCopy(app.provider, state: stateFilter)
+                    ListEmptyNote(title: copy.title, message: copy.message, filter: text.trimmingCharacters(in: .whitespaces)) { text = "" }
+                }
             }
             .liveRefresh(updated: model.lastUpdated, refreshing: model.refreshing, error: model.items.isEmpty ? nil : model.error) {
                 await reload(silent: true)
@@ -212,7 +225,7 @@ struct ForgeDetailColumn: View {
 
     var body: some View {
         if let item = app.forgeSelection {
-            ForgeItemDetailView(item: item, provider: app.provider).id(item.id).transition(.rise)
+            ForgeItemDetailView(item: item, provider: app.provider).id(item.id).transition(.routeSwap)
         } else {
             VStack(spacing: 12) {
                 IconTile(systemImage: app.provider.icon, color: .syViolet, size: 56).opacity(0.9)

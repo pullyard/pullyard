@@ -533,10 +533,13 @@ final class UpdateNotifier: NSObject, UNUserNotificationCenterDelegate {
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let identifier = response.notification.request.identifier
+        let target = ActivityTarget(userInfo: response.notification.request.content.userInfo)
         Task { @MainActor in
             NSApp.activate(ignoringOtherApps: true)
             if let tab = AgentNotifier.tabID(from: identifier) {
                 NotificationCenter.default.post(name: .openAgentTab, object: tab)
+            } else if let target {
+                NotificationCenter.default.post(name: .openActivity, object: target)
             } else {
                 Updater.shared.present()
             }

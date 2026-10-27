@@ -159,6 +159,7 @@ public abstract class ListPane : Grid
     {
         var b = new AppBarToggleButton { Icon = new FontIcon { Glyph = glyph, FontFamily = Ui.Icons }, IsChecked = on, LabelPosition = CommandBarLabelPosition.Collapsed, Width = 40, Height = 36 };
         ToolTipService.SetToolTip(b, tooltip);
+        Ui.Named(b, tooltip);
         b.Click += (_, _) => changed(b.IsChecked == true);
         return b;
     }

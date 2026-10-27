@@ -1,10 +1,13 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="no-js">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PullYard: pull requests without the browser</title>
 <meta name="description" content="PullYard is a tiny native client for GitHub, GitLab and Bitbucket pull requests on macOS, Windows and Linux, with a built-in agent workspace that runs Claude Code.">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0a0f1b" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f7fa" media="(prefers-color-scheme: light)">
 <meta property="og:title" content="PullYard: pull requests without the browser">
 <meta property="og:description" content="A tiny native client for GitHub, GitLab and Bitbucket pull requests on macOS, Windows and Linux, with a built-in agent workspace that runs Claude Code.">
 <meta property="og:type" content="website">
@@ -21,215 +24,620 @@
 <link rel="stylesheet" href="demo.css">
 <style>
 :root{
-  --bg:#0a0f1b;--bg2:#111a2c;--panel:#152036;--panel2:#18243c;--line:rgba(160,174,196,.10);--line2:rgba(160,174,196,.18);
-  --text:#e6ebf2;--muted:#8693a8;--dim:#5f6b80;
-  --coral:#ee6f5f;--coral2:#d8513f;--violet:#9d8cf0;--sky:#5bb8ec;--green:#5dbe8a;--amber:#e8b44c;
-  --radius:16px;--maxw:1160px;
+  --coral:#ee6f5f;--coral-hover:#f27f70;--violet:#9d8cf0;--sky:#5bb8ec;--green:#5dbe8a;--amber:#e8b44c;--teal:#2dd4bf;
+  --bg:#0a0f1b;--bg2:#111a2c;--panel:#152036;--panel2:#18243c;
+  --surface:#111a2c;--surface-hover:#152036;--raised:#18243c;
+  --line:rgba(160,174,196,.10);--line2:rgba(160,174,196,.18);--line3:rgba(160,174,196,.30);
+  --text:#e6ebf2;--text-soft:#c7d0dc;--muted:#8693a8;--dim:#7d899e;
+  --coral-ink:#ee6f5f;--violet-ink:#9d8cf0;--sky-ink:#5bb8ec;--green-ink:#5dbe8a;--amber-ink:#e8b44c;--teal-ink:#2dd4bf;
+  --on-coral:#1a0b09;--ghost:rgba(255,255,255,.06);--ghost-hover:rgba(255,255,255,.10);
+  --focus:#5bb8ec;--nav-bg:rgba(10,15,27,.82);
+  --band:linear-gradient(180deg,transparent,rgba(15,23,42,.7) 25%,rgba(15,23,42,.7) 75%,transparent);
+  --shadow-shot:0 24px 48px rgba(0,0,0,.45);--shadow-card:0 1px 0 rgba(255,255,255,.03) inset;
+  --r-sm:8px;--r-md:12px;--r-lg:16px;--r-xl:20px;--r-pill:999px;
+  --s-1:4px;--s-2:8px;--s-3:12px;--s-4:16px;--s-5:24px;--s-6:32px;--s-7:48px;--s-8:64px;--s-9:96px;
+  --dur:180ms;--ease:cubic-bezier(.2,.8,.2,1);
+  --maxw:1160px;--measure:68ch;--nav-h:64px;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",sans-serif;
   --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
+  color-scheme:dark;
 }
-*{box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+:root[data-theme="light"]{
+  --bg:#f6f7fa;--bg2:#ffffff;--panel:#eceff5;--panel2:#ffffff;
+  --surface:#ffffff;--surface-hover:#f9fafc;--raised:#ffffff;
+  --line:rgba(15,23,41,.08);--line2:rgba(15,23,41,.13);--line3:rgba(15,23,41,.24);
+  --text:#0f1729;--text-soft:#2b3547;--muted:#4a5568;--dim:#5b6576;
+  --coral-ink:#b8412f;--violet-ink:#5e48c9;--sky-ink:#1f6fa3;--green-ink:#23794c;--amber-ink:#8a5a00;--teal-ink:#0f766e;
+  --ghost:rgba(15,23,41,.05);--ghost-hover:rgba(15,23,41,.09);
+  --focus:#1f6fa3;--nav-bg:rgba(246,247,250,.85);
+  --band:linear-gradient(180deg,transparent,#eceff5 25%,#eceff5 75%,transparent);
+  --shadow-shot:0 18px 40px rgba(15,23,41,.16);--shadow-card:0 1px 2px rgba(15,23,41,.04);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    --bg:#f6f7fa;--bg2:#ffffff;--panel:#eceff5;--panel2:#ffffff;
+    --surface:#ffffff;--surface-hover:#f9fafc;--raised:#ffffff;
+    --line:rgba(15,23,41,.08);--line2:rgba(15,23,41,.13);--line3:rgba(15,23,41,.24);
+    --text:#0f1729;--text-soft:#2b3547;--muted:#4a5568;--dim:#5b6576;
+    --coral-ink:#b8412f;--violet-ink:#5e48c9;--sky-ink:#1f6fa3;--green-ink:#23794c;--amber-ink:#8a5a00;--teal-ink:#0f766e;
+    --ghost:rgba(15,23,41,.05);--ghost-hover:rgba(15,23,41,.09);
+    --focus:#1f6fa3;--nav-bg:rgba(246,247,250,.85);
+    --band:linear-gradient(180deg,transparent,#eceff5 25%,#eceff5 75%,transparent);
+    --shadow-shot:0 18px 40px rgba(15,23,41,.16);--shadow-card:0 1px 2px rgba(15,23,41,.04);
+    color-scheme:light;
+  }
+}
+*,*:before,*:after{box-sizing:border-box}
+html{scroll-padding-top:calc(var(--nav-h) + var(--s-4));-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
 a{color:inherit;text-decoration:none}
-.wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
-.glow{display:none}
+img,video,svg{max-width:100%}
+code{font-family:var(--mono)}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 var(--s-5)}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.ico{width:18px;height:18px;flex:none}
 
-nav{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line)}
-nav .wrap{display:flex;align-items:center;gap:28px;height:64px}
-.brand{display:flex;align-items:center;gap:10px;font-weight:650;letter-spacing:-.01em;font-size:17px}
+a:focus-visible,button:focus-visible,summary:focus-visible,video:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:3px;border-radius:var(--r-sm)}
+main:focus{outline:none}
+
+.skip{position:fixed;top:var(--s-3);left:var(--s-3);z-index:100;padding:var(--s-3) var(--s-4);border-radius:var(--r-sm);background:var(--text);color:var(--bg);font-weight:600;transform:translateY(-200%);transition:transform var(--dur) var(--ease)}
+.skip:focus,.skip:focus-visible{transform:none}
+
+.site-header{position:sticky;top:0;z-index:30;background:var(--nav-bg);-webkit-backdrop-filter:saturate(1.4) blur(14px);backdrop-filter:saturate(1.4) blur(14px);border-bottom:1px solid var(--line)}
+.site-header nav{display:flex;align-items:center;gap:var(--s-5);height:var(--nav-h)}
+.brand{display:inline-flex;align-items:center;gap:10px;font-weight:650;letter-spacing:-.01em;font-size:17px;min-height:44px}
 .brand img{width:30px;height:30px}
-nav .links{display:flex;gap:24px;margin-left:auto;color:var(--muted);font-size:14.5px}
-nav .links a:hover{color:var(--text)}
-.btn{display:inline-flex;align-items:center;gap:10px;border-radius:8px;padding:11px 18px;font-weight:600;font-size:15px;transition:background .15s ease;white-space:nowrap}
-.btn svg{width:18px;height:18px;flex:none}
-.btn-primary{background:var(--coral);color:#1a0b09}
-.btn-primary:hover{background:#f27f70}
-.btn-ghost{background:rgba(255,255,255,.05)}
-.btn-ghost:hover{background:rgba(255,255,255,.07)}
-.btn-sm{padding:7px 13px;font-size:14px;border-radius:7px}
+.nav-links{display:flex;align-items:center;gap:var(--s-1);margin:0 0 0 auto;padding:0;list-style:none}
+.nav-links a{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:var(--s-2) 10px;border-radius:var(--r-sm);color:var(--muted);font-size:14.5px;transition:color var(--dur) var(--ease),background var(--dur) var(--ease)}
+.nav-links a:hover{color:var(--text);background:var(--ghost)}
+.nav-links .ico{width:16px;height:16px}
+.nav-actions{display:flex;align-items:center;gap:var(--s-2)}
+.icon-btn{display:inline-grid;place-items:center;width:40px;height:40px;padding:0;border:1px solid var(--line2);border-radius:var(--r-sm);background:transparent;color:var(--muted);cursor:pointer;transition:color var(--dur) var(--ease),background var(--dur) var(--ease),border-color var(--dur) var(--ease)}
+.icon-btn:hover{color:var(--text);background:var(--ghost);border-color:var(--line3)}
+.icon-btn:active{background:var(--ghost-hover)}
+.icon-btn svg{width:18px;height:18px}
+.theme-btn [data-theme-icon]{display:none}
+.theme-btn[data-pref="auto"] [data-theme-icon="auto"],.theme-btn[data-pref="light"] [data-theme-icon="light"],.theme-btn[data-pref="dark"] [data-theme-icon="dark"]{display:block}
+.menu-btn{display:none}
+.menu-btn .close{display:none}
+.menu-btn[aria-expanded="true"] .open{display:none}
+.menu-btn[aria-expanded="true"] .close{display:block}
 
-header.hero{position:relative;padding:96px 0 40px;text-align:center}
-.hero-icon{width:132px;height:132px;margin:0 auto 26px;display:block;filter:drop-shadow(0 14px 24px rgba(0,0,0,.35))}
-.pill{display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:999px;background:rgba(255,255,255,.05);color:var(--muted);font-size:13px;margin-bottom:22px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:44px;border:1px solid transparent;border-radius:var(--r-sm);padding:10px 18px;font:600 15px/1.2 var(--sans);white-space:nowrap;cursor:pointer;transition:background var(--dur) var(--ease),border-color var(--dur) var(--ease),color var(--dur) var(--ease),transform var(--dur) var(--ease)}
+.btn svg{width:18px;height:18px;flex:none}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--coral);color:var(--on-coral)}
+.btn-primary:hover{background:var(--coral-hover)}
+.btn-ghost{background:var(--ghost);border-color:var(--line2);color:var(--text)}
+.btn-ghost:hover{background:var(--ghost-hover);border-color:var(--line3)}
+.btn-sm{min-height:36px;padding:7px 14px;font-size:14px}
+.btn-lg{min-height:52px;padding:14px 24px;font-size:16px}
+.dl-ic{display:contents}
+.link{color:var(--text);text-decoration:underline;text-decoration-color:var(--line3);text-underline-offset:3px;transition:text-decoration-color var(--dur) var(--ease)}
+.link:hover{text-decoration-color:currentColor}
+
+.hero{padding:var(--s-9) 0 var(--s-8);text-align:center}
+.pill{display:inline-flex;align-items:center;gap:var(--s-2);padding:6px 14px;border-radius:var(--r-pill);background:var(--ghost);border:1px solid var(--line);color:var(--muted);font-size:13.5px;margin-bottom:var(--s-5)}
 .pill b{color:var(--text);font-weight:600}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
-h1{font-size:clamp(40px,6.4vw,76px);line-height:1.02;letter-spacing:-.035em;margin:0 auto 22px;max-width:900px;font-weight:650}
+h1{font-size:clamp(38px,6.4vw,76px);line-height:1.03;letter-spacing:-.035em;margin:0 auto var(--s-5);max-width:900px;font-weight:650}
 h1 .grad{color:var(--muted)}
-.lead{font-size:clamp(17px,2vw,20px);color:var(--muted);max-width:680px;margin:0 auto 34px}
-.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-.meta{margin-top:16px;color:var(--dim);font-size:13.5px}
-.meta a{color:inherit;text-decoration:none;border-bottom:1px dotted currentColor}
+.lead{font-size:clamp(17px,2vw,20px);line-height:1.55;color:var(--muted);max-width:var(--measure);margin:0 auto var(--s-6)}
+.cta{display:flex;gap:var(--s-3);justify-content:center;flex-wrap:wrap}
+.meta{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:var(--s-1) var(--s-2);margin-top:var(--s-4);color:var(--dim);font-size:13.5px}
+.meta a{color:var(--muted);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;padding:2px 0}
 .meta a:hover{color:var(--text)}
+.meta .sep{color:var(--line3)}
+.other-link{display:inline-flex;align-items:center;gap:6px;margin-top:var(--s-3);min-height:32px;color:var(--muted);font-size:14.5px;font-weight:500;padding:var(--s-1) var(--s-2);border-radius:var(--r-sm);transition:color var(--dur) var(--ease)}
+.other-link:hover{color:var(--text)}
+.other-link svg{width:16px;height:16px}
 
-.shot{position:relative;margin:64px auto 0;max-width:1100px}
-.shot:before{display:none}
-.shot img{display:block;width:100%;height:auto;filter:drop-shadow(0 24px 40px rgba(0,0,0,.4))}
-.tour-video{margin:56px auto 0;width:100%;max-width:1100px;aspect-ratio:16/9;border-radius:14px;overflow:hidden;background:#0c1220;filter:drop-shadow(0 24px 40px rgba(0,0,0,.4))}
-.tour-video img{display:block;width:100%;height:100%;object-fit:cover}
+.tour-video{margin:var(--s-8) auto 0;width:100%;max-width:1100px;aspect-ratio:16/9;border-radius:var(--r-lg);overflow:hidden;background:#0c1220;box-shadow:var(--shadow-shot);border:1px solid var(--line2)}
 .tour-video video{display:block;width:100%;height:100%;object-fit:cover;cursor:pointer;background:#0c1220}
-.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-.gallery{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:48px}
+.platform-switch{margin-top:var(--s-5)}
+.shot{position:relative;margin:var(--s-7) auto 0;max-width:1100px}
+.demo-hint{color:var(--dim)}
+
+section{position:relative}
+.section{padding:var(--s-9) 0}
+.section-head{max-width:var(--measure)}
+.eyebrow{display:inline-flex;align-items:center;gap:var(--s-2);color:var(--coral-ink);font-weight:600;font-size:14px;letter-spacing:.02em;text-transform:uppercase;margin-bottom:var(--s-3)}
+.eyebrow svg{width:16px;height:16px}
+.eyebrow.violet{color:var(--violet-ink)}
+.eyebrow.sky{color:var(--sky-ink)}
+h2{font-size:clamp(30px,4vw,46px);line-height:1.08;letter-spacing:-.028em;margin:0 0 var(--s-4);font-weight:650}
+.sub{color:var(--muted);font-size:18px;line-height:1.6;max-width:var(--measure);margin:0}
+
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s-4);margin-top:var(--s-7)}
+.card{position:relative;display:flex;flex-direction:column;gap:var(--s-2);padding:var(--s-5);border-radius:var(--r-lg);background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-card);transition:border-color var(--dur) var(--ease),background var(--dur) var(--ease)}
+.card:hover{border-color:var(--line3);background:var(--surface-hover)}
+.tile{display:grid;place-items:center;width:40px;height:40px;border-radius:var(--r-md);margin-bottom:var(--s-2);color:var(--tile-ink);background:color-mix(in srgb,var(--tile) 15%,transparent)}
+.tile svg{width:20px;height:20px}
+.t-sky{--tile:var(--sky);--tile-ink:var(--sky-ink)}
+.t-violet{--tile:var(--violet);--tile-ink:var(--violet-ink)}
+.t-coral{--tile:var(--coral);--tile-ink:var(--coral-ink)}
+.t-amber{--tile:var(--amber);--tile-ink:var(--amber-ink)}
+.t-teal{--tile:var(--teal);--tile-ink:var(--teal-ink)}
+.t-green{--tile:var(--green);--tile-ink:var(--green-ink)}
+.card h3{margin:0;font-size:17.5px;line-height:1.3;letter-spacing:-.01em}
+.card p{margin:0;color:var(--muted);font-size:15px;line-height:1.6}
+
+.band{background:var(--band)}
+.split{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:var(--s-8);align-items:center}
+.checks{list-style:none;padding:0;margin:var(--s-6) 0 0;display:grid;gap:var(--s-3)}
+.checks li{display:flex;gap:var(--s-3);color:var(--text-soft);font-size:15.5px;line-height:1.55;max-width:var(--measure)}
+.checks li svg{width:20px;height:20px;flex:none;margin-top:2px;color:var(--coral-ink)}
+.checks b{color:var(--text);font-weight:600}
+.shot-img{display:block;width:100%;height:auto;aspect-ratio:1600/958;border-radius:var(--r-md);filter:drop-shadow(var(--shadow-shot))}
+picture{display:block}
+[data-platform="windows"] .shot-img{aspect-ratio:1586/993}
+[data-platform="linux"] .shot-img{aspect-ratio:1590/990}
+
+.gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-6) var(--s-5);margin-top:var(--s-7)}
 .gallery figure{margin:0}
-.gallery img{display:block;width:100%;height:auto;filter:drop-shadow(0 24px 40px rgba(0,0,0,.5))}
-.gallery figcaption{margin-top:14px;color:var(--muted);font-size:15px}
+.gallery figcaption{margin-top:var(--s-4);color:var(--muted);font-size:15px;line-height:1.6;max-width:var(--measure)}
 .gallery figcaption b{color:var(--text);font-weight:600}
 .gallery .wide{grid-column:1/-1}
-img[data-shot]:not([src]){visibility:hidden}
-.os-tabs.platform-switch{margin-top:14px}
-#tour .os-tabs.platform-switch{margin-top:26px}
 
-section{padding:110px 0;position:relative}
-.eyebrow{color:var(--coral);font-weight:600;font-size:15px;margin-bottom:10px}
-h2{font-size:clamp(30px,4vw,46px);line-height:1.08;letter-spacing:-.028em;margin:0 0 16px;font-weight:650}
-.sub{color:var(--muted);font-size:18px;max-width:640px;margin:0}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:52px}
-.card{position:relative;padding:26px;border-radius:12px;background:var(--bg2)}
-.card .ic{width:24px;height:24px;display:grid;place-items:center;margin-bottom:14px;background:none!important;color:var(--coral)!important}
-.card .ic svg{width:22px;height:22px}
-.card h4{margin:0 0 8px;font-size:17.5px;letter-spacing:-.01em}
-.card p{margin:0;color:var(--muted);font-size:15px}
+.os-tabs{display:inline-flex;gap:var(--s-1);padding:var(--s-1);border-radius:var(--r-md);background:var(--surface);border:1px solid var(--line)}
+.os-tabs button{display:inline-flex;align-items:center;justify-content:center;gap:var(--s-2);min-height:36px;border:0;background:none;color:var(--muted);font:600 14px/1 var(--sans);padding:var(--s-2) var(--s-4);border-radius:var(--r-sm);cursor:pointer;transition:background var(--dur) var(--ease),color var(--dur) var(--ease)}
+.os-tabs button svg{width:16px;height:16px}
+.os-tabs button:hover{color:var(--text);background:var(--ghost)}
+.os-tabs button[aria-selected="true"],.os-tabs button[aria-pressed="true"]{background:var(--raised);color:var(--text);box-shadow:0 0 0 1px var(--line2)}
+.section-head .os-tabs{margin-top:var(--s-5)}
 
-.checks{list-style:none;padding:0;margin:28px 0 0;display:grid;gap:14px}
-.checks li{display:flex;gap:12px;color:#c7d0dc}
-.checks li svg{width:20px;height:20px;flex:none;margin-top:3px;color:var(--coral)}
-.checks b{color:#fff;font-weight:600}
-.split{display:grid;grid-template-columns:.8fr 1.2fr;gap:56px;align-items:center}
-.claude-shot img{display:block;width:100%;height:auto;filter:drop-shadow(0 30px 50px rgba(0,0,0,.55))}
-.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:48px;counter-reset:s}
-.step{padding:26px;border-radius:var(--radius);background:var(--bg2)}
-.step:before{counter-increment:s;content:counter(s);display:grid;place-items:center;width:32px;height:32px;border-radius:9px;background:rgba(91,184,236,.14);color:var(--sky);font-weight:700;margin-bottom:16px}
-.step h4{margin:0 0 6px;font-size:17px}
+.install-tabs{margin-top:var(--s-6)}
+.js .os-title{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.os-title{margin:var(--s-8) 0 0;font-size:22px;letter-spacing:-.01em}
+.os-intro{color:var(--muted);font-size:16px;max-width:var(--measure);margin:var(--s-5) 0 0}
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s-4);margin-top:var(--s-5);counter-reset:s}
+.step{padding:var(--s-5);border-radius:var(--r-lg);background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-card)}
+.step:before{counter-increment:s;content:counter(s);display:grid;place-items:center;width:32px;height:32px;border-radius:var(--r-sm);background:color-mix(in srgb,var(--sky) 15%,transparent);color:var(--sky-ink);font-weight:700;margin-bottom:var(--s-4)}
+.step h4{margin:0 0 6px;font-size:17px;line-height:1.3}
 .step p{margin:0;color:var(--muted);font-size:15px}
-.code{margin-top:22px;display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;background:var(--bg2);font:14px var(--mono);color:#c7d0dc;overflow-x:auto}
+.code{margin-top:var(--s-4);display:flex;align-items:center;gap:var(--s-3);padding:var(--s-2) var(--s-2) var(--s-2) var(--s-4);min-height:52px;border-radius:var(--r-md);background:var(--surface);border:1px solid var(--line);font:14px var(--mono);color:var(--text-soft);overflow-x:auto}
+.code + .code{margin-top:var(--s-2)}
 .code code{white-space:nowrap}
-.code button{margin-left:auto;flex:none;background:rgba(255,255,255,.06);border:0;color:var(--text);border-radius:8px;padding:6px 12px;font:600 12.5px -apple-system,BlinkMacSystemFont,sans-serif;cursor:pointer}
-.code button:hover{background:rgba(255,255,255,.1)}
-.req{display:flex;gap:10px;flex-wrap:wrap;margin-top:26px}
-.req span{font-size:13.5px;color:var(--muted);padding:6px 12px;border-radius:999px;background:var(--bg2)}
-.dl-ic{display:contents}
+.code .label{flex:none;min-width:68px;color:var(--dim);font:600 12.5px var(--sans)}
+.code button{margin-left:auto;flex:none;display:inline-flex;align-items:center;gap:6px;min-height:36px;background:var(--ghost);border:1px solid var(--line2);color:var(--text);border-radius:var(--r-sm);padding:6px 12px;font:600 13px var(--sans);cursor:pointer;transition:background var(--dur) var(--ease),border-color var(--dur) var(--ease)}
+.code button:hover{background:var(--ghost-hover);border-color:var(--line3)}
+.code button svg{width:14px;height:14px}
+.req{display:flex;gap:var(--s-2);flex-wrap:wrap;margin-top:var(--s-5)}
+.req span{font-size:13.5px;color:var(--muted);padding:6px 12px;border-radius:var(--r-pill);background:var(--surface);border:1px solid var(--line)}
 
-details.platforms{max-width:640px;margin:14px auto 0;padding:0;background:none;border-radius:0;overflow:hidden}
-details.platforms.is-open{background:none}
-.platforms summary{display:inline-flex;gap:8px;align-items:center;color:var(--muted);font-weight:500;font-size:14px}
-.platforms summary:hover{color:var(--text)}
-.platforms summary:after{font-size:18px}
-.assets{list-style:none;margin:12px 0 4px;padding:6px;border-radius:12px;background:var(--bg2);text-align:left}
-.assets a{display:grid;grid-template-columns:76px 1fr auto;gap:2px 14px;align-items:center;padding:10px 12px;border-radius:8px;transition:background .15s ease}
-.assets a:hover{background:var(--panel)}
+.downloads{margin-top:var(--s-7);padding:0;border-radius:var(--r-lg);background:var(--surface);border:1px solid var(--line)}
+.downloads summary{padding:var(--s-4) var(--s-5);min-height:56px;align-items:center}
+.downloads summary .sum-title{display:inline-flex;align-items:center;gap:var(--s-3)}
+.downloads summary .sum-title svg{width:18px;height:18px;color:var(--muted)}
+.assets{list-style:none;margin:0;padding:0 var(--s-2) var(--s-2)}
+.assets a{display:grid;grid-template-columns:84px minmax(0,1fr) auto;gap:2px var(--s-4);align-items:center;min-height:44px;padding:10px var(--s-3);border-radius:var(--r-sm);transition:background var(--dur) var(--ease)}
+.assets a:hover{background:var(--ghost)}
 .assets .os{color:var(--text);font-weight:600;font-size:14px}
 .assets .what{min-width:0;color:var(--muted);font-size:14px;line-height:1.4}
 .assets .what code{display:block;margin-top:2px;font:12.5px var(--mono);color:var(--dim);overflow-wrap:anywhere}
 .assets .size{color:var(--dim);font-size:13px;font-variant-numeric:tabular-nums}
-.assets li.is-current .os{color:var(--coral)}
+.assets li.is-current .os{color:var(--coral-ink)}
+.assets li.is-current a{background:color-mix(in srgb,var(--coral) 8%,transparent)}
 
-.os-tabs{display:inline-flex;gap:4px;padding:4px;margin-top:34px;border-radius:11px;background:var(--bg2)}
-.os-tabs button{border:0;background:none;color:var(--muted);font:600 14px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:10px 16px;border-radius:8px;cursor:pointer;transition:background .15s ease,color .15s ease}
-.os-tabs button:hover{color:var(--text)}
-.os-tabs button[aria-selected="true"],.os-tabs button[aria-pressed="true"]{background:var(--panel2);color:var(--text)}
-.os-tabs button:focus-visible{outline:2px solid var(--sky);outline-offset:2px}
-.os-title{display:none;margin:56px 0 0;font-size:22px;letter-spacing:-.01em}
-.os-intro{color:var(--muted);font-size:16px;max-width:680px;margin:22px 0 0}
-.os-panel .steps{margin-top:28px}
-.code .label{flex:none;min-width:62px;color:var(--dim);font:600 12.5px -apple-system,BlinkMacSystemFont,sans-serif}
-.code + .code{margin-top:10px}
-
-.faq{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:44px;align-items:start}
-.faq-col{display:flex;flex-direction:column;gap:18px;min-width:0}
-details{border-radius:12px;padding:18px 22px;background:var(--bg2);overflow:hidden;transition:border-color .25s ease,background .25s ease}
-details.is-open{background:var(--panel)}
-summary{cursor:pointer;font-weight:600;list-style:none;display:flex;justify-content:space-between;gap:16px}
+.faq{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-4);margin-top:var(--s-7);align-items:start}
+.faq-col{display:flex;flex-direction:column;gap:var(--s-4);min-width:0}
+details{border-radius:var(--r-lg);background:var(--surface);border:1px solid var(--line);overflow:hidden;transition:border-color var(--dur) var(--ease),background var(--dur) var(--ease)}
+.faq details{padding:0}
+.faq summary{padding:var(--s-4) var(--s-5);min-height:56px;align-items:center}
+details.is-open{border-color:var(--line3)}
+summary{cursor:pointer;font-weight:600;list-style:none;display:flex;justify-content:space-between;gap:var(--s-4)}
 summary::-webkit-details-marker{display:none}
-summary:after{content:"+";color:var(--dim);font-weight:400;font-size:22px;line-height:1;display:inline-block;transition:transform .35s cubic-bezier(.3,1.4,.5,1),color .25s}
-details.is-open summary:after{transform:rotate(45deg);color:var(--text)}
-details p{color:var(--muted);margin:12px 0 0;font-size:15px}
-details p a{color:var(--text);text-decoration:underline;text-underline-offset:3px}
+summary:hover{color:var(--text)}
+summary .chev{width:18px;height:18px;flex:none;color:var(--dim);transition:transform var(--dur) var(--ease),color var(--dur) var(--ease)}
+details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
+.faq details p{color:var(--muted);margin:0;padding:0 var(--s-5) var(--s-5);font-size:15px;line-height:1.65}
+.faq details p a{color:var(--text);text-decoration:underline;text-underline-offset:3px}
+.faq details code{font-size:13.5px;padding:1px 6px;border-radius:6px;background:var(--ghost)}
+.pizza-link{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.pizza-link svg{width:16px;height:16px}
 
-.final{text-align:center;padding:120px 0}
-.final .pizza{margin:18px auto 0;color:var(--dim);font-size:13.5px}
-.final img{width:96px;height:96px;margin-bottom:22px;filter:drop-shadow(0 12px 22px rgba(0,0,0,.35))}
-footer{border-top:1px solid var(--line);padding:34px 0 46px;color:var(--dim);font-size:13.5px}
-footer .wrap{display:flex;gap:20px;justify-content:space-between;flex-wrap:wrap}
-footer a:hover{color:var(--text)}
+.final{text-align:center;padding:var(--s-9) 0 120px}
+.final-card{padding:var(--s-8) var(--s-5);border-radius:var(--r-xl);background:radial-gradient(120% 140% at 50% 0%,color-mix(in srgb,var(--coral) 12%,transparent),transparent 60%),var(--surface);border:1px solid var(--line)}
+.final .sub{margin:0 auto var(--s-6)}
+.final .pizza{margin:var(--s-4) auto 0;color:var(--dim);font-size:13.5px}
 
-.reveal{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s ease}
-.reveal.in{opacity:1;transform:none}
-@media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}.btn{transition:none}}
+.site-footer{border-top:1px solid var(--line);padding:var(--s-6) 0 var(--s-7);color:var(--dim);font-size:13.5px}
+.site-footer .wrap{display:flex;gap:var(--s-4) var(--s-5);justify-content:space-between;align-items:center;flex-wrap:wrap}
+.foot-links{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-1) var(--s-4);margin:0;padding:0;list-style:none}
+.foot-links a{display:inline-flex;align-items:center;gap:6px;min-height:32px;color:var(--muted);transition:color var(--dur) var(--ease)}
+.foot-links a:hover{color:var(--text)}
+.foot-links svg{width:15px;height:15px}
 
-@media (max-width:1000px){
-  .grid{grid-template-columns:1fr 1fr}.split{grid-template-columns:1fr;gap:40px}
+.js .reveal{opacity:0;transition:opacity .5s var(--ease),translate .5s var(--ease)}
+@media (prefers-reduced-motion:no-preference){.js .reveal{translate:0 18px;transition:opacity .7s var(--ease),translate .8s cubic-bezier(.16,1,.3,1),border-color var(--dur) var(--ease),background var(--dur) var(--ease);transition-delay:calc(var(--i,0) * 70ms)}}
+.js .reveal.in{opacity:1;translate:0 0}
+
+@media (prefers-reduced-motion:reduce){
+  *,*:before,*:after{transition-duration:0s!important;animation-duration:0s!important;animation-iteration-count:1!important}
+  .js .reveal{opacity:1;translate:none}
+  .btn:active{transform:none}
 }
-@media (max-width:680px){
-  .wrap{padding:0 16px}
-  nav .links{display:none}nav .wrap{gap:12px}nav .btn{margin-left:auto}
-  header.hero{padding:64px 0 24px}
-  .hero-icon{width:104px;height:104px}
-  .grid,.steps,.faq,.gallery{grid-template-columns:1fr}
-  section{padding:76px 0}
-  .shot{margin-top:44px}
-  .cta .btn{width:100%;justify-content:center}
-  .assets a{grid-template-columns:64px 1fr auto;gap:2px 10px;padding:10px 8px}
-  .os-tabs{display:flex}
-  .os-tabs button{flex:1;padding:10px 8px}
-  .code{align-items:flex-start;flex-wrap:wrap;gap:6px 12px}
+
+@media (max-width:1060px){
+  .nav-links{position:absolute;top:100%;left:0;right:0;display:none;flex-direction:column;align-items:stretch;gap:0;margin:0;padding:var(--s-2) var(--s-4) var(--s-4);background:var(--bg);border-bottom:1px solid var(--line2);box-shadow:0 18px 30px rgba(0,0,0,.18)}
+  .nav-links.is-open{display:flex}
+  .nav-links a{min-height:44px;padding:var(--s-3);font-size:16px}
+  .menu-btn{display:inline-grid}
+  .nav-actions{margin-left:auto}
+  .no-js .nav-links{position:static;display:flex;flex-direction:row;flex-wrap:wrap;padding:0;background:none;border:0;box-shadow:none}
+}
+@media (max-width:1000px){
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .split{grid-template-columns:minmax(0,1fr);gap:var(--s-7)}
+}
+@media (max-width:760px){
+  .steps,.faq,.gallery{grid-template-columns:minmax(0,1fr)}
+  .gallery .wide{grid-column:auto}
+}
+@media (max-width:640px){
+  .wrap{padding:0 var(--s-4)}
+  .site-header nav{gap:var(--s-3)}
+  .hero{padding:var(--s-8) 0 var(--s-7)}
+  .hero-logo{width:116px;height:116px}
+  .section{padding:72px 0}
+  .grid{grid-template-columns:minmax(0,1fr)}
+  .cta .btn{width:100%}
+  .tour-video{margin-top:var(--s-7)}
+  .os-tabs{display:flex;width:100%}
+  .os-tabs button{flex:1;padding:var(--s-2)}
+  .assets a{grid-template-columns:64px minmax(0,1fr) auto;gap:2px 10px;padding:10px var(--s-2)}
+  .code{align-items:flex-start;flex-wrap:wrap;gap:6px var(--s-3);padding:var(--s-3)}
   .code code{flex:1 1 200px;min-width:0;white-space:normal;overflow-wrap:anywhere}
   .code .label{min-width:0;flex-basis:100%}
+  .final-card{padding:var(--s-7) var(--s-4)}
+  .site-footer .wrap{flex-direction:column;align-items:flex-start}
+}
+@media (max-width:400px){
+  .nav-dl{display:none}
+}
+@media (pointer:coarse){
+  .icon-btn{width:44px;height:44px}
+  .btn-sm,.os-tabs button,.code button,.nav-links a,.foot-links a,.other-link{min-height:44px}
+  .meta a{display:inline-flex;align-items:center;min-height:44px}
 }
 </style>
+<link rel="stylesheet" href="site/site.css">
 <script>
 (function(){
+  var root=document.documentElement;
+  root.className=root.className.replace("no-js","")+" js";
+  if(window.matchMedia&&!window.matchMedia("(prefers-reduced-motion: reduce)").matches)root.className+=" motion";
   var uad=navigator.userAgentData, ua=navigator.userAgent||"";
   var hint=((uad&&uad.platform)||"")+" "+(navigator.platform||"")+" "+ua;
   var os=/android|cros|chrome ?os/i.test(hint)?"other":/mac|iphone|ipad|ipod/i.test(hint)?"mac":/windows|win32|win64/i.test(hint)?"windows":/linux|x11|bsd/i.test(hint)?"linux":"other";
-  document.documentElement.setAttribute("data-os",os);
-  document.documentElement.setAttribute("data-platform",os==="other"?"mac":os);
+  root.setAttribute("data-os",os);
+  root.setAttribute("data-platform",os==="other"?"mac":os);
+  var pref="auto";
+  try{pref=localStorage.getItem("pullyard-theme")||"auto"}catch(e){}
+  if(pref==="light"||pref==="dark")root.setAttribute("data-theme",pref);
 })();
 </script>
-<noscript><style>.os-only,.os-tabs{display:none!important}.os-title{display:block}.cta noscript{display:contents}img[data-shot],.tour-video video{display:none}.reveal{opacity:1;transform:none}.demo{display:block;height:auto;padding:0}.demo img{display:block;width:100%;height:auto}</style></noscript>
+<noscript><style>.os-only,.os-tabs,.theme-btn,.menu-btn{display:none!important}.cta noscript{display:contents}</style></noscript>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 
-<nav>
-  <div class="wrap">
-    <a class="brand" href="#"><img src="icon.svg" alt="">PullYard</a>
-    <div class="links">
-      <a href="#features">Features</a>
-      <a href="#claude">Agents</a>
-      <a href="#tour">Tour</a>
-      <a href="#install">Install</a>
-      <a href="changelog.html">Changelog</a>
-      <a href="roadmap.html">Roadmap</a>
-      <a href="https://github.com/pullyard/pullyard" data-repo>GitHub</a>
-      <a href="https://checkout.dodopayments.com/buy/pdt_0NpmyolvMAwxrA4eQBgpO?quantity=1">Buy me a pizza 🍕</a>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-apple" viewBox="0 0 24 24"><path fill="currentColor" d="M16.37 12.6c-.02-2.3 1.88-3.4 1.97-3.46-1.07-1.57-2.74-1.78-3.33-1.8-1.42-.14-2.77.83-3.49.83-.72 0-1.83-.81-3.01-.79-1.55.02-2.98.9-3.78 2.29-1.61 2.8-.41 6.94 1.16 9.21.77 1.11 1.68 2.36 2.88 2.31 1.16-.05 1.6-.75 3-.75s1.79.75 3.01.72c1.25-.02 2.04-1.13 2.8-2.25.88-1.29 1.24-2.54 1.26-2.6-.03-.01-2.42-.93-2.47-3.71zM14.08 5.85c.64-.78 1.07-1.85.95-2.93-.92.04-2.04.61-2.7 1.39-.59.69-1.11 1.79-.97 2.85 1.03.08 2.07-.52 2.72-1.31z"/></symbol>
+  <symbol id="i-windows" viewBox="0 0 24 24"><path fill="currentColor" d="M3 5.6 10.4 4.6v7H3zM11.4 4.4 21 3v8.6h-9.6zM3 12.4h7.4v7.1L3 18.4zM11.4 12.4H21V21l-9.6-1.4z"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></g></symbol>
+  <symbol id="i-github" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/></symbol>
+  <symbol id="i-pizza" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 7.4c5.6-3.2 12-3.2 17.6 0L12 21.5z"/><path d="M5 10.3c4.5-2.2 9.5-2.2 14 0"/><circle cx="10" cy="12.6" r="1"/><circle cx="14.2" cy="13.4" r="1"/><circle cx="12" cy="16.6" r=".9"/></g></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-arrow-down" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M6 13l6 6 6-6"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></g></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></g></symbol>
+</svg>
+
+<header class="site-header">
+  <nav class="wrap" aria-label="Primary">
+    <a class="brand" href="#main"><img src="icon.svg" width="30" height="30" alt="" aria-hidden="true">PullYard</a>
+    <ul class="nav-links" id="nav-links">
+      <li><a href="#features">Features</a></li>
+      <li><a href="#claude">Agents</a></li>
+      <li><a href="#tour">Tour</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="changelog.html">Changelog</a></li>
+      <li><a href="roadmap.html">Roadmap</a></li>
+      <li><a href="https://github.com/pullyard/pullyard" data-repo>GitHub</a></li>
+      <li><a href="https://checkout.dodopayments.com/buy/pdt_0NpmyolvMAwxrA4eQBgpO?quantity=1"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-pizza"/></svg>Buy me a pizza</a></li>
+    </ul>
+    <div class="nav-actions">
+      <button type="button" class="icon-btn theme-btn" data-theme-toggle data-pref="auto" aria-label="Color theme: automatic. Switch to light">
+        <svg data-theme-icon="auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>
+        <svg data-theme-icon="light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg data-theme-icon="dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/></svg>
+      </button>
+      <button type="button" class="icon-btn menu-btn" aria-expanded="false" aria-controls="nav-links" aria-label="Open menu">
+        <svg class="open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        <svg class="close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+      <a class="btn btn-primary btn-sm nav-dl" href="https://github.com/pullyard/pullyard/releases/latest" data-download>Download</a>
     </div>
-    <a class="btn btn-primary btn-sm" href="https://github.com/pullyard/pullyard/releases/latest" data-download>Download</a>
-  </div>
-</nav>
+  </nav>
+</header>
 
-<header class="hero">
-  <div class="glow"></div>
-  <div class="wrap" style="position:relative">
-    <img class="hero-icon" src="icon.svg" alt="PullYard app icon">
-    <div class="pill"><span class="dot"></span><b>Free &amp; open source</b> · native on macOS, Windows &amp; Linux</div>
-    <h1>Pull requests,<br><span class="grad">without the browser.</span></h1>
-    <p class="lead">PullYard is a small native GitHub client for macOS, Windows and Linux that also signs in to GitLab, Bitbucket, Gitea and GitHub Enterprise. You can review PRs, read big diffs and pass review comments to Claude Code, all in an app that opens right away.</p>
-    <div class="cta">
-      <a class="btn btn-primary os-only" href="https://github.com/pullyard/pullyard/releases/latest/download/PullYard.dmg" data-download>
-        <span class="dl-ic" data-download-icon><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.37 12.6c-.02-2.3 1.88-3.4 1.97-3.46-1.07-1.57-2.74-1.78-3.33-1.8-1.42-.14-2.77.83-3.49.83-.72 0-1.83-.81-3.01-.79-1.55.02-2.98.9-3.78 2.29-1.61 2.8-.41 6.94 1.16 9.21.77 1.11 1.68 2.36 2.88 2.31 1.16-.05 1.6-.75 3-.75s1.79.75 3.01.72c1.25-.02 2.04-1.13 2.8-2.25.88-1.29 1.24-2.54 1.26-2.6-.03-.01-2.42-.93-2.47-3.71zM14.08 5.85c.64-.78 1.07-1.85.95-2.93-.92.04-2.04.61-2.7 1.39-.59.69-1.11 1.79-.97 2.85 1.03.08 2.07-.52 2.72-1.31z"/></svg></span>
+<main id="main" tabindex="-1">
+<svg class="stack-line" data-stack-line aria-hidden="true" focusable="false" width="72"><defs><linearGradient id="sl-g" x1="0" y1="0" x2="0" y2="1000" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#A78BFA"/><stop offset=".35" stop-color="#38BDF8"/><stop offset=".7" stop-color="#FB7185"/><stop offset="1" stop-color="#A78BFA"/></linearGradient></defs><path class="sl-track"/><path class="sl-fill" stroke="url(#sl-g)"/><g class="sl-nodes"></g></svg>
+
+<section class="hero" aria-labelledby="hero-title">
+  <div class="hero-bg" aria-hidden="true"><div class="hero-grid"></div><div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div></div>
+  <div class="wrap">
+    <div class="hero-logo" data-hero-logo role="img" aria-label="PullYard app icon"><img src="icon.svg" width="156" height="156" alt="" fetchpriority="high" decoding="async"></div>
+    <div class="pill intro" style="--d:0ms"><span class="dot" aria-hidden="true"></span><b>Free &amp; open source</b> · native on macOS, Windows &amp; Linux</div>
+    <h1 id="hero-title">Pull requests,<br><span class="grad">without the browser.</span></h1>
+    <p class="lead intro" style="--d:70ms">PullYard is a small native GitHub client for macOS, Windows and Linux that also signs in to GitLab, Bitbucket, Gitea and GitHub Enterprise. You can review PRs, read big diffs and pass review comments to Claude Code, all in an app that opens right away.</p>
+    <div class="cta intro" style="--d:130ms">
+      <a class="btn btn-primary btn-lg os-only" href="https://github.com/pullyard/pullyard/releases/latest/download/PullYard.dmg" data-download>
+        <span class="dl-ic" data-download-icon><svg aria-hidden="true" focusable="false"><use href="#i-apple"/></svg></span>
         <span data-download-label>Download for macOS</span>
       </a>
       <noscript>
-        <a class="btn btn-primary" href="https://github.com/pullyard/pullyard/releases/latest/download/PullYard.dmg"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.37 12.6c-.02-2.3 1.88-3.4 1.97-3.46-1.07-1.57-2.74-1.78-3.33-1.8-1.42-.14-2.77.83-3.49.83-.72 0-1.83-.81-3.01-.79-1.55.02-2.98.9-3.78 2.29-1.61 2.8-.41 6.94 1.16 9.21.77 1.11 1.68 2.36 2.88 2.31 1.16-.05 1.6-.75 3-.75s1.79.75 3.01.72c1.25-.02 2.04-1.13 2.8-2.25.88-1.29 1.24-2.54 1.26-2.6-.03-.01-2.42-.93-2.47-3.71zM14.08 5.85c.64-.78 1.07-1.85.95-2.93-.92.04-2.04.61-2.7 1.39-.59.69-1.11 1.79-.97 2.85 1.03.08 2.07-.52 2.72-1.31z"/></svg> macOS</a>
-        <a class="btn btn-primary" href="https://github.com/pullyard/pullyard/releases/latest/download/PullYard-windows-x64-setup.exe"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.6 10.4 4.6v7H3zM11.4 4.4 21 3v8.6h-9.6zM3 12.4h7.4v7.1L3 18.4zM11.4 12.4H21V21l-9.6-1.4z"/></svg> Windows</a>
-        <a class="btn btn-primary" href="https://github.com/pullyard/pullyard/releases/latest/download/PullYard-linux-x86_64.flatpak"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg> Linux</a>
+        <a class="btn btn-primary btn-lg" href="https://github.com/pullyard/pullyard/releases/latest/download/PullYard.dmg"><svg aria-hidden="true" focusable="false"><use href="#i-apple"/></svg> macOS</a>
+        <a class="btn btn-primary btn-lg" href="https://github.com/pullyard/pullyard/releases/latest/download/PullYard-windows-x64-setup.exe"><svg aria-hidden="true" focusable="false"><use href="#i-windows"/></svg> Windows</a>
+        <a class="btn btn-primary btn-lg" href="https://github.com/pullyard/pullyard/releases/latest/download/PullYard-linux-x86_64.flatpak"><svg aria-hidden="true" focusable="false"><use href="#i-download"/></svg> Linux</a>
       </noscript>
-      <a class="btn btn-ghost" href="https://github.com/pullyard/pullyard" data-repo>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      <a class="btn btn-ghost btn-lg" href="https://github.com/pullyard/pullyard" data-repo>
+        <svg aria-hidden="true" focusable="false"><use href="#i-code"/></svg>
         View source
       </a>
     </div>
-    <div class="meta"><a href="https://github.com/pullyard/pullyard/releases/latest" data-version>Version 2.7.0</a> · <a href="changelog.html" data-whats-new>What's new</a> · <span data-os-meta>macOS, Windows and Linux</span></div>
-    <details class="platforms">
-      <summary>Other platforms</summary>
+    <a class="other-link intro" style="--d:190ms" href="#install" data-other-platforms>Other platforms<svg aria-hidden="true" focusable="false"><use href="#i-arrow-down"/></svg></a>
+    <div class="meta intro" style="--d:220ms"><a href="https://github.com/pullyard/pullyard/releases/latest" data-version>Version 2.7.0</a><span class="sep" aria-hidden="true">·</span><a href="changelog.html" data-whats-new>What's new</a><span class="sep" aria-hidden="true">·</span><span data-os-meta>macOS, Windows and Linux</span></div>
+
+    <figure class="tour-video reveal">
+      <video muted loop playsinline controls preload="none" width="1920" height="1080" poster="img/pullyard-web-poster.jpg" aria-label="PullYard product tour" aria-describedby="tour-hint" data-tour-video>
+        <source type="video/webm" src="img/pullyard-web-1920x1080.webm">
+        <source type="video/mp4" src="img/pullyard-web-1280x720.mp4">
+      </video>
+    </figure>
+    <p class="demo-hint tour-hint" id="tour-hint" data-platform-text='{"mac":"A one-minute tour: diffs, review, merge, Fix with agent and accounts.","windows":"A one-minute tour on Windows: diffs, review, merge, Fix with agent and repositories.","linux":"A one-minute tour on Linux: diffs, review, merge, Fix with agent and repositories."}'>A one-minute tour: diffs, review, merge, Fix with agent and accounts.</p>
+    <div class="os-tabs platform-switch" role="group" aria-label="Show the app on">
+      <button type="button" data-platform="mac" aria-pressed="true"><svg aria-hidden="true" focusable="false"><use href="#i-apple"/></svg>macOS</button>
+      <button type="button" data-platform="windows" aria-pressed="false"><svg aria-hidden="true" focusable="false"><use href="#i-windows"/></svg>Windows</button>
+      <button type="button" data-platform="linux" aria-pressed="false"><svg aria-hidden="true" focusable="false"><use href="#i-box"/></svg>Linux</button>
+    </div>
+
+    <div class="shot reveal">
+      <div id="demo" class="demo" role="application" aria-label="Interactive PullYard demo">
+        <noscript><img src="img/pr-files.webp" width="1600" height="958" loading="lazy" decoding="async" alt="PullYard showing a pull request's changed files"></noscript>
+      </div>
+      <p class="demo-hint"><i aria-hidden="true"></i>Live demo. Click around, then try “Fix with agent”</p>
+    </div>
+  </div>
+</section>
+
+<section id="how" class="story" aria-labelledby="story-title" data-story data-stack-node>
+  <div class="story-track">
+    <div class="wrap story-stage">
+      <div class="story-copy">
+        <div class="story-head reveal">
+          <div class="eyebrow violet">How it works</div>
+          <h2 id="story-title">From sign-in<br>to merged in five steps.</h2>
+          <p class="sub">The whole review loop in one native window on <span data-platform-name>macOS</span>.</p>
+        </div>
+        <div class="story-list">
+          <svg class="story-rail" viewBox="0 0 52 270" aria-hidden="true" focusable="false">
+            <defs><linearGradient id="rail-g" x1="0" y1="0" x2="0" y2="270" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#A78BFA"/><stop offset=".55" stop-color="#7DA4F9"/><stop offset="1" stop-color="#38BDF8"/></linearGradient></defs>
+            <path class="rail-track" d="M22 27 C38 45 38 63 22 81 C6 99 6 117 22 135 C38 153 38 171 22 189 C6 207 6 225 22 243" fill="none" stroke-width="2"/>
+            <path class="rail-fill" d="M22 27 C38 45 38 63 22 81 C6 99 6 117 22 135 C38 153 38 171 22 189 C6 207 6 225 22 243" fill="none" stroke="url(#rail-g)" stroke-width="3" stroke-linecap="round" pathLength="1" stroke-dasharray="1 1" stroke-dashoffset="1"/>
+          </svg>
+          <ol class="story-steps">
+            <li class="story-step reveal" id="step-sign-in">
+              <h3><a class="step-link" href="#step-sign-in"><span class="step-num" aria-hidden="true">1</span><span class="step-label"><span class="sr-only">Step 1: </span>Sign in</span></a></h3>
+              <p>Use the GitHub CLI, a personal access token or Device Flow. On the Mac the welcome screen also signs in to <b>GitLab, Bitbucket, Gitea and GitHub Enterprise</b>. Your token stays in the system keychain.</p>
+              <figure><img class="story-shot" src="img/repo.webp" data-shot="repo.webp" width="1600" height="958" loading="lazy" decoding="async" alt="Repository browser with file tree and rendered README" data-alt="Repository browser with file tree and rendered README"></figure>
+            </li>
+            <li class="story-step reveal" id="step-inbox">
+              <h3><a class="step-link" href="#step-inbox"><span class="step-num" aria-hidden="true">2</span><span class="step-label"><span class="sr-only">Step 2: </span>Your inbox</span></a></h3>
+              <p>Review requests, your own pull requests and notifications in one sidebar. Lists refresh every 30 seconds and <b>new pull requests appear at the top</b>.</p>
+              <figure><img class="story-shot" src="img/pr-conversation.webp" data-shot="pr-conversation.webp" width="1600" height="958" loading="lazy" decoding="async" alt="Sidebar with notifications and review requests next to a pull request" data-alt="Sidebar with notifications and review requests next to a pull request"></figure>
+            </li>
+            <li class="story-step reveal" id="step-review">
+              <h3><a class="step-link" href="#step-review"><span class="step-num" aria-hidden="true">3</span><span class="step-label"><span class="sr-only">Step 3: </span>Review the PR</span></a></h3>
+              <p>Conversation, review threads, commits, checks and changed files. The <b>native diff viewer</b> scrolls thousands of lines with file headers pinned. Comment, approve or request changes.</p>
+              <figure><img class="story-shot" src="img/pr-files.webp" data-shot="pr-files.webp" width="1600" height="958" loading="lazy" decoding="async" alt="Changed files of a pull request with a fast diff viewer" data-alt="Changed files of a pull request with a fast diff viewer"></figure>
+            </li>
+            <li class="story-step reveal" id="step-fix">
+              <h3><a class="step-link" href="#step-fix"><span class="step-num" aria-hidden="true">4</span><span class="step-label"><span class="sr-only">Step 4: </span>Fix with agent</span></a></h3>
+              <p>One click starts an agent session with the review feedback, right next to the PR and its branch. It runs Claude Code; you <b>approve tool calls in the chat</b> and see a diff for every edit.</p>
+              <figure><img class="story-shot" src="img/claude.webp" data-shot="claude.webp" width="1600" height="958" loading="lazy" decoding="async" alt="Agent chat editing a file and asking permission to run tests" data-alt="Agent chat editing a file and asking permission to run tests"></figure>
+            </li>
+            <li class="story-step reveal" id="step-ship">
+              <h3><a class="step-link" href="#step-ship"><span class="step-num" aria-hidden="true">5</span><span class="step-label"><span class="sr-only">Step 5: </span>Ship it</span></a></h3>
+              <p>Re-request review in one click after you push, then merge when it's <b>ready to merge</b>. Stacked pull requests show where each one sits in its chain.</p>
+              <figure><img class="story-shot" src="img/light.webp" data-shot="light.webp" width="1600" height="958" loading="lazy" decoding="async" alt="Pull request ready to merge, in light mode" data-alt="Pull request ready to merge, in light mode"></figure>
+            </li>
+          </ol>
+        </div>
+      </div>
+      <div class="story-stage-frame" aria-hidden="true">
+        <div class="story-frame-glow"></div>
+        <div class="story-frame">
+          <div class="story-layer"><img src="img/repo.webp" data-story-shot="repo.webp" width="1600" height="958" alt="" loading="lazy" decoding="async"><svg preserveAspectRatio="none" focusable="false"><path class="ring-dim" fill-rule="evenodd" d=""/><rect class="ring-glow" vector-effect="non-scaling-stroke"/><rect class="ring-line" pathLength="1" stroke-dasharray="1 1" stroke-dashoffset="1" vector-effect="non-scaling-stroke"/></svg></div>
+          <div class="story-layer"><img src="img/pr-conversation.webp" data-story-shot="pr-conversation.webp" width="1600" height="958" alt="" loading="lazy" decoding="async"><svg preserveAspectRatio="none" focusable="false"><path class="ring-dim" fill-rule="evenodd" d=""/><rect class="ring-glow" vector-effect="non-scaling-stroke"/><rect class="ring-line" pathLength="1" stroke-dasharray="1 1" stroke-dashoffset="1" vector-effect="non-scaling-stroke"/></svg></div>
+          <div class="story-layer"><img src="img/pr-files.webp" data-story-shot="pr-files.webp" width="1600" height="958" alt="" loading="lazy" decoding="async"><svg preserveAspectRatio="none" focusable="false"><path class="ring-dim" fill-rule="evenodd" d=""/><rect class="ring-glow" vector-effect="non-scaling-stroke"/><rect class="ring-line" pathLength="1" stroke-dasharray="1 1" stroke-dashoffset="1" vector-effect="non-scaling-stroke"/></svg></div>
+          <div class="story-layer"><img src="img/claude.webp" data-story-shot="claude.webp" width="1600" height="958" alt="" loading="lazy" decoding="async"><svg preserveAspectRatio="none" focusable="false"><path class="ring-dim" fill-rule="evenodd" d=""/><rect class="ring-glow" vector-effect="non-scaling-stroke"/><rect class="ring-line" pathLength="1" stroke-dasharray="1 1" stroke-dashoffset="1" vector-effect="non-scaling-stroke"/></svg></div>
+          <div class="story-layer"><img src="img/light.webp" data-story-shot="light.webp" width="1600" height="958" alt="" loading="lazy" decoding="async"><svg preserveAspectRatio="none" focusable="false"><path class="ring-dim" fill-rule="evenodd" d=""/><rect class="ring-glow" vector-effect="non-scaling-stroke"/><rect class="ring-line" pathLength="1" stroke-dasharray="1 1" stroke-dashoffset="1" vector-effect="non-scaling-stroke"/></svg></div>
+          <div class="story-chip"><span class="chip-dot"></span><span class="chip-text"><span>Signed in, repositories ready</span><span>Review requests waiting on you</span><span>Changed files, native diff</span><span>Approve each step in the chat</span><span>Ready to merge</span></span></div>
+        </div>
+        <div class="story-progress"><span data-story-count>01</span><span>/ 05</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features" class="section" aria-labelledby="features-title" data-stack-node>
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">Why PullYard</div>
+      <h2 id="features-title">The parts of GitHub<br>you use every day.</h2>
+      <p class="sub">GitHub in a browser tab can take up a gigabyte of memory to show a single diff. PullYard is a small native app for everyday review work.</p>
+    </div>
+    <div class="grid">
+      <article class="card reveal">
+        <div class="tile t-sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
+        <h3>Native and fast</h3>
+        <p>SwiftUI on macOS, WinUI 3 on Windows, GTK 4 on Linux. Diffs with thousands of lines scroll without stutter, and file headers stay pinned.</p>
+      </article>
+      <article class="card reveal">
+        <div class="tile t-violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V10a3 3 0 0 0-3-3h-4"/><path d="m13 5-2 2 2 2"/></svg></div>
+        <h3>Full pull request review</h3>
+        <p>Conversation, review threads, commits, checks and files. Comment, approve and merge, follow stacked PRs as one chain, and re-request review in one click after you push.</p>
+      </article>
+      <article class="card reveal">
+        <div class="tile t-coral"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg></div>
+        <h3>Fix with agent</h3>
+        <p>One click sends review feedback to Claude Code. If the reviewer left a “Fix prompt”, PullYard uses it; otherwise it writes one from the comments.</p>
+      </article>
+      <article class="card reveal">
+        <div class="tile t-amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></div>
+        <h3>Fresh without reloading</h3>
+        <p>Pull requests refresh every 30 seconds and new ones appear at the top. Pull down on a list or press ⌘R / Ctrl+R to refresh right away. A menu bar badge on the Mac, or a tray icon on Windows, counts the reviews waiting on you.</p>
+      </article>
+      <article class="card reveal">
+        <div class="tile t-teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
+        <h3>Repos and projects</h3>
+        <p>Browse repository files with syntax highlighting and open your GitHub Projects boards in the same window.</p>
+      </article>
+      <article class="card reveal">
+        <div class="tile t-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+        <h3>Private by default</h3>
+        <p>Sign in with the GitHub CLI, a personal token or Device Flow. Your token is kept in the system keychain, and PullYard talks to GitHub directly with no server of its own.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="claude" class="section band" aria-labelledby="claude-title" data-stack-node>
+  <div class="wrap split">
+    <div class="reveal">
+      <div class="eyebrow">Agents</div>
+      <h2 id="claude-title">Review and fix in the same window.</h2>
+      <p class="sub">PullYard has a chat for the official Claude Code CLI built in, right next to the PR, its changed files and the branch Claude is working on.</p>
+      <ul class="checks">
+        <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span><b>Sessions by project.</b> History is grouped by folder and branch, and shows the PR for each session.</span></li>
+        <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span><b>Model, effort and mode.</b> Change them mid-session, approve tool calls in the chat and see a diff for every edit.</span></li>
+        <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span><b>Tasks at a glance.</b> Every command and subagent Claude runs, live, with how long it took, what failed and its full output.</span></li>
+        <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span><b>Idle sessions sleep.</b> A chat you left in the morning frees its memory and picks up again on your next message.</span></li>
+        <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span><b>Usage overlay.</b> Context window and plan limits in one place, the same numbers the CLI shows.</span></li>
+        <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span><b>Personal and work accounts.</b> Keep separate Claude sign-ins and switch between them.</span></li>
+      </ul>
+    </div>
+    <div class="reveal">
+      <img class="shot-img" src="img/claude.webp" data-shot="claude.webp" width="1600" height="958" loading="lazy" decoding="async" alt="Claude Code chat in PullYard editing a file and asking permission to run tests" data-alt="Claude Code chat in PullYard editing a file and asking permission to run tests">
+    </div>
+  </div>
+</section>
+
+<section id="tour" class="section" aria-labelledby="tour-title" data-stack-node>
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow violet">A closer look</div>
+      <h2 id="tour-title">What it looks like.</h2>
+      <p class="sub">These are real screenshots of PullYard on <span data-platform-name>macOS</span>, open on a public repository.</p>
+      <div class="os-tabs platform-switch" role="group" aria-label="Show screenshots for">
+        <button type="button" data-platform="mac" aria-pressed="true"><svg aria-hidden="true" focusable="false"><use href="#i-apple"/></svg>macOS</button>
+        <button type="button" data-platform="windows" aria-pressed="false"><svg aria-hidden="true" focusable="false"><use href="#i-windows"/></svg>Windows</button>
+        <button type="button" data-platform="linux" aria-pressed="false"><svg aria-hidden="true" focusable="false"><use href="#i-box"/></svg>Linux</button>
+      </div>
+    </div>
+    <div class="gallery">
+      <figure class="reveal wide">
+        <img class="shot-img" src="img/pr-files.webp" data-shot="pr-files.webp" width="1600" height="958" loading="lazy" decoding="async" alt="Changed files of a pull request with a fast diff viewer" data-alt="Changed files of a pull request with a fast diff viewer">
+        <figcaption><b>Changed files.</b> A native diff viewer that handles thousands of lines, with a file list and checkmarks for files you've viewed.</figcaption>
+      </figure>
+      <figure class="reveal">
+        <picture>
+          <source media="(prefers-color-scheme: light)" srcset="img/light.webp" data-shot="light.webp" data-theme-source width="1600" height="958">
+          <img class="shot-img" src="img/pr-conversation.webp" data-shot="pr-conversation.webp" width="1600" height="958" loading="lazy" decoding="async" alt="Pull request conversation with merge status and unresolved comments" data-alt="Pull request conversation with merge status and unresolved comments" data-alt-swapped="Pull request conversation with merge status and unresolved comments, in light mode">
+        </picture>
+        <figcaption><b>Conversation.</b> Reviews, threads and checks, and a button that sends unresolved comments to Claude Code.</figcaption>
+      </figure>
+      <figure class="reveal">
+        <img class="shot-img" src="img/repo.webp" data-shot="repo.webp" width="1600" height="958" loading="lazy" decoding="async" alt="Repository browser with file tree and rendered README" data-alt="Repository browser with file tree and rendered README">
+        <figcaption><b>Repository browser.</b> File tree, README and code with syntax highlighting.</figcaption>
+      </figure>
+      <figure class="reveal wide">
+        <picture>
+          <source media="(prefers-color-scheme: light)" srcset="img/pr-conversation.webp" data-shot="pr-conversation.webp" data-theme-source width="1600" height="958">
+          <img class="shot-img" src="img/light.webp" data-shot="light.webp" width="1600" height="958" loading="lazy" decoding="async" alt="PullYard in light mode" data-alt="PullYard in light mode" data-alt-swapped="PullYard in dark mode">
+        </picture>
+        <figcaption><b>Light or dark.</b> The PullYard theme comes in both, or you can switch to the standard <span data-platform-text='{"mac":"macOS","windows":"Windows","linux":"GNOME"}'>macOS</span> look in Settings.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="section" aria-labelledby="install-title" data-stack-node>
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow sky">Install</div>
+      <h2 id="install-title">Install</h2>
+      <p class="sub">Pick your system. Each one gets its own native build of the same app.</p>
+    </div>
+    <div class="os-tabs install-tabs" role="tablist" aria-label="Operating system">
+      <button type="button" role="tab" id="tab-mac" aria-controls="install-mac" aria-selected="true" data-os-tab="mac"><svg aria-hidden="true" focusable="false"><use href="#i-apple"/></svg>macOS</button>
+      <button type="button" role="tab" id="tab-windows" aria-controls="install-windows" aria-selected="false" tabindex="-1" data-os-tab="windows"><svg aria-hidden="true" focusable="false"><use href="#i-windows"/></svg>Windows</button>
+      <button type="button" role="tab" id="tab-linux" aria-controls="install-linux" aria-selected="false" tabindex="-1" data-os-tab="linux"><svg aria-hidden="true" focusable="false"><use href="#i-box"/></svg>Linux</button>
+    </div>
+
+    <div class="os-panel" id="install-mac" role="tabpanel" aria-labelledby="tab-mac" tabindex="0" data-os-panel="mac">
+      <h3 class="os-title">macOS</h3>
+      <p class="os-intro">PullYard isn't notarized yet, so macOS asks once before the first launch. After that, updates install from inside the app.</p>
+      <div class="steps">
+        <div class="step"><h4>Download</h4><p>Get the latest DMG from GitHub Releases. It runs on Apple Silicon and Intel.</p></div>
+        <div class="step"><h4>Drag to Applications</h4><p>Open the DMG and drop PullYard into your Applications folder.</p></div>
+        <div class="step"><h4>Allow first launch</h4><p>Go to System Settings → Privacy &amp; Security → Open Anyway, or run the command below. You only do this once.</p></div>
+      </div>
+      <div class="code"><code>xattr -dr com.apple.quarantine /Applications/PullYard.app</code><button type="button" aria-label="Copy command: xattr"><svg aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+      <div class="code"><span class="label">Homebrew</span><code>brew install --cask pullyard/tap/pullyard</code><button type="button" aria-label="Copy Homebrew command"><svg aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+      <div class="req">
+        <span>macOS 14 or later</span><span>Apple Silicon or Intel</span><span>Optional: GitHub CLI</span><span>Optional: Claude Code CLI</span>
+      </div>
+    </div>
+
+    <div class="os-panel" id="install-windows" role="tabpanel" aria-labelledby="tab-windows" tabindex="0" data-os-panel="windows">
+      <h3 class="os-title">Windows</h3>
+      <p class="os-intro">PullYard isn't code-signed yet, so SmartScreen asks once before the first launch. After that, the installed app updates itself.</p>
+      <div class="steps">
+        <div class="step"><h4>Download</h4><p>Get the setup for your PC, x64 or ARM64. It installs just for you, no admin rights needed.</p></div>
+        <div class="step"><h4>Run the setup</h4><p>If SmartScreen says it protected your PC, click <b>More info → Run anyway</b>. You only do this once.</p></div>
+        <div class="step"><h4>Or go portable</h4><p>Prefer no installer? Unzip the portable build anywhere and run PullYard.exe. It opens the release page when there's an update.</p></div>
+      </div>
+      <div class="code"><span class="label">Portable</span><code>Expand-Archive .\PullYard-windows-<span data-win-arch>x64</span>-portable.zip -DestinationPath .\PullYard</code><button type="button" aria-label="Copy portable unzip command"><svg aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+      <div class="req">
+        <span>Windows 10 1809 or later, or Windows 11</span><span>x64 or ARM64</span><span>WebView2 Runtime (built into Windows 11)</span><span>Optional: GitHub CLI</span><span>Optional: Claude Code CLI</span>
+      </div>
+    </div>
+
+    <div class="os-panel" id="install-linux" role="tabpanel" aria-labelledby="tab-linux" tabindex="0" data-os-panel="linux">
+      <h3 class="os-title">Linux</h3>
+      <p class="os-intro">Three ways to install, all for x86_64. Pick the one that fits your distribution.</p>
+      <div class="steps">
+        <div class="step"><h4>.deb package</h4><p>For Ubuntu 24.04 or later, Debian and their derivatives. apt pulls in GTK 4, libadwaita and the other libraries.</p></div>
+        <div class="step"><h4>Flatpak</h4><p>Works on any distribution. It uses the GNOME runtime from Flathub and runs git, gh and claude from your system.</p></div>
+        <div class="step"><h4>Tarball</h4><p>A portable build for systems with GTK 4.14 or later. The install script puts it in ~/.local, and it updates itself.</p></div>
+      </div>
+      <div class="code"><span class="label">.deb</span><code>sudo apt install ./pullyard_*.deb</code><button type="button" aria-label="Copy .deb install command"><svg aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+      <div class="code"><span class="label">Flatpak</span><code>flatpak install --user PullYard-linux-x86_64.flatpak</code><button type="button" aria-label="Copy Flatpak install command"><svg aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+      <div class="code"><span class="label">Tarball</span><code>tar xzf PullYard-linux-x86_64.tar.gz &amp;&amp; ./PullYard-linux-x86_64/install.sh</code><button type="button" aria-label="Copy tarball install command"><svg aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+      <div class="req">
+        <span>GTK 4 and libadwaita</span><span>Ubuntu 24.04 or later, or any distro via Flatpak</span><span>x86_64</span><span>Optional: GitHub CLI</span><span>Optional: Claude Code CLI</span>
+      </div>
+    </div>
+
+    <details class="downloads platforms" id="all-downloads">
+      <summary><span class="sum-title"><svg aria-hidden="true" focusable="false"><use href="#i-download"/></svg>Other platforms and all downloads</span><svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary>
       <ul class="assets">
         <li data-asset="PullYard.dmg" data-os="mac"><a href="https://github.com/pullyard/pullyard/releases/latest/download/PullYard.dmg"><span class="os">macOS</span><span class="what">Universal, Apple Silicon &amp; Intel<code>PullYard.dmg</code></span><span class="size" data-size></span></a></li>
         <li data-asset="PullYard-windows-x64-setup.exe" data-os="windows" data-arch="x64"><a href="https://github.com/pullyard/pullyard/releases/latest/download/PullYard-windows-x64-setup.exe"><span class="os">Windows</span><span class="what">Installer, x64<code>PullYard-windows-x64-setup.exe</code></span><span class="size" data-size></span></a></li>
@@ -241,223 +649,176 @@ footer a:hover{color:var(--text)}
         <li data-asset="PullYard-linux-x86_64.tar.gz" data-os="linux"><a href="https://github.com/pullyard/pullyard/releases/latest/download/PullYard-linux-x86_64.tar.gz"><span class="os">Linux</span><span class="what">Portable tarball, x86_64<code>PullYard-linux-x86_64.tar.gz</code></span><span class="size" data-size></span></a></li>
       </ul>
     </details>
-
-    <figure class="tour-video reveal">
-      <video muted loop playsinline preload="none" width="1920" height="1080" aria-label="PullYard product tour" data-tour-video>
-        <source type="video/webm">
-        <source type="video/mp4">
-      </video>
-      <noscript><img src="img/pullyard-web-poster.jpg" width="1920" height="1080" alt="PullYard product tour"></noscript>
-      <span class="sr-only">Click the video to play or pause it.</span>
-    </figure>
-    <p class="demo-hint tour-hint" data-platform-text='{"mac":"A one-minute tour: diffs, review, merge, Fix with agent and accounts.","windows":"A one-minute tour on Windows: diffs, review, merge, Fix with agent and repositories.","linux":"A one-minute tour on Linux: diffs, review, merge, Fix with agent and repositories."}'>A one-minute tour: diffs, review, merge, Fix with agent and accounts.</p>
-    <div class="os-tabs platform-switch" role="group" aria-label="Show the app on">
-      <button type="button" data-platform="mac" aria-pressed="true">macOS</button>
-      <button type="button" data-platform="windows" aria-pressed="false">Windows</button>
-      <button type="button" data-platform="linux" aria-pressed="false">Linux</button>
-    </div>
-
-    <div class="shot reveal">
-      <div id="demo" class="demo" role="application" aria-label="Interactive PullYard demo">
-        <noscript><img src="img/pr-files.webp" width="1600" height="958" alt="PullYard showing a pull request's changed files"></noscript>
-      </div>
-      <p class="demo-hint"><i></i>Live demo. Click around, then try “Fix with agent”</p>
-    </div>
-  </div>
-</header>
-
-<section id="features">
-  <div class="wrap">
-    <div class="reveal">
-      <div class="eyebrow">Why PullYard</div>
-      <h2>The parts of GitHub<br>you use every day.</h2>
-      <p class="sub">GitHub in a browser tab can take up a gigabyte of memory to show a single diff. PullYard is a small native app for everyday review work.</p>
-    </div>
-    <div class="grid">
-      <div class="card reveal">
-        <div class="ic" style="background:rgba(91,184,236,.14);color:var(--sky)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
-        <h4>Native and fast</h4>
-        <p>SwiftUI on macOS, WinUI 3 on Windows, GTK 4 on Linux. Diffs with thousands of lines scroll without stutter, and file headers stay pinned.</p>
-      </div>
-      <div class="card reveal">
-        <div class="ic" style="background:rgba(157,140,240,.14);color:var(--violet)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V10a3 3 0 0 0-3-3h-4"/><path d="m13 5-2 2 2 2"/></svg></div>
-        <h4>Full pull request review</h4>
-        <p>Conversation, review threads, commits, checks and files. Comment, approve and merge, follow stacked PRs as one chain, and re-request review in one click after you push.</p>
-      </div>
-      <div class="card reveal">
-        <div class="ic" style="background:rgba(238,111,95,.14);color:var(--coral)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg></div>
-        <h4>Fix with agent</h4>
-        <p>One click sends review feedback to Claude Code. If the reviewer left a “Fix prompt”, PullYard uses it; otherwise it writes one from the comments.</p>
-      </div>
-      <div class="card reveal">
-        <div class="ic" style="background:rgba(232,180,76,.14);color:var(--amber)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></div>
-        <h4>Fresh without reloading</h4>
-        <p>Pull requests refresh every 30 seconds and new ones appear at the top. Pull down on a list or press ⌘R / Ctrl+R to refresh right away. A menu bar badge on the Mac, or a tray icon on Windows, counts the reviews waiting on you.</p>
-      </div>
-      <div class="card reveal">
-        <div class="ic" style="background:rgba(45,212,191,.14);color:#2dd4bf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
-        <h4>Repos and projects</h4>
-        <p>Browse repository files with syntax highlighting and open your GitHub Projects boards in the same window.</p>
-      </div>
-      <div class="card reveal">
-        <div class="ic" style="background:rgba(93,190,138,.14);color:var(--green)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
-        <h4>Private by default</h4>
-        <p>Sign in with the GitHub CLI, a personal token or Device Flow. Your token is kept in the system keychain, and PullYard talks to GitHub directly with no server of its own.</p>
-      </div>
-    </div>
   </div>
 </section>
 
-<section id="claude" style="background:linear-gradient(180deg,transparent,rgba(15,23,42,.6) 30%,rgba(15,23,42,.6) 70%,transparent)">
-  <div class="wrap split">
-    <div class="reveal">
-      <div class="eyebrow" style="color:var(--coral)">Agents</div>
-      <h2>Review and fix in the same window.</h2>
-      <p class="sub">PullYard has a chat for the official Claude Code CLI built in, right next to the PR, its changed files and the branch Claude is working on.</p>
-      <ul class="checks">
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Sessions by project.</b> History is grouped by folder and branch, and shows the PR for each session.</span></li>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Model, effort and mode.</b> Change them mid-session, approve tool calls in the chat and see a diff for every edit.</span></li>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Tasks at a glance.</b> Every command and subagent Claude runs, live, with how long it took, what failed and its full output.</span></li>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Idle sessions sleep.</b> A chat you left in the morning frees its memory and picks up again on your next message.</span></li>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Usage overlay.</b> Context window and plan limits in one place, the same numbers the CLI shows.</span></li>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Personal and work accounts.</b> Keep separate Claude sign-ins and switch between them.</span></li>
-      </ul>
-    </div>
-    <div class="claude-shot reveal">
-      <img data-shot="claude.webp" width="1600" height="958" loading="lazy" alt="Claude Code chat in PullYard editing a file and asking permission to run tests" data-alt="Claude Code chat in PullYard editing a file and asking permission to run tests">
-      <noscript><img src="img/claude.webp" width="1600" height="958" alt="Claude Code chat in PullYard editing a file and asking permission to run tests, with the changed files on the right"></noscript>
-    </div>
-  </div>
-</section>
-
-<section id="tour" style="padding-top:40px">
+<section id="faq" class="section" aria-labelledby="faq-title" style="padding-top:var(--s-6)" data-stack-node>
   <div class="wrap">
-    <div class="reveal">
-      <div class="eyebrow" style="color:var(--violet)">A closer look</div>
-      <h2>What it looks like.</h2>
-      <p class="sub">These are real screenshots of PullYard on <span data-platform-name>macOS</span>, open on a public repository.</p>
-      <div class="os-tabs platform-switch" role="group" aria-label="Show screenshots for">
-        <button type="button" data-platform="mac" aria-pressed="true">macOS</button>
-        <button type="button" data-platform="windows" aria-pressed="false">Windows</button>
-        <button type="button" data-platform="linux" aria-pressed="false">Linux</button>
-      </div>
-    </div>
-    <div class="gallery">
-      <figure class="reveal wide"><img data-shot="pr-files.webp" width="1600" height="958" loading="lazy" alt="Changed files of a pull request with a fast diff viewer" data-alt="Changed files of a pull request with a fast diff viewer"><noscript><img src="img/pr-files.webp" width="1600" height="958" alt="Changed files of a pull request with a fast diff viewer"></noscript><figcaption><b>Changed files.</b> A native diff viewer that handles thousands of lines, with a file list and checkmarks for files you've viewed.</figcaption></figure>
-      <figure class="reveal"><img data-shot="pr-conversation.webp" width="1600" height="958" loading="lazy" alt="Pull request conversation with merge status and unresolved comments" data-alt="Pull request conversation with merge status and unresolved comments"><noscript><img src="img/pr-conversation.webp" width="1600" height="958" alt="Pull request conversation with merge status and unresolved comments"></noscript><figcaption><b>Conversation.</b> Reviews, threads and checks, and a button that sends unresolved comments to Claude Code.</figcaption></figure>
-      <figure class="reveal"><img data-shot="repo.webp" width="1600" height="958" loading="lazy" alt="Repository browser with file tree and rendered README" data-alt="Repository browser with file tree and rendered README"><noscript><img src="img/repo.webp" width="1600" height="958" alt="Repository browser with file tree and rendered README"></noscript><figcaption><b>Repository browser.</b> File tree, README and code with syntax highlighting.</figcaption></figure>
-      <figure class="reveal wide"><img data-shot="light.webp" width="1600" height="958" loading="lazy" alt="PullYard in light mode" data-alt="PullYard in light mode"><noscript><img src="img/light.webp" width="1600" height="958" alt="PullYard in light mode"></noscript><figcaption><b>Light or dark.</b> The PullYard theme comes in both, or you can switch to the standard <span data-platform-text='{"mac":"macOS","windows":"Windows","linux":"GNOME"}'>macOS</span> look in Settings.</figcaption></figure>
-    </div>
-  </div>
-</section>
-
-<section id="install">
-  <div class="wrap">
-    <div class="reveal">
-      <div class="eyebrow">Install</div>
-      <h2>Install</h2>
-      <p class="sub">Pick your system. Each one gets its own native build of the same app.</p>
-      <div class="os-tabs" role="tablist" aria-label="Operating system">
-        <button type="button" role="tab" id="tab-mac" aria-controls="install-mac" aria-selected="true" data-os-tab="mac">macOS</button>
-        <button type="button" role="tab" id="tab-windows" aria-controls="install-windows" aria-selected="false" tabindex="-1" data-os-tab="windows">Windows</button>
-        <button type="button" role="tab" id="tab-linux" aria-controls="install-linux" aria-selected="false" tabindex="-1" data-os-tab="linux">Linux</button>
-      </div>
-    </div>
-
-    <div class="os-panel" id="install-mac" role="tabpanel" aria-labelledby="tab-mac" data-os-panel="mac">
-      <h3 class="os-title">macOS</h3>
-      <p class="os-intro reveal">PullYard isn't notarized yet, so macOS asks once before the first launch. After that, updates install from inside the app.</p>
-      <div class="steps">
-        <div class="step reveal"><h4>Download</h4><p>Get the latest DMG from GitHub Releases. It runs on Apple Silicon and Intel.</p></div>
-        <div class="step reveal"><h4>Drag to Applications</h4><p>Open the DMG and drop PullYard into your Applications folder.</p></div>
-        <div class="step reveal"><h4>Allow first launch</h4><p>Go to System Settings → Privacy &amp; Security → Open Anyway, or run the command below. You only do this once.</p></div>
-      </div>
-      <div class="code reveal"><code>xattr -dr com.apple.quarantine /Applications/PullYard.app</code><button type="button">Copy</button></div>
-      <div class="code reveal"><span class="label">Homebrew</span><code>brew install --cask pullyard/tap/pullyard</code><button type="button">Copy</button></div>
-      <div class="req reveal">
-        <span>macOS 14 or later</span><span>Apple Silicon or Intel</span><span>Optional: GitHub CLI</span><span>Optional: Claude Code CLI</span>
-      </div>
-    </div>
-
-    <div class="os-panel" id="install-windows" role="tabpanel" aria-labelledby="tab-windows" data-os-panel="windows">
-      <h3 class="os-title">Windows</h3>
-      <p class="os-intro reveal">PullYard isn't code-signed yet, so SmartScreen asks once before the first launch. After that, the installed app updates itself.</p>
-      <div class="steps">
-        <div class="step reveal"><h4>Download</h4><p>Get the setup for your PC, x64 or ARM64. It installs just for you, no admin rights needed.</p></div>
-        <div class="step reveal"><h4>Run the setup</h4><p>If SmartScreen says it protected your PC, click <b>More info → Run anyway</b>. You only do this once.</p></div>
-        <div class="step reveal"><h4>Or go portable</h4><p>Prefer no installer? Unzip the portable build anywhere and run PullYard.exe. It opens the release page when there's an update.</p></div>
-      </div>
-      <div class="code reveal"><span class="label">Portable</span><code>Expand-Archive .\PullYard-windows-<span data-win-arch>x64</span>-portable.zip -DestinationPath .\PullYard</code><button type="button">Copy</button></div>
-      <div class="req reveal">
-        <span>Windows 10 1809 or later, or Windows 11</span><span>x64 or ARM64</span><span>WebView2 Runtime (built into Windows 11)</span><span>Optional: GitHub CLI</span><span>Optional: Claude Code CLI</span>
-      </div>
-    </div>
-
-    <div class="os-panel" id="install-linux" role="tabpanel" aria-labelledby="tab-linux" data-os-panel="linux">
-      <h3 class="os-title">Linux</h3>
-      <p class="os-intro reveal">Three ways to install, all for x86_64. Pick the one that fits your distribution.</p>
-      <div class="steps">
-        <div class="step reveal"><h4>.deb package</h4><p>For Ubuntu 24.04 or later, Debian and their derivatives. apt pulls in GTK 4, libadwaita and the other libraries.</p></div>
-        <div class="step reveal"><h4>Flatpak</h4><p>Works on any distribution. It uses the GNOME runtime from Flathub and runs git, gh and claude from your system.</p></div>
-        <div class="step reveal"><h4>Tarball</h4><p>A portable build for systems with GTK 4.14 or later. The install script puts it in ~/.local, and it updates itself.</p></div>
-      </div>
-      <div class="code reveal"><span class="label">.deb</span><code>sudo apt install ./pullyard_*.deb</code><button type="button">Copy</button></div>
-      <div class="code reveal"><span class="label">Flatpak</span><code>flatpak install --user PullYard-linux-x86_64.flatpak</code><button type="button">Copy</button></div>
-      <div class="code reveal"><span class="label">Tarball</span><code>tar xzf PullYard-linux-x86_64.tar.gz &amp;&amp; ./PullYard-linux-x86_64/install.sh</code><button type="button">Copy</button></div>
-      <div class="req reveal">
-        <span>GTK 4 and libadwaita</span><span>Ubuntu 24.04 or later, or any distro via Flatpak</span><span>x86_64</span><span>Optional: GitHub CLI</span><span>Optional: Claude Code CLI</span>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section style="padding-top:20px">
-  <div class="wrap">
-    <h2 class="reveal">Questions</h2>
+    <h2 id="faq-title" class="reveal">Questions</h2>
     <div class="faq">
       <div class="faq-col">
-        <details class="reveal"><summary>Is this an official GitHub or Anthropic app?</summary><p>No. PullYard is an independent open-source project. It uses the public GitHub API and runs the official Claude Code CLI, which you install yourself.</p></details>
-        <details class="reveal"><summary>Do I need Claude Code?</summary><p>No. All the GitHub features work without it. The agent workspace and “Fix with agent” turn on once the CLI is installed and signed in.</p></details>
-        <details class="reveal"><summary>How does sign-in to Claude work?</summary><p>PullYard never sees your Claude credentials. It runs <code>claude auth login</code>, which opens the official sign-in page in your browser.</p></details>
+        <details class="reveal"><summary>Is this an official GitHub or Anthropic app?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>No. PullYard is an independent open-source project. It uses the public GitHub API and runs the official Claude Code CLI, which you install yourself.</p></details>
+        <details class="reveal"><summary>Do I need Claude Code?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>No. All the GitHub features work without it. The agent workspace and “Fix with agent” turn on once the CLI is installed and signed in.</p></details>
+        <details class="reveal"><summary>How does sign-in to Claude work?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>PullYard never sees your Claude credentials. It runs <code>claude auth login</code>, which opens the official sign-in page in your browser.</p></details>
       </div>
       <div class="faq-col">
-        <details class="reveal"><summary>Where does my data go?</summary><p>From your computer straight to api.github.com. Your token is stored in the macOS Keychain, Windows Credential Manager or the Secret Service keyring on Linux. PullYard has no backend and no analytics.</p></details>
-        <details class="reveal"><summary>How do I update?</summary><p>PullYard checks GitHub for a new release every 6 hours; you can turn that off in Settings. On macOS, choose <b>PullYard → Check for Updates…</b> any time: it downloads the release, replaces itself and restarts, so there's no disk image to open. The Windows installer build and the Linux tarball update themselves the same way. The Windows portable build, the .deb and the Flatpak open the release page so you can grab the new file.</p></details>
-        <details class="reveal"><summary>What do I get for a pizza?</summary><p>Just my thanks. Nothing is locked: PullYard is free and open source, and every feature is there for everyone. A pizza helps keep the project going. You choose the price, from $3. The link is also in <b>Settings → Support PullYard</b> in the app. <a href="https://checkout.dodopayments.com/buy/pdt_0NpmyolvMAwxrA4eQBgpO?quantity=1">Buy me a pizza 🍕</a></p></details>
-        <details class="reveal"><summary>How fresh is what I see?</summary><p>Pull request lists, the open pull request and notifications refresh every 30 seconds while PullYard is in front, and again as soon as you switch back to it. The footer shows when the list was last updated. Pull down on a list or press <b>⌘R</b> (<b>Ctrl+R</b> on Windows and Linux) to refresh now. You can change the interval in Settings.</p></details>
+        <details class="reveal"><summary>Where does my data go?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>From your computer straight to api.github.com. Your token is stored in the macOS Keychain, Windows Credential Manager or the Secret Service keyring on Linux. PullYard has no backend and no analytics.</p></details>
+        <details class="reveal"><summary>How do I update?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>PullYard checks GitHub for a new release every 6 hours; you can turn that off in Settings. On macOS, choose <b>PullYard → Check for Updates…</b> any time: it downloads the release, replaces itself and restarts, so there's no disk image to open. The Windows installer build and the Linux tarball update themselves the same way. The Windows portable build, the .deb and the Flatpak open the release page so you can grab the new file.</p></details>
+        <details class="reveal"><summary>What do I get for a pizza?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>Just my thanks. Nothing is locked: PullYard is free and open source, and every feature is there for everyone. A pizza helps keep the project going. You choose the price, from $3. The link is also in <b>Settings → Support PullYard</b> in the app. <a class="pizza-link" href="https://checkout.dodopayments.com/buy/pdt_0NpmyolvMAwxrA4eQBgpO?quantity=1"><svg aria-hidden="true" focusable="false"><use href="#i-pizza"/></svg>Buy me a pizza</a></p></details>
+        <details class="reveal"><summary>How fresh is what I see?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>Pull request lists, the open pull request and notifications refresh every 30 seconds while PullYard is in front, and again as soon as you switch back to it. The footer shows when the list was last updated. Pull down on a list or press <b>⌘R</b> (<b>Ctrl+R</b> on Windows and Linux) to refresh now. You can change the interval in Settings.</p></details>
       </div>
     </div>
   </div>
 </section>
 
-<div class="final">
-  <div class="wrap reveal">
-    <img src="icon.svg" alt="">
-    <h2>Give it a try.</h2>
-    <p class="sub" style="margin:0 auto 30px">Free and open source, for macOS, Windows and Linux.</p>
-    <div class="cta">
-      <a class="btn btn-primary" href="https://github.com/pullyard/pullyard/releases/latest" data-download><span data-download-label>Download PullYard</span></a>
-      <a class="btn btn-ghost" href="https://github.com/pullyard/pullyard/releases" data-repo-releases>All releases</a>
-      <a class="btn btn-ghost" href="https://checkout.dodopayments.com/buy/pdt_0NpmyolvMAwxrA4eQBgpO?quantity=1">Buy me a pizza 🍕</a>
-    </div>
-    <p class="pizza">Pay what you want, from $3 · PullYard stays free and open source</p>
-  </div>
-</div>
-
-<footer>
+<section class="final" aria-labelledby="final-title" data-stack-node>
   <div class="wrap">
-    <span>© 2026 PullYard contributors · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="https://checkout.dodopayments.com/buy/pdt_0NpmyolvMAwxrA4eQBgpO?quantity=1">Buy me a pizza 🍕</a></span>
+    <div class="final-card reveal">
+      <span class="final-logo" data-final-logo aria-hidden="true"><img src="icon.svg" width="96" height="96" alt="" loading="lazy" decoding="async"></span>
+      <h2 id="final-title">Give it a try.</h2>
+      <p class="sub">Free and open source, for macOS, Windows and Linux.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/pullyard/pullyard/releases/latest" data-download><span class="dl-ic" data-download-icon><svg aria-hidden="true" focusable="false"><use href="#i-download"/></svg></span><span data-download-label>Download PullYard</span></a>
+        <a class="btn btn-ghost" href="https://github.com/pullyard/pullyard/releases" data-repo-releases>All releases</a>
+        <a class="btn btn-ghost" href="https://checkout.dodopayments.com/buy/pdt_0NpmyolvMAwxrA4eQBgpO?quantity=1"><svg aria-hidden="true" focusable="false"><use href="#i-pizza"/></svg>Buy me a pizza</a>
+      </div>
+      <p class="pizza">Pay what you want, from $3 · PullYard stays free and open source</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <nav aria-label="Footer">
+      <ul class="foot-links">
+        <li><span>© 2026 PullYard contributors</span></li>
+        <li><a href="changelog.html">Changelog</a></li>
+        <li><a href="roadmap.html">Roadmap</a></li>
+        <li><a href="https://github.com/pullyard/pullyard" data-repo><svg aria-hidden="true" focusable="false"><use href="#i-github"/></svg>GitHub</a></li>
+        <li><a href="https://checkout.dodopayments.com/buy/pdt_0NpmyolvMAwxrA4eQBgpO?quantity=1"><svg aria-hidden="true" focusable="false"><use href="#i-pizza"/></svg>Buy me a pizza</a></li>
+      </ul>
+    </nav>
     <span>Not affiliated with GitHub, Inc. or Anthropic. GitHub and Claude are trademarks of their respective owners.</span>
   </div>
+  <div class="yard" data-yard aria-hidden="true">
+    <div class="yard-inner">
+      <svg class="yard-svg" viewBox="0 0 440 150" width="440" height="150" focusable="false">
+        <defs>
+          <linearGradient id="yd-beam-g" x1="1" y1="0" x2="0" y2="0"><stop offset="0" stop-color="#fde68a" stop-opacity=".5"/><stop offset=".55" stop-color="#fde68a" stop-opacity=".12"/><stop offset="1" stop-color="#fde68a" stop-opacity="0"/></linearGradient>
+          <linearGradient id="yd-pile-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="currentColor" stop-opacity=".9"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient>
+        </defs>
+        <g class="yd-beam"><g class="yd-beam-sweep"><path d="M24 44.5 L-250 24 L-250 65 Z" fill="url(#yd-beam-g)"/></g></g>
+        <g class="yd-piles" fill="url(#yd-pile-g)"><rect x="6" y="112" width="5" height="26"/><rect x="62" y="112" width="5" height="26"/><rect x="118" y="112" width="5" height="26"/><rect x="174" y="112" width="5" height="26"/><rect x="230" y="112" width="5" height="26"/><rect x="286" y="112" width="5" height="26"/><rect x="336" y="112" width="5" height="26"/></g>
+        <rect class="yd-deck" x="0" y="104" width="346" height="9" rx="2"/>
+        <rect class="yd-deck-top" x="0" y="104" width="346" height="1.6" rx=".8"/>
+        <rect class="yd-bollard" x="337" y="98.5" width="5" height="6" rx="1.8"/>
+        <circle class="yd-tire" cx="347" cy="109" r="3.2"/>
+        <g class="yd-house">
+          <path class="yd-tower" d="M15 104 L19 52 L29 52 L33 104 Z"/>
+          <path class="yd-stripe" d="M16.25 88 L31.75 88 L31.15 80 L16.85 80 Z M17.6 70 L30.4 70 L29.8 62 L18.2 62 Z"/>
+          <rect class="yd-gallery" x="15" y="50" width="18" height="3" rx="1"/>
+          <rect class="yd-lamproom" x="18.5" y="39" width="11" height="11" rx="1.5"/>
+          <circle class="yd-glow" cx="24" cy="44.5" r="9"/>
+          <circle class="yd-lamp" cx="24" cy="44.5" r="3"/>
+          <path class="yd-roof" d="M16.5 39.5 L24 31 L31.5 39.5 Z"/>
+        </g>
+        <g class="yd-crane">
+          <path class="yd-ties" d="M304 5 L44 16 M304 5 L426 16"/>
+          <path class="yd-mast" d="M300 104 V20 M308 104 V20 M300 104 L308 92 L300 80 L308 68 L300 56 L308 44 L300 32 L308 20"/>
+          <rect class="yd-arm" x="40" y="16" width="390" height="4" rx="1"/>
+          <rect class="yd-mast-top" x="301" y="3" width="6" height="13" rx="1"/>
+          <rect class="yd-cab" x="309" y="20" width="13" height="9" rx="1.5"/>
+          <g class="yd-trolley" transform="translate(282 0)">
+            <rect x="-6" y="20" width="12" height="4" rx="1"/>
+            <line class="yd-cable" x1="0" y1="24" x2="0" y2="34"/>
+            <g class="yd-hookg" transform="translate(0 34)"><path d="M-6 0 H6 M-5 0 V3 M5 0 V3"/></g>
+          </g>
+        </g>
+        <g class="yd-stacks"></g>
+        <g class="ct yd-lift" style="display:none"></g>
+      </svg>
+      <div class="yard-tip"><span class="tip-row"><span class="tip-n"></span><span class="tip-t"></span></span><span class="tip-s"></span></div>
+      <div class="yard-toast"><span class="tk"><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg></span>Merged into <code>main</code></div>
+    </div>
+  </div>
 </footer>
+<div class="sr-only" aria-live="polite" data-live></div>
 
 <script>
 (function(){
+  var root=document.documentElement;
+  var THEME_KEY="pullyard-theme", ORDER=["auto","light","dark"], LABEL={auto:"automatic",light:"light",dark:"dark"};
+  var lightMQ=window.matchMedia?window.matchMedia("(prefers-color-scheme: light)"):null;
+  var reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var live=document.querySelector("[data-live]");
+  function announce(t){if(live){live.textContent="";setTimeout(function(){live.textContent=t},30)}}
+  function getPref(){try{return localStorage.getItem(THEME_KEY)||"auto"}catch(e){return "auto"}}
+  function isLight(){var p=root.getAttribute("data-theme");return p?p==="light":!!(lightMQ&&lightMQ.matches)}
+  function syncThemeMedia(){
+    var p=getPref(), media=p==="auto"?"(prefers-color-scheme: light)":p==="light"?"all":"not all", light=isLight();
+    document.querySelectorAll("source[data-theme-source]").forEach(function(s){if(s.media!==media)s.media=media});
+    document.querySelectorAll("picture img[data-alt-swapped]").forEach(function(img){
+      img.alt=(light?img.getAttribute("data-alt-swapped"):img.getAttribute("data-alt"))+" on "+NAMES[root.getAttribute("data-platform")||"mac"];
+    });
+  }
+  function applyTheme(p,say){
+    if(p==="auto")root.removeAttribute("data-theme");else root.setAttribute("data-theme",p);
+    var btn=document.querySelector("[data-theme-toggle]");
+    if(btn){
+      var next=ORDER[(ORDER.indexOf(p)+1)%ORDER.length];
+      btn.setAttribute("data-pref",p);
+      btn.setAttribute("aria-label","Color theme: "+LABEL[p]+". Switch to "+LABEL[next]);
+      btn.title="Theme: "+LABEL[p];
+    }
+    syncThemeMedia();
+    if(say)announce("Theme: "+LABEL[p]);
+  }
+  var themeBtn=document.querySelector("[data-theme-toggle]");
+  if(themeBtn)themeBtn.addEventListener("click",function(){
+    var next=ORDER[(ORDER.indexOf(getPref())+1)%ORDER.length];
+    try{if(next==="auto")localStorage.removeItem(THEME_KEY);else localStorage.setItem(THEME_KEY,next)}catch(e){}
+    var wasLight=isLight(), go=function(){applyTheme(next,true)};
+    if(reduce){go();return}
+    if(document.startViewTransition){
+      var r=themeBtn.getBoundingClientRect(), x=r.left+r.width/2, y=r.top+r.height/2;
+      var rad=Math.hypot(Math.max(x,window.innerWidth-x),Math.max(y,window.innerHeight-y));
+      root.classList.add("vt-theme");
+      var vt=document.startViewTransition(go);
+      vt.ready.then(function(){
+        if(isLight()===wasLight)return;
+        root.animate({clipPath:["circle(0px at "+x+"px "+y+"px)","circle("+rad+"px at "+x+"px "+y+"px)"]},{duration:620,easing:"cubic-bezier(.65,0,.25,1)",pseudoElement:"::view-transition-new(root)"});
+      }).catch(function(){});
+      vt.finished.then(function(){root.classList.remove("vt-theme")},function(){root.classList.remove("vt-theme")});
+      return;
+    }
+    root.classList.add("theme-fade");
+    go();
+    setTimeout(function(){root.classList.remove("theme-fade")},380);
+  });
+  if(lightMQ){var onMQ=function(){syncThemeMedia()};if(lightMQ.addEventListener)lightMQ.addEventListener("change",onMQ);else if(lightMQ.addListener)lightMQ.addListener(onMQ)}
+
+  var menuBtn=document.querySelector(".menu-btn"), links=document.getElementById("nav-links");
+  function setMenu(open){
+    if(!menuBtn)return;
+    menuBtn.setAttribute("aria-expanded",open?"true":"false");
+    menuBtn.setAttribute("aria-label",open?"Close menu":"Open menu");
+    links.classList.toggle("is-open",open);
+  }
+  if(menuBtn){
+    menuBtn.addEventListener("click",function(){setMenu(menuBtn.getAttribute("aria-expanded")!=="true")});
+    links.addEventListener("click",function(e){if(e.target.closest("a"))setMenu(false)});
+    document.addEventListener("keydown",function(e){if(e.key==="Escape"&&menuBtn.getAttribute("aria-expanded")==="true"){setMenu(false);menuBtn.focus()}});
+    document.addEventListener("click",function(e){if(!e.target.closest(".site-header"))setMenu(false)});
+    window.addEventListener("resize",function(){if(window.innerWidth>1060)setMenu(false)});
+  }
+
   var RELEASES="https://github.com/pullyard/pullyard/releases/latest", DL=RELEASES+"/download/";
   var ICONS={
-    mac:document.querySelector("[data-download-icon]").innerHTML,
-    windows:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.6 10.4 4.6v7H3zM11.4 4.4 21 3v8.6h-9.6zM3 12.4h7.4v7.1L3 18.4zM11.4 12.4H21V21l-9.6-1.4z"/></svg>',
-    other:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>'
+    mac:'<svg aria-hidden="true" focusable="false"><use href="#i-apple"/></svg>',
+    windows:'<svg aria-hidden="true" focusable="false"><use href="#i-windows"/></svg>',
+    other:'<svg aria-hidden="true" focusable="false"><use href="#i-download"/></svg>'
   };
   var NAMES={mac:"macOS",windows:"Windows",linux:"Linux"};
   var META={
@@ -467,7 +828,7 @@ footer a:hover{color:var(--text)}
     other:"macOS, Windows and Linux"
   };
   var uad=navigator.userAgentData, ua=navigator.userAgent||"";
-  var os=document.documentElement.getAttribute("data-os")||"other";
+  var os=root.getAttribute("data-os")||"other";
   var MEDIA={
     mac:{dir:"img/",w:1600,h:958},
     windows:{dir:"img/windows/",w:1586,h:993},
@@ -513,18 +874,25 @@ footer a:hover{color:var(--text)}
     showPlatform(key);
   }
   function showPlatform(key){
-    var m=MEDIA[key]||MEDIA.mac, root=document.documentElement, changed=root.getAttribute("data-platform")!==key;
+    var m=MEDIA[key]||MEDIA.mac, changed=root.getAttribute("data-platform")!==key;
     root.setAttribute("data-platform",key);
     document.querySelectorAll("button[data-platform]").forEach(function(b){b.setAttribute("aria-pressed",b.getAttribute("data-platform")===key?"true":"false")});
     document.querySelectorAll("[data-platform-name]").forEach(function(el){el.textContent=NAMES[key]});
     document.querySelectorAll("[data-platform-text]").forEach(function(el){try{el.textContent=JSON.parse(el.getAttribute("data-platform-text"))[key]}catch(e){}});
+    document.querySelectorAll("source[data-shot]").forEach(function(s){
+      var src=m.dir+s.getAttribute("data-shot");
+      if(s.getAttribute("srcset")===src)return;
+      s.setAttribute("width",m.w);s.setAttribute("height",m.h);
+      s.srcset=src;
+    });
     document.querySelectorAll("img[data-shot]").forEach(function(img){
       var src=m.dir+img.getAttribute("data-shot");
+      img.alt=img.getAttribute("data-alt")+" on "+NAMES[key];
       if(img.getAttribute("src")===src)return;
       img.width=m.w;img.height=m.h;
-      img.alt=img.getAttribute("data-alt")+" on "+NAMES[key];
       img.src=src;
     });
+    syncThemeMedia();
     var video=document.querySelector("[data-tour-video]");
     if(video){
       var poster=m.dir+"pullyard-web-poster.jpg";
@@ -547,24 +915,54 @@ footer a:hover{color:var(--text)}
   tabs.forEach(function(t,i){
     t.addEventListener("click",function(){selectOS(t.getAttribute("data-os-tab"))});
     t.addEventListener("keydown",function(e){
-      var d=e.key==="ArrowRight"?1:e.key==="ArrowLeft"?-1:0;
-      if(!d)return;
+      var d=e.key==="ArrowRight"?1:e.key==="ArrowLeft"?-1:0, target=null;
+      if(d)target=tabs[(i+d+tabs.length)%tabs.length];
+      else if(e.key==="Home")target=tabs[0];
+      else if(e.key==="End")target=tabs[tabs.length-1];
+      if(!target)return;
       e.preventDefault();
-      selectOS(tabs[(i+d+tabs.length)%tabs.length].getAttribute("data-os-tab"),true);
+      selectOS(target.getAttribute("data-os-tab"),true);
     });
   });
+  applyTheme(getPref(),false);
   selectOS(NAMES[os]?os:"mac");
-  if(!NAMES[os]){var platforms=document.querySelector(".platforms");if(platforms)platforms.open=true}
+  var downloads=document.getElementById("all-downloads");
+  if(!NAMES[os]&&downloads){downloads.open=true;downloads.classList.add("is-open")}
   apply();
   if(uad&&uad.getHighEntropyValues)uad.getHighEntropyValues(["architecture"]).then(function(v){if(v.architecture==="arm"){arch="arm64";apply()}}).catch(function(){});
+
+  document.querySelectorAll("[data-other-platforms]").forEach(function(a){
+    a.addEventListener("click",function(e){
+      var target=document.getElementById("install");
+      if(!target)return;
+      e.preventDefault();
+      if(downloads&&!downloads.open){downloads.open=true;downloads.classList.add("is-open")}
+      history.replaceState(null,"","#install");
+      var tab=document.querySelector('[data-os-tab][aria-selected="true"]');
+      var land=function(){if(tab)tab.focus({preventScroll:true})};
+      if(window.PullYardGlide)window.PullYardGlide(target,land);
+      else{target.scrollIntoView({behavior:reduce?"auto":"smooth",block:"start"});land()}
+    });
+  });
+
   document.querySelectorAll(".code button").forEach(function(button){
-    var code=button.parentNode.querySelector("code");
+    var code=button.parentNode.querySelector("code"), text=button.querySelector("span"), timer=0;
+    var icon=button.querySelector("svg");
+    if(icon)icon.setAttribute("class","cp");
+    button.insertAdjacentHTML("afterbegin",'<svg class="ck" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12.5l4.5 4.5L19 7.5" pathLength="1"/></svg>');
     button.addEventListener("click",function(){
-      (navigator.clipboard?navigator.clipboard.writeText(code.textContent):Promise.reject()).then(function(){button.textContent="Copied";setTimeout(function(){button.textContent="Copy"},1600)}).catch(function(){
+      (navigator.clipboard?navigator.clipboard.writeText(code.textContent):Promise.reject()).then(function(){
+        text.textContent="Copied";announce("Copied to clipboard");
+        button.classList.remove("is-copied");void button.offsetWidth;button.classList.add("is-copied");
+        clearTimeout(timer);
+        timer=setTimeout(function(){text.textContent="Copy";button.classList.remove("is-copied")},1700);
+      }).catch(function(){
         var r=document.createRange();r.selectNodeContents(code);var s=getSelection();s.removeAllRanges();s.addRange(r);
+        announce("Command selected. Press Command or Control C to copy.");
       });
     });
   });
+
   var version=document.querySelector("[data-version]");
   if(window.fetch)fetch("https://api.github.com/repos/pullyard/pullyard/releases/latest").then(function(r){return r.ok?r.json():null}).then(function(j){
     if(!j)return;
@@ -575,13 +973,13 @@ footer a:hover{color:var(--text)}
     (j.assets||[]).forEach(function(a){if(/^pullyard_.+_amd64\.deb$/i.test(a.name))deb=a});
     apply();
   }).catch(function(){});
-  var reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  document.querySelectorAll(".faq details, details.platforms").forEach(function(d){
-    var summary=d.querySelector("summary"), body=d.querySelector("p, .assets"), running=null;
+
+  document.querySelectorAll("details").forEach(function(d){
+    var summary=d.querySelector("summary"), running=null;
     if(d.open)d.classList.add("is-open");
     summary.addEventListener("click",function(e){
       e.preventDefault();
-      var opening=!d.classList.contains("is-open");
+      var opening=!d.open;
       d.classList.toggle("is-open",opening);
       if(reduce||!d.animate){d.open=opening;return}
       var from=d.getBoundingClientRect().height;
@@ -591,25 +989,27 @@ footer a:hover{color:var(--text)}
       d.open=false;
       var closedH=d.getBoundingClientRect().height;
       d.open=true;
-      var to=opening?openH:closedH;
-      running=d.animate([{height:from+"px"},{height:to+"px"}],{duration:opening?340:260,easing:"cubic-bezier(.2,.8,.2,1)"});
-      if(body)body.animate(opening?[{opacity:0,transform:"translateY(-6px)"},{opacity:1,transform:"none"}]:[{opacity:1},{opacity:0}],{duration:opening?320:180,easing:"ease-out",fill:"both"});
-      var anim=running;
-      var done=function(){if(running!==anim)return;running=null;anim.cancel();d.open=opening;if(body)body.getAnimations().forEach(function(a){a.cancel()})};
+      var anim=d.animate([{height:from+"px"},{height:(opening?openH:closedH)+"px"}],{duration:opening?240:200,easing:"cubic-bezier(.2,.8,.2,1)"});
+      running=anim;
+      var done=function(){if(running!==anim)return;running=null;anim.cancel();d.open=opening};
       anim.onfinish=done;
-      setTimeout(done,(opening?340:260)+80);
+      setTimeout(done,(opening?240:200)+80);
     });
   });
+
   var els=document.querySelectorAll(".reveal");
-  if(!("IntersectionObserver" in window)){els.forEach(function(e){e.classList.add("in")});return}
-  var io=new IntersectionObserver(function(entries){entries.forEach(function(e){if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target)}})},{rootMargin:"0px 0px -8% 0px"});
-  els.forEach(function(e){io.observe(e)});
+  if(reduce||!("IntersectionObserver" in window)){els.forEach(function(e){e.classList.add("in")})}
+  else{
+    var io=new IntersectionObserver(function(entries){entries.forEach(function(e){if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target)}})},{rootMargin:"0px 0px -8% 0px"});
+    els.forEach(function(e){io.observe(e)});
+  }
 })();
 </script>
 <script src="demo.js"></script>
+<script src="site/motion.js"></script>
 <script>
 (function () {
-  var video = document.querySelector(".tour-video video");
+  var video = document.querySelector("[data-tour-video]");
   if (!video) return;
   var fellBack = false, visible = false;
   document.addEventListener("platformchange", function () { fellBack = false; });
@@ -622,15 +1022,18 @@ footer a:hover{color:var(--text)}
     if (visible && !video.controls) video.play().catch(function () {});
   }, true);
   var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (reduced || !("IntersectionObserver" in window)) {
-    video.controls = true;
-    video.preload = "metadata";
-    return;
-  }
+  if (reduced || !("IntersectionObserver" in window)) return;
+  video.controls = false;
   var userPaused = false;
-  video.addEventListener("click", function () {
+  function toggle() {
     if (video.paused) { userPaused = false; video.play().catch(function () {}); }
     else { userPaused = true; video.pause(); }
+  }
+  video.tabIndex = 0;
+  video.setAttribute("aria-label", "PullYard product tour. Press Space or Enter to play or pause.");
+  video.addEventListener("click", toggle);
+  video.addEventListener("keydown", function (e) {
+    if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggle(); }
   });
   new IntersectionObserver(function (entries) {
     entries.forEach(function (e) {

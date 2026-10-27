@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Text.Json.Nodes;
+using Microsoft.UI.Input;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -13,6 +15,7 @@ using PullYard.Core.Util;
 using PullYard.Services;
 using PullYard.ViewModels;
 using Windows.System;
+using Windows.UI.Core;
 using VisualState = PullYard.Core.Api.VisualState;
 
 namespace PullYard.Views;
@@ -117,7 +120,12 @@ public sealed class PRContent : Grid, IShortcutHost
     private int lastScrollToken;
     private int renderedDiffVersion = -1;
     private string renderedFilter = "";
+    private string renderedLayout = "";
     private string lastHtml = "";
+    private CheckBox? wrapBox;
+    private ComboBox? layoutBox;
+    private bool splitFits;
+    private bool syncingReviewBar;
 
     public PRContent(PRDetailViewModel model)
     {
@@ -157,10 +165,12 @@ public sealed class PRContent : Grid, IShortcutHost
         busy.Visibility = Visibility.Collapsed;
         model.PropertyChanged += OnModel;
         JiraService.Account.Changed += OnJiraChanged;
+        Settings.Shared.Changed += OnSettings;
         Unloaded += (_, _) =>
         {
             model.PropertyChanged -= OnModel;
             JiraService.Account.Changed -= OnJiraChanged;
+            Settings.Shared.Changed -= OnSettings;
             WatchFixTab(null);
         };
         Loaded += (_, _) =>
@@ -169,8 +179,11 @@ public sealed class PRContent : Grid, IShortcutHost
             model.PropertyChanged += OnModel;
             JiraService.Account.Changed -= OnJiraChanged;
             JiraService.Account.Changed += OnJiraChanged;
+            Settings.Shared.Changed -= OnSettings;
+            Settings.Shared.Changed += OnSettings;
             RenderAll();
         };
+        CharacterReceived += OnReviewCharacter;
         AddShortcuts();
         RenderAll();
     }
@@ -349,6 +362,7 @@ public sealed class PRContent : Grid, IShortcutHost
         };
         var p = Ui.H(3, Ui.Avatar(r.Avatar, 18), Ui.Glyph(glyph, r.State is "APPROVED" or "CHANGES_REQUESTED" or "COMMENTED" ? 11 : 6, color));
         Ui.Tip(p, $"{r.Login}: {title}");
+        Ui.Named(p, $"{r.Login}: {title}");
         return p;
     }
 
@@ -394,6 +408,7 @@ public sealed class PRContent : Grid, IShortcutHost
             chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "green"), Ui.Caption(ok.ToString(), "green")));
             var b = new Button { Content = chips, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(4, 0, 4, 0) };
             Ui.Tip(b, L.T("PR_Checks", "Checks"));
+            Ui.Named(b, L.T("PR_Checks", "Checks"), L.F("PR_ChecksSummary", "{0} failed, {1} pending, {2} passed", failed, pending, ok));
             b.Click += (_, _) => model.Tab = PRTab.Checks;
             row.Children.Add(b);
         }
@@ -475,7 +490,8 @@ public sealed class PRContent : Grid, IShortcutHost
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(0)
             };
-            Ui.Tip(running, L.T("CiFix_OpenSession", "Open the Claude Code session"));
+            Ui.Tip(running, L.T("CiFix_OpenSession", "Open the agent session"));
+            Ui.Named(running, label + " · " + tab.State.Title(), L.T("CiFix_OpenSession", "Open the agent session"));
             running.Click += (_, _) => openTab();
             row.Children.Add(running);
         }
@@ -490,8 +506,9 @@ public sealed class PRContent : Grid, IShortcutHost
         var actions = Ui.H(6);
         if (model.CanWrite && model.FailedRuns > 0) actions.Children.Add(Ui.Button(L.T("Checks_RerunShort", "Re-run failed"), rerun));
         var button = Ui.Button(L.T("Fix_Button", "Fix with agent"), fix, accent: true);
-        button.Background = Palette.Brush("coral");
-        button.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
+        var (coral, onCoral) = Palette.Filled("coral");
+        button.Background = coral;
+        button.Foreground = onCoral;
         actions.Children.Add(button);
         var grid = Ui.Columns((row, Ui.Star), (actions, Ui.Auto));
         return new Border { Background = Palette.Brush("red", 0.08), CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 6, 8, 6), Child = grid };
@@ -558,27 +575,43 @@ public sealed class PRContent : Grid, IShortcutHost
         toolbar.Children.Clear();
         if (pr.IsOpen)
         {
+            var reviewText = model.PendingCount == 0 ? L.T("PR_Review", "Review") : L.F("PR_ReviewN", "Review ({0})", model.PendingCount);
             var review = new SplitButton
             {
-                Content = Ui.H(6, Ui.Glyph("", 13, "text"), new TextBlock { Text = model.PendingCount == 0 ? L.T("PR_Review", "Review") : L.F("PR_ReviewN", "Review ({0})", model.PendingCount) })
+                Content = Ui.H(6, Ui.Glyph("", 13, "text"), new TextBlock { Text = reviewText })
             };
             review.Click += (_, _) => Dialogs.Review(XamlRoot, model).Forget();
             var flyout = Ui.Menu(Ui.MenuItem(L.T("PR_WriteReview", "Write review…"), () => Dialogs.Review(XamlRoot, model).Forget()));
             if (!pr.ViewerDidAuthor) flyout.Items.Add(Ui.MenuItem(L.T("PR_Approve", "Approve"), () => ConfirmApprove().Forget()));
+            flyout.Items.Add(Ui.Separator());
+            flyout.Items.Add(Ui.MenuItem(L.T("PR_RequestReviewMenu", "Request review…"), () => Dialogs.Reviewers(XamlRoot, model).Forget(), ""));
             review.Flyout = flyout;
             Ui.Tip(review, L.T("PR_SubmitReview", "Submit review"));
+            Ui.Named(review, reviewText, L.T("PR_SubmitReview", "Submit review"));
             toolbar.Children.Add(review);
-            toolbar.Children.Add(Ui.IconButton("", L.T("PR_RequestReview", "Request or re-request review"), () => Dialogs.Reviewers(XamlRoot, model).Forget(), "text"));
         }
-        toolbar.Children.Add(Ui.IconButton("", L.T("PR_FixWithClaude", "Send review comments to a new Claude Code session"), () => Dialogs.FixWithClaude(XamlRoot, model).Forget(), "coral"));
+        var fix = Ui.Button(L.T("Fix_Button", "Fix with agent"), () => Dialogs.FixWithClaude(XamlRoot, model).Forget(), glyph: "", tooltip: L.T("PR_FixWithAgent", "Send review comments to a new agent session"));
+        toolbar.Children.Add(fix);
         if (pr.IsOpen && !pr.IsDraft && model.CanWrite)
-            toolbar.Children.Add(Ui.IconButton("", L.T("PR_Merge", "Merge pull request"), () => Dialogs.Merge(XamlRoot, model).Forget(), "green"));
+            toolbar.Children.Add(Ui.Button(L.T("PR_MergeButton", "Merge"), () => Dialogs.Merge(XamlRoot, model).Forget(), glyph: "", tooltip: L.T("PR_Merge", "Merge pull request")));
         toolbar.Children.Add(Ui.RefreshButton(() => model.Load(true)));
-        var more = Ui.IconButton("", L.T("Common_More", "More"), () => { }, "text");
+        var more = Ui.IconButton("", L.T("Common_MoreActions", "More actions"), () => { }, "text");
         more.Flyout = MoreMenu();
-        toolbar.Children.Add(more);
-        toolbar.Children.Add(Ui.IconButton("\uE8C8", L.T("Menu_CopyShortLinkHint", "Copy short link (Ctrl+Shift+C)"), CopyShortLink, "text"));
-        toolbar.Children.Add(Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(pr.Url), "text"));
+        var group = Ui.H(0,
+            Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(pr.Url), "text"),
+            Ui.IconButton("\uE8C8", L.T("Menu_CopyShortLinkHint", "Copy short link (Ctrl+Shift+C)"), CopyShortLink, "text"),
+            more);
+        var groupHost = new Border
+        {
+            Child = group,
+            CornerRadius = new CornerRadius(6),
+            BorderBrush = Palette.Brush("text", ThemeService.IsDark ? 0.14 : 0.12),
+            BorderThickness = new Thickness(1),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(4, 0, 0, 0)
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(groupHost, L.T("PR_BrowserAndMore", "Browser and more"));
+        toolbar.Children.Add(groupHost);
     }
 
     private void CopyShortLink() => ShellView.CopyShortLink(ShortLink.Of(model.Ref));
@@ -594,6 +627,8 @@ public sealed class PRContent : Grid, IShortcutHost
     {
         var pr = Pr;
         var menu = Ui.Menu(
+            Ui.MenuItem(L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(pr.Url), "\uE774"),
+            Ui.Separator(),
             Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => WindowInterop.Copy(pr.Url), ""),
             Ui.MenuItem(L.T("Menu_CopyShortLink", "Copy Short Link"), CopyShortLink, "\uE8C8"),
             Ui.MenuItem(L.F("PR_CopyCheckout", "Copy “gh pr checkout {0}”", pr.Number), () => WindowInterop.Copy($"gh pr checkout {pr.Number} -R {model.Ref.Repo.Full}"), ""),
@@ -699,17 +734,51 @@ public sealed class PRContent : Grid, IShortcutHost
     {
         var box = new TextBox { PlaceholderText = placeholder, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 64, MaxHeight = 200 };
         ScrollViewer.SetVerticalScrollBarVisibility(box, ScrollBarVisibility.Auto);
-        var button = Ui.Button(buttonText, () => { }, accent: true);
-        button.VerticalAlignment = VerticalAlignment.Bottom;
-        button.IsEnabled = false;
-        box.TextChanged += (_, _) => button.IsEnabled = box.Text.Trim().Length > 0;
+        Ui.Named(box, buttonText, placeholder);
+        var button = TextZoom.Track(new Button { VerticalAlignment = VerticalAlignment.Bottom }, 14);
+        var busy = false;
+        void Sync()
+        {
+            var empty = box.Text.Trim().Length == 0;
+            var accent = !empty && !busy;
+            button.Style = (Style)Application.Current.Resources[accent ? "AccentButtonStyle" : "DefaultButtonStyle"];
+            button.Content = busy ? Ui.H(6, Ui.Spinner(14), new TextBlock { Text = L.T("Composer_Sending", "Sending…") }) : buttonText;
+            button.IsEnabled = !busy;
+            var tip = busy ? L.T("Composer_Sending", "Sending…") : empty ? L.T("Composer_WriteFirst", "Write a comment to send it") : L.T("Composer_SendHint", "Send comment (Ctrl+Enter)");
+            ToolTipService.SetToolTip(button, tip);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, busy ? L.T("Composer_Sending", "Sending…") : buttonText);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(button, tip);
+        }
+        Sync();
+        var wasEmpty = true;
+        box.TextChanged += (_, _) =>
+        {
+            var empty = box.Text.Trim().Length == 0;
+            if (empty == wasEmpty) return;
+            wasEmpty = empty;
+            Sync();
+        };
         async Task Submit()
         {
             var body = box.Text;
-            if (body.Trim().Length == 0) return;
-            button.IsEnabled = false;
-            if (await send(body)) box.Text = "";
-            button.IsEnabled = box.Text.Trim().Length > 0;
+            if (busy) return;
+            if (body.Trim().Length == 0)
+            {
+                box.Focus(FocusState.Programmatic);
+                return;
+            }
+            busy = true;
+            Sync();
+            try
+            {
+                if (await send(body)) box.Text = "";
+            }
+            finally
+            {
+                busy = false;
+                wasEmpty = box.Text.Trim().Length == 0;
+                Sync();
+            }
         }
         button.Click += (_, _) => Submit().Forget();
         var acc = new KeyboardAccelerator { Key = VirtualKey.Enter, Modifiers = VirtualKeyModifiers.Control };
@@ -860,15 +929,140 @@ public sealed class PRContent : Grid, IShortcutHost
         grid.Children.Add(line);
 
         var right = new Grid();
+        right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        right.Children.Add(ReviewBar());
         diff = new HtmlView();
         diff.LinkClicked += url => HtmlView.OpenLink(url);
         diff.ActionInvoked += OnDiffAction;
+        diff.SizeChanged += (_, e) =>
+        {
+            var fits = e.NewSize.Width >= DiffPrefs.SplitMinWidth;
+            if (fits == splitFits) return;
+            splitFits = fits;
+            SyncReviewBar();
+            RenderFiles();
+        };
+        SetRow(diff, 1);
         right.Children.Add(diff);
         SetColumn(right, 2);
         grid.Children.Add(right);
         renderedDiffVersion = -1;
         RenderFiles();
         return grid;
+    }
+
+    private static bool WrapPref => Settings.Shared.GetBool(DiffPrefs.WrapKey, true);
+
+    private static bool SplitPref => Settings.Shared.GetBool(DiffPrefs.SplitKey, false);
+
+    private bool SplitActive => SplitPref && splitFits;
+
+    private FrameworkElement ReviewBar()
+    {
+        Button Nav(string glyph, string title, string key, string id)
+        {
+            var b = Ui.IconButton(glyph, L.F("Files_ShortcutTip", "{0} ({1})", title, key), () => Perform(id), "text");
+            b.Padding = new Thickness(7, 4, 7, 4);
+            AutomationProperties.SetName(b, title);
+            AutomationProperties.SetAcceleratorKey(b, key);
+            return b;
+        }
+        wrapBox = new CheckBox { Content = L.T("Files_WrapLines", "Wrap lines"), MinWidth = 0, VerticalAlignment = VerticalAlignment.Center };
+        ToolTipService.SetToolTip(wrapBox, L.T("Files_WrapTip", "Wrap long lines (W)"));
+        AutomationProperties.SetAcceleratorKey(wrapBox, "W");
+        wrapBox.Click += (_, _) =>
+        {
+            if (!syncingReviewBar) Settings.Shared.Set(DiffPrefs.WrapKey, wrapBox.IsChecked == true);
+        };
+        layoutBox = new ComboBox { MinWidth = 104, VerticalAlignment = VerticalAlignment.Center };
+        layoutBox.Items.Add(L.T("Files_Unified", "Unified"));
+        layoutBox.Items.Add(L.T("Files_Split", "Split"));
+        AutomationProperties.SetName(layoutBox, L.T("Files_DiffLayout", "Diff layout"));
+        AutomationProperties.SetAcceleratorKey(layoutBox, "S");
+        layoutBox.SelectionChanged += (_, _) =>
+        {
+            if (!syncingReviewBar && layoutBox.SelectedIndex >= 0 && splitFits) Settings.Shared.Set(DiffPrefs.SplitKey, layoutBox.SelectedIndex == 1);
+        };
+        var nav = Ui.H(2,
+            Nav("\uE70E", L.T("Files_PrevFile", "Previous file"), "P", "p"),
+            Nav("\uE70D", L.T("Files_NextFile", "Next file"), "N", "n"),
+            Ui.Line(vertical: true),
+            Nav("\uE74A", L.T("Files_PrevHunk", "Previous hunk"), "[", "["),
+            Nav("\uE74B", L.T("Files_NextHunk", "Next hunk"), "]", "]"));
+        var options = Ui.H(12, wrapBox, layoutBox);
+        var row = Ui.Columns((nav, Ui.Auto), (null, Ui.Star), (options, Ui.Auto));
+        row.Padding = new Thickness(8, 4, 10, 4);
+        AutomationProperties.SetName(row, L.T("Files_ReviewBar", "Review navigation"));
+        SyncReviewBar();
+        var line = Ui.Line();
+        line.VerticalAlignment = VerticalAlignment.Bottom;
+        var bar = new Grid();
+        bar.Children.Add(row);
+        bar.Children.Add(line);
+        return bar;
+    }
+
+    private void SyncReviewBar()
+    {
+        if (wrapBox is null || layoutBox is null) return;
+        syncingReviewBar = true;
+        wrapBox.IsChecked = WrapPref;
+        layoutBox.SelectedIndex = SplitActive ? 1 : 0;
+        layoutBox.IsEnabled = splitFits;
+        ToolTipService.SetToolTip(layoutBox, splitFits ? L.T("Files_LayoutTip", "Unified or side-by-side diff (S)") : L.T("Files_LayoutNarrow", "Widen the window to use split view"));
+        syncingReviewBar = false;
+    }
+
+    private void OnSettings(string key)
+    {
+        if (key is not (DiffPrefs.WrapKey or DiffPrefs.SplitKey)) return;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            SyncReviewBar();
+            RenderFiles();
+        });
+    }
+
+    private void OnReviewCharacter(UIElement sender, CharacterReceivedRoutedEventArgs e)
+    {
+        if (e.Handled || model.Tab != PRTab.Files || diff is null) return;
+        var key = e.Character switch
+        {
+            'n' => "n",
+            'p' => "p",
+            '[' => "[",
+            ']' => "]",
+            'v' => "v",
+            'w' => "w",
+            's' => "s",
+            _ => null
+        };
+        if (key is null || XamlRoot is null) return;
+        if (FocusManager.GetFocusedElement(XamlRoot) is TextBox or RichEditBox or PasswordBox or AutoSuggestBox) return;
+        if (InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(CoreVirtualKeyStates.Down)) return;
+        if (InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu).HasFlag(CoreVirtualKeyStates.Down)) return;
+        e.Handled = Perform(key);
+    }
+
+    private bool Perform(string key)
+    {
+        switch (key)
+        {
+            case "n" or "p" or "[" or "]" or "v":
+                if (diff is null || !model.FilesLoaded) return false;
+                diff.Send(new JsonObject { ["op"] = "review", ["key"] = key });
+                return true;
+            case "w":
+                Settings.Shared.Set(DiffPrefs.WrapKey, !WrapPref);
+                return true;
+            case "s":
+                if (!splitFits) return false;
+                Settings.Shared.Set(DiffPrefs.SplitKey, !SplitActive);
+                return true;
+            default:
+                return false;
+        }
     }
 
     private void RenderFiles()
@@ -885,12 +1079,14 @@ public sealed class PRContent : Grid, IShortcutHost
         fileList.ItemsSource = visible.Select(f => new FileListItem(f, model.ViewedPaths.Contains(f.Id), model.ThreadCount(f.Id))).ToList();
         if (selected is not null) fileList.SelectedItem = (fileList.ItemsSource as List<FileListItem>)?.FirstOrDefault(f => f.File.Id == selected);
         if (viewedCount is not null) viewedCount.Text = $"{model.ViewedPaths.Intersect(model.Files.Select(f => f.Id)).Count()}/{model.Files.Count}";
-        if (renderedDiffVersion == model.DiffVersion && renderedFilter == filter) return;
+        var layout = $"{WrapPref}|{SplitActive}";
+        if (renderedDiffVersion == model.DiffVersion && renderedFilter == filter && renderedLayout == layout) return;
         var first = renderedDiffVersion < 0;
         renderedDiffVersion = model.DiffVersion;
         renderedFilter = filter;
-        var html = DiffHtml.Render(model.Files, model.RenderOptions(filter));
-        diff.Render(html, "diff", first && selected is not null ? "file:" + selected : first ? "top" : null, "flush");
+        renderedLayout = layout;
+        var html = DiffHtml.Render(model.Files, model.RenderOptions(filter, WrapPref, SplitActive));
+        diff.Render(html, "diff", first && selected is not null ? "file:" + selected : first ? "top" : null, "flush review");
     }
 
     private void OnDiffAction(string type, string id)
@@ -922,7 +1118,13 @@ public sealed class PRContent : Grid, IShortcutHost
             case "expand":
                 model.Collapsed.Remove(id);
                 if (model.Files.FirstOrDefault(f => f.Id == id) is { } file)
-                    diff?.Send(new JsonObject { ["op"] = "fileBody", ["path"] = id, ["html"] = DiffHtml.Body(file, model.RenderOptions("")) });
+                    diff?.Send(new JsonObject { ["op"] = "fileBody", ["path"] = id, ["html"] = DiffHtml.Body(file, model.RenderOptions("", WrapPref, SplitActive)) });
+                break;
+            case "review":
+                Perform(id);
+                break;
+            case "reveal":
+                model.RevealFile(id);
                 break;
             case "deletePending":
                 if (Guid.TryParse(id, out var gid)) model.RemovePending(gid);
@@ -1000,7 +1202,7 @@ public sealed record CheckRowItem(CheckContext Check, Action ShowLog, Action? Fi
         if (c.IsActionsJob && c.Outcome is not CheckOutcome.Pending and not CheckOutcome.Skipped)
             right.Children.Add(Ui.Button(L.T("Checks_Log", "Log"), ShowLog));
         if (c.Link is { } link) right.Children.Add(Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(link)));
-        var grid = Ui.Columns((Ui.Glyph(Palette.CheckGlyph(c.Outcome), 15, Palette.CheckKey(c.Outcome)), Ui.Auto), (body, Ui.Star), (right, Ui.Auto));
+        var grid = Ui.Columns((Ui.CheckIcon(c.Outcome, 15), Ui.Auto), (body, Ui.Star), (right, Ui.Auto));
         grid.ColumnSpacing = 10;
         grid.Padding = new Thickness(0, 4, 0, 4);
         return grid;
