@@ -3,6 +3,7 @@ using System.ComponentModel;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using PullYard.Controls;
 using PullYard.Core.Claude;
@@ -22,8 +23,14 @@ public sealed class ClaudeWorkspaceView : Grid
     private readonly ContentControl controlBar = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, IsTabStop = false };
     private readonly Grid tabContent = new();
     private readonly ContentControl inspectorHost = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch, IsTabStop = false };
-    private readonly ColumnDefinition inspectorColumn = new() { Width = new GridLength(380) };
+    private readonly ColumnDefinition inspectorColumn = new() { Width = new GridLength(InspectorDefault) };
+    private const double InspectorMin = 280;
+    private const double InspectorDefault = 380;
     private Grid? workspace;
+    private Grid? main;
+    private FrameworkElement? divider;
+    private Border? grip;
+    private bool inspectorExpanded;
     private ClaudeTab? shownTab;
     private ClaudeInspector? inspector;
     private ClaudeAuthView? authView;
@@ -71,7 +78,46 @@ public sealed class ClaudeWorkspaceView : Grid
 
     private void OnWs(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(ClaudeWorkspace.ShowInspector) && !Ws.ShowInspector) inspectorExpanded = false;
         if (e.PropertyName is nameof(ClaudeWorkspace.SelectedTab) or nameof(ClaudeWorkspace.ShowInspector) or nameof(ClaudeWorkspace.Projects)) Render();
+    }
+
+    private double MaxInspectorWidth => Math.Max(InspectorMin, (workspace?.ActualWidth ?? 0) * 0.6);
+
+    private double InspectorWidth
+    {
+        get
+        {
+            var saved = Settings.Shared.GetDouble(Keys.AgentsInspectorWidth, InspectorDefault);
+            var max = workspace is { ActualWidth: > 0 } ? MaxInspectorWidth : double.MaxValue;
+            return Math.Clamp(saved, InspectorMin, Math.Max(InspectorMin, max));
+        }
+    }
+
+    private void SizeInspector(double width, bool save)
+    {
+        var clamped = Math.Clamp(width, InspectorMin, MaxInspectorWidth);
+        inspectorColumn.Width = new GridLength(clamped);
+        if (save) Settings.Shared.Set(Keys.AgentsInspectorWidth, Math.Round(clamped));
+    }
+
+    private void ToggleExpanded()
+    {
+        inspectorExpanded = !inspectorExpanded && Ws.ShowInspector;
+        ApplyExpanded();
+        if (inspectorExpanded) inspector?.FocusExpand();
+    }
+
+    private void ApplyExpanded()
+    {
+        if (main is null) return;
+        var expanded = inspectorExpanded && Ws.ShowInspector;
+        SetColumn(inspectorHost, expanded ? 0 : 2);
+        SetColumnSpan(inspectorHost, expanded ? 3 : 1);
+        main.Visibility = expanded ? Visibility.Collapsed : Visibility.Visible;
+        if (divider is not null) divider.Visibility = Ws.ShowInspector && !expanded ? Visibility.Visible : Visibility.Collapsed;
+        if (grip is not null) grip.Visibility = Ws.ShowInspector && !expanded ? Visibility.Visible : Visibility.Collapsed;
+        inspector?.SetExpanded(expanded);
     }
 
     private void OnTabs(object? sender, NotifyCollectionChangedEventArgs e)
@@ -114,10 +160,11 @@ public sealed class ClaudeWorkspaceView : Grid
         if (shownTab != tab)
         {
             shownTab = tab;
-            inspector = new ClaudeInspector(tab);
+            inspector = new ClaudeInspector(tab) { ToggleExpand = ToggleExpanded };
             inspectorHost.Content = inspector;
         }
-        inspectorColumn.Width = Ws.ShowInspector ? new GridLength(380) : new GridLength(0);
+        inspectorColumn.Width = Ws.ShowInspector ? new GridLength(InspectorWidth) : new GridLength(0);
+        ApplyExpanded();
         var revealInspector = Ws.ShowInspector && inspectorHost.Visibility == Visibility.Collapsed;
         inspectorHost.Visibility = Ws.ShowInspector ? Visibility.Visible : Visibility.Collapsed;
         if (revealInspector) DispatcherQueue.TryEnqueue(() => LiveRefresh.Reveal(inspectorHost));
@@ -132,6 +179,7 @@ public sealed class ClaudeWorkspaceView : Grid
         workspace.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         workspace.ColumnDefinitions.Add(inspectorColumn);
         var main = new Grid();
+        this.main = main;
         main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         main.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -145,10 +193,73 @@ public sealed class ClaudeWorkspaceView : Grid
         main.Children.Add(tabContent);
         workspace.Children.Add(main);
         var line = Ui.Line(vertical: true);
+        divider = line;
         SetColumn(line, 1);
         workspace.Children.Add(line);
         SetColumn(inspectorHost, 2);
         workspace.Children.Add(inspectorHost);
+        BuildGrip(workspace);
+        workspace.SizeChanged += (_, _) =>
+        {
+            if (Ws.ShowInspector && inspectorColumn.Width.Value > MaxInspectorWidth) SizeInspector(inspectorColumn.Width.Value, false);
+        };
+        var escape = new KeyboardAccelerator { Key = Windows.System.VirtualKey.Escape };
+        escape.Invoked += (_, e) =>
+        {
+            if (!inspectorExpanded || !Ws.ShowInspector) return;
+            e.Handled = true;
+            ToggleExpanded();
+        };
+        workspace.KeyboardAccelerators.Add(escape);
+        workspace.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
+    }
+
+    private void BuildGrip(Grid host)
+    {
+        var handle = grip = new Border { Width = 9, Margin = new Thickness(-4, 0, -4, 0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        ToolTipService.SetToolTip(handle, L.T("Inspector_ResizeHint", "Drag to resize, double-click to reset"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(handle, L.T("Inspector_Resize", "Resize inspector"));
+        SetColumn(handle, 1);
+        host.Children.Add(handle);
+        double startWidth = 0, startX = 0;
+        var dragging = false;
+        handle.PointerEntered += (_, _) => ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.SizeWestEast);
+        handle.PointerExited += (_, _) =>
+        {
+            if (!dragging) ProtectedCursor = null;
+        };
+        handle.PointerPressed += (_, e) =>
+        {
+            dragging = true;
+            startWidth = inspectorColumn.ActualWidth;
+            startX = e.GetCurrentPoint(host).Position.X;
+            handle.CapturePointer(e.Pointer);
+            e.Handled = true;
+        };
+        handle.PointerMoved += (_, e) =>
+        {
+            if (!dragging) return;
+            SizeInspector(startWidth - (e.GetCurrentPoint(host).Position.X - startX), false);
+        };
+        void End(Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+        {
+            if (!dragging) return;
+            dragging = false;
+            handle.ReleasePointerCapture(e.Pointer);
+            ProtectedCursor = null;
+            SizeInspector(inspectorColumn.ActualWidth, true);
+        }
+        handle.PointerReleased += (_, e) => End(e);
+        handle.PointerCaptureLost += (_, _) =>
+        {
+            dragging = false;
+            ProtectedCursor = null;
+        };
+        handle.DoubleTapped += (_, e) =>
+        {
+            e.Handled = true;
+            SizeInspector(InspectorDefault, true);
+        };
     }
 
     private FrameworkElement EmptyState()
@@ -222,10 +333,12 @@ public sealed class ClaudeWorkspaceView : Grid
                 BorderThickness = new Thickness(1)
             };
             b.Click += (_, _) => Ws.SelectedTab = tab;
+            Ui.Named(b, $"{tab.Title}, {tab.ProjectName}, {tab.State.Title()}");
             tabBar.Children.Add(b);
         }
         var add = new DropDownButton { Content = Ui.Glyph("", 12, "text"), Padding = new Thickness(8, 4, 8, 4) };
         Ui.Tip(add, L.T("Claude_NewSession", "New session"));
+        Ui.Named(add, L.T("Claude_NewSession", "New session"));
         var menu = new MenuFlyout();
         if (Ws.SelectedTab is { } current)
         {
@@ -282,6 +395,8 @@ public sealed class ClaudeWorkspaceView : Grid
         var termItem = new SelectorBarItem { Icon = new FontIcon { Glyph = "", FontFamily = Ui.Icons }, Tag = "terminal" };
         Ui.Tip(chatItem, L.T("Claude_Chat", "Chat"));
         Ui.Tip(termItem, L.T("Claude_Terminal", "Terminal"));
+        Ui.Named(chatItem, L.T("Claude_Chat", "Chat"));
+        Ui.Named(termItem, L.T("Claude_Terminal", "Terminal"));
         kind.Items.Add(chatItem);
         kind.Items.Add(termItem);
         kind.SelectedItem = tab.Kind == ClaudeTabKind.Chat ? chatItem : termItem;
@@ -293,11 +408,12 @@ public sealed class ClaudeWorkspaceView : Grid
             else if (!wantsTerminal && tab.Kind == ClaudeTabKind.Terminal) Ws.OpenInChat(tab);
         };
         Ui.Tip(kind, L.T("Claude_ChatOrTerminal", "Chat or terminal (same session)"));
+        Ui.Named(kind, L.T("Claude_ChatOrTerminalName", "Chat or terminal"));
         right.Children.Add(kind);
         var more = Ui.IconButton("", L.T("Common_More", "More"), () => { }, "text");
         more.Flyout = MoreMenu(tab);
         right.Children.Add(more);
-        right.Children.Add(Ui.IconButton("", L.T("Claude_ToggleInspector", "Toggle changes panel"), () => Ws.ShowInspector = !Ws.ShowInspector, "text"));
+        right.Children.Add(Ui.IconButton("\uE89F", Ws.ShowInspector ? L.T("Claude_HideInspector", "Hide changes panel") : L.T("Claude_ShowInspector", "Show changes panel"), () => Ws.ShowInspector = !Ws.ShowInspector, "text"));
         controlBar.Content = Ui.Columns((left, Ui.Star), (right, Ui.Auto));
     }
 

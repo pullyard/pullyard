@@ -15,7 +15,7 @@ fragment IssueItem on Issue { number title url issueState: state stateReason cre
 
     public static readonly string Search = @"query Search($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 40, after: $after) { issueCount pageInfo { hasNextPage endCursor } nodes { __typename ...PRItem ...IssueItem } } }" + ItemFragments;
 
-    public const string BadgeFragment = "fragment BadgePR on PullRequest { number title url prState: state isDraft updatedAt author { login avatarUrl } repository { nameWithOwner } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }";
+    public const string BadgeFragment = "fragment BadgePR on PullRequest { number title url prState: state isDraft updatedAt reviewDecision author { login avatarUrl } repository { nameWithOwner } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }";
 
     public static readonly string Badges = @"query Badges {
   rr: search(query: ""is:pr is:open review-requested:@me archived:false sort:updated-desc"", type: ISSUE, first: 10) { issueCount nodes { __typename ...BadgePR } }

@@ -30,6 +30,7 @@ public sealed class RepoDetailView : LiveDetail
     private RepoCodeView? codeView;
     private ListView? itemsList;
     private RowAppear? itemsAppear;
+    private readonly ContentControl itemsOverlay = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch, IsTabStop = false };
     private readonly RefreshFooter footer = new();
     private static readonly Dictionary<string, (string Ref, string Path, bool Blame)> pendingFiles = new(StringComparer.OrdinalIgnoreCase);
     private static event Action<string>? FileRequested;
@@ -231,7 +232,9 @@ public sealed class RepoDetailView : LiveDetail
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         if (itemsList.Parent is Panel p) p.Children.Remove(itemsList);
         if (footer.Parent is Panel fp) fp.Children.Remove(footer);
+        if (itemsOverlay.Parent is Panel op) op.Children.Remove(itemsOverlay);
         grid.Children.Add(itemsList);
+        grid.Children.Add(itemsOverlay);
         SetRow(footer, 1);
         grid.Children.Add(footer);
         footer.Retry = () => LoadItems().Forget();
@@ -249,7 +252,21 @@ public sealed class RepoDetailView : LiveDetail
             itemsAppear?.Ingest(listModel.Items.Select(i => i.Id), listModel.AppearMode);
             itemsList.ItemsSource = listModel.Items;
         }
-        footer.Update(listModel.LastUpdated, listModel.Refreshing, listModel.Error);
+        footer.Update(listModel.LastUpdated, listModel.Refreshing, listModel.Items.Count == 0 ? null : listModel.Error);
+        if (e.PropertyName is nameof(SearchListViewModel.Items) or nameof(SearchListViewModel.Loading) or nameof(SearchListViewModel.Error) or nameof(SearchListViewModel.CheckingCache)) UpdateItemsOverlay();
+    }
+
+    private void UpdateItemsOverlay()
+    {
+        if (listModel.Items.Count > 0 || listModel.CheckingCache) itemsOverlay.Content = null;
+        else if (listModel.Loading) itemsOverlay.Content = Ui.Loading();
+        else if (listModel.Error is { } err) itemsOverlay.Content = Ui.Error(err, () => LoadItems().Forget());
+        else
+        {
+            var copy = EmptyCopy.List(tab == "issue" ? L.T("Empty_IssuesNoun", "issues") : L.T("Empty_PullRequestsNoun", "pull requests"), stateFilter, repo.Full);
+            itemsOverlay.Content = Ui.EmptyState(copy.Title, copy.Message);
+        }
+        itemsOverlay.Visibility = itemsOverlay.Content is null ? Visibility.Collapsed : Visibility.Visible;
     }
 }
 

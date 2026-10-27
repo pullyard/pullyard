@@ -397,8 +397,11 @@ public sealed partial class PRDetailViewModel : ObservableObject
         outdatedByPath = outdated;
     }
 
-    public DiffRenderOptions RenderOptions(string filter) => new()
+    public DiffRenderOptions RenderOptions(string filter, bool wrap = true, bool split = false) => new()
     {
+        Wrap = wrap,
+        Split = split,
+        Review = true,
         Commentable = Pr?.IsOpen ?? false,
         ShowViewed = true,
         ShowBlame = Pr is not null,

@@ -23,6 +23,10 @@ public sealed class ClaudeInspector : Grid
     private TasksPanel? tasks;
     private LocalFilesPanel? files;
     private BranchPRPanel? prs;
+    private readonly Button expandButton;
+    private bool expanded;
+
+    public Action? ToggleExpand { get; set; }
 
     public ClaudeInspector(ClaudeTab tab)
     {
@@ -30,7 +34,11 @@ public sealed class ClaudeInspector : Grid
         Background = ThemeService.IsBrand ? Palette.Brush("panel") : null;
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        var top = Ui.V(0, tabs, Ui.Line());
+        expandButton = Ui.IconButton("\uE740", L.T("Inspector_ExpandHint", "Expand over the chat"), () => ToggleExpand?.Invoke());
+        expandButton.Margin = new Thickness(0, 0, 6, 0);
+        expandButton.VerticalAlignment = VerticalAlignment.Center;
+        SetExpanded(false);
+        var top = Ui.V(0, Ui.Columns((tabs, Ui.Star), (expandButton, Ui.Auto)), Ui.Line());
         top.Margin = new Thickness(0, 4, 0, 0);
         Children.Add(top);
         SetRow(host, 1);
@@ -56,6 +64,20 @@ public sealed class ClaudeInspector : Grid
         RenderTabs();
         Show();
     }
+
+    public void SetExpanded(bool on)
+    {
+        expanded = on;
+        expandButton.Content = Ui.Glyph(on ? "\uE73F" : "\uE740", 14, "muted");
+        var tip = on ? L.T("Inspector_CollapseHint", "Collapse (Esc)") : L.T("Inspector_ExpandHint", "Expand over the chat");
+        ToolTipService.SetToolTip(expandButton, tip);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(expandButton, on ? L.T("Inspector_Collapse", "Collapse inspector") : L.T("Inspector_Expand", "Expand inspector"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(expandButton, tip);
+    }
+
+    public bool Expanded => expanded;
+
+    public void FocusExpand() => expandButton.Focus(FocusState.Programmatic);
 
     private int shownRunning = -1;
 
@@ -183,6 +205,7 @@ public sealed class TasksPanel : Grid
         row.Margin = new Thickness(6, 8, 6, 4);
         if (!collapsible) return row;
         var b = new Button { Content = row, Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left };
+        Ui.Expandable(b, title, showFinished);
         b.Click += (_, _) =>
         {
             showFinished = !showFinished;
@@ -252,6 +275,7 @@ public sealed class TasksPanel : Grid
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch
         };
+        Ui.Expandable(button, Title(t), open);
         button.Click += (_, _) =>
         {
             if (!expanded.Remove(t.ToolId)) expanded.Add(t.ToolId);
@@ -327,19 +351,41 @@ public sealed class ChangesPanel : Grid
                 case "expand":
                     collapsed.Remove(id);
                     if (tab.Git.Changes.FirstOrDefault(f => f.Id == id) is { } file)
-                        html.Send(new System.Text.Json.Nodes.JsonObject { ["op"] = "fileBody", ["path"] = id, ["html"] = DiffHtml.Body(file, new DiffRenderOptions()) });
+                        html.Send(new System.Text.Json.Nodes.JsonObject { ["op"] = "fileBody", ["path"] = id, ["html"] = DiffHtml.Body(file, new DiffRenderOptions { Wrap = Wrap }) });
                     break;
             }
         };
         tab.Git.PropertyChanged += OnGit;
-        Unloaded += (_, _) => tab.Git.PropertyChanged -= OnGit;
+        Settings.Shared.Changed += OnSettings;
+        Unloaded += (_, _) =>
+        {
+            tab.Git.PropertyChanged -= OnGit;
+            Settings.Shared.Changed -= OnSettings;
+        };
         Loaded += (_, _) =>
         {
             tab.Git.PropertyChanged -= OnGit;
             tab.Git.PropertyChanged += OnGit;
+            Settings.Shared.Changed -= OnSettings;
+            Settings.Shared.Changed += OnSettings;
             tab.Git.Refresh().Forget();
         };
         Render();
+    }
+
+    private static bool Wrap => Settings.Shared.GetBool(DiffPrefs.WrapKey, true);
+
+    private void OnSettings(string key)
+    {
+        if (key == DiffPrefs.WrapKey) DispatcherQueue.TryEnqueue(Render);
+    }
+
+    private CheckBox WrapToggle()
+    {
+        var box = new CheckBox { Content = L.T("Files_WrapLines", "Wrap lines"), IsChecked = Wrap, MinWidth = 0, Padding = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        ToolTipService.SetToolTip(box, L.T("Changes_WrapTip", "Wrap long lines"));
+        box.Click += (_, _) => Settings.Shared.Set(DiffPrefs.WrapKey, box.IsChecked == true);
+        return box;
     }
 
     private void OnGit(object? sender, PropertyChangedEventArgs e)
@@ -355,7 +401,7 @@ public sealed class ChangesPanel : Grid
         if (git.Loading) summary.Children.Add(Ui.Spinner(12));
         summary.Children.Add(Ui.Caption(git.Changes.Count == 0 ? L.T("Changes_None", "No uncommitted changes") : Fmt.Plural(git.Changes.Count, "file changed", "files changed")));
         if (git.Changes.Count > 0) summary.Children.Add(Ui.DiffStat(git.TotalAdditions, git.TotalDeletions));
-        header.Children.Add(Ui.Columns((summary, Ui.Star), (Ui.IconButton("", L.T("Common_Refresh", "Refresh"), () => git.Refresh().Forget()), Ui.Auto)));
+        header.Children.Add(Ui.Columns((summary, Ui.Star), (git.Changes.Count > 0 ? WrapToggle() : null, Ui.Auto), (Ui.IconButton("", L.T("Common_Refresh", "Refresh"), () => git.Refresh().Forget()), Ui.Auto)));
         if (git.Unpushed.Count > 0)
         {
             header.Children.Add(Ui.Text(L.F("Changes_Unpushed", "Unpushed commits · {0}", git.Unpushed.Count), 12, "muted", FontWeights.SemiBold));
@@ -371,7 +417,7 @@ public sealed class ChangesPanel : Grid
         empty.Visibility = Visibility.Collapsed;
         html.Visibility = Visibility.Visible;
         foreach (var f in git.Changes.Where(f => f.Lines.Count > 1500)) collapsed.Add(f.Id);
-        html.Render(DiffHtml.Render(git.Changes, new DiffRenderOptions { ShowOpen = true, Collapsed = collapsed }), "diff", null, "flush");
+        html.Render(DiffHtml.Render(git.Changes, new DiffRenderOptions { ShowOpen = true, Collapsed = collapsed, Wrap = Wrap }), "diff", null, "flush");
     }
 }
 
@@ -713,7 +759,12 @@ public sealed class BranchPRPanel : Grid
             }
         };
         if (error is { } err) items.Add(new TextRowItem(err));
-        if (list.Count == 0 && !listLoading && error is null) items.Add(new TextRowItem(L.T("Common_NothingHere", "Nothing here")));
+        if (list.Count == 0 && !listLoading && error is null) items.Add(new TextRowItem(scope switch
+        {
+            "mine" => L.T("Inspector_NoPRsByYou", "No pull requests by you"),
+            "merged" => L.T("Inspector_NoMergedPRs", "No merged pull requests"),
+            _ => L.T("Inspector_NoOpenPRs", "No open pull requests")
+        }));
         items.AddRange(list.Select(p => new PRRowItem(p, null)));
         listView.ItemsSource = items;
         status.Update(lastUpdated, branchLoading || listLoading, branchError ?? error);
@@ -912,7 +963,7 @@ public sealed class InspectorPRDetail : Grid
         }
         else
         {
-            filesPanel.Children.Add(Ui.Spinner(14));
+            filesPanel.Children.Add(Ui.Loading(28));
         }
         filesHeader.Content = filesPanel;
         filesHeader.Expanding += (_, _) =>

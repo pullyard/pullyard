@@ -19,18 +19,24 @@ internal static class LogoArt
     public const double BoxWidth = 750;
     public const double BoxHeight = 500;
 
-    public static readonly Color Violet = Color.FromArgb(255, 0xA7, 0x8B, 0xFA);
-    public static readonly Color Sky = Color.FromArgb(255, 0x38, 0xBD, 0xF8);
-    public static readonly Color Blue = Color.FromArgb(255, 0x6E, 0xA6, 0xFA);
-    public static readonly Color HullTop = Color.FromArgb(255, 0xFB, 0x71, 0x85);
-    public static readonly Color HullBottom = Color.FromArgb(255, 0xD6, 0x1F, 0x4E);
-    public static readonly Color Deck = Color.FromArgb(255, 0xFE, 0xCD, 0xD3);
-    public static readonly Color Cabin = Color.FromArgb(255, 0xF8, 0xFA, 0xFC);
-    public static readonly Color CabinShade = Color.FromArgb(255, 0xE2, 0xE8, 0xF0);
-    public static readonly Color Window = Color.FromArgb(255, 0x1E, 0x29, 0x3B);
-    public static readonly Color Wave = Color.FromArgb(255, 0x7D, 0xD3, 0xFC);
+    public static Color Violet => Pick(0xA78BFA, true);
+    public static Color Sky => Pick(0x38BDF8, true);
+    public static Color Blue => Pick(0x6EA6FA, true);
+    public static Color HullTop => Pick(0xFB7185, true);
+    public static Color HullBottom => Pick(0xD61F4E, true);
+    public static Color Deck => Pick(0xFECDD3, false);
+    public static Color Cabin => Pick(0xF8FAFC, false);
+    public static Color CabinShade => Pick(0xE2E8F0, false);
+    public static Color Window => Pick(0x1E293B, true);
+    public static Color Wave => Pick(0x7DD3FC, true);
 
-    public static Color Alpha(Color c, double opacity) => Color.FromArgb((byte)Math.Round(255 * opacity), c.R, c.G, c.B);
+    private static Color Pick(uint rgb, bool ink)
+    {
+        if (!ThemeService.IsHighContrast) return Palette.Hex(rgb);
+        return Palette.Get(ink ? "text" : "window");
+    }
+
+    public static Color Alpha(Color c, double opacity) => Windows.UI.Color.FromArgb((byte)Math.Round(255 * opacity), c.R, c.G, c.B);
 
     public static PathGeometry Circle(double cx, double cy, double r)
     {
@@ -117,7 +123,7 @@ public sealed class LogoLoader : Grid
 
     public event Action? Drawn;
 
-    public LogoLoader(double size = 56, bool once = false, double? drawSeconds = null)
+    public LogoLoader(double size = 56, bool once = false, double? drawSeconds = null, bool still = false)
     {
         this.once = once;
         this.drawSeconds = drawSeconds ?? Draw;
@@ -129,7 +135,7 @@ public sealed class LogoLoader : Grid
         var art = new Canvas { RenderTransform = new TranslateTransform { X = -LogoArt.BoxX, Y = -LogoArt.BoxY } };
         Children.Add(new Viewbox { Stretch = Stretch.Uniform, Child = new Canvas { Width = LogoArt.BoxWidth, Height = LogoArt.BoxHeight, Children = { art } } });
 
-        var animate = Motion.Enabled;
+        var animate = Motion.Enabled && !still;
         board = animate ? new Storyboard() : null;
         if (board is not null && !once)
         {
@@ -291,6 +297,22 @@ public sealed class LogoLoader : Grid
         Storyboard.SetTarget(anim, scale);
         Storyboard.SetTargetProperty(anim, "ScaleY");
         board.Children.Add(anim);
+    }
+}
+
+public sealed class DrawnLogoMark : Grid
+{
+    private static readonly HashSet<string> Drawn = new();
+
+    public DrawnLogoMark(string key = "", double size = 56, double drawSeconds = 1.4)
+    {
+        IsHitTestVisible = false;
+        var still = !Motion.Enabled || !Drawn.Add(key);
+        var logo = new LogoLoader(size, once: true, drawSeconds: drawSeconds, still: still);
+        AutomationProperties.SetAccessibilityView(logo, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+        Width = logo.Width;
+        Height = logo.Height;
+        Children.Add(logo);
     }
 }
 

@@ -52,6 +52,8 @@ public sealed partial class AppViewModel : ObservableObject
     public event Action? SettingsRequested;
     public event Action? ActivateRequested;
     public event Action? AddAccountRequested;
+    public event Action<string?, List<SearchItem>?, int, List<SearchItem>?>? BadgesObserved;
+    public event Action? SessionReset;
 
     private DateTimeOffset lastLiveRefresh = DateTimeOffset.Now;
     private CancellationTokenSource? pollCts;
@@ -518,6 +520,7 @@ public sealed partial class AppViewModel : ObservableObject
         ReviewRequestCount = 0;
         MyPRCount = 0;
         UnreadCount = 0;
+        SessionReset?.Invoke();
         Phase = next;
     }
 
@@ -552,14 +555,29 @@ public sealed partial class AppViewModel : ObservableObject
         RefreshBadges().Forget();
     }
 
+    private readonly List<Route> recentRoutes = new();
+
+    public IReadOnlyList<Route> RecentRoutes => recentRoutes;
+
+    private void Remember(Route route)
+    {
+        recentRoutes.Remove(route);
+        recentRoutes.Insert(0, route);
+        if (recentRoutes.Count > 20) recentRoutes.RemoveAt(recentRoutes.Count - 1);
+    }
+
+    partial void OnAccountChanged(string? value) => recentRoutes.Clear();
+
     public void Select(Route? route)
     {
+        if (route is not null) Remember(route);
         DetailRoot = route;
         if (route is not null) RouteRequested?.Invoke(route, false);
     }
 
     public void Open(Route route, bool push = false)
     {
+        Remember(route);
         if (Section.Kind == SectionKind.Claude)
         {
             Section = Section.Prs(PRFilter.Mine);
@@ -773,6 +791,7 @@ public sealed partial class AppViewModel : ObservableObject
             UnreadCount = 12;
             return;
         }
+        BadgeResponse? badges = null;
         try
         {
             var b = await api.Badges();
@@ -780,10 +799,12 @@ public sealed partial class AppViewModel : ObservableObject
             ReviewRequestCount = b.Rr.IssueCount;
             MyPRs = b.Mine.Nodes;
             MyPRCount = b.Mine.IssueCount;
+            badges = b;
         }
         catch
         {
         }
+        if (ReferenceEquals(Api, api)) BadgesObserved?.Invoke(Account, badges?.Rr.Nodes, badges?.Rr.IssueCount ?? 0, badges?.Mine.Nodes);
         try
         {
             if (await api.UnreadNotificationCount(live) is { } unread) UnreadCount = unread;
@@ -843,6 +864,8 @@ public sealed partial class AppViewModel : ObservableObject
     {
         var caps = ForgeCaps;
         var supported = caps.PullFilters;
+        List<SearchItem>? seenReviews = null;
+        List<SearchItem>? seenMine = null;
         if (supported.Contains(ForgeFilter.ReviewRequested))
         {
             try
@@ -851,6 +874,7 @@ public sealed partial class AppViewModel : ObservableObject
                 if (!ReferenceEquals(Forge, forge)) return;
                 ReviewRequests = rr.Take(10).ToList();
                 ReviewRequestCount = rr.Count;
+                seenReviews = rr;
             }
             catch
             {
@@ -864,11 +888,13 @@ public sealed partial class AppViewModel : ObservableObject
                 if (!ReferenceEquals(Forge, forge)) return;
                 MyPRs = mine.Take(10).ToList();
                 MyPRCount = mine.Count;
+                seenMine = mine;
             }
             catch
             {
             }
         }
+        if (ReferenceEquals(Forge, forge)) BadgesObserved?.Invoke(Account, seenReviews, seenReviews?.Count ?? 0, seenMine);
         if (caps.HasInbox)
         {
             try

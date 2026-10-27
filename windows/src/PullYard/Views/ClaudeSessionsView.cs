@@ -283,7 +283,7 @@ public sealed class ClaudeSessionsView : ListPane
         }
         else if (items.Count == 0 || (items.Count == 1 && items[0] is ArchivedToggleItem && Ws.Projects.Count == 0))
         {
-            ShowOverlay(Ws.LoadingProjects ? Ui.Loading() : Ui.Empty("\uE945", "coral", L.T("Claude_NoSessions", "No Claude Code sessions yet")));
+            ShowOverlay(Ws.LoadingProjects ? Ui.Loading() : Ui.EmptyState(L.T("Claude_NoSessionsTitle", "No agent sessions yet"), L.T("Claude_NoSessionsMessage", "Start a session in a project folder and it shows up here.")));
         }
         else
         {

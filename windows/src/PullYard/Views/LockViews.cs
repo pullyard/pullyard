@@ -62,7 +62,7 @@ public sealed class UnlockView : Grid
             Submit();
         };
         entry = Ui.V(10, Center(Ui.H(8, pinBox, unlock)), hello);
-        blockedText = Ui.Text(L.T("Lock_Blocked", "Too many wrong PINs. Reset the PIN to continue. This also signs out the Claude Code accounts linked to this account."), 13, "red", wrap: true);
+        blockedText = Ui.Text(L.T("Lock_Blocked", "Too many wrong PINs. Reset the PIN to continue. This also signs out the Agents accounts linked to this account."), 13, "red", wrap: true);
         blockedText.TextAlignment = TextAlignment.Center;
         blockedText.MaxWidth = 360;
 

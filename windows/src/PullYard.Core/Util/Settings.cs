@@ -186,4 +186,6 @@ public static class Keys
     public const string AgentsSeenBaseline = "agents.seenBaseline";
     public const string AgentsNotify = "agents.notify";
     public const string AgentsOpenIn = "agents.openIn";
+    public const string AgentsInspectorWidth = "agents.inspectorWidth";
+    public const string NotifyRecent = "notify.recent";
 }

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Microsoft.UI.Xaml;
+using PullYard.Core.Api;
 using PullYard.Core.Claude;
 using PullYard.Core.Util;
 using PullYard.ViewModels;
@@ -14,8 +15,12 @@ public static class AgentNotifier
 
     public static bool Enabled
     {
-        get => Settings.Shared.GetBool(Keys.AgentsNotify, true);
-        set => Settings.Shared.Set(Keys.AgentsNotify, value);
+        get => NotifyKind.AgentInput.Enabled(Settings.Shared) || NotifyKind.AgentFinished.Enabled(Settings.Shared);
+        set
+        {
+            NotifyKind.AgentInput.SetEnabled(Settings.Shared, value);
+            NotifyKind.AgentFinished.SetEnabled(Settings.Shared, value);
+        }
     }
 
     public static void Attach(AppViewModel app, Window window)
@@ -40,8 +45,8 @@ public static class AgentNotifier
             window.DispatcherQueue.TryEnqueue(() =>
             {
                 MarkWatched(app);
-                TaskbarBadge.Reset();
-                UpdateBadge(ws, window);
+                AppBadge.SetAgents(ws.BadgeCount);
+                AppBadge.Refresh();
             });
         };
     }
@@ -52,21 +57,18 @@ public static class AgentNotifier
         app.Claude.MarkViewed(tab);
     }
 
-    private static void UpdateBadge(ClaudeWorkspace ws, Window window)
-    {
-        var count = ws.BadgeCount;
-        TaskbarBadge.Set(WindowInterop.Handle(window), count, L.F("Agents_BadgeDescription", "{0} agent sessions need attention", count));
-    }
+    private static void UpdateBadge(ClaudeWorkspace ws, Window window) => AppBadge.SetAgents(ws.BadgeCount);
 
     private static void Post(ClaudeTab tab, AgentEvent kind, string? detail)
     {
-        if (!Enabled) return;
+        var notifyKind = kind == AgentEvent.Finished ? NotifyKind.AgentFinished : NotifyKind.AgentInput;
+        if (!notifyKind.Enabled(Settings.Shared)) return;
         var (title, body) = kind switch
         {
-            AgentEvent.Finished => (L.F("Agents_NotifyFinished", "Finished · {0}", tab.Title), ClaudeWorkspace.Snippet(detail)),
-            AgentEvent.Question => (tab.Title, L.T("Agents_NotifyQuestion", "Claude has a question for you")),
-            AgentEvent.Plan => (tab.Title, L.T("Agents_NotifyPlan", "Claude has a plan ready for review")),
-            _ => (tab.Title, L.F("Agents_NotifyPermission", "Claude needs permission: {0}", detail ?? ""))
+            AgentEvent.Finished => (L.F("Agents_NotifyAgentFinished", "Agent finished · {0}", tab.Title), ClaudeWorkspace.Snippet(detail)),
+            AgentEvent.Question => (tab.Title, L.T("Agents_NotifyAgentQuestion", "Your agent has a question for you")),
+            AgentEvent.Plan => (tab.Title, L.T("Agents_NotifyAgentPlan", "Your agent has a plan ready for review")),
+            _ => (tab.Title, L.F("Agents_NotifyAgentPermission", "Your agent needs permission: {0}", detail ?? ""))
         };
         if (body.Length == 0) body = tab.ProjectName;
         Notifications.Show(title, body, ActionPrefix + tab.Id, tab.Id.ToString(), Group);

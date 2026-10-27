@@ -74,7 +74,7 @@ public sealed class StacksView : ListPane
         }
         if (vm.Loading || !vm.Loaded) ShowOverlay(Ui.Loading());
         else if (vm.Error is { } err) ShowOverlay(Ui.Error(err, () => vm.Load(Model.Api, Model.Account, force: true).Forget()));
-        else ShowOverlay(Ui.Empty(StackUi.StackGlyph, "indigo", L.T("Stacks_Empty", "No stacked pull requests. Open a pull request on another pull request's branch and it shows up here.")));
+        else ShowOverlay(Ui.EmptyState(L.T("Stacks_EmptyTitle", "No stacked pull requests"), L.T("Stacks_EmptyMessage", "Open a pull request on another pull request’s branch and it shows up here.")));
     }
 
     private void SyncSelection()

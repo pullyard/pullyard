@@ -33,6 +33,7 @@ public sealed class ShellView : Grid
     private readonly StackPanel footer = Ui.V(0);
     private readonly ColumnDefinition listColumn = new() { Width = new GridLength(380) };
     private readonly Dictionary<string, NavigationViewItem> navItems = new();
+    private readonly Dictionary<string, string> navTitles = new();
     private readonly List<(Route Route, FrameworkElement View)> stack = new();
     private ClaudeWorkspaceView? claudeView;
     private bool syncingSelection;
@@ -117,16 +118,18 @@ public sealed class ShellView : Grid
     {
         nav.MenuItems.Clear();
         navItems.Clear();
+        navTitles.Clear();
         void Header(string text) => nav.MenuItems.Add(new NavigationViewItemHeader { Content = text });
-        void Item(Section s, string title, string glyph, string color)
+        void Item(Section s, string title, string glyph)
         {
             var item = new NavigationViewItem
             {
                 Content = title,
                 Tag = s.Key,
-                Icon = new FontIcon { Glyph = glyph, FontFamily = Ui.Icons, Foreground = Palette.Brush(color) }
+                Icon = new FontIcon { Glyph = glyph, FontFamily = Ui.Icons }
             };
             navItems[s.Key] = item;
+            navTitles[s.Key] = title;
             nav.MenuItems.Add(item);
         }
         if (app.Forge is not null)
@@ -136,40 +139,40 @@ public sealed class ShellView : Grid
             if (caps.HasInbox)
             {
                 Header(L.T("Nav_Inbox", "Inbox"));
-                Item(Section.Notifications, caps.Inbox.Title(), "\uEA8F", "amber");
+                Item(Section.Notifications, caps.Inbox.Title(), "\uEA8F");
             }
             Header(provider.RequestsTitle());
-            foreach (var f in caps.PullFilters) Item(Section.Prs(f.Filter()), f.Filter().Title(), f.Filter().Glyph(), f.Filter().ColorKey());
-            if (caps.PullFilters.Contains(Core.Auth.ForgeFilter.Mine)) Item(Section.MyPrsByRepo, provider.ByProjectTitle(), "\uE8B7", "coral");
+            foreach (var f in caps.PullFilters) Item(Section.Prs(f.Filter()), f.Filter().Title(), f.Filter().Glyph());
+            if (caps.PullFilters.Contains(Core.Auth.ForgeFilter.Mine)) Item(Section.MyPrsByRepo, provider.ByProjectTitle(), "\uE8B7");
             if (caps.IssueFilters.Count > 0)
             {
                 Header(L.T("Nav_Issues", "Issues"));
-                foreach (var f in caps.IssueFilters) Item(Section.Issues(f.Filter()), f.Filter().Title(), f.Filter().Glyph(), f.Filter().ColorKey());
+                foreach (var f in caps.IssueFilters) Item(Section.Issues(f.Filter()), f.Filter().Title(), f.Filter().Glyph());
             }
             if (caps.Repositories)
             {
                 Header(L.T("Nav_Code", "Code"));
-                Item(Section.Repos, provider.RepositoriesTitle(), "\uE8F1", "teal");
+                Item(Section.Repos, provider.RepositoriesTitle(), "\uE8F1");
             }
             Header(L.T("Nav_AI", "AI"));
-            Item(Section.Claude, L.T("Section_Claude", "Agents"), "\uE945", "coral");
+            Item(Section.Claude, L.T("Section_Claude", "Agents"), "\uE945");
             SyncNavSelection();
             UpdateBadges();
             return;
         }
         Header(L.T("Nav_Inbox", "Inbox"));
-        Item(Section.Notifications, L.T("Section_Notifications", "Notifications"), "", "amber");
+        Item(Section.Notifications, L.T("Section_Notifications", "Notifications"), "");
         Header(L.T("Nav_PullRequests", "Pull requests"));
-        foreach (var f in Enum.GetValues<PRFilter>()) Item(Section.Prs(f), f.Title(), f.Glyph(), f.ColorKey());
-        Item(Section.MyPrsByRepo, L.T("Section_MyPrsByProject", "My PRs by project"), "", "coral");
-        Item(Section.Stacks, L.T("Section_Stacks", "Stacks"), "\uE81E", "indigo");
+        foreach (var f in Enum.GetValues<PRFilter>()) Item(Section.Prs(f), f.Title(), f.Glyph());
+        Item(Section.MyPrsByRepo, L.T("Section_MyPrsByProject", "My PRs by project"), "");
+        Item(Section.Stacks, L.T("Section_Stacks", "Stacks"), "\uE81E");
         Header(L.T("Nav_Issues", "Issues"));
-        foreach (var f in Enum.GetValues<IssueFilter>()) Item(Section.Issues(f), f.Title(), f.Glyph(), f.ColorKey());
+        foreach (var f in Enum.GetValues<IssueFilter>()) Item(Section.Issues(f), f.Title(), f.Glyph());
         Header(L.T("Nav_Code", "Code"));
-        Item(Section.Repos, L.T("Section_Repositories", "Repositories"), "", "teal");
-        Item(Section.Projects, L.T("Section_Projects", "Projects"), "", "indigo");
+        Item(Section.Repos, L.T("Section_Repositories", "Repositories"), "");
+        Item(Section.Projects, L.T("Section_Projects", "Projects"), "");
         Header(L.T("Nav_AI", "AI"));
-        Item(Section.Claude, L.T("Section_Claude", "Agents"), "", "coral");
+        Item(Section.Claude, L.T("Section_Claude", "Agents"), "");
         SyncNavSelection();
         UpdateBadges();
     }
@@ -184,16 +187,27 @@ public sealed class ShellView : Grid
 
     private void UpdateBadges()
     {
-        void Badge(string key, int count, string color = "muted")
+        void Badge(string key, int count, bool attention, string spoken)
         {
             if (!navItems.TryGetValue(key, out var item)) return;
-            item.InfoBadge = count > 0 ? new InfoBadge { Value = count, Background = Palette.Brush(color, 0.9) } : null;
+            if (count <= 0)
+            {
+                item.InfoBadge = null;
+            }
+            else
+            {
+                var (fill, text) = attention ? Palette.Filled("accent") : (Palette.Brush("text", ThemeService.IsDark ? 0.16 : 0.10), Palette.Brush("text"));
+                item.InfoBadge = new InfoBadge { Value = count, Background = fill, Foreground = text };
+            }
+            var title = navTitles.GetValueOrDefault(key, "");
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(item, count > 0 ? $"{title}, {spoken}" : title);
         }
-        Badge(Section.Notifications.Key, app.UnreadCount, "amber");
-        Badge(Section.Prs(PRFilter.ReviewRequested).Key, app.ReviewRequestCount, "sky");
-        Badge(Section.Prs(PRFilter.Mine).Key, app.MyPRCount, "violet");
-        var claude = app.Claude.AttentionCount > 0 ? app.Claude.AttentionCount : app.Claude.RunningCount;
-        Badge(Section.Claude.Key, claude, app.Claude.AttentionCount > 0 ? "amber" : "coral");
+        Badge(Section.Notifications.Key, app.UnreadCount, false, L.F("Nav_UnreadCount", "{0} unread", app.UnreadCount));
+        Badge(Section.Prs(PRFilter.ReviewRequested).Key, app.ReviewRequestCount, true, L.F("Nav_WaitingCount", "{0} waiting", app.ReviewRequestCount));
+        Badge(Section.Prs(PRFilter.Mine).Key, app.MyPRCount, false, L.F("Nav_OpenCount", "{0} open", app.MyPRCount));
+        var attention = app.Claude.AttentionCount;
+        var claude = attention > 0 ? attention : app.Claude.RunningCount;
+        Badge(Section.Claude.Key, claude, attention > 0, attention > 0 ? L.F("Nav_NeedYouCount", "{0} need you", attention) : L.F("Nav_RunningCount", "{0} running", claude));
     }
 
     private void RenderFooter()
@@ -444,6 +458,12 @@ public sealed class ShellView : Grid
         TextZoom.ApplyWhenLoaded(view);
         detailHost.Content = view;
     }
+
+    public Route? CurrentRoute => stack.Count > 0 ? stack[^1].Route : null;
+
+    public bool IsPaneOpen => nav.IsPaneOpen;
+
+    public void TogglePane() => nav.IsPaneOpen = !nav.IsPaneOpen;
 
     public bool CanGoBack => stack.Count > 1;
 

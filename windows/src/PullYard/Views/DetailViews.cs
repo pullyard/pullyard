@@ -188,13 +188,25 @@ public sealed class IssueDetailView : LiveDetail, IShortcutHost
         if (issue.ViewerCanUpdate)
         {
             tools.Children.Add(issue.IssueState == "OPEN"
-                ? Ui.IconButton("", L.T("Issue_Close", "Close issue"), () => model.SetOpen(false).Forget(), "text")
-                : Ui.IconButton("", L.T("Issue_Reopen", "Reopen issue"), () => model.SetOpen(true).Forget(), "text"));
+                ? Ui.Button(L.T("Issue_CloseShort", "Close"), () => model.SetOpen(false).Forget(), glyph: "\uE930", tooltip: L.T("Issue_Close", "Close issue"))
+                : Ui.Button(L.T("Issue_ReopenShort", "Reopen"), () => model.SetOpen(true).Forget(), glyph: "\uE7A7", tooltip: L.T("Issue_Reopen", "Reopen issue")));
         }
         tools.Children.Add(Ui.RefreshButton(() => model?.Load() ?? Task.CompletedTask));
-        tools.Children.Add(Ui.IconButton("", L.T("Menu_CopyLink", "Copy Link"), () => WindowInterop.Copy(issue.Url), "text"));
-        tools.Children.Add(Ui.IconButton("\uE8C8", L.T("Menu_CopyShortLinkHint", "Copy short link (Ctrl+Shift+C)"), () => ShellView.CopyShortLink(ShortLink.Of(itemRef)), "text"));
-        tools.Children.Add(Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(issue.Url), "text"));
+        var share = Ui.H(0,
+            Ui.IconButton("\uE71B", L.T("Menu_CopyLink", "Copy Link"), () => WindowInterop.Copy(issue.Url), "text"),
+            Ui.IconButton("\uE8C8", L.T("Menu_CopyShortLinkHint", "Copy short link (Ctrl+Shift+C)"), () => ShellView.CopyShortLink(ShortLink.Of(itemRef)), "text"),
+            Ui.IconButton("\uE774", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(issue.Url), "text"));
+        var shareHost = new Border
+        {
+            Child = share,
+            CornerRadius = new CornerRadius(6),
+            BorderBrush = Palette.Brush("text", ThemeService.IsDark ? 0.14 : 0.12),
+            BorderThickness = new Thickness(1),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(4, 0, 0, 0)
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(shareHost, L.T("Issue_Share", "Share"));
+        tools.Children.Add(shareHost);
         RenderHtml();
         status.Update(model.LastUpdated, model.Loading, model.RefreshError);
     }
@@ -265,9 +277,9 @@ public sealed class CommitDetailView : LiveDetail
         {
             if (type == "copy") WindowInterop.Copy(id);
             if (type == "expand" && files.FirstOrDefault(f => f.Id == id) is { } file)
-                html.Send(new System.Text.Json.Nodes.JsonObject { ["op"] = "fileBody", ["path"] = id, ["html"] = DiffHtml.Body(file, new DiffRenderOptions()) });
+                html.Send(new System.Text.Json.Nodes.JsonObject { ["op"] = "fileBody", ["path"] = id, ["html"] = DiffHtml.Body(file, new DiffRenderOptions { Wrap = Settings.Shared.GetBool(DiffPrefs.WrapKey, true) }) });
         };
-        html.Render(DiffHtml.Render(files, new DiffRenderOptions { Collapsed = collapsed }), "diff", "top", "flush");
+        html.Render(DiffHtml.Render(files, new DiffRenderOptions { Collapsed = collapsed, Wrap = Settings.Shared.GetBool(DiffPrefs.WrapKey, true) }), "diff", "top", "flush");
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });

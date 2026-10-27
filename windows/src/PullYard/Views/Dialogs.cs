@@ -302,7 +302,7 @@ public static class Dialogs
         }
         errorsOnly.Checked += (_, _) => Render();
         errorsOnly.Unchecked += (_, _) => Render();
-        var toolbar = Ui.H(8, Ui.Glyph(Palette.CheckGlyph(check.Outcome), 14, Palette.CheckKey(check.Outcome)), errorsOnly);
+        var toolbar = Ui.H(8, Ui.CheckIcon(check.Outcome, 14), errorsOnly);
         if (check.Link is { } link) toolbar.Children.Add(Ui.Link(L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(link), 13));
         var fixRequested = false;
         ContentDialog? dialog = null;
@@ -315,8 +315,9 @@ public static class Dialogs
                 fixRequested = true;
                 dialog?.Hide();
             }, glyph: "\uE945");
-            fixButton.Background = Palette.Brush("coral");
-            fixButton.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
+            var (coral, onCoral) = Palette.Filled("coral");
+            fixButton.Background = coral;
+            fixButton.Foreground = onCoral;
             fixButton.HorizontalAlignment = HorizontalAlignment.Right;
             top.Children.Add(fixButton);
         }
@@ -546,7 +547,7 @@ public static class Dialogs
             {
                 var caption = Ui.Text("", 12, "dim");
                 ciCaptions[c.Id] = caption;
-                var label = Ui.H(6, Ui.Glyph(Palette.CheckGlyph(c.Outcome), 12, Palette.CheckKey(c.Outcome)), Ui.Text(c.FullTitle, 12, "text"), caption);
+                var label = Ui.H(6, Ui.CheckIcon(c.Outcome, 12), Ui.Text(c.FullTitle, 12, "text"), caption);
                 var cb = new CheckBox { Content = label, IsChecked = ciSelected.Contains(c.Id) };
                 ciBoxes.Add((cb, c.Id));
                 ciPanel.Children.Add(cb);

@@ -93,6 +93,7 @@ public static class StackUi
             VerticalAlignment = VerticalAlignment.Center
         };
         Ui.Tip(b, tip);
+        Ui.Named(b, tip);
         b.Click += (_, _) => onClick();
         return b;
     }
@@ -147,6 +148,7 @@ public static class StackUi
                 VerticalAlignment = VerticalAlignment.Center
             };
             Ui.Tip(drop, L.F("Stack_UpMany", "Up the stack: {0} pull requests are stacked on this one", ups.Count));
+            Ui.Named(drop, L.F("Stack_UpMany", "Up the stack: {0} pull requests are stacked on this one", ups.Count));
             nav.Children.Add(drop);
         }
         nav.Children.Add(Plain(Ui.Glyph("", 10, "dim"), L.T("Stack_ShowWhole", "Show the whole stack"), onShow));
@@ -233,7 +235,7 @@ public sealed class StackPreviewContent : Grid
         var title = Ui.Text("", 20, "text", FontWeights.Bold);
         title.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = node.Title + "  " });
         title.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = $"#{node.Number}", Foreground = Palette.Brush("dim"), FontWeight = FontWeights.Normal });
-        var head = Ui.Columns((title, Ui.Star), (Ui.Spinner(16), Ui.Auto));
+        var head = Ui.Columns((title, Ui.Star), (Ui.Loading(22), Ui.Auto));
         var meta = new WrapPanel(8, Ui.StateBadge(node.VisualState), Ui.Text(node.Author ?? "", 13, "text", FontWeights.SemiBold),
             PRContent.BranchChip(node.BaseRefName, "sky"), Ui.Glyph("", 11, "dim"), PRContent.BranchChip(node.HeadRefName, "violet"), StackUi.Shimmer(70));
         var header = Ui.V(8, head, meta);
