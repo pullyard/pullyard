@@ -10,6 +10,7 @@ use crate::{brand, updater};
 
 struct Row {
     section: Section,
+    title: String,
     list: gtk::ListBox,
     row: gtk::ListBoxRow,
     count: gtk::Label,
@@ -24,9 +25,12 @@ pub struct Sidebar {
     footer: gtk::Box,
 }
 
-fn sidebar_icon(icon_name: &str, color: &str) -> gtk::Box {
-    let b = fixed_box(&["sy-sidebar-icon"], 22, 22);
-    centered_in(&b, &colored_icon(icon_name, 13, color), 22, 22);
+fn sidebar_icon(icon_name: &str) -> gtk::Box {
+    let b = fixed_box(&[], 20, 20);
+    let i = icon(icon_name, 15);
+    i.add_css_class("sy-sidebar-glyph");
+    centered_in(&b, &i, 20, 20);
+    decorative(&b);
     b
 }
 
@@ -60,6 +64,7 @@ impl Sidebar {
         let hb = adw::HeaderBar::new();
         hb.set_title_widget(Some(&adw::WindowTitle::new(brand::APP_NAME, "")));
         let menu = Menu::new();
+        menu.item("Command Palette…", || ui_activate("command-palette"));
         menu.item("Open by Link…", || ui_activate("open-link"));
         menu.item("Refresh", || ui_activate("refresh"));
         let mut menu = menu;
@@ -69,6 +74,7 @@ impl Sidebar {
         menu.item("Actual Size", || ui_activate("zoom-reset"));
         menu.section(None);
         menu.item("Preferences", || ui_activate("preferences"));
+        menu.item("Keyboard Shortcuts", || ui_activate("show-shortcuts"));
         menu.item("Check for Updates…", || ui_activate("check-updates"));
         menu.item("Buy Me a Pizza…", || ui_activate("donate"));
         menu.item(&format!("About {}", brand::APP_NAME), || ui_activate("about"));
@@ -149,13 +155,15 @@ impl Sidebar {
             let list = gtk::ListBox::new();
             list.add_css_class("sy-sidebar-list");
             list.set_selection_mode(gtk::SelectionMode::Single);
-            for (section, title, icon_name, tint) in items {
+            for (section, title, icon_name, _tint) in items {
                 let b = hbox(8);
-                b.append(&sidebar_icon(icon_name, tint));
+                b.append(&sidebar_icon(icon_name));
                 let l = ellipsized(&title, &["sy-text"]);
                 l.set_hexpand(true);
                 b.append(&l);
-                let count = label_with("", &["sy-count", "sy-small"]);
+                let count = label_with("", &["sy-sidebar-badge"]);
+                count.set_valign(gtk::Align::Center);
+                count.set_visible(false);
                 b.append(&count);
                 let row = gtk::ListBoxRow::new();
                 row.set_child(Some(&b));
@@ -166,7 +174,8 @@ impl Sidebar {
                         app::set_section(section);
                     }
                 });
-                rows.push(Row { section, list: list.clone(), row, count });
+                set_label(&row, &title);
+                rows.push(Row { section, title: title.clone(), list: list.clone(), row, count });
             }
             self.column.append(&list);
         }
@@ -194,20 +203,27 @@ impl Sidebar {
         let attention = a.claude.attention_count();
         let running = a.claude.running_count();
         for r in self.rows.borrow().iter() {
-            let n: i64 = match r.section {
-                Section::Notifications => unread as i64,
-                Section::Prs(PrFilter::ReviewRequested) => rr,
-                Section::Prs(PrFilter::Mine) => mine,
+            let (n, urgent, noun): (i64, bool, &str) = match r.section {
+                Section::Notifications => (unread as i64, false, "unread"),
+                Section::Prs(PrFilter::ReviewRequested) => (rr, rr > 0, "waiting for your review"),
+                Section::Prs(PrFilter::Mine) => (mine, false, "open"),
                 Section::Claude => {
                     if attention > 0 {
-                        attention as i64
+                        (attention as i64, true, "need you")
                     } else {
-                        running as i64
+                        (running as i64, false, "running")
                     }
                 }
-                _ => 0,
+                _ => (0, false, ""),
             };
             r.count.set_text(&if n > 0 { n.to_string() } else { String::new() });
+            r.count.set_visible(n > 0);
+            if urgent {
+                r.count.add_css_class("attention");
+            } else {
+                r.count.remove_css_class("attention");
+            }
+            set_label(&r.row, &if n > 0 { format!("{}, {n} {noun}", r.title) } else { r.title.clone() });
         }
     }
 
@@ -240,9 +256,9 @@ impl Sidebar {
     }
 }
 
-type Group = (String, Vec<(Section, String, &'static str, &'static str)>);
+pub type Group = (String, Vec<(Section, String, &'static str, &'static str)>);
 
-fn groups() -> Vec<Group> {
+pub fn groups() -> Vec<Group> {
     let provider = app::provider();
     let claude = ("AI".to_string(), vec![(Section::Claude, "Agents".to_string(), "sy-sparkles-symbolic", "coral")]);
     if provider.is_github() {

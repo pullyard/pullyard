@@ -24,20 +24,25 @@ fn rgba(r: f32, g: f32, b: f32, a: f32) -> gdk::RGBA {
     gdk::RGBA::new(r, g, b, a)
 }
 
+fn brand(hex: &str) -> gdk::RGBA {
+    let (r, g, b) = crate::brand::rgb(hex);
+    rgba(r as f32, g as f32, b as f32, 1.0)
+}
+
 fn violet() -> gdk::RGBA {
-    rgba(0.655, 0.545, 0.980, 1.0)
+    brand(crate::brand::MARK_VIOLET)
 }
 
 fn sky() -> gdk::RGBA {
-    rgba(0.220, 0.741, 0.973, 1.0)
+    brand(crate::brand::MARK_SKY)
 }
 
 fn hull_top() -> gdk::RGBA {
-    rgba(0.984, 0.443, 0.522, 1.0)
+    brand(crate::brand::MARK_CORAL)
 }
 
 fn hull_bottom() -> gdk::RGBA {
-    rgba(0.839, 0.122, 0.306, 1.0)
+    brand(crate::brand::MARK_CORAL_DEEP)
 }
 
 fn deck() -> gdk::RGBA {
@@ -146,6 +151,7 @@ impl Geometry {
 
 thread_local! {
     static GEOMETRY: Geometry = Geometry::new();
+    static DRAWN: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(std::collections::HashSet::new());
 }
 
 fn clamp01(v: f64) -> f64 {
@@ -310,6 +316,7 @@ mod imp {
         pub elapsed: Cell<f64>,
         pub last_draw: Cell<i64>,
         pub tick: RefCell<Option<gtk::TickCallbackId>>,
+        pub span: Cell<f64>,
     }
 
     #[glib::object_subclass]
@@ -330,8 +337,17 @@ mod imp {
     }
 
     impl Loader {
+        pub fn span(&self) -> f64 {
+            let s = self.span.get();
+            if s > 0.0 {
+                s
+            } else {
+                ONCE
+            }
+        }
+
         pub fn finished(&self) -> bool {
-            self.mode.get() == Mode::Once && self.elapsed.get() >= ONCE
+            self.mode.get() == Mode::Once && self.elapsed.get() >= self.span()
         }
 
         pub fn start(&self) {
@@ -344,7 +360,7 @@ mod imp {
             }
             if !animations_enabled() {
                 if self.mode.get() == Mode::Once {
-                    self.elapsed.set(ONCE);
+                    self.elapsed.set(self.span());
                 }
                 obj.queue_draw();
                 return;
@@ -411,7 +427,7 @@ mod imp {
             match self.mode.get() {
                 Mode::Wake => draw_wake(snapshot, w, h, self.elapsed.get(), still),
                 Mode::Once => {
-                    let p = if still { 1.0 } else { (self.elapsed.get() / ONCE).min(1.0) };
+                    let p = if still { 1.0 } else { ease_in_out((self.elapsed.get() / self.span()).min(1.0)) };
                     draw_mark(snapshot, w, h, p, 0.0);
                 }
                 Mode::Loop => {
@@ -453,8 +469,24 @@ impl Loader {
         Self::new(Mode::Once, size, (size as f32 * BOX_H / BOX_W).round() as i32)
     }
 
+    pub fn draw_once(size: i32, key: &str, seconds: f64) -> Self {
+        let l = Self::once(size);
+        let imp = l.imp();
+        imp.span.set(seconds);
+        let first = DRAWN.with(|d| d.borrow_mut().insert(key.to_string()));
+        if !first || !animations_enabled() {
+            imp.elapsed.set(seconds);
+        }
+        l.update_state(&[gtk::accessible::State::Hidden(true)]);
+        l
+    }
+
     pub fn wake(height: i32) -> Self {
         Self::new(Mode::Wake, (height as f32 * 20.0 / 12.0).round() as i32, height)
+    }
+
+    pub fn set_duration(&self, seconds: f64) {
+        self.imp().span.set(seconds);
     }
 
     pub fn set_spinning(&self, on: bool) {

@@ -3,7 +3,6 @@ use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 
-use super::splash::app_icon;
 use super::widgets::*;
 use crate::git_accounts::{self, GitCredential, GitProvider};
 use crate::{app, auth, brand, rt, settings, util};
@@ -410,19 +409,75 @@ fn saved_accounts(on_done: Option<Rc<dyn Fn()>>) -> gtk::Box {
     c
 }
 
+fn stage<W: IsA<gtk::Widget>>(child: &W, delay: f64) -> gtk::Revealer {
+    let r = gtk::Revealer::new();
+    r.set_transition_type(gtk::RevealerTransitionType::Crossfade);
+    r.set_transition_duration(450);
+    r.set_child(Some(child));
+    if !super::logo::animations_enabled() {
+        r.set_reveal_child(true);
+        return r;
+    }
+    let weak = r.downgrade();
+    gtk::glib::timeout_add_local_once(std::time::Duration::from_secs_f64(delay), move || {
+        if let Some(r) = weak.upgrade() {
+            r.set_reveal_child(true);
+        }
+    });
+    r
+}
+
+fn welcome_hero(pace: f64) -> gtk::Box {
+    let b = vbox(10);
+    let mark = Loader::once(210);
+    mark.set_duration(1.7);
+    mark.set_halign(gtk::Align::Center);
+    decorative(&mark);
+    b.append(&mark);
+    let t = label_with(brand::APP_NAME, &["onboarding-title"]);
+    t.set_xalign(0.5);
+    b.append(&stage(&t, 1.15 * pace));
+    let s = label_with(brand::TAGLINE, &["onboarding-tagline"]);
+    s.set_xalign(0.5);
+    b.append(&stage(&s, 1.3 * pace));
+    b
+}
+
+const FEATURES: [(&str, &str, &str, &str); 3] = [
+    ("sy-bell-symbolic", "sky", "Inbox for reviews", "Review requests, mentions and your PRs in one live list."),
+    ("sy-merge-symbolic", "violet", "Review & merge", "Diffs, threads and checks — no browser tab needed."),
+    ("sy-sparkles-symbolic", "coral", "Fix with agent", "Hand a failing check or review comment to an agent."),
+];
+
+fn welcome_features(pace: f64) -> gtk::Box {
+    let row = hbox(10);
+    row.set_homogeneous(true);
+    for (i, (icon_name, color, title, detail)) in FEATURES.iter().enumerate() {
+        let card = vbox(8);
+        card.add_css_class("onboarding-card");
+        let tile = icon_tile(icon_name, color, 28);
+        tile.set_halign(gtk::Align::Start);
+        decorative(&tile);
+        card.append(&tile);
+        card.append(&label_with(title, &["sy-bold", "sy-text"]));
+        let d = wrap_label(detail, &["sy-status-message"]);
+        d.set_max_width_chars(18);
+        card.append(&d);
+        card.set_accessible_role(gtk::AccessibleRole::Group);
+        set_label(&card, &format!("{title}. {detail}"));
+        row.append(&stage(&card, (1.5 + i as f64 * 0.1) * pace));
+    }
+    row
+}
+
 pub fn form(embedded: bool, on_done: Option<Rc<dyn Fn()>>) -> gtk::Box {
+    let outer = vbox(22);
     let column = vbox(18);
+    let pace = if git_accounts::accounts().is_empty() { 1.0 } else { 0.5 };
 
     if !embedded {
-        let head = vbox(6);
-        head.append(&app_icon(104));
-        let t = label_with(brand::APP_NAME, &["login-title", "sy-text"]);
-        t.set_xalign(0.5);
-        head.append(&t);
-        let s = label_with("Fast PR browsing without a browser", &["sy-muted"]);
-        s.set_xalign(0.5);
-        head.append(&s);
-        column.append(&head);
+        outer.append(&welcome_hero(pace));
+        outer.append(&welcome_features(pace));
         column.append(&saved_accounts(on_done.clone()));
     }
 
@@ -701,7 +756,11 @@ pub fn form(embedded: bool, on_done: Option<Rc<dyn Fn()>>) -> gtk::Box {
         }
     });
     keep_alive(&column, login);
-    column
+    if embedded {
+        return column;
+    }
+    outer.append(&stage(&column, 1.95 * pace));
+    outer
 }
 
 pub fn select_provider(p: GitProvider) {
@@ -717,11 +776,11 @@ pub fn build() -> gtk::Widget {
     column.set_size_request(480, -1);
 
     let clamp = adw::Clamp::new();
-    clamp.set_maximum_size(520);
+    clamp.set_maximum_size(640);
     clamp.set_child(Some(&column));
     let scroll = scrolled(&clamp);
     let page = vbox(0);
-    page.add_css_class("sy-panel-pane");
+    page.add_css_class("onboarding");
     let tv = adw::ToolbarView::new();
     let hb = adw::HeaderBar::new();
     hb.set_show_title(false);

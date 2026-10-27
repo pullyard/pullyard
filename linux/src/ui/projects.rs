@@ -21,6 +21,8 @@ struct ProjectsList {
     hint: gtk::Box,
     status: Rc<RefreshStatus>,
     stack: gtk::Stack,
+    empty: gtk::Box,
+    closed: gtk::ToggleButton,
 }
 
 fn scope_hint() -> gtk::Box {
@@ -99,11 +101,20 @@ impl ProjectsList {
             if self.loading.get() {
                 self.stack.set_visible_child_name("loading");
             } else {
-                if let Some(l) = self.stack.child_by_name("empty").and_downcast::<gtk::Label>() {
-                    l.set_text(match &err {
-                        Some(e) if !self.hint.is_visible() => e,
-                        _ => "No projects",
-                    });
+                match &err {
+                    Some(e) if !self.hint.is_visible() => {
+                        let weak = Rc::downgrade(self);
+                        set_status(&self.empty, &error_state(e, Some(Box::new(move || {
+                            if let Some(me) = weak.upgrade() {
+                                me.load();
+                            }
+                        }))));
+                    }
+                    _ if self.projects.borrow().is_empty() => set_status(&self.empty, &empty_note("No projects", Some("Projects you can access show up here."))),
+                    _ => {
+                        let toggle = self.closed.clone();
+                        set_status(&self.empty, &empty_note_action("No open projects", Some("Closed projects are hidden."), Some(("Show closed", Box::new(move || toggle.set_active(true))))));
+                    }
                 }
                 self.stack.set_visible_child_name("empty");
             }
@@ -155,14 +166,9 @@ pub fn list() -> gtk::Widget {
     let stack = gtk::Stack::new();
     stack.add_named(&scrolled(&lb), Some("list"));
     stack.add_named(&loading(), Some("loading"));
-    let empty = label_with("No projects", &["sy-muted"]);
-    empty.set_valign(gtk::Align::Start);
-    empty.set_halign(gtk::Align::Center);
-    empty.set_margin_top(30);
-    empty.set_wrap(true);
-    empty.set_natural_wrap_mode(gtk::NaturalWrapMode::None);
-    empty.set_justify(gtk::Justification::Center);
+    let empty = vbox(0);
     stack.add_named(&empty, Some("empty"));
+    let closed = gtk::ToggleButton::new();
     stack.set_vexpand(true);
     let holder: Rc<RefCell<Option<std::rc::Weak<ProjectsList>>>> = Rc::new(RefCell::new(None));
     let h = holder.clone();
@@ -182,6 +188,8 @@ pub fn list() -> gtk::Widget {
         hint: hint.clone(),
         status,
         stack: stack.clone(),
+        empty,
+        closed: closed.clone(),
     });
     *holder.borrow_mut() = Some(Rc::downgrade(&me));
     let w = Rc::downgrade(&me);
@@ -192,9 +200,9 @@ pub fn list() -> gtk::Widget {
             }
         }
     });
-    let closed = gtk::ToggleButton::new();
     crate::icons::set_button_icon(&closed, "sy-archive-symbolic");
     closed.set_tooltip_text(Some("Show closed"));
+    set_label(&closed, "Show closed");
     let w = Rc::downgrade(&me);
     closed.connect_toggled(move |t| {
         if let Some(me) = w.upgrade() {

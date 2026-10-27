@@ -1050,6 +1050,7 @@ impl App {
             s.unread_count = 0;
             s.known_review_requests = None;
         }
+        crate::notify::reset();
         self.pr_models.borrow_mut().clear();
         self.set_phase(Phase::LoggedOut);
         self.badges.emit(&());
@@ -1124,11 +1125,16 @@ impl App {
             return;
         }
         let a1 = api.clone();
-        if let Ok(b) = crate::rt::run(async move { a1.badges().await }).await {
-            self.apply_review_requests(b.rr.nodes, b.rr.issue_count);
+        let account = cache_account();
+        let badges = crate::rt::run(async move { a1.badges().await }).await.ok();
+        if let Some(b) = &badges {
+            self.apply_review_requests(b.rr.nodes.clone(), b.rr.issue_count);
             let mut s = self.state.borrow_mut();
-            s.my_prs = b.mine.nodes;
+            s.my_prs = b.mine.nodes.clone();
             s.my_pr_count = b.mine.issue_count;
+        }
+        if cache_account() == account {
+            crate::notify::observe(&account, badges.as_ref().map(|b| b.rr.nodes.as_slice()), badges.as_ref().map(|b| b.rr.issue_count).unwrap_or(0), badges.as_ref().map(|b| b.mine.nodes.as_slice()));
         }
         let a2 = api.clone();
         if let Ok(n) = crate::rt::run(async move { a2.unread_notification_count(force).await }).await {
@@ -1139,40 +1145,26 @@ impl App {
     }
 
     fn apply_review_requests(&self, items: Vec<SearchItem>, count: i64) {
-        let new_items: Vec<SearchItem> = {
-            let mut s = self.state.borrow_mut();
-            let ids: HashSet<String> = items.iter().map(|i| i.url.clone()).collect();
-            let fresh = match &s.known_review_requests {
-                Some(known) => items.iter().filter(|i| !known.contains(&i.url)).cloned().collect(),
-                None => vec![],
-            };
-            s.known_review_requests = Some(ids);
-            s.review_requests = items;
-            s.review_request_count = count;
-            fresh
-        };
-        if !new_items.is_empty() && settings::read(|s| s.notify_review_requests) && !is_active() {
-            let prefix = number_prefix();
-            for item in new_items.iter().take(3) {
-                let n = gio::Notification::new(&format!("Review requested: {}", item.title));
-                n.set_body(Some(&format!("{}{prefix}{} by {}", item.repository.name_with_owner, item.number, item.author.as_ref().map(|a| a.login.as_str()).unwrap_or("ghost"))));
-                n.set_default_action_and_target_value("app.open-url", Some(&item.url.to_variant()));
-                self.gtk_app.send_notification(Some(&format!("rr-{}", item.url)), &n);
-            }
-        }
+        let mut s = self.state.borrow_mut();
+        s.known_review_requests = Some(items.iter().map(|i| i.url.clone()).collect());
+        s.review_requests = items;
+        s.review_request_count = count;
     }
 
     async fn refresh_forge_badges(self: Rc<Self>, forge: ForgeClient) {
         let caps = self.state.borrow().forge_caps.clone();
         let supported = caps.pull_filters.clone();
         let current = |me: &Rc<Self>| me.state.borrow().forge.as_ref().is_some_and(|f| f.same(&forge));
+        let mut seen_reviews: Option<Vec<SearchItem>> = None;
+        let mut seen_mine: Option<Vec<SearchItem>> = None;
         if supported.contains(&PrFilter::ReviewRequested) {
             let f = forge.clone();
             if let Ok(rr) = crate::rt::run(async move { f.pull_requests(PrFilter::ReviewRequested, ui::lists::StateFilter::Open).await }).await {
                 if current(&self) {
                     ui::forge_view::remember(&rr);
                     let count = rr.len() as i64;
-                    self.apply_review_requests(rr.into_iter().take(10).collect(), count);
+                    self.apply_review_requests(rr.iter().take(10).cloned().collect(), count);
+                    seen_reviews = Some(rr);
                 }
             }
         }
@@ -1183,9 +1175,13 @@ impl App {
                     ui::forge_view::remember(&mine);
                     let mut s = self.state.borrow_mut();
                     s.my_pr_count = mine.len() as i64;
-                    s.my_prs = mine.into_iter().take(10).collect();
+                    s.my_prs = mine.iter().take(10).cloned().collect();
+                    seen_mine = Some(mine);
                 }
             }
+        }
+        if current(&self) {
+            crate::notify::observe(&cache_account(), seen_reviews.as_deref(), seen_reviews.as_ref().map(|r| r.len() as i64).unwrap_or(0), seen_mine.as_deref());
         }
         let unread = if caps.has_inbox() {
             let f = forge.clone();
@@ -1427,14 +1423,25 @@ impl App {
         let claude_ready = || try_get().is_some_and(|a| a.state.borrow().phase == Phase::LoggedIn && section_allowed(Section::Claude));
         add(
             "agents-quick-open",
-            &["<Control>k"],
+            &["<Control><Shift>k"],
             Box::new(move || {
-                if forward_to_terminal(0x0b) || !claude_ready() {
+                if !claude_ready() {
                     return;
                 }
                 ui::claude::quick_open::show();
             }),
         );
+        add(
+            "command-palette",
+            &["<Control>k"],
+            Box::new(|| {
+                if forward_to_terminal(0x0b) {
+                    return;
+                }
+                ui::palette::show();
+            }),
+        );
+        add("show-shortcuts", &["<Control>question", "<Control><Shift>question"], Box::new(ui::shortcuts::show));
         let me = self.clone();
         add(
             "agents-new-session",
@@ -1605,6 +1612,7 @@ pub fn run(smoke: bool) -> glib::ExitCode {
         crate::theme::install();
         crate::text_zoom::install();
         a.install_actions();
+        crate::notify::install(&a.gtk_app);
     });
     let a = app.clone();
     gtk_app.connect_activate(move |_| {

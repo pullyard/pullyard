@@ -5,7 +5,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use super::pr::files::line_widget;
+use super::pr::diff_view::{self, DiffSelection, HScroll, RowLine, RowOpts};
 use super::widgets::*;
 use crate::api::models::*;
 use crate::diff::DiffFile;
@@ -19,7 +19,9 @@ enum Row {
 }
 
 pub struct PlainDiff {
-    pub widget: gtk::ScrolledWindow,
+    pub widget: gtk::Box,
+    hscroll: Rc<HScroll>,
+    selection: Rc<DiffSelection>,
     files: RefCell<Vec<DiffFile>>,
     collapsed: RefCell<HashSet<String>>,
     store: gio::ListStore,
@@ -34,13 +36,23 @@ impl PlainDiff {
         let factory = gtk::SignalListItemFactory::new();
         let view = gtk::ListView::new(Some(gtk::NoSelection::new(Some(store.clone()))), Some(factory.clone()));
         view.add_css_class("diff-view");
-        let widget = gtk::ScrolledWindow::new();
-        widget.set_hscrollbar_policy(gtk::PolicyType::Never);
-        widget.set_child(Some(&view));
+        diff_view::ensure_css();
+        let scroll = gtk::ScrolledWindow::new();
+        scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
+        scroll.set_child(Some(&view));
+        scroll.set_vexpand(true);
+        scroll.set_hexpand(true);
+        let hscroll = HScroll::new();
+        hscroll.attach_wheel(&scroll);
+        let widget = vbox(0);
         widget.set_vexpand(true);
         widget.set_hexpand(true);
+        widget.append(&scroll);
+        widget.append(&hscroll.bar);
         let me = Rc::new(PlainDiff {
             widget,
+            hscroll,
+            selection: DiffSelection::new(&view),
             files: RefCell::new(vec![]),
             collapsed: RefCell::new(HashSet::new()),
             store,
@@ -61,10 +73,40 @@ impl PlainDiff {
             let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
             let Some(obj) = item.item().and_downcast::<glib::BoxedAnyObject>() else { return };
             let row = obj.borrow::<Row>().clone();
-            let widget = me.row_widget(&row);
+            let widget = me.row_widget(&row, item);
             if let Some(bin) = item.child().and_downcast::<adw::Bin>() {
                 bin.set_child(Some(&widget));
             }
+        });
+        let w = Rc::downgrade(&me);
+        me.selection.set_source(Rc::new(move |pos, _| {
+            let Some(me) = w.upgrade() else { return RowLine::Other };
+            let rows = me.rows.borrow();
+            let files = me.files.borrow();
+            match rows.get(pos as usize) {
+                Some(Row::Header(_)) => RowLine::Header,
+                Some(Row::Line(fi, li)) => files.get(*fi).and_then(|f| f.lines.get(*li)).cloned().map(RowLine::Line).unwrap_or(RowLine::Other),
+                _ => RowLine::Other,
+            }
+        }));
+        let w = Rc::downgrade(&me);
+        diff_view::on_prefs(move |_| match w.upgrade() {
+            Some(me) => {
+                me.rebuild();
+                true
+            }
+            None => false,
+        });
+        let w = Rc::downgrade(&me);
+        crate::theme::on_change(move |_| match w.upgrade() {
+            Some(me) => {
+                let n = me.store.n_items();
+                if n > 0 {
+                    me.store.items_changed(0, n, n);
+                }
+                true
+            }
+            None => false,
         });
         me
     }
@@ -98,13 +140,24 @@ impl PlainDiff {
                 rows.push(Row::Line(fi, li));
             }
         }
+        let wrap = diff_view::wrap();
+        let longest = if wrap {
+            0
+        } else {
+            diff_view::longest_columns(rows.iter().filter_map(|r| match r {
+                Row::Line(fi, li) => files.get(*fi).and_then(|f| f.lines.get(*li)),
+                _ => None,
+            }))
+        };
+        self.hscroll.reset(longest, !wrap);
         let objs: Vec<glib::BoxedAnyObject> = rows.iter().map(|r| glib::BoxedAnyObject::new(r.clone())).collect();
         let n = self.store.n_items();
+        self.selection.clear();
         self.store.splice(0, n, &objs);
         *self.rows.borrow_mut() = rows;
     }
 
-    fn row_widget(self: &Rc<Self>, row: &Row) -> gtk::Widget {
+    fn row_widget(self: &Rc<Self>, row: &Row, item: &gtk::ListItem) -> gtk::Widget {
         match row {
             Row::Header(fi) => {
                 let Some(f) = self.files.borrow().get(*fi).cloned() else { return vbox(0).upcast() };
@@ -142,16 +195,31 @@ impl PlainDiff {
                     o.connect_clicked(move |_| open(id.clone()));
                     b.append(&o);
                 }
-                let c = icon_button("edit-copy-symbolic", "Copy path");
+                let c = icon_button("edit-copy-symbolic", "Copy file path");
                 let id = f.id.clone();
                 c.connect_clicked(move |_| util::copy(&id));
                 b.append(&c);
+                let w = gtk::ToggleButton::new();
+                w.set_icon_name("format-justify-left-symbolic");
+                w.add_css_class("flat");
+                w.set_active(diff_view::wrap());
+                w.set_tooltip_text(Some("Wrap long lines"));
+                w.update_property(&[gtk::accessible::Property::Label("Wrap lines")]);
+                w.connect_toggled(|t| {
+                    let on = t.is_active();
+                    glib::idle_add_local_once(move || diff_view::set_wrap(on));
+                });
+                b.append(&w);
                 b.upcast()
             }
             Row::Line(fi, li) => {
                 let files = self.files.borrow();
-                match files.get(*fi).and_then(|f| f.lines.get(*li)) {
-                    Some(l) => line_widget(l, false).upcast(),
+                let Some(f) = files.get(*fi) else { return vbox(0).upcast() };
+                match f.lines.get(*li) {
+                    Some(l) => {
+                        let opts = RowOpts { ext: diff_view::file_ext(f), wrap: diff_view::wrap(), commentable: false, scroll: Some(self.hscroll.clone()), select: Some((self.selection.clone(), item.clone())) };
+                        diff_view::line_row(l, &opts, None).upcast()
+                    }
                     None => vbox(0).upcast(),
                 }
             }

@@ -8,10 +8,21 @@ use gtk::glib;
 
 use crate::claude::Indicator;
 
-const VIOLET: (f64, f64, f64) = (0.655, 0.545, 0.980);
-const SKY: (f64, f64, f64) = (0.220, 0.741, 0.973);
-const HULL_TOP: (f64, f64, f64) = (0.984, 0.443, 0.522);
-const HULL_BOTTOM: (f64, f64, f64) = (0.839, 0.122, 0.306);
+fn violet() -> (f64, f64, f64) {
+    crate::brand::rgb(crate::brand::MARK_VIOLET)
+}
+
+fn sky() -> (f64, f64, f64) {
+    crate::brand::rgb(crate::brand::MARK_SKY)
+}
+
+fn hull_top() -> (f64, f64, f64) {
+    crate::brand::rgb(crate::brand::MARK_CORAL)
+}
+
+fn hull_bottom() -> (f64, f64, f64) {
+    crate::brand::rgb(crate::brand::MARK_CORAL_DEEP)
+}
 const SIZE: i32 = 16;
 
 fn animations_enabled() -> bool {
@@ -27,14 +38,14 @@ fn draw_spinner(cr: &cairo::Context, w: f64, h: f64, phase: f64) {
     let (cx, cy) = (w / 2.0, h / 2.0);
     let r = 4.0;
     cr.set_line_width(2.0);
-    cr.set_source_rgba(VIOLET.0, VIOLET.1, VIOLET.2, 0.2);
+    cr.set_source_rgba(violet().0, violet().1, violet().2, 0.2);
     cr.arc(cx, cy, r, 0.0, 2.0 * PI);
     let _ = cr.stroke();
     let start = -phase * 2.0 * PI - PI / 2.0;
     let end = start + 0.34 * 2.0 * PI;
     let grad = cairo::LinearGradient::new(cx - r, cy, cx + r, cy);
-    grad.add_color_stop_rgb(0.0, SKY.0, SKY.1, SKY.2);
-    grad.add_color_stop_rgb(1.0, VIOLET.0, VIOLET.1, VIOLET.2);
+    grad.add_color_stop_rgb(0.0, sky().0, sky().1, sky().2);
+    grad.add_color_stop_rgb(1.0, violet().0, violet().1, violet().2);
     let _ = cr.set_source(&grad);
     cr.set_line_cap(cairo::LineCap::Round);
     cr.arc(cx, cy, r, start, end);
@@ -45,16 +56,16 @@ fn draw_done(cr: &cairo::Context, w: f64, h: f64) {
     let (cx, cy) = (w / 2.0, h / 2.0);
     let r = 4.0;
     let ring = cairo::LinearGradient::new(cx - r, cy - r, cx + r, cy + r);
-    ring.add_color_stop_rgb(0.0, VIOLET.0, VIOLET.1, VIOLET.2);
-    ring.add_color_stop_rgb(0.5, SKY.0, SKY.1, SKY.2);
-    ring.add_color_stop_rgb(1.0, VIOLET.0, VIOLET.1, VIOLET.2);
+    ring.add_color_stop_rgb(0.0, violet().0, violet().1, violet().2);
+    ring.add_color_stop_rgb(0.5, sky().0, sky().1, sky().2);
+    ring.add_color_stop_rgb(1.0, violet().0, violet().1, violet().2);
     let _ = cr.set_source(&ring);
     cr.set_line_width(2.0);
     cr.arc(cx, cy, r, 0.0, 2.0 * PI);
     let _ = cr.stroke();
     let dot = cairo::LinearGradient::new(cx - 2.0, cy - 2.0, cx + 2.0, cy + 2.0);
-    dot.add_color_stop_rgb(0.0, VIOLET.0, VIOLET.1, VIOLET.2);
-    dot.add_color_stop_rgb(1.0, SKY.0, SKY.1, SKY.2);
+    dot.add_color_stop_rgb(0.0, violet().0, violet().1, violet().2);
+    dot.add_color_stop_rgb(1.0, sky().0, sky().1, sky().2);
     let _ = cr.set_source(&dot);
     cr.arc(cx, cy, 2.0, 0.0, 2.0 * PI);
     let _ = cr.fill();
@@ -66,17 +77,17 @@ fn draw_waiting(cr: &cairo::Context, w: f64, h: f64, phase: Option<f64>) {
     if let Some(p) = phase {
         let t = ease(p);
         let pr = (r * (1.0 + 0.7 * t)).min(w / 2.0);
-        cr.set_source_rgba(HULL_TOP.0, HULL_TOP.1, HULL_TOP.2, 0.3 * (1.0 - t));
+        cr.set_source_rgba(hull_top().0, hull_top().1, hull_top().2, 0.3 * (1.0 - t));
         cr.arc(cx, cy, pr, 0.0, 2.0 * PI);
         let _ = cr.fill();
     } else {
-        cr.set_source_rgba(HULL_TOP.0, HULL_TOP.1, HULL_TOP.2, 0.3);
+        cr.set_source_rgba(hull_top().0, hull_top().1, hull_top().2, 0.3);
         cr.arc(cx, cy, r + 1.0, 0.0, 2.0 * PI);
         let _ = cr.fill();
     }
     let hull = cairo::LinearGradient::new(cx, cy - r, cx, cy + r);
-    hull.add_color_stop_rgb(0.0, HULL_TOP.0, HULL_TOP.1, HULL_TOP.2);
-    hull.add_color_stop_rgb(1.0, HULL_BOTTOM.0, HULL_BOTTOM.1, HULL_BOTTOM.2);
+    hull.add_color_stop_rgb(0.0, hull_top().0, hull_top().1, hull_top().2);
+    hull.add_color_stop_rgb(1.0, hull_bottom().0, hull_bottom().1, hull_bottom().2);
     let _ = cr.set_source(&hull);
     cr.arc(cx, cy, r, 0.0, 2.0 * PI);
     let _ = cr.fill();

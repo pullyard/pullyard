@@ -5,9 +5,11 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
+use super::diff_view::{self, DiffSelection, HScroll, OnComment, RowLine, RowOpts, Side};
 use super::model::{Change, FlatRow, PrModel};
 use crate::api::models::{PendingComment, RepoRef, ReviewThread};
 use crate::diff::{DiffAnchor, DiffFile, DiffLine, LineKind};
+use crate::diff_layout::{self, SplitRow};
 use crate::ui::composer::Composer;
 use crate::ui::menu::Menu;
 use crate::ui::widgets::*;
@@ -17,9 +19,19 @@ pub struct FilesTab {
     pub widget: gtk::Stack,
     model: Rc<PrModel>,
     store: gio::ListStore,
-    rows: RefCell<Vec<FlatRow>>,
+    rows: RefCell<Vec<ViewRow>>,
     row_keys: RefCell<Vec<RowKey>>,
     rows_open: Cell<Option<bool>>,
+    rows_mode: Cell<Option<(bool, bool)>>,
+    diff_scroll: gtk::ScrolledWindow,
+    hscroll: Rc<HScroll>,
+    selection: Rc<DiffSelection>,
+    split_fits: Cell<bool>,
+    split_toggle: gtk::ToggleButton,
+    unified_toggle: gtk::ToggleButton,
+    bound: RefCell<Vec<(glib::WeakRef<adw::Bin>, glib::BoxedAnyObject)>>,
+    nav_index: Cell<Option<usize>>,
+    keys: RefCell<Option<(glib::WeakRef<gtk::Window>, gtk::EventControllerKey)>>,
     rows_filter: RefCell<String>,
     file_list_sig: Cell<Option<u64>>,
     view: gtk::ListView,
@@ -37,7 +49,92 @@ pub struct FilesTab {
 enum RowKey {
     Header(usize, bool, bool),
     Line(usize, usize),
+    Split(usize, Option<usize>, Option<usize>),
     Other(String),
+}
+
+#[derive(Clone)]
+enum ViewRow {
+    Flat(FlatRow),
+    Split(usize, Option<usize>, Option<usize>),
+}
+
+type Segment = Vec<(usize, Vec<FlatRow>)>;
+
+fn flush_segment(out: &mut Vec<ViewRow>, files: &[DiffFile], fi: Option<usize>, segment: &mut Segment) {
+    let taken = std::mem::take(segment);
+    let Some(file) = fi.and_then(|fi| files.get(fi)) else {
+        for (_, extras) in taken {
+            out.extend(extras.into_iter().map(ViewRow::Flat));
+        }
+        return;
+    };
+    let fi = fi.unwrap_or_default();
+    let kinds: Vec<LineKind> = taken.iter().map(|(li, _)| file.lines.get(*li).map(|l| l.kind).unwrap_or(LineKind::Meta)).collect();
+    for row in diff_layout::pair_kinds(&kinds) {
+        match row {
+            SplitRow::Full(i) => {
+                out.push(ViewRow::Flat(FlatRow::Line(fi, taken[i].0)));
+                out.extend(taken[i].1.iter().cloned().map(ViewRow::Flat));
+            }
+            SplitRow::Pair(a, b) => {
+                out.push(ViewRow::Split(fi, a.map(|i| taken[i].0), b.map(|i| taken[i].0)));
+                if let Some(a) = a {
+                    out.extend(taken[a].1.iter().cloned().map(ViewRow::Flat));
+                }
+                if let Some(b) = b.filter(|b| Some(*b) != a) {
+                    out.extend(taken[b].1.iter().cloned().map(ViewRow::Flat));
+                }
+            }
+        }
+    }
+}
+
+fn split_rows(flat: Vec<FlatRow>, files: &[DiffFile]) -> Vec<ViewRow> {
+    let mut out = Vec::with_capacity(flat.len());
+    let mut segment_file: Option<usize> = None;
+    let mut segment: Segment = vec![];
+    for row in flat {
+        match row {
+            FlatRow::Line(fi, li) => {
+                if segment_file != Some(fi) {
+                    flush_segment(&mut out, files, segment_file, &mut segment);
+                    segment_file = Some(fi);
+                }
+                segment.push((li, vec![]));
+            }
+            FlatRow::Header(_) => {
+                flush_segment(&mut out, files, segment_file, &mut segment);
+                segment_file = None;
+                out.push(ViewRow::Flat(row));
+            }
+            other => match segment.last_mut() {
+                Some(last) => last.1.push(other),
+                None => out.push(ViewRow::Flat(other)),
+            },
+        }
+    }
+    flush_segment(&mut out, files, segment_file, &mut segment);
+    out
+}
+
+fn nav_button(icon_name: &str, title: &str, key: &str) -> gtk::Button {
+    let b = icon_button(icon_name, &format!("{title} ({key})"));
+    b.update_property(&[gtk::accessible::Property::Label(title)]);
+    b
+}
+
+fn is_text_input(w: &gtk::Widget) -> bool {
+    w.is::<gtk::Editable>()
+        || w.is::<gtk::Text>()
+        || w.is::<gtk::TextView>()
+        || w.is::<vte4::Terminal>()
+        || w.is::<webkit6::WebView>()
+        || w.ancestor(vte4::Terminal::static_type()).is_some()
+        || w.ancestor(webkit6::WebView::static_type()).is_some()
+        || w.ancestor(gtk::TextView::static_type()).is_some()
+        || w.ancestor(adw::Dialog::static_type()).is_some()
+        || w.ancestor(gtk::Popover::static_type()).is_some()
 }
 
 fn blame_target(m: &PrModel) -> Option<(RepoRef, String)> {
@@ -52,45 +149,7 @@ fn status_label(f: &DiffFile) -> gtk::Label {
 }
 
 pub fn line_widget(line: &DiffLine, commentable: bool) -> gtk::Box {
-    let row = hbox(0);
-    row.add_css_class("diff-line");
-    match line.kind {
-        LineKind::Add => row.add_css_class("add"),
-        LineKind::Del => row.add_css_class("del"),
-        LineKind::Hunk => row.add_css_class("hunk"),
-        LineKind::Meta => row.add_css_class("meta"),
-        LineKind::Context => {}
-    }
-    if line.kind == LineKind::Hunk {
-        let t = label_with(&line.text, &["diff-line"]);
-        t.set_margin_start(110);
-        t.set_margin_top(3);
-        t.set_margin_bottom(3);
-        t.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        t.set_hexpand(true);
-        row.append(&t);
-        return row;
-    }
-    let gutter = label_with(&line.gutter(commentable), &["diff-gutter"]);
-    gutter.set_width_chars(14);
-    gutter.set_xalign(1.0);
-    gutter.set_valign(gtk::Align::Start);
-    if commentable && line.commentable() {
-        gutter.add_css_class("commentable");
-        gutter.set_tooltip_text(Some("Comment on this line"));
-    }
-    row.append(&gutter);
-    let text = format!("{}{}", line.sign(), line.text.replace('\t', "    "));
-    let t = gtk::Label::new(Some(&text));
-    t.add_css_class("diff-line");
-    t.set_xalign(0.0);
-    t.set_wrap(true);
-    t.set_wrap_mode(gtk::pango::WrapMode::Char);
-    t.set_hexpand(true);
-    t.set_margin_start(6);
-    t.set_valign(gtk::Align::Start);
-    row.append(&t);
-    row
+    diff_view::line_row(line, &RowOpts { wrap: true, commentable, ..Default::default() }, None)
 }
 
 impl FilesTab {
@@ -100,11 +159,50 @@ impl FilesTab {
         let selection = gtk::NoSelection::new(Some(store.clone()));
         let view = gtk::ListView::new(Some(selection), Some(factory.clone()));
         view.add_css_class("diff-view");
+        diff_view::ensure_css();
         let diff_scroll = gtk::ScrolledWindow::new();
         diff_scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
         diff_scroll.set_child(Some(&view));
         diff_scroll.set_hexpand(true);
         diff_scroll.set_vexpand(true);
+        let hscroll = HScroll::new();
+        hscroll.attach_wheel(&diff_scroll);
+
+        let review_bar = hbox(10);
+        review_bar.add_css_class("diff-review-bar");
+        let file_nav = hbox(2);
+        let prev_file = nav_button("go-up-symbolic", "Previous file", "P");
+        let next_file = nav_button("go-down-symbolic", "Next file", "N");
+        file_nav.append(&prev_file);
+        file_nav.append(&next_file);
+        review_bar.append(&file_nav);
+        let hunk_nav = hbox(2);
+        let prev_hunk = nav_button("go-top-symbolic", "Previous hunk", "[");
+        let next_hunk = nav_button("go-bottom-symbolic", "Next hunk", "]");
+        hunk_nav.append(&prev_hunk);
+        hunk_nav.append(&next_hunk);
+        review_bar.append(&hunk_nav);
+        review_bar.append(&spacer());
+        review_bar.append(&diff_view::wrap_check());
+        let layout_box = hbox(0);
+        layout_box.add_css_class("linked");
+        let unified_toggle = gtk::ToggleButton::with_label("Unified");
+        let split_toggle = gtk::ToggleButton::with_label("Split");
+        split_toggle.set_group(Some(&unified_toggle));
+        unified_toggle.set_active(true);
+        layout_box.append(&unified_toggle);
+        layout_box.append(&split_toggle);
+        layout_box.update_property(&[gtk::accessible::Property::Label("Diff layout")]);
+        review_bar.append(&layout_box);
+
+        let diff_column = vbox(0);
+        diff_column.append(&review_bar);
+        diff_column.append(&diff_scroll);
+        diff_column.append(&hscroll.bar);
+        let diff_area = adw::BreakpointBin::new();
+        diff_area.set_size_request(320, 200);
+        diff_area.set_child(Some(&diff_column));
+        let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::new_length(adw::BreakpointConditionLengthType::MinWidth, diff_layout::SPLIT_MIN_WIDTH as f64, adw::LengthUnit::Px));
 
         let side = vbox(0);
         side.add_css_class("sy-list-pane");
@@ -126,7 +224,7 @@ impl FilesTab {
 
         let paned = gtk::Paned::new(gtk::Orientation::Horizontal);
         paned.set_start_child(Some(&side));
-        paned.set_end_child(Some(&diff_scroll));
+        paned.set_end_child(Some(&diff_area));
         paned.set_resize_start_child(false);
         paned.set_shrink_start_child(false);
         paned.set_position(260);
@@ -143,6 +241,16 @@ impl FilesTab {
             rows: RefCell::new(vec![]),
             row_keys: RefCell::new(vec![]),
             rows_open: Cell::new(None),
+            rows_mode: Cell::new(None),
+            diff_scroll,
+            hscroll,
+            selection: DiffSelection::new(&view),
+            split_fits: Cell::new(false),
+            split_toggle: split_toggle.clone(),
+            unified_toggle: unified_toggle.clone(),
+            bound: RefCell::new(vec![]),
+            nav_index: Cell::new(None),
+            keys: RefCell::new(None),
             rows_filter: RefCell::new(String::new()),
             file_list_sig: Cell::new(None),
             view,
@@ -169,19 +277,104 @@ impl FilesTab {
             let Some(me) = w.upgrade() else { return };
             let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
             let Some(obj) = item.item().and_downcast::<glib::BoxedAnyObject>() else { return };
-            let row = obj.borrow::<FlatRow>().clone();
-            let widget = me.row_widget(&row);
+            let row = obj.borrow::<ViewRow>().clone();
+            let widget = me.row_widget(&row, item);
             if let Some(bin) = item.child().and_downcast::<adw::Bin>() {
                 bin.set_child(Some(&widget));
+                let mut bound = me.bound.borrow_mut();
+                bound.retain(|(b, _)| b.upgrade().is_some_and(|b| b != bin));
+                bound.push((bin.downgrade(), obj));
             }
         });
-        factory.connect_unbind(|_, item| {
+        let w = Rc::downgrade(&me);
+        factory.connect_unbind(move |_, item| {
             if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
                 if let Some(bin) = item.child().and_downcast::<adw::Bin>() {
                     bin.set_child(None::<&gtk::Widget>);
+                    if let Some(me) = w.upgrade() {
+                        me.bound.borrow_mut().retain(|(b, _)| b.upgrade().is_some_and(|b| b != bin));
+                    }
                 }
             }
         });
+
+        let w = Rc::downgrade(&me);
+        me.selection.set_source(Rc::new(move |pos, side| {
+            let Some(me) = w.upgrade() else { return RowLine::Other };
+            let rows = me.rows.borrow();
+            let files = me.model.files.borrow();
+            let line = |fi: usize, li: Option<usize>| li.and_then(|li| files.get(fi).and_then(|f| f.lines.get(li))).cloned().map(RowLine::Line).unwrap_or(RowLine::Other);
+            match rows.get(pos as usize) {
+                Some(ViewRow::Flat(FlatRow::Header(_))) => RowLine::Header,
+                Some(ViewRow::Flat(FlatRow::Line(fi, li))) => line(*fi, Some(*li)),
+                Some(ViewRow::Split(fi, a, b)) => line(*fi, if side == Side::Right { *b } else { *a }),
+                _ => RowLine::Other,
+            }
+        }));
+        let w = Rc::downgrade(&me);
+        breakpoint.connect_apply(move |_| {
+            if let Some(me) = w.upgrade() {
+                me.set_split_fits(true);
+            }
+        });
+        let w = Rc::downgrade(&me);
+        breakpoint.connect_unapply(move |_| {
+            if let Some(me) = w.upgrade() {
+                me.set_split_fits(false);
+            }
+        });
+        diff_area.add_breakpoint(breakpoint);
+        let w = Rc::downgrade(&me);
+        prev_file.connect_clicked(move |_| {
+            if let Some(me) = w.upgrade() {
+                me.perform('p');
+            }
+        });
+        let w = Rc::downgrade(&me);
+        next_file.connect_clicked(move |_| {
+            if let Some(me) = w.upgrade() {
+                me.perform('n');
+            }
+        });
+        let w = Rc::downgrade(&me);
+        prev_hunk.connect_clicked(move |_| {
+            if let Some(me) = w.upgrade() {
+                me.perform('[');
+            }
+        });
+        let w = Rc::downgrade(&me);
+        next_hunk.connect_clicked(move |_| {
+            if let Some(me) = w.upgrade() {
+                me.perform(']');
+            }
+        });
+        let w = Rc::downgrade(&me);
+        split_toggle.connect_toggled(move |t| {
+            let Some(me) = w.upgrade() else { return };
+            let on = t.is_active();
+            if me.split_fits.get() && on != diff_view::split() {
+                glib::idle_add_local_once(move || diff_view::set_split(on));
+            }
+        });
+        let w = Rc::downgrade(&me);
+        diff_view::on_prefs(move |_| match w.upgrade() {
+            Some(me) => {
+                me.sync_layout_toggle();
+                me.rebuild();
+                true
+            }
+            None => false,
+        });
+        let w = Rc::downgrade(&me);
+        crate::theme::on_change(move |_| match w.upgrade() {
+            Some(me) => {
+                me.rebind_all();
+                true
+            }
+            None => false,
+        });
+        me.sync_layout_toggle();
+        me.install_keys();
 
         let w = Rc::downgrade(&me);
         filter.connect_search_changed(move |e| {
@@ -250,12 +443,20 @@ impl FilesTab {
         }
         self.widget.set_visible_child_name("files");
         let filter = self.filter.borrow().clone();
-        let rows = m.flat_rows(&filter);
+        let flat = m.flat_rows(&filter);
+        let wrap = diff_view::wrap();
+        let split = self.split_active();
+        let rows: Vec<ViewRow> = if split { split_rows(flat, &m.files.borrow()) } else { flat.into_iter().map(ViewRow::Flat).collect() };
         let keys: Vec<RowKey> = rows.iter().map(|r| self.row_key(r)).collect();
         let open = Some(m.pr.borrow().as_ref().map(|p| p.is_open()).unwrap_or(false));
         let old = self.row_keys.replace(vec![]);
         let n = self.store.n_items() as usize;
-        let full = self.rows_open.get() != open || old.len() != n || self.rows_filter.borrow().as_str() != filter;
+        let mode = Some((wrap, split));
+        let full = self.rows_open.get() != open || self.rows_mode.get() != mode || old.len() != n || self.rows_filter.borrow().as_str() != filter;
+        if full || !wrap {
+            let longest = if wrap { 0 } else { self.longest_columns(&rows) };
+            self.hscroll.reset(longest, !wrap);
+        }
         let (prefix, suffix) = if full {
             (0, 0)
         } else {
@@ -267,12 +468,14 @@ impl FilesTab {
         let removed = n - prefix - suffix;
         let objs: Vec<glib::BoxedAnyObject> = rows[prefix..rows.len() - suffix].iter().map(|r| glib::BoxedAnyObject::new(r.clone())).collect();
         if removed > 0 || !objs.is_empty() {
+            self.selection.clear();
             self.store.splice(prefix as u32, removed as u32, &objs);
             if crate::diagnostics::enabled() {
                 after_next_paint(&self.view, move || crate::diagnostics::ui_elapsed("pr.diff.frame", started));
             }
         }
         self.rows_open.set(open);
+        self.rows_mode.set(mode);
         *self.rows_filter.borrow_mut() = filter;
         *self.row_keys.borrow_mut() = keys;
         *self.rows.borrow_mut() = rows;
@@ -283,7 +486,278 @@ impl FilesTab {
         }
     }
 
-    fn row_key(&self, row: &FlatRow) -> RowKey {
+    fn split_active(&self) -> bool {
+        self.split_fits.get() && diff_view::split()
+    }
+
+    fn set_split_fits(self: &Rc<Self>, fits: bool) {
+        if self.split_fits.replace(fits) == fits {
+            return;
+        }
+        let me = self.clone();
+        glib::idle_add_local_once(move || {
+            me.sync_layout_toggle();
+            me.rows_mode.set(None);
+            me.rebuild();
+        });
+    }
+
+    fn sync_layout_toggle(&self) {
+        let fits = self.split_fits.get();
+        let active = self.split_active();
+        if self.split_toggle.is_active() != active {
+            if active {
+                self.split_toggle.set_active(true);
+            } else {
+                self.unified_toggle.set_active(true);
+            }
+        }
+        self.split_toggle.set_sensitive(fits);
+        let parent = self.split_toggle.parent();
+        let tip = if fits { "Unified or side-by-side diff (S)" } else { "Widen the window to use split view" };
+        for w in [Some(self.split_toggle.clone().upcast::<gtk::Widget>()), Some(self.unified_toggle.clone().upcast()), parent].into_iter().flatten() {
+            w.set_tooltip_text(Some(tip));
+        }
+    }
+
+    fn rebind_all(&self) {
+        let n = self.store.n_items();
+        if n > 0 {
+            self.store.items_changed(0, n, n);
+        }
+    }
+
+    fn longest_columns(&self, rows: &[ViewRow]) -> usize {
+        let files = self.model.files.borrow();
+        let line = |fi: usize, li: Option<usize>| li.and_then(|li| files.get(fi).and_then(|f| f.lines.get(li))).map(diff_layout::display_columns).unwrap_or(0);
+        rows.iter()
+            .map(|r| match r {
+                ViewRow::Flat(FlatRow::Line(fi, li)) => line(*fi, Some(*li)),
+                ViewRow::Split(fi, a, b) => line(*fi, *a).max(line(*fi, *b)),
+                _ => 0,
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn row_opts(&self, file: &DiffFile, item: &gtk::ListItem) -> RowOpts {
+        let open = self.model.pr.borrow().as_ref().map(|p| p.is_open()).unwrap_or(false);
+        RowOpts { ext: diff_view::file_ext(file), wrap: diff_view::wrap(), commentable: open, scroll: Some(self.hscroll.clone()), select: Some((self.selection.clone(), item.clone())) }
+    }
+
+    fn comment_handler(&self, file: &DiffFile) -> Option<OnComment> {
+        let m = self.model.clone();
+        let path = file.id.clone();
+        Some(Rc::new(move |line: &DiffLine| {
+            let Some(anchor) = line.anchor_line() else { return };
+            *m.composer.borrow_mut() = Some(DiffAnchor { path: path.clone(), line: anchor, side: line.anchor_side().to_string() });
+            m.composer_text.borrow_mut().clear();
+            m.emit(Change::Diff);
+        }))
+    }
+
+    fn install_keys(self: &Rc<Self>) {
+        let w = Rc::downgrade(self);
+        self.widget.connect_map(move |widget| {
+            let Some(me) = w.upgrade() else { return };
+            let Some(window) = widget.root().and_downcast::<gtk::Window>() else { return };
+            me.remove_keys();
+            let keys = gtk::EventControllerKey::new();
+            let weak = Rc::downgrade(&me);
+            keys.connect_key_pressed(move |_, key, _, state| match weak.upgrade() {
+                Some(me) if me.handle_key(key, state) => glib::Propagation::Stop,
+                _ => glib::Propagation::Proceed,
+            });
+            window.add_controller(keys.clone());
+            *me.keys.borrow_mut() = Some((window.downgrade(), keys));
+        });
+        let w = Rc::downgrade(self);
+        self.widget.connect_unmap(move |_| {
+            if let Some(me) = w.upgrade() {
+                me.remove_keys();
+            }
+        });
+    }
+
+    fn remove_keys(&self) {
+        if let Some((window, keys)) = self.keys.borrow_mut().take() {
+            if let Some(window) = window.upgrade() {
+                window.remove_controller(&keys);
+            }
+        }
+    }
+
+    fn handle_key(self: &Rc<Self>, key: gtk::gdk::Key, state: gtk::gdk::ModifierType) -> bool {
+        use gtk::gdk::ModifierType as M;
+        if state.intersects(M::CONTROL_MASK | M::ALT_MASK | M::SUPER_MASK | M::META_MASK) {
+            return false;
+        }
+        let Some(c) = key.to_unicode().filter(|c| matches!(c, 'n' | 'p' | '[' | ']' | 'v' | 'w' | 's')) else { return false };
+        if !self.widget.is_drawable() || self.widget.visible_child_name().as_deref() != Some("files") {
+            return false;
+        }
+        let focus = self.widget.root().and_downcast::<gtk::Window>().and_then(|w| gtk::prelude::GtkWindowExt::focus(&w));
+        if focus.as_ref().is_some_and(is_text_input) {
+            return false;
+        }
+        self.perform(c)
+    }
+
+    fn perform(self: &Rc<Self>, key: char) -> bool {
+        match key {
+            'n' => self.step_file(1),
+            'p' => self.step_file(-1),
+            ']' => self.jump_hunk(1),
+            '[' => self.jump_hunk(-1),
+            'v' => {
+                let Some(path) = self.current_file() else { return false };
+                let m = self.model.clone();
+                crate::rt::spawn_local(async move { m.toggle_viewed(path).await });
+            }
+            'w' => diff_view::set_wrap(!diff_view::wrap()),
+            's' => {
+                if !self.split_fits.get() {
+                    return false;
+                }
+                diff_view::set_split(!self.split_active());
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn index_of(&self, obj: &glib::BoxedAnyObject) -> Option<usize> {
+        (0..self.store.n_items()).find(|i| self.store.item(*i).as_ref() == Some(obj.upcast_ref::<glib::Object>())).map(|i| i as usize)
+    }
+
+    fn bound_bin(&self, index: usize) -> Option<adw::Bin> {
+        let obj = self.store.item(index as u32)?;
+        self.bound.borrow().iter().find(|(_, o)| o.upcast_ref::<glib::Object>() == &obj).and_then(|(b, _)| b.upgrade())
+    }
+
+    fn index_visible(&self, index: usize) -> bool {
+        let Some(bin) = self.bound_bin(index) else { return false };
+        let Some(bounds) = bin.compute_bounds(&self.diff_scroll) else { return false };
+        bin.is_mapped() && bounds.y() + bounds.height() > 0.0 && bounds.y() < self.diff_scroll.height() as f32
+    }
+
+    fn top_index(&self) -> Option<usize> {
+        let mut current = self.diff_scroll.pick(24.0, 2.0, gtk::PickFlags::DEFAULT);
+        while let Some(w) = current {
+            if let Some(bin) = w.downcast_ref::<adw::Bin>() {
+                let obj = self.bound.borrow().iter().find(|(b, _)| b.upgrade().as_ref() == Some(bin)).map(|(_, o)| o.clone());
+                if let Some(obj) = obj {
+                    return self.index_of(&obj);
+                }
+            }
+            if w == *self.diff_scroll.upcast_ref::<gtk::Widget>() {
+                break;
+            }
+            current = w.parent();
+        }
+        None
+    }
+
+    fn current_index(&self) -> Option<usize> {
+        let len = self.rows.borrow().len();
+        if len == 0 {
+            return None;
+        }
+        if let Some(i) = self.nav_index.get().filter(|i| *i < len && self.index_visible(*i)) {
+            return Some(i);
+        }
+        Some(self.top_index().unwrap_or(0).min(len - 1))
+    }
+
+    fn header_at_or_before(&self, index: usize) -> Option<(usize, usize)> {
+        let rows = self.rows.borrow();
+        rows.iter().take(index + 1).enumerate().rev().find_map(|(i, r)| match r {
+            ViewRow::Flat(FlatRow::Header(fi)) => Some((i, *fi)),
+            _ => None,
+        })
+    }
+
+    fn current_file(&self) -> Option<String> {
+        let files = self.model.files.borrow();
+        let fi = self
+            .current_index()
+            .and_then(|i| self.header_at_or_before(i))
+            .map(|(_, fi)| fi)
+            .or_else(|| self.rows.borrow().iter().find_map(|r| if let ViewRow::Flat(FlatRow::Header(fi)) = r { Some(*fi) } else { None }))?;
+        files.get(fi).map(|f| f.id.clone())
+    }
+
+    fn scroll_to_top(self: &Rc<Self>, index: usize) {
+        self.nav_index.set(Some(index));
+        self.view.scroll_to(index as u32, gtk::ListScrollFlags::NONE, None);
+        let w = Rc::downgrade(self);
+        after_next_paint(&self.view, move || {
+            let Some(me) = w.upgrade() else { return };
+            let Some(bin) = me.bound_bin(index) else { return };
+            let Some(bounds) = bin.compute_bounds(&me.diff_scroll) else { return };
+            let adj = me.diff_scroll.vadjustment();
+            adj.set_value(adj.value() + bounds.y() as f64);
+        });
+    }
+
+    fn step_file(self: &Rc<Self>, step: i64) {
+        let headers: Vec<(usize, usize)> = self
+            .rows
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| match r {
+                ViewRow::Flat(FlatRow::Header(fi)) => Some((i, *fi)),
+                _ => None,
+            })
+            .collect();
+        if headers.is_empty() {
+            return;
+        }
+        let current = self.current_index().and_then(|i| self.header_at_or_before(i)).and_then(|(row, _)| headers.iter().position(|(r, _)| *r == row));
+        let target = match current {
+            Some(p) => (p as i64 + step).clamp(0, headers.len() as i64 - 1) as usize,
+            None => 0,
+        };
+        let fi = headers[target].1;
+        let Some(path) = self.model.files.borrow().get(fi).map(|f| f.id.clone()) else { return };
+        if self.model.collapsed.borrow_mut().remove(&path) {
+            self.model.emit(Change::Diff);
+        }
+        let index = self.rows.borrow().iter().position(|r| matches!(r, ViewRow::Flat(FlatRow::Header(i)) if *i == fi));
+        if let Some(index) = index {
+            self.scroll_to_top(index);
+        }
+        let position = self.file_keys.borrow().iter().position(|k| *k == path);
+        if let Some(row) = position.and_then(|p| self.file_list.row_at_index(p as i32)) {
+            self.suppress_select.set(true);
+            self.file_list.select_row(Some(&row));
+            self.suppress_select.set(false);
+        }
+    }
+
+    fn jump_hunk(self: &Rc<Self>, step: i64) {
+        let Some(current) = self.current_index() else { return };
+        let target = {
+            let rows = self.rows.borrow();
+            let files = self.model.files.borrow();
+            let is_hunk = |r: &ViewRow| matches!(r, ViewRow::Flat(FlatRow::Line(fi, li)) if files.get(*fi).and_then(|f| f.lines.get(*li)).is_some_and(|l| l.kind == LineKind::Hunk));
+            if step > 0 {
+                (current + 1..rows.len()).find(|i| is_hunk(&rows[*i]))
+            } else {
+                (0..current).rev().find(|i| is_hunk(&rows[*i]))
+            }
+        };
+        if let Some(t) = target {
+            self.scroll_to_top(t);
+        }
+    }
+
+    fn row_key(&self, row: &ViewRow) -> RowKey {
+        let row = match row {
+            ViewRow::Flat(r) => r,
+            ViewRow::Split(fi, a, b) => return RowKey::Split(*fi, *a, *b),
+        };
         match row {
             FlatRow::Header(fi) => {
                 let files = self.model.files.borrow();
@@ -345,7 +819,7 @@ impl FilesTab {
 
     fn reveal(self: &Rc<Self>, path: &str) {
         let files = self.model.files.borrow();
-        let idx = self.rows.borrow().iter().position(|r| matches!(r, FlatRow::Header(i) if files.get(*i).map(|f| f.id.as_str()) == Some(path)));
+        let idx = self.rows.borrow().iter().position(|r| matches!(r, ViewRow::Flat(FlatRow::Header(i)) if files.get(*i).map(|f| f.id.as_str()) == Some(path)));
         drop(files);
         match idx {
             Some(i) => self.view.scroll_to(i as u32, gtk::ListScrollFlags::NONE, Some(gtk::ScrollInfo::new())),
@@ -353,7 +827,18 @@ impl FilesTab {
         }
     }
 
-    fn row_widget(self: &Rc<Self>, row: &FlatRow) -> gtk::Widget {
+    fn row_widget(self: &Rc<Self>, row: &ViewRow, item: &gtk::ListItem) -> gtk::Widget {
+        let row = match row {
+            ViewRow::Flat(r) => r,
+            ViewRow::Split(fi, a, b) => {
+                let files = self.model.files.borrow();
+                let Some(file) = files.get(*fi) else { return vbox(0).upcast() };
+                let left = a.and_then(|i| file.lines.get(i));
+                let right = b.and_then(|i| file.lines.get(i));
+                let opts = self.row_opts(file, item);
+                return diff_view::split_row(left, right, &opts, self.comment_handler(file)).upcast();
+            }
+        };
         match row {
             FlatRow::Header(fi) => {
                 let f = self.model.files.borrow().get(*fi).cloned();
@@ -366,23 +851,8 @@ impl FilesTab {
                 let files = self.model.files.borrow();
                 let Some(file) = files.get(*fi) else { return vbox(0).upcast() };
                 let Some(line) = file.lines.get(*li) else { return vbox(0).upcast() };
-                let open = self.model.pr.borrow().as_ref().map(|p| p.is_open()).unwrap_or(false);
-                let w = line_widget(line, open);
-                if open && line.commentable() {
-                    if let Some(anchor) = line.anchor_line() {
-                        let gutter = w.first_child();
-                        if let Some(g) = gutter {
-                            let m = self.model.clone();
-                            let a = DiffAnchor { path: file.id.clone(), line: anchor, side: line.anchor_side().to_string() };
-                            on_click_widget(&g, move || {
-                                *m.composer.borrow_mut() = Some(a.clone());
-                                m.composer_text.borrow_mut().clear();
-                                m.emit(Change::Diff);
-                            });
-                        }
-                    }
-                }
-                w.upcast()
+                let opts = self.row_opts(file, item);
+                diff_view::line_row(line, &opts, self.comment_handler(file)).upcast()
             }
             FlatRow::Thread(t) => self.thread_card(t).upcast(),
             FlatRow::Pending(p) => self.pending_card(p).upcast(),
@@ -420,8 +890,10 @@ impl FilesTab {
         b.append(&l);
         b.append(&diff_stat(f.additions, f.deletions));
         b.append(&spacer());
+        let is_viewed = m.viewed.borrow().contains(&f.id);
         let viewed = gtk::CheckButton::with_label("Viewed");
-        viewed.set_active(m.viewed.borrow().contains(&f.id));
+        viewed.set_active(is_viewed);
+        viewed.set_tooltip_text(Some("Mark file as viewed (V)"));
         let mm = m.clone();
         let id = f.id.clone();
         viewed.connect_toggled(move |_| {
@@ -434,7 +906,7 @@ impl FilesTab {
         b.append(&viewed);
         let menu = Menu::new();
         let id = f.id.clone();
-        menu.item("Copy path", move || util::copy(&id));
+        menu.item("Copy file path", move || util::copy(&id));
         if f.status != "removed" {
             let mm = m.clone();
             let id = f.id.clone();
@@ -456,7 +928,38 @@ impl FilesTab {
             mm.collapsed.borrow_mut().clear();
             mm.emit(Change::Diff);
         });
-        b.append(&menu.button("view-more-symbolic", "File actions"));
+        let mut menu = menu;
+        menu.section(None);
+        for (label, key) in [("Next file (N)", 'n'), ("Previous file (P)", 'p'), ("Next hunk (])", ']'), ("Previous hunk ([)", '[')] {
+            let w = Rc::downgrade(self);
+            menu.item(label, move || {
+                if let Some(me) = w.upgrade() {
+                    me.perform(key);
+                }
+            });
+        }
+        let mm = m.clone();
+        let id = f.id.clone();
+        menu.item(if is_viewed { "Mark as not viewed (V)" } else { "Mark as viewed (V)" }, move || {
+            let mm = mm.clone();
+            let id = id.clone();
+            crate::rt::spawn_local(async move { mm.toggle_viewed(id).await });
+        });
+        menu.section(None);
+        menu.item(if diff_view::wrap() { "Don't wrap lines (W)" } else { "Wrap lines (W)" }, || diff_view::set_wrap(!diff_view::wrap()));
+        if self.split_fits.get() {
+            let w = Rc::downgrade(self);
+            menu.item(if self.split_active() { "Unified view (S)" } else { "Split view (S)" }, move || {
+                if let Some(me) = w.upgrade() {
+                    me.perform('s');
+                }
+            });
+        } else {
+            menu.disabled("Split view (S)");
+        }
+        let more = menu.button("view-more-symbolic", "File actions");
+        more.update_property(&[gtk::accessible::Property::Label("File actions")]);
+        b.append(&more);
         b
     }
 
@@ -670,5 +1173,11 @@ impl FilesTab {
         });
         keep_alive(&card, composer);
         card
+    }
+}
+
+impl Drop for FilesTab {
+    fn drop(&mut self) {
+        self.remove_keys();
     }
 }

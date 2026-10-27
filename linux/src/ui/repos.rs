@@ -9,7 +9,7 @@ use gtk::glib;
 use super::code_view::CodeView;
 use super::dialogs::Sheet;
 use super::html::HtmlView;
-use super::item_row::{item_menu, item_row};
+use super::item_row::{describe_row, item_menu, item_row};
 use super::lists::{state_toggles, SearchModel, StateFilter};
 use super::menu::{context_menu, Menu};
 use super::tabstrip::{TabItem, TabStrip};
@@ -32,6 +32,8 @@ struct ReposList {
     stack: gtk::Stack,
     keys: RefCell<Vec<RepoRef>>,
     status: Rc<RefreshStatus>,
+    search: gtk::SearchEntry,
+    empty: gtk::Box,
 }
 
 fn repo_row(r: &RepoSummary) -> gtk::Box {
@@ -111,12 +113,25 @@ impl ReposList {
             if self.loading.get() {
                 self.stack.set_visible_child_name("loading");
             } else {
-                if let Some(e) = self.error.borrow().clone() {
-                    if let Some(l) = self.stack.child_by_name("empty").and_downcast::<gtk::Label>() {
-                        l.set_text(&e);
-                    }
-                } else if let Some(l) = self.stack.child_by_name("empty").and_downcast::<gtk::Label>() {
-                    l.set_text("Nothing here");
+                let text = self.text.borrow().clone();
+                if let Some(e) = self.error.borrow().clone().filter(|_| self.repos.borrow().is_empty()) {
+                    let weak = Rc::downgrade(self);
+                    set_status(&self.empty, &error_state(&e, Some(Box::new(move || {
+                        if let Some(me) = weak.upgrade() {
+                            me.load();
+                        }
+                    }))));
+                } else if !text.is_empty() {
+                    let entry = self.search.clone();
+                    set_status(&self.empty, &no_matches(&text, move || entry.set_text("")));
+                } else {
+                    let archived_hidden = self.hide_archived.get() && self.repos.borrow().iter().any(|r| r.is_archived);
+                    let (title, message) = if archived_hidden {
+                        ("No active repositories", "Archived repositories are hidden.")
+                    } else {
+                        ("No repositories", "Repositories you can access show up here.")
+                    };
+                    set_status(&self.empty, &empty_note(title, Some(message)));
                 }
                 self.stack.set_visible_child_name("empty");
             }
@@ -174,6 +189,7 @@ impl ReposList {
                     let mut all = r.nodes;
                     all.extend(keep);
                     *me.repos.borrow_mut() = all;
+                    remember_repos(&me.repos.borrow());
                     me.updated.set(Some(Utc::now()));
                     *me.error.borrow_mut() = None;
                 }
@@ -196,11 +212,31 @@ impl ReposList {
         let known: std::collections::HashSet<String> = self.repos.borrow().iter().map(|r| r.name_with_owner.clone()).collect();
         let added: Vec<RepoSummary> = r.nodes.into_iter().filter(|n| !known.contains(&n.name_with_owner)).collect();
         self.repos.borrow_mut().extend(added);
+        remember_repos(&self.repos.borrow());
         *self.cursor.borrow_mut() = r.page_info.end_cursor;
         self.has_more.set(r.page_info.has_next_page);
         self.render();
         true
     }
+}
+
+thread_local! {
+    static KNOWN_REPOS: RefCell<(String, Vec<RepoSummary>)> = const { RefCell::new((String::new(), Vec::new())) };
+}
+
+fn remember_repos(repos: &[RepoSummary]) {
+    KNOWN_REPOS.with(|k| *k.borrow_mut() = (app::cache_account(), repos.to_vec()));
+}
+
+pub fn known_repos() -> Vec<RepoSummary> {
+    KNOWN_REPOS.with(|k| {
+        let k = k.borrow();
+        if k.0 == app::cache_account() {
+            k.1.clone()
+        } else {
+            Vec::new()
+        }
+    })
 }
 
 pub fn list() -> gtk::Widget {
@@ -210,14 +246,9 @@ pub fn list() -> gtk::Widget {
     let scroll = scrolled(&lb);
     stack.add_named(&scroll, Some("list"));
     stack.add_named(&loading(), Some("loading"));
-    let empty = label_with("Nothing here", &["sy-muted"]);
-    empty.set_valign(gtk::Align::Start);
-    empty.set_halign(gtk::Align::Center);
-    empty.set_margin_top(30);
-    empty.set_wrap(true);
-    empty.set_natural_wrap_mode(gtk::NaturalWrapMode::None);
-    empty.set_justify(gtk::Justification::Center);
+    let empty = vbox(0);
     stack.add_named(&empty, Some("empty"));
+    let search = gtk::SearchEntry::new();
     let holder: Rc<RefCell<Option<std::rc::Weak<ReposList>>>> = Rc::new(RefCell::new(None));
     let h = holder.clone();
     let status = RefreshStatus::new(false, move || {
@@ -238,6 +269,8 @@ pub fn list() -> gtk::Widget {
         stack: stack.clone(),
         keys: RefCell::new(vec![]),
         status,
+        search: search.clone(),
+        empty,
     });
     *holder.borrow_mut() = Some(Rc::downgrade(&me));
     let w = Rc::downgrade(&me);
@@ -259,7 +292,6 @@ pub fn list() -> gtk::Widget {
         }
     });
 
-    let search = gtk::SearchEntry::new();
     search.set_placeholder_text(Some("Filter repositories"));
     let w = Rc::downgrade(&me);
     search.connect_search_changed(move |e| {
@@ -284,10 +316,12 @@ pub fn list() -> gtk::Widget {
     let search_btn = gtk::ToggleButton::new();
     search_btn.set_icon_name("system-search-symbolic");
     search_btn.set_tooltip_text(Some("Filter"));
+    set_label(&search_btn, "Filter");
     search_btn.bind_property("active", &search_bar, "search-mode-enabled").bidirectional().build();
     let archived = gtk::ToggleButton::new();
     crate::icons::set_button_icon(&archived, "sy-archive-symbolic");
     archived.set_tooltip_text(Some("Hide archived"));
+    set_label(&archived, "Hide archived");
     archived.set_active(true);
     let w = Rc::downgrade(&me);
     archived.connect_toggled(move |t| {
@@ -1749,13 +1783,36 @@ impl RepoDetail {
         self.status.update(m.last_updated.get(), m.refreshing.get(), if items.is_empty() { None } else { m.error.borrow().clone() });
         self.list.remove_all();
         if items.is_empty() {
-            self.list_stack.set_visible_child_name(if m.loading.get() { "loading" } else { "empty" });
+            if m.loading.get() {
+                self.list_stack.set_visible_child_name("loading");
+                return;
+            }
+            if let Some(page) = self.list_stack.child_by_name("empty").and_downcast::<gtk::Box>() {
+                let issues = self.tabs.active() == "issue";
+                if let Some(e) = m.error.borrow().clone() {
+                    let model = self.list_model.clone();
+                    let q = self.query();
+                    set_status(&page, &error_state(&e, Some(Box::new(move || {
+                        let m = model.clone();
+                        let q = q.clone();
+                        crate::rt::spawn_local(async move { m.load(q, false, true).await });
+                    }))));
+                } else {
+                    let noun = if issues { "issues" } else { "pull requests" };
+                    let state = self.state.get();
+                    let title = if state == StateFilter::All { format!("No {noun}") } else { format!("No {} {noun}", state.title().to_lowercase()) };
+                    let lead = if issues { "Issues" } else { "Pull requests" };
+                    set_status(&page, &empty_note(&title, Some(&format!("{lead} in {} show up here.", self.repo.full()))));
+                }
+            }
+            self.list_stack.set_visible_child_name("empty");
             return;
         }
         self.list_stack.set_visible_child_name("list");
         for item in items {
             let row = gtk::ListBoxRow::new();
             row.set_child(Some(&item_row(&item, true)));
+            describe_row(&row, &item);
             let it = item.clone();
             context_menu(&row, move || item_menu(&it));
             self.list.append(&row);
@@ -1808,11 +1865,7 @@ pub fn detail_page(repo: &RepoRef) -> adw::NavigationPage {
     let list_stack = gtk::Stack::new();
     list_stack.add_named(&scrolled(&list), Some("list"));
     list_stack.add_named(&loading(), Some("loading"));
-    let empty = label_with("Nothing here", &["sy-muted"]);
-    empty.set_valign(gtk::Align::Start);
-    empty.set_margin_top(30);
-    empty.set_halign(gtk::Align::Center);
-    list_stack.add_named(&empty, Some("empty"));
+    list_stack.add_named(&vbox(0), Some("empty"));
     let code_model = CodeModel::new(repo.clone(), api.clone());
     let browser = CodeBrowser::new(code_model.clone());
     let content = gtk::Stack::new();

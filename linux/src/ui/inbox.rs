@@ -111,6 +111,7 @@ fn fill(container: &gtk::Box, popover: &gtk::Popover) {
 pub fn button() -> gtk::MenuButton {
     let b = gtk::MenuButton::new();
     b.set_tooltip_text(Some("Review requests and your open pull requests"));
+    set_label(&b, "Review requests and your open pull requests");
     let content = hbox(3);
     content.append(&icon("sy-eye-symbolic", 14));
     let count = label_with("", &["sy-small", "sy-bold"]);

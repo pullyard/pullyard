@@ -2,6 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 
 
+use crate::brand;
 use crate::settings;
 use crate::signal::Signal;
 
@@ -26,12 +27,12 @@ const BRAND_LIGHT: Palette = Palette {
         ("muted", "#5F6B7E"),
         ("dim", "#939AA8"),
         ("accent", "#2A8BC8"),
-        ("sky", "#1F7FB8"),
-        ("violet", "#6B55D6"),
-        ("coral", "#D8513F"),
-        ("green", "#2E8A57"),
+        ("sky", brand::SKY.0),
+        ("violet", brand::VIOLET.0),
+        ("coral", brand::CORAL.0),
+        ("green", brand::GREEN.0),
         ("red", "#C2412F"),
-        ("amber", "#B7791F"),
+        ("amber", brand::AMBER.0),
         ("teal", "#23877A"),
         ("indigo", "#4E5BC4"),
         ("slate", "#6B7486"),
@@ -62,12 +63,12 @@ const BRAND_DARK: Palette = Palette {
         ("muted", "#8693A8"),
         ("dim", "#5F6B80"),
         ("accent", "#5BB8EC"),
-        ("sky", "#5BB8EC"),
-        ("violet", "#9D8CF0"),
-        ("coral", "#EE6F5F"),
-        ("green", "#5DBE8A"),
+        ("sky", brand::SKY.1),
+        ("violet", brand::VIOLET.1),
+        ("coral", brand::CORAL.1),
+        ("green", brand::GREEN.1),
         ("red", "#E8746A"),
-        ("amber", "#E8B44C"),
+        ("amber", brand::AMBER.1),
         ("teal", "#56C2B0"),
         ("indigo", "#8C97E8"),
         ("slate", "#939CB0"),
@@ -98,19 +99,19 @@ const SYSTEM_LIGHT: Palette = Palette {
         ("muted", "alpha(@window_fg_color, 0.65)"),
         ("dim", "alpha(@window_fg_color, 0.45)"),
         ("accent", "@accent_color"),
-        ("sky", "#1c71d8"),
-        ("violet", "#813d9c"),
-        ("coral", "#e01b24"),
-        ("green", "#26a269"),
-        ("red", "#c01c28"),
-        ("amber", "#c88800"),
-        ("teal", "#1f8a8a"),
-        ("indigo", "#3d50c4"),
-        ("slate", "#77767b"),
-        ("orange", "#e66100"),
+        ("sky", "@blue_4"),
+        ("violet", "@purple_4"),
+        ("coral", "@red_3"),
+        ("green", "@success_color"),
+        ("red", "@error_color"),
+        ("amber", "@warning_color"),
+        ("teal", "mix(@blue_5, @green_5, 0.55)"),
+        ("indigo", "mix(@blue_5, @purple_4, 0.4)"),
+        ("slate", "@dark_1"),
+        ("orange", "@orange_4"),
         ("selection", "@accent_bg_color"),
-        ("add_bg", "alpha(#26a269, 0.14)"),
-        ("del_bg", "alpha(#c01c28, 0.14)"),
+        ("add_bg", "alpha(@success_color, 0.14)"),
+        ("del_bg", "alpha(@error_color, 0.14)"),
         ("hunk_bg", "alpha(@accent_color, 0.08)"),
         ("add_text", "@window_fg_color"),
         ("del_text", "@window_fg_color"),
@@ -134,19 +135,19 @@ const SYSTEM_DARK: Palette = Palette {
         ("muted", "alpha(@window_fg_color, 0.65)"),
         ("dim", "alpha(@window_fg_color, 0.45)"),
         ("accent", "@accent_color"),
-        ("sky", "#62a0ea"),
-        ("violet", "#c061cb"),
-        ("coral", "#ff7b63"),
-        ("green", "#57e389"),
-        ("red", "#ff7b7b"),
-        ("amber", "#f8e45c"),
-        ("teal", "#5bc8c8"),
-        ("indigo", "#8f9ff8"),
-        ("slate", "#9a9996"),
-        ("orange", "#ffa348"),
+        ("sky", "@blue_2"),
+        ("violet", "@purple_2"),
+        ("coral", "@red_1"),
+        ("green", "@success_color"),
+        ("red", "@error_color"),
+        ("amber", "@warning_color"),
+        ("teal", "mix(@blue_2, @green_2, 0.55)"),
+        ("indigo", "mix(@blue_2, @purple_1, 0.4)"),
+        ("slate", "@light_5"),
+        ("orange", "@orange_2"),
         ("selection", "@accent_bg_color"),
-        ("add_bg", "alpha(#57e389, 0.14)"),
-        ("del_bg", "alpha(#ff7b7b, 0.14)"),
+        ("add_bg", "alpha(@success_color, 0.14)"),
+        ("del_bg", "alpha(@error_color, 0.14)"),
         ("hunk_bg", "alpha(@accent_color, 0.08)"),
         ("add_text", "@window_fg_color"),
         ("del_text", "@window_fg_color"),
@@ -172,6 +173,14 @@ pub fn is_dark() -> bool {
     adw::StyleManager::default().is_dark()
 }
 
+pub fn is_high_contrast() -> bool {
+    adw::StyleManager::default().is_high_contrast()
+}
+
+fn brand_active() -> bool {
+    is_brand() && !is_high_contrast()
+}
+
 pub fn on_change(f: impl Fn(&()) -> bool + 'static) {
     CHANGED.with(|s| s.connect(f));
 }
@@ -181,7 +190,7 @@ fn libadwaita_has_css_vars() -> bool {
 }
 
 fn current_palette() -> &'static Palette {
-    match (is_brand(), is_dark()) {
+    match (brand_active(), is_dark()) {
         (true, false) => &BRAND_LIGHT,
         (true, true) => &BRAND_DARK,
         (false, false) => &SYSTEM_LIGHT,
@@ -194,12 +203,22 @@ pub fn token_hex(name: &str) -> Option<&'static str> {
 }
 
 fn palette_css() -> String {
-    let brand = is_brand();
+    let brand = brand_active();
     let palette = current_palette();
     let mut css = String::new();
     for (k, v) in palette.entries {
         css.push_str(&format!("@define-color sy_{k} {v};\n"));
     }
+    let dark = is_dark();
+    for (name, pair) in [("sky", brand::SKY), ("violet", brand::VIOLET), ("coral", brand::CORAL), ("green", brand::GREEN), ("amber", brand::AMBER)] {
+        css.push_str(&format!("@define-color sy_brand_{name} {};\n", brand::pick(pair, dark)));
+    }
+    let (mark_violet, mark_sky, mark_coral) = (brand::MARK_VIOLET, brand::MARK_SKY, brand::MARK_CORAL);
+    css.push_str(&format!("@define-color sy_mark_violet {mark_violet};\n@define-color sy_mark_sky {mark_sky};\n@define-color sy_mark_coral {mark_coral};\n"));
+    if is_high_contrast() {
+        css.push_str("@define-color sy_line alpha(@sy_text, 0.45);\n@define-color sy_line_strong alpha(@sy_text, 0.65);\n@define-color sy_muted alpha(@sy_text, 0.85);\n@define-color sy_dim alpha(@sy_text, 0.72);\n");
+    }
+    css.push_str("@define-color sy_hover alpha(@sy_text, 0.05);\n@define-color sy_ring @sy_line_strong;\n@define-color sy_on_accent @accent_fg_color;\n");
     if brand {
         let overrides = [
             ("window_bg_color", "@sy_window", "--window-bg-color"),
@@ -262,20 +281,19 @@ const APP_CSS: &str = r#"
 list.sy-list, listview.sy-list { background-color: transparent; }
 list.sy-list > row { padding: 8px 12px; margin: 0 8px; border-bottom: 1px solid @sy_line; }
 list.sy-list > row:selected { background-color: alpha(@sy_text, 0.10); border-radius: 10px; border-bottom-color: transparent; }
-list.sy-list:focus-within > row:selected { background-color: @sy_selection; color: white; }
-list.sy-list:focus-within > row:selected .sy-muted, list.sy-list:focus-within > row:selected .sy-dim { color: alpha(white, 0.75); }
-list.sy-list:focus-within > row:selected .sy-text { color: white; }
+list.sy-list:focus-within > row:selected { background-color: @sy_selection; color: @sy_on_accent; }
+list.sy-list:focus-within > row:selected .sy-muted, list.sy-list:focus-within > row:selected .sy-dim { color: alpha(@sy_on_accent, 0.75); }
+list.sy-list:focus-within > row:selected .sy-text { color: @sy_on_accent; }
 list.sy-plain > row { padding: 4px 10px; }
 list.sy-sidebar-list { background-color: transparent; }
 list.sy-sidebar-list > row { padding: 5px 8px; margin: 1px 6px; border-radius: 7px; }
 list.sy-sidebar-list > row:selected { background-color: alpha(@sy_text, 0.07); box-shadow: inset 3px 0 @sy_accent; }
 .sy-section-title { font-size: 0.86em; font-weight: 600; color: @sy_dim; margin: 12px 14px 4px 16px; }
-.sy-sidebar-icon { min-width: 22px; min-height: 22px; border-radius: 6px; background-color: alpha(@sy_text, 0.06); box-shadow: inset 0 0 0 1px alpha(@sy_text, 0.07); }
 .sy-count { color: @sy_muted; font-feature-settings: "tnum"; }
 .chip { padding: 1px 7px; border-radius: 999px; font-size: 0.82em; font-weight: 500; }
 .chip.mono { font-family: monospace; font-weight: 400; }
 .state-dot { min-width: 22px; min-height: 22px; border-radius: 999px; }
-.state-pill { padding: 3px 10px; border-radius: 999px; font-weight: 600; color: white; }
+.state-pill { padding: 3px 10px; border-radius: 999px; font-weight: 600; color: @sy_on_accent; }
 .icon-tile { border-radius: 6px; }
 .banner-box { border-radius: 10px; padding: 6px 10px; min-height: 28px; }
 .banner-button { min-height: 24px; padding: 2px 12px; border-radius: 6px; font-size: 0.92em; font-weight: 600; }
@@ -359,7 +377,7 @@ listview.stack-list > row { padding: 0; margin: 1px 0; background: none; }
 .chat-jump:active { transform: scale(0.92); }
 .chat-jump.fresh { animation: sy-jump-pulse 1.6s ease-in-out infinite; }
 @keyframes sy-jump-pulse { 0% { border-color: alpha(@sy_violet, 0.45); } 50% { border-color: @sy_sky; } 100% { border-color: alpha(@sy_violet, 0.45); } }
-.chat-jump-badge { background-color: @sy_violet; color: white; border-radius: 9px; min-width: 18px; min-height: 18px; padding: 0 5px; font-size: 10px; font-weight: 700; border: 2px solid @sy_panel; }
+.chat-jump-badge { background-color: @sy_violet; color: @sy_on_accent; border-radius: 9px; min-width: 18px; min-height: 18px; padding: 0 5px; font-size: 10px; font-weight: 700; border: 2px solid @sy_panel; }
 .chat-pr-card { background-color: alpha(@sy_violet, 0.08); border: 1px solid alpha(@sy_violet, 0.25); border-radius: 10px; padding: 12px; }
 .chat-todo { background-color: alpha(@sy_text, 0.03); border: 1px solid @sy_line; border-radius: 10px; }
 .chat-todo-head { padding: 6px 10px; border-radius: 10px; }
@@ -391,13 +409,33 @@ button.jira-row { padding: 11px 14px; border-radius: 10px; background-color: alp
 button.jira-row:hover { background-color: alpha(@sy_text, 0.06); }
 button.jira-parent { padding: 0 2px; min-height: 0; }
 menubutton.jira-status-menu > button { padding: 0; min-height: 0; background: none; box-shadow: none; }
+.sy-status { min-width: 220px; }
+.sy-unread-dot { background-color: @sy_sky; border-radius: 999px; min-width: 7px; min-height: 7px; }
+.sy-status-title { font-weight: 600; color: @sy_text; }
+.sy-status-message { color: @sy_muted; }
+.sy-avatar-ring { border-radius: 999px; box-shadow: 0 0 0 1px @sy_ring; }
+list.sy-list > row:hover:not(:selected) { background-color: @sy_hover; border-radius: 10px; }
+.sy-row-title { font-weight: 500; color: @sy_text; }
+.sy-row-meta { color: @sy_muted; font-size: 0.85em; }
+.sy-row-meta .sy-dim { color: @sy_dim; }
+.sy-sidebar-glyph { color: @sy_muted; }
+list.sy-sidebar-list > row:selected .sy-sidebar-glyph { color: @sy_text; }
+.sy-sidebar-badge { padding: 0 7px; min-width: 10px; border-radius: 999px; background-color: alpha(@sy_text, 0.07); color: @sy_muted; font-size: 0.8em; font-weight: 600; font-feature-settings: "tnum"; }
+.sy-sidebar-badge.attention { background-color: @sy_accent; color: @sy_on_accent; }
+button.comment-send:disabled { background-color: alpha(@sy_text, 0.08); color: @sy_dim; }
+.onboarding { background-color: @sy_window; background-image: linear-gradient(135deg, alpha(@sy_mark_violet, 0.12), alpha(@sy_mark_sky, 0.08) 45%, alpha(@sy_mark_coral, 0.10)); background-size: 260% 260%; animation: sy-drift 24s ease-in-out infinite alternate; }
+@keyframes sy-drift { from { background-position: 0% 30%; } to { background-position: 100% 70%; } }
+.onboarding-title { font-size: 32px; font-weight: 700; color: @sy_text; }
+.onboarding-tagline { font-size: 1.05em; color: @sy_muted; }
+.onboarding-card { background-color: alpha(@sy_raised, 0.86); border: 1px solid @sy_line; border-radius: 12px; padding: 12px 14px; }
+.onboarding-card .sy-status-message { font-size: 0.88em; }
 "#;
 
 fn color_css() -> String {
     let mut css = String::new();
     for name in ACCENTS {
         css.push_str(&format!(
-            ".fg-{name} {{ color: @sy_{name}; }}\n.bg-{name} {{ background-color: alpha(@sy_{name}, 0.12); }}\n.tile-{name} {{ background-color: alpha(@sy_{name}, 0.14); color: @sy_{name}; }}\n.chip.{name} {{ background-color: alpha(@sy_{name}, 0.12); color: @sy_{name}; }}\n.state-dot.{name} {{ background-color: alpha(@sy_{name}, 0.15); color: @sy_{name}; }}\n.state-pill.{name} {{ background-color: @sy_{name}; }}\n.banner-box.{name} {{ background-color: alpha(@sy_{name}, 0.08); }}\nbutton.tint-{name} {{ background-color: @sy_{name}; color: white; }}\n.edge-{name} {{ background-color: @sy_{name}; min-width: 3px; border-radius: 2px; }}\n.jira-status.{name} {{ background-color: alpha(@sy_{name}, 0.14); color: @sy_{name}; }}\n.jira-status.{name} .jira-dot {{ background-color: @sy_{name}; }}\n"
+            ".fg-{name} {{ color: @sy_{name}; }}\n.bg-{name} {{ background-color: alpha(@sy_{name}, 0.12); }}\n.tile-{name} {{ background-color: alpha(@sy_{name}, 0.14); color: @sy_{name}; }}\n.chip.{name} {{ background-color: alpha(@sy_{name}, 0.12); color: @sy_{name}; }}\n.state-dot.{name} {{ background-color: alpha(@sy_{name}, 0.15); color: @sy_{name}; }}\n.state-pill.{name} {{ background-color: @sy_{name}; }}\n.banner-box.{name} {{ background-color: alpha(@sy_{name}, 0.08); }}\nbutton.tint-{name} {{ background-color: @sy_{name}; color: @sy_on_accent; }}\n.edge-{name} {{ background-color: @sy_{name}; min-width: 3px; border-radius: 2px; }}\n.jira-status.{name} {{ background-color: alpha(@sy_{name}, 0.14); color: @sy_{name}; }}\n.jira-status.{name} .jira-dot {{ background-color: @sy_{name}; }}\n"
         ));
     }
     css
@@ -428,6 +466,7 @@ pub fn install() {
     });
     DYNAMIC_PROVIDER.with(|p| gtk::style_context_add_provider_for_display(&display, p, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2));
     adw::StyleManager::default().connect_dark_notify(|_| reload_palette());
+    adw::StyleManager::default().connect_high_contrast_notify(|_| reload_palette());
     apply();
 }
 

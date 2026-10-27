@@ -87,6 +87,14 @@ pub struct Settings {
     pub jira_hidden: HashMap<String, Vec<String>>,
     pub agents_notify: bool,
     pub agents_open_in: String,
+    pub notify_ci_failed: bool,
+    pub notify_review_decision: bool,
+    pub notify_agent_input: Option<bool>,
+    pub notify_agent_finished: Option<bool>,
+    pub notify_recent: Vec<String>,
+    pub inspector_width: Option<i32>,
+    pub diff_wrap: bool,
+    pub diff_split: bool,
 }
 
 impl Default for Settings {
@@ -134,6 +142,14 @@ impl Default for Settings {
             jira_hidden: HashMap::new(),
             agents_notify: true,
             agents_open_in: String::new(),
+            notify_ci_failed: true,
+            notify_review_decision: true,
+            notify_agent_input: None,
+            notify_agent_finished: None,
+            notify_recent: Vec::new(),
+            inspector_width: None,
+            diff_wrap: true,
+            diff_split: false,
         }
     }
 }

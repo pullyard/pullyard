@@ -22,15 +22,11 @@ struct Inbox {
     status: Rc<RefreshStatus>,
 }
 
-fn shell(title: &adw::WindowTitle, list: &gtk::ListBox, stack: &gtk::Stack, status: &RefreshStatus, empty_text: &str, search: Option<&gtk::SearchEntry>) -> gtk::Widget {
+fn shell(title: &adw::WindowTitle, list: &gtk::ListBox, stack: &gtk::Stack, status: &RefreshStatus, search: Option<&gtk::SearchEntry>) -> gtk::Widget {
     stack.add_named(&scrolled(list), Some("list"));
     stack.add_named(&loading(), Some("loading"));
-    let empty = label_with(empty_text, &["sy-muted"]);
-    empty.set_valign(gtk::Align::Start);
-    empty.set_halign(gtk::Align::Center);
-    empty.set_margin_top(30);
-    stack.add_named(&empty, Some("empty"));
-    stack.add_named(&vbox(8), Some("error"));
+    stack.add_named(&vbox(0), Some("empty"));
+    stack.add_named(&vbox(0), Some("error"));
     let content = vbox(0);
     content.append(stack);
     content.append(&footer(status));
@@ -47,6 +43,7 @@ fn shell(title: &adw::WindowTitle, list: &gtk::ListBox, stack: &gtk::Stack, stat
         let search_btn = gtk::ToggleButton::new();
         search_btn.set_icon_name("system-search-symbolic");
         search_btn.set_tooltip_text(Some("Filter"));
+        set_label(&search_btn, "Filter");
         search_btn.bind_property("active", &search_bar, "search-mode-enabled").bidirectional().build();
         hb.pack_start(&search_btn);
         tv.add_top_bar(&search_bar);
@@ -55,20 +52,20 @@ fn shell(title: &adw::WindowTitle, list: &gtk::ListBox, stack: &gtk::Stack, stat
     tv.upcast()
 }
 
-fn show_state(stack: &gtk::Stack, empty: bool, loading: bool, error: Option<&str>) {
+fn show_state(stack: &gtk::Stack, empty: bool, loading: bool, error: Option<&str>, retry: impl Fn() + 'static, empty_page: impl FnOnce() -> gtk::Widget) {
     if !empty {
         stack.set_visible_child_name("list");
     } else if loading {
         stack.set_visible_child_name("loading");
     } else if let Some(e) = error {
         if let Some(page) = stack.child_by_name("error").and_downcast::<gtk::Box>() {
-            clear(&page);
-            let l = wrap_label(e, &["fg-red", "sy-small"]);
-            pad(&l, 12);
-            page.append(&l);
+            set_status(&page, &error_state(e, Some(Box::new(retry))));
         }
         stack.set_visible_child_name("error");
     } else {
+        if let Some(page) = stack.child_by_name("empty").and_downcast::<gtk::Box>() {
+            set_status(&page, &empty_page());
+        }
         stack.set_visible_child_name("empty");
     }
 }
@@ -116,7 +113,19 @@ impl Inbox {
         self.title.set_subtitle(&if items.is_empty() { String::new() } else { items.len().to_string() });
         let err = self.error.borrow().clone();
         self.status.update(self.updated.get(), self.refreshing.get(), if items.is_empty() { None } else { err.clone() });
-        show_state(&self.stack, items.is_empty(), self.loading.get(), err.as_deref());
+        let weak = Rc::downgrade(self);
+        show_state(
+            &self.stack,
+            items.is_empty(),
+            self.loading.get(),
+            err.as_deref(),
+            move || {
+                if let Some(me) = weak.upgrade() {
+                    me.load();
+                }
+            },
+            || empty_note("All caught up", Some("New review requests and mentions show up here.")),
+        );
         rebuild_rows(&self.list, || {
             for n in &items {
                 let row = gtk::ListBoxRow::new();
@@ -208,7 +217,7 @@ pub fn inbox() -> gtk::Widget {
             me.load();
         }
     });
-    let widget = shell(&title, &list, &stack, &status, "All done", None);
+    let widget = shell(&title, &list, &stack, &status, None);
     let me = Rc::new(Inbox { items: RefCell::new(vec![]), loading: Cell::new(true), refreshing: Cell::new(false), error: RefCell::new(None), updated: Cell::new(None), list: list.clone(), title, stack, status });
     *holder.borrow_mut() = Some(Rc::downgrade(&me));
     let weak = Rc::downgrade(&me);
@@ -251,6 +260,7 @@ struct Repos {
     title: adw::WindowTitle,
     stack: gtk::Stack,
     status: Rc<RefreshStatus>,
+    search: gtk::SearchEntry,
 }
 
 pub fn repo_matches(r: &ForgeRepo, text: &str) -> bool {
@@ -295,14 +305,35 @@ fn repo_row(r: &ForgeRepo) -> gtk::Box {
 }
 
 impl Repos {
-    fn render(&self) {
+    fn render(self: &Rc<Self>) {
         let text = self.text.borrow().clone();
         let visible: Vec<ForgeRepo> = self.repos.borrow().iter().filter(|r| repo_matches(r, &text)).cloned().collect();
         let total = self.repos.borrow().len();
         self.title.set_subtitle(&if total == 0 { String::new() } else { total.to_string() });
         let err = self.error.borrow().clone();
         self.status.update(self.updated.get(), self.loading.get(), if visible.is_empty() { None } else { err.clone() });
-        show_state(&self.stack, visible.is_empty(), self.loading.get() && total == 0, err.as_deref());
+        let weak = Rc::downgrade(self);
+        let filter = text.trim().to_string();
+        let entry = self.search.clone();
+        show_state(
+            &self.stack,
+            visible.is_empty(),
+            self.loading.get() && total == 0,
+            err.as_deref(),
+            move || {
+                if let Some(me) = weak.upgrade() {
+                    me.load();
+                }
+            },
+            move || {
+                if filter.is_empty() {
+                    let title = app::provider().repositories_title();
+                    empty_note(&format!("No {}", title.to_lowercase()), Some(&format!("{title} you can access show up here.")))
+                } else {
+                    no_matches(&filter, move || entry.set_text(""))
+                }
+            },
+        );
         rebuild_rows(&self.list, || {
             for r in &visible {
                 let row = gtk::ListBoxRow::new();
@@ -366,7 +397,7 @@ pub fn repos() -> gtk::Widget {
             me.load();
         }
     });
-    let widget = shell(&title, &list, &stack, &status, "Nothing here", Some(&search));
+    let widget = shell(&title, &list, &stack, &status, Some(&search));
     let me = Rc::new(Repos {
         repos: RefCell::new(vec![]),
         visible: RefCell::new(vec![]),
@@ -378,6 +409,7 @@ pub fn repos() -> gtk::Widget {
         title,
         stack,
         status,
+        search: search.clone(),
     });
     *holder.borrow_mut() = Some(Rc::downgrade(&me));
     let weak = Rc::downgrade(&me);

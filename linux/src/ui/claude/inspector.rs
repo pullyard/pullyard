@@ -10,7 +10,7 @@ use crate::claude::workspace::Tab;
 use crate::fix_prompt::{self, FixOptions};
 use crate::ui::code_view::CodeView;
 use crate::ui::commit::PlainDiff;
-use crate::ui::item_row::item_row;
+use crate::ui::item_row::{describe_row, item_row};
 use crate::ui::menu::{context_menu, Menu};
 use crate::ui::pr::model::{Change, PrModel};
 use crate::ui::repos::entry_row;
@@ -539,6 +539,7 @@ impl BranchPrs {
     fn row(&self, it: &SearchItem) -> gtk::ListBoxRow {
         let row = gtk::ListBoxRow::new();
         row.set_child(Some(&item_row(it, false)));
+        describe_row(&row, it);
         let item = it.clone();
         context_menu(&row, move || {
             let m = Menu::ctx();

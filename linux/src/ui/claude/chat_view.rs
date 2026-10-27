@@ -42,6 +42,8 @@ pub struct ChatView {
     pr_key: RefCell<Option<String>>,
     sleeping: gtk::Box,
     permission_bar: gtk::Box,
+    permission_wanted: Cell<bool>,
+    permission_card: RefCell<Option<glib::WeakRef<gtk::Box>>>,
     todo_bar: gtk::Box,
     todo_key: RefCell<String>,
     todo_open: Cell<bool>,
@@ -308,6 +310,7 @@ impl ChatView {
         jump_button.add_css_class("chat-jump");
         jump_button.set_child(Some(&crate::icons::image("sy-down-symbolic", 18)));
         jump_button.set_tooltip_text(Some("Jump to the latest message"));
+        set_label(&jump_button, "Jump to the latest message");
         let jump_badge = label_with("", &["chat-jump-badge"]);
         jump_badge.set_halign(gtk::Align::End);
         jump_badge.set_valign(gtk::Align::Start);
@@ -379,6 +382,8 @@ impl ChatView {
             pr_key: RefCell::new(None),
             sleeping,
             permission_bar,
+            permission_wanted: Cell::new(false),
+            permission_card: RefCell::new(None),
             todo_bar,
             todo_key: RefCell::new(String::new()),
             todo_open: Cell::new(false),
@@ -408,12 +413,14 @@ impl ChatView {
         me.scroller.vadjustment().connect_value_changed(move |adj| {
             if let Some(me) = w.upgrade() {
                 me.on_scrolled(adj);
+                me.sync_permission_bar();
             }
         });
         let w = Rc::downgrade(&me);
         me.scroller.vadjustment().connect_changed(move |_| {
             if let Some(me) = w.upgrade() {
                 me.scroll_down();
+                me.sync_permission_bar();
             }
         });
         let w = Rc::downgrade(&me);
@@ -712,16 +719,27 @@ impl ChatView {
         let pending = c.pending.borrow().iter().find(|p| !p.resolved.get()).cloned();
         match pending {
             Some(p) => {
-                self.permission_bar.set_visible(true);
-                self.permission_bar.append(&colored_icon("sy-attention-symbolic", 14, "amber"));
+                self.permission_wanted.set(true);
+                self.permission_bar.append(&status_icon("sy-attention-symbolic", 14, "amber", "Needs your input"));
                 if p.tool_name == "AskUserQuestion" || p.tool_name == "ExitPlanMode" {
-                    let l = label_with(if p.tool_name == "AskUserQuestion" { "Claude asked a question — answer above" } else { "Claude is waiting for plan approval above" }, &["sy-text"]);
+                    let l = label_with(if p.tool_name == "AskUserQuestion" { "Your agent asked a question" } else { "Your agent is waiting for plan approval" }, &["sy-text"]);
                     l.set_hexpand(true);
                     self.permission_bar.append(&l);
                 } else {
-                    let l = ellipsized(&format!("Claude needs permission: {}", p.tool_name), &["sy-text"]);
+                    let l = ellipsized(&format!("Your agent needs permission: {}", p.tool_name), &["sy-text"]);
                     l.set_hexpand(true);
                     self.permission_bar.append(&l);
+                }
+                let show = flat("Show");
+                show.set_tooltip_text(Some("Scroll to the request"));
+                let w = Rc::downgrade(self);
+                show.connect_clicked(move |_| {
+                    if let Some(me) = w.upgrade() {
+                        me.reveal_permission_card();
+                    }
+                });
+                self.permission_bar.append(&show);
+                if p.tool_name != "AskUserQuestion" && p.tool_name != "ExitPlanMode" {
                     let allow = suggested("Allow");
                     let (c1, p1) = (c.clone(), p.clone());
                     allow.connect_clicked(move |_| c1.respond(&p1, true, None, None, None));
@@ -732,13 +750,51 @@ impl ChatView {
                     self.permission_bar.append(&deny);
                 }
             }
-            None => self.permission_bar.set_visible(false),
+            None => self.permission_wanted.set(false),
         }
+        self.sync_permission_bar();
+        let w = Rc::downgrade(self);
+        glib::idle_add_local_once(move || {
+            if let Some(me) = w.upgrade() {
+                me.sync_permission_bar();
+            }
+        });
         if c.items.borrow().is_empty() {
             self.render_welcome();
         }
         self.composer.render_state();
         self.scroll_down();
+    }
+
+    fn live_permission_card(&self) -> Option<gtk::Box> {
+        let card = self.permission_card.borrow().as_ref().and_then(|w| w.upgrade())?;
+        if card.root().is_none() {
+            return None;
+        }
+        Some(card)
+    }
+
+    fn permission_card_in_view(&self) -> bool {
+        let Some(card) = self.live_permission_card().filter(|c| c.is_mapped()) else { return false };
+        let Some(bounds) = card.compute_bounds(&self.scroller) else { return false };
+        let height = self.scroller.height() as f32;
+        bounds.y() + bounds.height() > 0.0 && bounds.y() < height
+    }
+
+    fn sync_permission_bar(&self) {
+        let visible = self.permission_wanted.get() && !self.permission_card_in_view();
+        if self.permission_bar.is_visible() != visible {
+            self.permission_bar.set_visible(visible);
+        }
+    }
+
+    fn reveal_permission_card(self: &Rc<Self>) {
+        let Some(card) = self.live_permission_card() else { return };
+        let Some(bounds) = card.compute_bounds(&self.scroller) else { return };
+        let adj = self.scroller.vadjustment();
+        self.set_stick(false);
+        let target = (adj.value() + bounds.y() as f64 - 24.0).clamp(adj.lower(), (adj.upper() - adj.page_size()).max(adj.lower()));
+        adj.set_value(target);
     }
 
     fn render_error(self: &Rc<Self>) {
@@ -1379,6 +1435,7 @@ impl ChatView {
             let pc = self.permission_card(&p, &folder);
             pad(&pc, 10);
             card.append(&pc);
+            *self.permission_card.borrow_mut() = Some(pc.downgrade());
         }
         card.upcast()
     }
@@ -1728,12 +1785,15 @@ impl ChatComposer {
         crate::icons::set_button_icon(&stop, "sy-stop-symbolic");
         stop.add_css_class("tint-red");
         stop.set_tooltip_text(Some("Stop (Esc)"));
+        set_label(&stop, "Stop");
         let send = gtk::Button::new();
         crate::icons::set_button_icon(&send, "sy-send-symbolic");
         send.add_css_class("tint-coral");
         send.set_tooltip_text(Some("Send (Enter)"));
+        set_label(&send, "Send");
         let usage = gtk::MenuButton::new();
         usage.add_css_class("flat");
+        set_label(&usage, "Usage");
         let widget = vbox(6);
         widget.add_css_class("chat-composer");
         widget.append(&completion_box);
@@ -1888,6 +1948,8 @@ impl ChatComposer {
             let x = gtk::Button::from_icon_name("window-close-symbolic");
             x.add_css_class("circular");
             x.add_css_class("osd");
+            x.set_tooltip_text(Some("Remove image"));
+            set_label(&x, "Remove image");
             x.set_halign(gtk::Align::End);
             x.set_valign(gtk::Align::Start);
             let w = Rc::downgrade(self);

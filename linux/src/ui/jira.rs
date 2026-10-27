@@ -705,6 +705,7 @@ impl JiraTab {
         head.append(&self.status_menu(&issue, show_error));
         if collapsible {
             let collapse = icon_button("pan-up-symbolic", "Collapse");
+            set_expanded(&collapse, true);
             collapse.set_valign(gtk::Align::Center);
             let w = Rc::downgrade(self);
             let key = issue.key.clone();
@@ -805,6 +806,7 @@ impl JiraTab {
         mb.add_css_class("jira-status-menu");
         mb.set_valign(gtk::Align::Center);
         mb.set_tooltip_text(Some("Change status"));
+        set_label(&mb, &format!("Status: {}, change status", issue.status));
         mb.set_always_show_arrow(false);
         let pill = Rc::new(status_pill(&issue.status, &issue.status_category, true));
         mb.set_child(Some(&pill.widget));

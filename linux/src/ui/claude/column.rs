@@ -78,6 +78,8 @@ fn session_row(s: &SessionInfo, opts: RowOpts, dot: &Dot, on_toggle: Option<Box<
         toggle.add_css_class("circular");
         toggle.set_valign(gtk::Align::Center);
         toggle.set_tooltip_text(Some(if opts.collapsed { "Show sub-sessions" } else { "Hide sub-sessions" }));
+        set_label(&toggle, "Sub-sessions");
+        set_expanded(&toggle, !opts.collapsed);
         if let Some(f) = on_toggle {
             toggle.connect_clicked(move |_| f());
         }
@@ -140,6 +142,9 @@ fn project_header(p: &Project, expanded: bool, on_toggle: impl Fn() + 'static, o
         b.set_opacity(0.6);
     }
     b.set_tooltip_text(Some(&util::tilde(&p.path)));
+    b.set_accessible_role(gtk::AccessibleRole::Button);
+    set_label(&b, &format!("{}, {} sessions", p.name(), p.sessions.len()));
+    set_expanded(&b, expanded);
     on_click_widget(&b, on_toggle);
     b
 }
@@ -627,6 +632,7 @@ pub fn build() -> gtk::Widget {
     let search_btn = gtk::ToggleButton::new();
     search_btn.set_icon_name("system-search-symbolic");
     search_btn.set_tooltip_text(Some("Search sessions"));
+    set_label(&search_btn, "Search sessions");
     search_btn.bind_property("active", &search_bar, "search-mode-enabled").bidirectional().build();
     let content = vbox(0);
     content.append(&scroll);
