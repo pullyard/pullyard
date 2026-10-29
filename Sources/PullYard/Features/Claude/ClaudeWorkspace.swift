@@ -383,9 +383,9 @@ final class ClaudeWorkspace {
         return tab
     }
 
-    func rewind(_ tab: ClaudeTab, to text: String, occurrenceFromEnd: Int) {
+    func rewind(_ tab: ClaudeTab, to text: String, occurrenceFromEnd: Int, replacement: String) {
         guard let chat = tab.chat, let sid = chat.sessionId, !sid.isEmpty else {
-            tab.chat?.draftRequest = text
+            tab.chat?.draftRequest = replacement
             return
         }
         let configDir = chat.configDir ?? ClaudeProfiles.shared.configDir()
@@ -403,17 +403,24 @@ final class ClaudeWorkspace {
             }.value
             switch result {
             case .success(let (file, info)):
+                let index = tabs.firstIndex { $0.id == tab.id }
                 let new: ClaudeTab
                 if let info {
-                    new = resume(info.retitled("Edit · " + tab.title), kind: .chat)
+                    new = resume(info.retitled(tab.title), kind: .chat)
+                    new.chat?.items.removeAll { $0.id == "nresumed" }
+                    new.chat?.send(replacement)
                 } else {
                     try? FileManager.default.removeItem(at: file)
-                    new = newSession(folder: tab.folder, name: "Edit · " + tab.title, kind: .chat)
+                    new = newSession(folder: tab.folder, prompt: replacement, name: tab.title, kind: .chat)
                 }
-                new.chat?.draftRequest = text
+                new.title = tab.title
+                close(tab)
+                if let index, let current = tabs.firstIndex(where: { $0.id == new.id }), index < current {
+                    tabs.move(fromOffsets: IndexSet(integer: current), toOffset: index)
+                }
                 selectedTabID = new.id
             case .failure(let error):
-                chat.draftRequest = text
+                chat.draftRequest = replacement
                 chat.lastError = error.localizedDescription
             }
         }

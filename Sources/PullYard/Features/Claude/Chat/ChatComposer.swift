@@ -311,12 +311,17 @@ struct ChatComposer: View {
             UsageRingButton(chat: chat)
             if chat.busy {
                 ComposerRoundButton(icon: "stop.fill", style: .stop, help: "Stop (Esc)") { chat.interrupt() }
-                    .transition(.scale.combined(with: .opacity))
+                    .transition(.opacity.combined(with: .offset(x: 6)))
             }
-            ComposerRoundButton(icon: "arrow.up", style: .send, enabled: !(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty), help: "Send (↩)") { submit() }
+            let hasContent = !(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty)
+            if !chat.busy || hasContent {
+                ComposerRoundButton(icon: "arrow.up", style: .send, enabled: hasContent, help: chat.busy ? "Queue message (↩)" : "Send (↩)") { submit() }
+                    .transition(.opacity)
+            }
         }
         .font(.syCaption)
         .controlSize(.small)
+        .animation(Motion.smooth, value: chat.busy)
     }
 
     private func dictate() {
@@ -547,11 +552,12 @@ struct ComposerRoundButton: View {
                 .background(background)
                 .clipShape(Circle())
                 .overlay(Circle().strokeBorder(style == .stop ? Color.syLineStrong : .clear, lineWidth: 1))
-                .scaleEffect(hover && enabled ? 1.06 : 1)
+                .brightness(hover && enabled && style == .send ? 0.06 : 0)
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
-        .onHover { h in withAnimation(Motion.quick) { hover = h } }
+        .animation(Motion.smooth, value: enabled)
+        .onHover { h in withAnimation(Motion.fade) { hover = h } }
         .help(help)
         .accessibilityLabel(style == .stop ? "Stop" : "Send")
     }

@@ -333,7 +333,7 @@ struct SearchListView: View {
             loadedText = text
             await reload(typing: typing)
         }
-        .onChange(of: app.refreshTick) { Task { await reload() } }
+        .onChange(of: app.refreshTick) { Task { await reload(silent: !model.items.isEmpty) } }
         .onLiveTick { await reload(silent: true) }
     }
 

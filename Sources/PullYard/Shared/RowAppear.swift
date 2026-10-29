@@ -15,7 +15,7 @@ enum RowEntrance {
 final class RowAppearTracker {
     private static var registry: [String: RowAppearTracker] = [:]
     private static let cascadeLimit = 12
-    private static let stagger = 0.07
+    private static let stagger = 0.035
 
     private(set) var epoch = 0
     @ObservationIgnored private var seen: Set<String> = []

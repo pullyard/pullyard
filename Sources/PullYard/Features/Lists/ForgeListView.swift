@@ -190,7 +190,7 @@ struct ForgeListView: View {
         .navigationTitle(kind.title(app.provider))
         .navigationSubtitle(items.isEmpty ? "" : "\(items.count)")
         .task(id: "\(stateFilter.rawValue)|\(app.account?.id ?? "")") { await reload() }
-        .onChange(of: app.refreshTick) { Task { await reload() } }
+        .onChange(of: app.refreshTick) { Task { await reload(silent: !model.items.isEmpty) } }
         .onLiveTick { await reload(silent: true) }
     }
 

@@ -490,7 +490,7 @@ struct CommandPalette: View {
             PaletteCommand(id: "quick-open", section: .actions, icon: "terminal", tint: .syCoral, title: "Go to Session…", detail: "Agents", shortcut: "⇧⌘K", keywords: "agent session") { app.showQuickOpen = true },
             PaletteCommand(id: "new-agent", section: .actions, icon: "plus.bubble", tint: .syCoral, title: "New Agent Session", detail: "Agents", shortcut: "⌘N", keywords: "agent session new") { app.newAgentSession() },
             PaletteCommand(id: "sidebar", section: .actions, icon: "sidebar.left", tint: .syMuted, title: sidebarHidden ? "Show Sidebar" : "Hide Sidebar", keywords: "toggle sidebar") {
-                withAnimation(Motion.smooth) { sidebarHidden.toggle() }
+                sidebarHidden.toggle()
             },
         ]
         if !app.detailPath.isEmpty {

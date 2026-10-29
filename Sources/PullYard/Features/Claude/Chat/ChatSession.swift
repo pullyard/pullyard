@@ -422,6 +422,15 @@ final class ChatSession {
         if busy { items.append(.notice(id: UUID().uuidString, text: "Interrupted", isError: false)) }
     }
 
+    func stop(_ call: ChatToolCall) {
+        if let id = call.taskId {
+            control("stop_task", ["task_id": id])
+            call.taskStatus = "stopping"
+        } else if call.status == .running {
+            interrupt()
+        }
+    }
+
     func setModel(_ value: String) {
         modelValue = value
         control("set_model", ["model": value])
@@ -666,10 +675,44 @@ final class ChatSession {
 
     nonisolated static func historyUserItem(id: String, text raw: String) -> ChatItem? {
         var text = raw.replacingOccurrences(of: "<system-reminder>[\\s\\S]*?</system-reminder>", with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: "</?pasted_content[^>]*>", with: "", options: .regularExpression)
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.hasPrefix("<task-notification>") { return taskNotificationItem(id: id, text: text) }
         if text.hasPrefix("[Request interrupted by user") { return .notice(id: id, text: "Interrupted", isError: false) }
         if text.isEmpty || text.hasPrefix("<command-name>") || text.hasPrefix("<local-command") || text.hasPrefix("<command-message>") || text.hasPrefix("Caveat:") { return nil }
         return .user(id: id, text: text, images: [])
+    }
+
+    nonisolated static func taskNotificationItem(id: String, text: String) -> ChatItem {
+        func tag(_ name: String) -> String? {
+            guard let r = text.range(of: "<\(name)>[\\s\\S]*?</\(name)>", options: .regularExpression) else { return nil }
+            let inner = text[r].dropFirst(name.count + 2).dropLast(name.count + 3)
+            return String(inner)
+                .replacingOccurrences(of: "&lt;", with: "<")
+                .replacingOccurrences(of: "&gt;", with: ">")
+                .replacingOccurrences(of: "&quot;", with: "\"")
+                .replacingOccurrences(of: "&#39;", with: "'")
+                .replacingOccurrences(of: "&amp;", with: "&")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let status = tag("status") ?? ""
+        let summary = tag("summary") ?? ""
+        let failed = status == "failed" || summary.range(of: "exit code [1-9]", options: .regularExpression) != nil
+        let verb: String
+        switch status {
+        case "completed": verb = failed ? "failed" : "finished"
+        case "failed": verb = "failed"
+        case "killed", "stopped": verb = "stopped"
+        default: verb = status.isEmpty ? "updated" : status
+        }
+        var subject = summary
+        if let open = summary.firstIndex(of: "\""), let close = summary.lastIndex(of: "\""), open < close {
+            subject = String(summary[summary.index(after: open)..<close])
+        }
+        subject = subject.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        if subject.count > 60 { subject = String(subject.prefix(59)) + "…" }
+        let label = summary.hasPrefix("Agent") ? "Agent" : "Background task"
+        return .notice(id: id, text: subject.isEmpty ? "\(label) \(verb)" : "\(label) \(verb) · \(subject)", isError: failed)
     }
 
     static func resultText(_ content: Any?) -> String? {

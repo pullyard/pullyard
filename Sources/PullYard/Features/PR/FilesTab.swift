@@ -7,6 +7,8 @@ struct FilesTab: View {
     @State private var filter = ""
     @State private var navigator = DiffNavigator()
     @State private var splitFits = false
+    @State private var focus = FileFocus()
+    @State private var cache = DiffRowsCache()
     @AppStorage(DiffPrefs.wrapKey) private var wrap = true
     @AppStorage(DiffPrefs.splitKey) private var split = false
 
@@ -16,15 +18,13 @@ struct FilesTab: View {
                 HStack(spacing: 0) {
                     if showList {
                         HStack(spacing: 0) {
-                            fileList.frame(width: 260).surface(.list)
+                            FileListPane(model: model, focus: focus, filter: $filter, files: visibleFiles).frame(width: 260).surface(.list)
                             Divider()
                         }
-                        .transition(.move(edge: .leading).combined(with: .opacity))
                     }
                     VStack(spacing: 0) {
                         reviewBar
-                        diff
-                            .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false) { await model.load(full: true) }
+                        DiffRefreshHost(model: model) { diff }
                     }
                     .background(GeometryReader { g in
                         Color.clear
@@ -44,7 +44,7 @@ struct FilesTab: View {
     private var splitAvailable: Bool { splitFits }
 
     private func measure(_ width: CGFloat) {
-        let fits = width >= DiffPrefs.splitMinWidth
+        let fits = width >= DiffPrefs.splitMinWidth - (splitFits ? 40 : 0)
         if fits != splitFits { splitFits = fits }
     }
     private var splitActive: Bool { split && splitAvailable }
@@ -139,47 +139,33 @@ struct FilesTab: View {
         .accessibilityLabel(title)
     }
 
-    private var fileList: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                TextField("Filter files", text: $filter).textFieldStyle(.roundedBorder).controlSize(.small)
-                Text("\(model.viewedPaths.intersection(model.files.map(\.id)).count)/\(model.files.count)")
-                    .font(.syCaption.monospacedDigit()).foregroundStyle(Color.syMuted).help("Viewed")
-            }
-            .padding(8)
-            List(visibleFiles, selection: Binding(get: { model.scrollTarget }, set: { p in if let p { model.revealFile(p) } })) { f in
-                HStack(spacing: 6) {
-                    Text(f.statusLetter)
-                        .font(.syCaption2.weight(.bold).monospaced())
-                        .foregroundStyle(statusColor(f.status))
-                        .frame(width: 12)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text((f.id as NSString).lastPathComponent).font(.syBody).lineLimit(1)
-                        Text((f.id as NSString).deletingLastPathComponent).font(.syCaption2).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.head)
-                    }
-                    Spacer(minLength: 2)
-                    if model.threadCount(f.id) > 0 {
-                        Image(systemName: "text.bubble").font(.syCaption2).foregroundStyle(Color.syMuted).accessibilityLabel("Has comments")
-                    }
-                    if model.viewedPaths.contains(f.id) {
-                        Image(systemName: "checkmark.circle.fill").font(.syCaption).foregroundStyle(Color.ghGreen).accessibilityLabel("Viewed")
-                    }
-                }
-                .rowAppear(f.id, model.fileRows)
-                .tag(f.id)
-            }
-            .listStyle(.inset)
-            .surface(.list)
-        }
-    }
-
     private var diff: some View {
-        let built = tableRows(model.flatRows(filter: filter), split: splitActive)
-        let fileOf = built.fileOf
-        return DiffTableView(rows: built.rows, scrollTarget: model.scrollTarget.map { "h:" + $0 }, wrap: wrap, navigator: navigator, onKey: { perform($0) }, onComment: { id, line in
-            guard let path = fileOf[id], let n = line.anchorLine else { return }
-            model.composer = DiffAnchor(path: path, line: n, side: line.anchorSide)
-        })
+        let flat = model.flatRows(filter: filter)
+        let key = "\(model.flatCacheKey)|\(splitActive)|\(wrap)|\(splitAvailable)|\(model.filesOid ?? "")"
+        if key != cache.key {
+            let built = tableRows(flat, split: splitActive)
+            cache.key = key
+            cache.version += 1
+            cache.rows = built.rows
+            cache.fileOf = built.fileOf
+        }
+        let fileOf = cache.fileOf
+        let focus = focus
+        return DiffTableView(
+            rows: cache.rows,
+            version: cache.version,
+            scrollTarget: model.scrollTarget.map { "h:" + $0 },
+            scrollToken: model.scrollToken,
+            active: model.tab == .files,
+            wrap: wrap,
+            navigator: navigator,
+            onTopGroup: { id in focus.current = id.flatMap { $0.hasPrefix("h:") ? String($0.dropFirst(2)) : nil } },
+            onKey: { perform($0) },
+            onComment: { id, line in
+                guard let path = fileOf[id], let n = line.anchorLine else { return }
+                model.composer = DiffAnchor(path: path, line: n, side: line.anchorSide)
+            }
+        )
     }
 
     private func tableRows(_ flat: [FlatDiffRow], split: Bool) -> (rows: [DiffTableRow], fileOf: [String: String]) {
@@ -266,6 +252,69 @@ struct FilesTab: View {
             Text(text).font(.syCaption).foregroundStyle(Color.syMuted).padding(.horizontal, 12).padding(.vertical, 8)
         }
     }
+}
+
+@Observable
+final class FileFocus {
+    var current: String?
+}
+
+final class DiffRowsCache {
+    var key = ""
+    var version = 0
+    var rows: [DiffTableRow] = []
+    var fileOf: [String: String] = [:]
+}
+
+private struct DiffRefreshHost<Content: View>: View {
+    let model: PRDetailModel
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false) { await model.load(full: true) }
+    }
+}
+
+private struct FileListPane: View {
+    @Bindable var model: PRDetailModel
+    let focus: FileFocus
+    @Binding var filter: String
+    let files: [DiffFile]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                TextField("Filter files", text: $filter).textFieldStyle(.roundedBorder).controlSize(.small)
+                Text("\(model.viewedPaths.intersection(model.files.map(\.id)).count)/\(model.files.count)")
+                    .font(.syCaption.monospacedDigit()).foregroundStyle(Color.syMuted).help("Viewed")
+            }
+            .padding(8)
+            List(files, selection: Binding(get: { focus.current ?? model.scrollTarget }, set: { p in if let p { model.revealFile(p) } })) { f in
+                HStack(spacing: 6) {
+                    Text(f.statusLetter)
+                        .font(.syCaption2.weight(.bold).monospaced())
+                        .foregroundStyle(statusColor(f.status))
+                        .frame(width: 12)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text((f.id as NSString).lastPathComponent).font(.syBody).lineLimit(1)
+                        Text((f.id as NSString).deletingLastPathComponent).font(.syCaption2).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.head)
+                    }
+                    Spacer(minLength: 2)
+                    if model.threadCount(f.id) > 0 {
+                        Image(systemName: "text.bubble").font(.syCaption2).foregroundStyle(Color.syMuted).accessibilityLabel("Has comments")
+                    }
+                    if model.viewedPaths.contains(f.id) {
+                        Image(systemName: "checkmark.circle.fill").font(.syCaption).foregroundStyle(Color.ghGreen).accessibilityLabel("Viewed")
+                    }
+                }
+                .rowAppear(f.id, model.fileRows)
+                .tag(f.id)
+            }
+            .listStyle(.inset)
+            .surface(.list)
+        }
+    }
 
     private func statusColor(_ s: String) -> Color {
         switch s {
@@ -325,7 +374,7 @@ struct FileHeader: View {
                 if file.status != "removed", let onBlame {
                     Button("Blame") { onBlame(file) }
                 }
-                Button(showList ? "Hide file list" : "Show file list") { withAnimation(Motion.smooth) { showList.toggle() } }
+                Button(showList ? "Hide file list" : "Show file list") { showList.toggle() }
                 Button("Collapse all") { model.collapsed = Set(model.files.map(\.id)) }
                 Button("Expand all") { model.collapsed = [] }
                 if let review {
@@ -432,7 +481,7 @@ struct InlineThreadView: View {
         let open = expanded ?? !thread.isResolved
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
-                Button { withAnimation(Motion.quick) { expanded = !open } } label: {
+                Button { expanded = !open } label: {
                     Image(systemName: open ? "chevron.down" : "chevron.right").frame(width: 10)
                 }
                 .buttonStyle(.plain)
@@ -496,7 +545,6 @@ struct InlineThreadView: View {
                         }
                     }
                 }
-                .transition(.reveal)
             }
         }
         .font(.syCallout)
