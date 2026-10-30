@@ -105,7 +105,12 @@ public sealed class PermissionRequest
 
 public enum ToolStatus { Running, Done, Error, Denied }
 
-public enum ChatTaskState { Running, Done, Failed, Stopped }
+public enum ChatTaskState { Running, Stopping, Done, Failed, Stopped }
+
+public static class ChatTaskStateExtensions
+{
+    public static bool IsActive(this ChatTaskState state) => state is ChatTaskState.Running or ChatTaskState.Stopping;
+}
 
 public sealed class ToolItem : ChatItem
 {
@@ -141,6 +146,7 @@ public sealed class ToolItem : ChatItem
                     case null or "running" or "pending":
                         if (Backgrounded || Status == ToolStatus.Running) return ChatTaskState.Running;
                         break;
+                    case "stopping": return ChatTaskState.Stopping;
                     case "completed": return ChatTaskState.Done;
                     case "failed": return ChatTaskState.Failed;
                     default: return ChatTaskState.Stopped;
@@ -153,6 +159,18 @@ public sealed class ToolItem : ChatItem
                 ToolStatus.Denied => ChatTaskState.Stopped,
                 _ => ChatTaskState.Done
             };
+        }
+    }
+
+    public bool Stoppable => IsTask && TaskState == ChatTaskState.Running && (TaskId is not null || Status == ToolStatus.Running);
+
+    public string? CommandHint
+    {
+        get
+        {
+            if (Name != "Bash" || Input.Str("description") is not { Length: > 0 } || Input.Str("command") is not { Length: > 0 } command) return null;
+            var line = command.Split('\n')[0].Trim();
+            return line.Length == 0 ? null : line;
         }
     }
 
@@ -250,6 +268,13 @@ public sealed class ToolItem : ChatItem
             ["input"] = Input.DeepClone(),
             ["result"] = Truncate(ResultText)
         };
+        if (IsTask)
+        {
+            o["taskState"] = TaskState.ToString().ToLowerInvariant();
+            o["stoppable"] = Stoppable;
+            o["background"] = TaskId is not null;
+        }
+        if (CommandHint is { } hint) o["commandHint"] = hint;
         if (Input.Str("file_path") is { } fp) o["path"] = fp;
         if (Structured is { } s)
         {

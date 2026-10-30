@@ -47,6 +47,7 @@ public sealed partial class ChatSession : ObservableObject
     private bool resetPending = true;
     private readonly List<(string Text, IReadOnlyList<ChatImage> Images)> queuedPrompts = new();
     private int requestCounter;
+    private readonly Dictionary<string, (string ToolId, string? Previous)> stopRequests = new();
     private bool intentionalStop;
 
     public event Action<string>? OnSessionId;
@@ -321,16 +322,18 @@ public sealed partial class ChatSession : ObservableObject
         }
     }
 
-    private void Control(string subtype, JsonObject request)
+    private string Control(string subtype, JsonObject request)
     {
         requestCounter++;
         request["subtype"] = subtype;
+        var id = $"gl-{requestCounter}-{subtype}";
         Write(new JsonObject
         {
             ["type"] = "control_request",
-            ["request_id"] = $"gl-{requestCounter}-{subtype}",
+            ["request_id"] = id,
             ["request"] = request
         });
+        return id;
     }
 
     public void Send(string text, IReadOnlyList<ChatImage>? images = null)
@@ -365,6 +368,23 @@ public sealed partial class ChatSession : ObservableObject
     }
 
     public void Interrupt() => Control("interrupt", new JsonObject());
+
+    public void StopTask(ToolItem tool)
+    {
+        if (!tool.Stoppable) return;
+        if (tool.TaskId is { } taskId)
+        {
+            var previous = tool.TaskStatus;
+            var id = Control("stop_task", new JsonObject { ["task_id"] = taskId });
+            stopRequests[id] = (tool.ToolId, previous);
+            tool.TaskStatus = "stopping";
+            TouchTask(tool);
+        }
+        else if (tool.Status == ToolStatus.Running)
+        {
+            Interrupt();
+        }
+    }
 
     public void SetModel(string value)
     {
@@ -807,7 +827,17 @@ public sealed partial class ChatSession : ObservableObject
 
     private void HandleControlResponse(JsonObject o)
     {
-        if (o.Obj("response") is not { } r || r.Str("request_id") is not { } rid || r.Obj("response") is not { } body) return;
+        if (o.Obj("response") is not { } r || r.Str("request_id") is not { } rid) return;
+        if (stopRequests.Remove(rid, out var stop))
+        {
+            if (r.Str("subtype") == "error" && tools.TryGetValue(stop.ToolId, out var stopped) && stopped.TaskStatus == "stopping")
+            {
+                stopped.TaskStatus = stop.Previous;
+                TouchTask(stopped);
+            }
+            return;
+        }
+        if (r.Obj("response") is not { } body) return;
         if (rid.EndsWith("-initialize"))
         {
             Models = body.Arr("models").Objects()
@@ -876,10 +906,8 @@ public sealed partial class ChatSession : ObservableObject
                         tool.Structured = o.Obj("toolUseResult")?.DeepClone() as JsonObject;
                     }
                 }
-                if (SessionRewind.PromptText(o) is { } prompt)
-                    loaded.Add(new UserItem(o.Str("uuid") ?? Guid.NewGuid().ToString(), prompt, Array.Empty<ChatImage>()));
-                else if (SessionRewind.RawPrompt(o)?.Trim().StartsWith(SessionRewind.InterruptedMarker) == true)
-                    loaded.Add(new NoticeItem(o.Str("uuid") ?? Guid.NewGuid().ToString(), "Interrupted", false));
+                if (SessionRewind.RawPrompt(o) is { } raw && HistoryPrompt.Item(o.Str("uuid") ?? Guid.NewGuid().ToString(), raw) is { } item)
+                    loaded.Add(item);
             }
             else if (type == "assistant" && msg.Arr("content") is { } blocks)
             {

@@ -39,8 +39,9 @@ public static class SessionRewind
             return o.Bool("isCompactSummary") == true ? null : s;
         if (msg.Arr("content") is not { } blocks) return null;
         var texts = blocks.Objects()
-            .Where(b => b.Str("type") == "text" && b.Str("text") is { } t && !t.StartsWith('<'))
-            .Select(b => b.Str("text")!)
+            .Where(b => b.Str("type") == "text" && b.Str("text") is not null)
+            .Select(b => HistoryPrompt.StripPasted(b.Str("text")!).Trim())
+            .Where(t => t.Length > 0 && (!t.StartsWith('<') || HistoryPrompt.IsTaskNotification(t)))
             .ToList();
         return texts.Count == 0 ? null : string.Join("\n", texts);
     }
@@ -48,9 +49,8 @@ public static class SessionRewind
     public static string? PromptText(JsonObject o)
     {
         if (RawPrompt(o) is not { } raw) return null;
-        var clean = raw.Trim();
-        if (clean.Length == 0 || clean.StartsWith(InterruptedMarker) || clean.StartsWith("<command-name>") || clean.StartsWith("<local-command") ||
-            clean.StartsWith("<command-message>") || clean.StartsWith("Caveat:")) return null;
+        var clean = HistoryPrompt.StripPasted(raw).Trim();
+        if (clean.StartsWith(InterruptedMarker) || HistoryPrompt.IsTaskNotification(clean) || HistoryPrompt.IsHidden(clean)) return null;
         return clean;
     }
 
