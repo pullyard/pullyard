@@ -906,7 +906,7 @@ public sealed partial class ChatSession : ObservableObject
                         tool.Structured = o.Obj("toolUseResult")?.DeepClone() as JsonObject;
                     }
                 }
-                if (SessionRewind.RawPrompt(o) is { } raw && HistoryPrompt.Item(o.Str("uuid") ?? Guid.NewGuid().ToString(), raw) is { } item)
+                if (SessionRewind.RawPrompt(o) is { } prompt && HistoryPrompt.Item(o.Str("uuid") ?? Guid.NewGuid().ToString(), prompt) is { } item)
                     loaded.Add(item);
             }
             else if (type == "assistant" && msg.Arr("content") is { } blocks)
