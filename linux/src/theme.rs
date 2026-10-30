@@ -366,7 +366,16 @@ listview.stack-list > row { padding: 0; margin: 1px 0; background: none; }
 .chat-composer textview, .chat-composer textview text { background-color: transparent; }
 .chat-code { background-color: @sy_sunken; border-radius: 8px; padding: 8px; font-family: monospace; font-size: 12px; }
 .chat-notice { color: @sy_dim; font-size: 0.82em; }
-.chat-actions { opacity: 0; transition: opacity 160ms ease-out; min-height: 22px; }
+.chat-output-scroll { background-color: @sy_sunken; border-radius: 8px; }
+.chat-output, .chat-output text { background-color: transparent; color: inherit; font-size: 12px; }
+.chat-tool-summary { color: alpha(@sy_text, 0.72); }
+.chat-step-title { color: alpha(@sy_text, 0.86); }
+.chat-command-hint { color: @sy_muted; font-family: monospace; font-size: 0.9em; }
+.chat-stop { min-width: 20px; min-height: 20px; padding: 0; border-radius: 999px; color: @sy_red; background-color: alpha(@sy_red, 0.14); transition: background-color 200ms ease-out, color 200ms ease-out; }
+.chat-stop:hover { color: white; background-color: alpha(@sy_red, 0.9); }
+.chat-user-edit { box-shadow: inset 0 0 0 1px alpha(@sy_violet, 0.45); }
+.chat-user-edit textview, .chat-user-edit textview text { background-color: transparent; }
+.chat-actions { opacity: 0; transition: opacity 200ms ease-out; min-height: 22px; }
 .chat-actions.shown { opacity: 1; }
 .chat-actions button { min-height: 22px; min-width: 24px; padding: 0 4px; border-radius: 6px; color: @sy_muted; }
 .chat-actions button:hover { color: @sy_text; background-color: alpha(@sy_text, 0.08); }

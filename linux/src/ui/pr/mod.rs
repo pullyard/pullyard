@@ -81,7 +81,7 @@ impl PrPage {
         tabs.set_visible("jira", false);
         let tab_stack = gtk::Stack::new();
         tab_stack.set_transition_type(gtk::StackTransitionType::Crossfade);
-        tab_stack.set_transition_duration(120);
+        tab_stack.set_transition_duration(200);
         tab_stack.set_vexpand(true);
         let main = vbox(0);
         main.append(&header_box);

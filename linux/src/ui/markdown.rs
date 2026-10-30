@@ -275,37 +275,138 @@ fn block_widget(block: &Block) -> gtk::Widget {
     }
 }
 
+#[derive(Clone, PartialEq, Debug)]
+enum Segment {
+    Prose(Vec<Block>),
+    Single(Block),
+}
+
+fn is_prose(b: &Block) -> bool {
+    matches!(b, Block::Para(_) | Block::Heading(..) | Block::Item(..))
+}
+
+fn segments(blocks: Vec<Block>) -> Vec<Segment> {
+    let mut out: Vec<Segment> = vec![];
+    for b in blocks {
+        let prose = is_prose(&b);
+        let extend = prose && matches!(out.last(), Some(Segment::Prose(_)));
+        if extend {
+            if let Some(Segment::Prose(run)) = out.last_mut() {
+                run.push(b);
+            }
+        } else if prose {
+            out.push(Segment::Prose(vec![b]));
+        } else {
+            out.push(Segment::Single(b));
+        }
+    }
+    out
+}
+
+const PARA_GAP: &str = "\n<span size=\"4096\"> </span>\n";
+
+fn item_indent(indent: i32) -> String {
+    "\u{2003}".repeat((indent / 2).max(0) as usize)
+}
+
+fn prose_markup(blocks: &[Block]) -> String {
+    let mut out = String::new();
+    let mut prev: Option<&Block> = None;
+    for b in blocks {
+        if let Some(p) = prev {
+            out.push_str(if matches!((p, b), (Block::Item(..), Block::Item(..))) { "\n" } else { PARA_GAP });
+        }
+        match b {
+            Block::Para(t) => out.push_str(&inline_markup(t)),
+            Block::Heading(level, t) => out.push_str(&format!("<span weight=\"bold\" size=\"{}\">{}</span>", if *level <= 2 { "large" } else { "medium" }, inline_markup(t))),
+            Block::Item(indent, marker, rest) => out.push_str(&format!("{}<span alpha=\"60%\">{}</span> {}", item_indent(*indent), escape(marker), inline_markup(rest))),
+            _ => {}
+        }
+        prev = Some(b);
+    }
+    out
+}
+
+fn prose_plain(blocks: &[Block]) -> String {
+    blocks
+        .iter()
+        .map(|b| match b {
+            Block::Para(t) | Block::Heading(_, t) => t.clone(),
+            Block::Item(indent, marker, rest) => format!("{}{marker} {rest}", item_indent(*indent)),
+            _ => String::new(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn set_prose(l: &gtk::Label, blocks: &[Block]) {
+    l.set_text("");
+    l.set_markup(&prose_markup(blocks));
+    if l.text().is_empty() {
+        l.set_text(&prose_plain(blocks));
+    }
+}
+
+fn prose_label(blocks: &[Block]) -> gtk::Label {
+    let l = gtk::Label::new(None);
+    set_prose(&l, blocks);
+    l.set_xalign(0.0);
+    l.set_wrap(true);
+    l.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    l.set_selectable(true);
+    l.add_css_class("sy-text");
+    connect_links(&l);
+    l
+}
+
+fn segment_widget(seg: &Segment) -> gtk::Widget {
+    match seg {
+        Segment::Prose(blocks) => prose_label(blocks).upcast(),
+        Segment::Single(block) => block_widget(block),
+    }
+}
+
 pub fn view(text: &str) -> gtk::Box {
     let root = vbox(8);
-    for block in parse(text) {
-        root.append(&block_widget(&block));
+    for seg in segments(parse(text)) {
+        root.append(&segment_widget(&seg));
     }
     root
 }
 
 pub struct MarkdownView {
     pub widget: gtk::Box,
-    blocks: std::cell::RefCell<Vec<(Block, gtk::Widget)>>,
+    segments: std::cell::RefCell<Vec<(Segment, gtk::Widget)>>,
 }
 
 impl MarkdownView {
     pub fn new(text: &str) -> std::rc::Rc<Self> {
-        let me = std::rc::Rc::new(MarkdownView { widget: vbox(8), blocks: std::cell::RefCell::new(vec![]) });
+        let me = std::rc::Rc::new(MarkdownView { widget: vbox(8), segments: std::cell::RefCell::new(vec![]) });
         me.set_text(text);
         me
     }
 
     pub fn set_text(&self, text: &str) {
-        let new = parse(text);
-        let mut blocks = self.blocks.borrow_mut();
-        let keep = blocks.iter().zip(&new).take_while(|((old, _), block)| old == *block).count();
-        for (_, w) in blocks.drain(keep..) {
+        let new = segments(parse(text));
+        let mut segs = self.segments.borrow_mut();
+        let mut keep = segs.iter().zip(&new).take_while(|((old, _), seg)| old == *seg).count();
+        if keep < segs.len() && keep < new.len() {
+            let reuse = matches!((&segs[keep].0, &new[keep]), (Segment::Prose(_), Segment::Prose(_)));
+            if reuse {
+                if let (Some(l), Segment::Prose(blocks)) = (segs[keep].1.downcast_ref::<gtk::Label>(), &new[keep]) {
+                    set_prose(l, blocks);
+                }
+                segs[keep].0 = new[keep].clone();
+                keep += 1;
+            }
+        }
+        for (_, w) in segs.drain(keep..) {
             self.widget.remove(&w);
         }
-        for block in new.into_iter().skip(keep) {
-            let w = block_widget(&block);
+        for seg in new.into_iter().skip(keep) {
+            let w = segment_widget(&seg);
             self.widget.append(&w);
-            blocks.push((block, w));
+            segs.push((seg, w));
         }
     }
 }
@@ -388,5 +489,22 @@ mod tests {
         );
         let streaming = parse("# Title\n\nsome te");
         assert_eq!(streaming[0], b[0]);
+    }
+
+    #[test]
+    fn prose_blocks_merge_into_one_run() {
+        let segs = segments(parse("# Title\n\nsome text\n\n- a\n- b\n```\ncode\n```\nafter"));
+        assert_eq!(segs.len(), 3);
+        match &segs[0] {
+            Segment::Prose(blocks) => {
+                assert_eq!(blocks.len(), 4);
+                let m = prose_markup(blocks);
+                assert!(m.starts_with("<span weight=\"bold\" size=\"large\">Title</span>"));
+                assert!(m.contains("<span alpha=\"60%\">•</span> a\n<span alpha=\"60%\">•</span> b"));
+            }
+            _ => panic!("expected prose"),
+        }
+        assert_eq!(segs[1], Segment::Single(Block::Code("code".into())));
+        assert_eq!(segs[2], Segment::Prose(vec![Block::Para("after".into())]));
     }
 }

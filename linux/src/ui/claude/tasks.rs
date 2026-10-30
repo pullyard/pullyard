@@ -7,6 +7,7 @@ use adw::prelude::*;
 use gtk::glib;
 
 use crate::claude::chat::{ChatItem, ChatSession, TaskState, ToolCall};
+use crate::ui::claude::chat_view::{mono_output, tool_stop_button};
 use crate::ui::menu::{context_menu, Menu};
 use crate::ui::widgets::*;
 use crate::util;
@@ -49,7 +50,7 @@ impl TasksPanel {
         let w = Rc::downgrade(&me);
         glib::timeout_add_seconds_local(1, move || match w.upgrade() {
             Some(me) => {
-                if me.widget.is_mapped() && me.calls().iter().any(|c| c.task_state() == TaskState::Running) {
+                if me.widget.is_mapped() && me.calls().iter().any(|c| is_active(c.task_state())) {
                     me.render();
                 }
                 glib::ControlFlow::Continue
@@ -79,7 +80,7 @@ impl TasksPanel {
     }
 
     fn report(&self) {
-        let running = self.calls().iter().filter(|c| c.task_state() == TaskState::Running).count();
+        let running = self.calls().iter().filter(|c| is_active(c.task_state())).count();
         if let Some(f) = self.on_running.borrow().as_ref() {
             f(running);
         }
@@ -107,7 +108,7 @@ impl TasksPanel {
             return;
         }
         self.widget.set_visible_child_name("list");
-        let (running, finished): (Vec<_>, Vec<_>) = calls.into_iter().partition(|c| c.task_state() == TaskState::Running);
+        let (running, finished): (Vec<_>, Vec<_>) = calls.into_iter().partition(|c| is_active(c.task_state()));
         if !running.is_empty() {
             self.list.append(&self.header(&format!("Running {}", running.len()), false));
             for c in &running {
@@ -158,6 +159,9 @@ impl TasksPanel {
         titles.append(&title);
         if let Some(sub) = subtitle(call) {
             let l = ellipsized(&sub, &["sy-muted", "sy-small"]);
+            if call.name == "Bash" {
+                l.add_css_class("sy-mono");
+            }
             l.set_xalign(0.0);
             titles.append(&l);
         }
@@ -167,6 +171,10 @@ impl TasksPanel {
                 if let Some(start) = call.started_at.get() {
                     line.append(&label_with(&duration(start.elapsed()), &["sy-muted", "sy-small"]));
                 }
+                line.append(&spinner(12));
+            }
+            TaskState::Stopping => {
+                line.append(&label_with("Stopping…", &["sy-muted", "sy-small"]));
                 line.append(&spinner(12));
             }
             TaskState::Failed => line.append(&label_with("Failed", &["fg-red", "sy-small", "sy-bold"])),
@@ -205,30 +213,27 @@ impl TasksPanel {
             }
             m
         });
-        outer.append(&line);
+        if call.can_stop() {
+            let row = hbox(4);
+            line.set_hexpand(true);
+            row.append(&line);
+            let stop = tool_stop_button(&self.chat, call);
+            stop.set_margin_end(4);
+            row.append(&stop);
+            outer.append(&row);
+        } else {
+            outer.append(&line);
+        }
         if open {
             let details = vbox(6);
             margins(&details, 0, 6, 8, 6);
             if !command.is_empty() {
-                let l = selectable(wrap_label(&format!("$ {command}"), &["sy-mono", "sy-small", "sy-text"]));
-                l.set_xalign(0.0);
-                let b = vbox(0);
-                b.add_css_class("sy-raised");
-                pad(&b, 8);
-                b.append(&l);
-                details.append(&b);
+                details.append(&mono_output(&format!("$ {command}"), "sy-text", 160));
             }
             if let Some(out) = out.filter(|o| !o.is_empty()) {
-                let tail: String = if out.chars().count() > 8000 { out.chars().skip(out.chars().count() - 8000).collect() } else { out };
-                let l = selectable(wrap_label(&tail, &["sy-mono", "sy-small", if state == TaskState::Failed { "fg-red" } else { "sy-muted" }]));
-                l.set_xalign(0.0);
-                l.set_valign(gtk::Align::Start);
-                pad(&l, 8);
-                let s = scrolled(&l);
-                s.set_vexpand(false);
-                s.set_propagate_natural_height(true);
-                s.set_max_content_height(180);
-                details.append(&s);
+                let count = out.chars().count();
+                let tail: String = if count > 8000 { out.chars().skip(count - 8000).collect() } else { out };
+                details.append(&mono_output(&tail, if state == TaskState::Failed { "fg-red" } else { "sy-muted" }, 220));
             }
             outer.append(&details);
         }
@@ -249,9 +254,14 @@ fn title(call: &ToolCall) -> String {
     call.name.clone()
 }
 
+fn is_active(state: TaskState) -> bool {
+    matches!(state, TaskState::Running | TaskState::Stopping)
+}
+
 fn subtitle(call: &ToolCall) -> Option<String> {
     if call.name == "Bash" {
-        return call.backgrounded.get().then(|| "Background".to_string());
+        let parts: Vec<String> = [call.backgrounded.get().then(|| "Background".to_string()), call.command_hint()].into_iter().flatten().collect();
+        return (!parts.is_empty()).then(|| parts.join(" · "));
     }
     let mut parts = Vec::new();
     if let Some(t) = call.string("subagent_type").filter(|t| !t.is_empty()) {

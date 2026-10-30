@@ -697,6 +697,44 @@ impl Workspace {
         self.emit(WsEvent::Selection);
     }
 
+    pub fn continue_edited(self: &Rc<Self>, tab: &Rc<Tab>, info: Option<SessionInfo>, prompt: String) -> Rc<Tab> {
+        let title = tab.title.borrow().clone();
+        let index = self.tabs.borrow().iter().position(|t| t.id == tab.id);
+        let new = match info {
+            Some(mut info) => {
+                info.title = title.clone();
+                let new = self.resume(&info, false, Some(TabKind::Chat));
+                if let Some(c) = &new.chat {
+                    c.items.borrow_mut().retain(|i| i.id() != "nresumed");
+                    c.changed.emit(&super::chat::Event::Reset);
+                    c.send(&prompt, vec![]);
+                }
+                new
+            }
+            None => self.new_session(&tab.folder, Some(prompt), Some(title.clone()), None, Some(TabKind::Chat)),
+        };
+        *new.title.borrow_mut() = title;
+        if let Some(c) = &tab.chat {
+            c.stop();
+        }
+        tab.kill_terminal();
+        notifier::withdraw(tab.id);
+        {
+            let mut tabs = self.tabs.borrow_mut();
+            tabs.retain(|t| t.id != tab.id);
+            if let (Some(index), Some(current)) = (index, tabs.iter().position(|t| t.id == new.id)) {
+                if index < current {
+                    let moved = tabs.remove(current);
+                    tabs.insert(index, moved);
+                }
+            }
+        }
+        self.set_selected(Some(new.id));
+        self.emit(WsEvent::Tabs);
+        self.emit(WsEvent::Selection);
+        new
+    }
+
     pub fn apply_model_to_current(&self) {
         let Some(tab) = self.selected_tab() else { return };
         if !tab.running() || self.model() == ModelOption::Default {
