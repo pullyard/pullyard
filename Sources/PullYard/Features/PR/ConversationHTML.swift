@@ -25,7 +25,8 @@ enum ConversationHTML {
 
     private static func time(_ d: Date?) -> String {
         guard let d else { return "" }
-        return "<span title=\"\(esc(Fmt.full.string(from: d)))\">\(esc(Fmt.rel(d)))</span>"
+        let full = esc(Fmt.full.string(from: d))
+        return "<span title=\"\(full)\" data-ts=\"\(Int(d.timeIntervalSince1970))\">\(full)</span>"
     }
 
     private static func body(_ html: String?) -> String {
@@ -217,9 +218,13 @@ enum ConversationHTML {
         """
         <!doctype html><html><head><meta charset="utf-8">\(csp(scripts: true))<style>\(css)</style>
         <script nonce="\(nonce)">document.addEventListener("click",function(e){var el=e.target.closest("[data-act]");if(!el||el.getAttribute("data-n")!=="\(nonce)")return;e.preventDefault();window.webkit.messageHandlers.app.postMessage({type:el.dataset.act,id:el.dataset.id||""})});</script>
-        </head><body><div class="tl">\(content)</div></body></html>
+        </head><body><div class="tl">\(content)</div><script nonce="\(nonce)">\(timeScript)</script></body></html>
         """
     }
+
+    private static let timeScript = """
+    (function(){var f=new Intl.RelativeTimeFormat("en-US",{style:"short"});var u=[[3600,"minute",60],[86400,"hour",3600],[604800,"day",86400],[2629800,"week",604800],[31557600,"month",2629800],[Infinity,"year",31557600]];function rel(t){var s=t-Date.now()/1000,a=Math.abs(s);if(a<45)return "just now";for(var i=0;i<u.length;i++){if(a<u[i][0])return f.format(Math.round(s/u[i][2]),u[i][1]);}return "";}function run(){document.querySelectorAll("[data-ts]").forEach(function(el){el.textContent=rel(+el.getAttribute("data-ts"));});}window.__pyTimes=run;run();if(!window.__pyTimer){window.__pyTimer=setInterval(run,60000);}})();
+    """
 
     static let nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "")
 

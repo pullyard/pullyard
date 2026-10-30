@@ -405,8 +405,11 @@ struct DiffTableView: NSViewRepresentable {
     let rows: [DiffTableRow]
     var version: Int = 0
     var scrollTarget: String?
+    var scrollToken = 0
+    var active = true
     var wrap = true
     var navigator: DiffNavigator?
+    var onTopGroup: ((String?) -> Void)?
     var onKey: ((String) -> Bool)?
     var onComment: ((String, DiffLine) -> Void)?
     var zoom = TextZoom.shared.scale
@@ -441,7 +444,11 @@ struct DiffTableView: NSViewRepresentable {
         table.onHorizontalScroll = { [weak coordinator = context.coordinator] event in coordinator?.scrollHorizontally(event) ?? false }
         container.bar.onScroll = { [weak coordinator = context.coordinator] fraction in coordinator?.setOffset(fraction: fraction) }
         context.coordinator.observeWidth(scroll)
+        context.coordinator.observeScroll(scroll)
         navigator?.coordinator = context.coordinator
+        context.coordinator.active = active
+        context.coordinator.onTopGroup = onTopGroup
+        context.coordinator.lastScrollToken = scrollToken
         context.coordinator.update(rows: rows, version: version, zoom: zoom, wrap: wrap, onComment: onComment)
         context.coordinator.setKeyHandler(onKey)
         return container
@@ -450,9 +457,12 @@ struct DiffTableView: NSViewRepresentable {
     func updateNSView(_ container: DiffContainerView, context: Context) {
         navigator?.coordinator = context.coordinator
         context.coordinator.setKeyHandler(onKey)
+        context.coordinator.active = active
+        context.coordinator.onTopGroup = onTopGroup
         context.coordinator.update(rows: rows, version: version, zoom: zoom, wrap: wrap, onComment: onComment)
-        if let target = scrollTarget, target != context.coordinator.lastScrollTarget {
+        if let target = scrollTarget, target != context.coordinator.lastScrollTarget || scrollToken != context.coordinator.lastScrollToken {
             context.coordinator.lastScrollTarget = target
+            context.coordinator.lastScrollToken = scrollToken
             context.coordinator.scroll(to: target)
         }
     }
@@ -471,6 +481,12 @@ struct DiffTableView: NSViewRepresentable {
         var zoom: CGFloat = 0
         var onComment: ((String, DiffLine) -> Void)?
         var lastScrollTarget: String?
+        var lastScrollToken = 0
+        var active = true
+        var onTopGroup: ((String?) -> Void)?
+        private var topGroup: String?
+        private var scrollObserver: NSObjectProtocol?
+        private var topGroupCheck: DispatchWorkItem?
         let state = DiffRenderState()
         private var wrap: Bool?
         private var hasSplit = false
@@ -487,6 +503,7 @@ struct DiffTableView: NSViewRepresentable {
 
         deinit {
             if let widthObserver { NotificationCenter.default.removeObserver(widthObserver) }
+            if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver) }
             if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         }
 
@@ -511,6 +528,22 @@ struct DiffTableView: NSViewRepresentable {
             scroll.contentView.postsFrameChangedNotifications = true
         }
 
+        func observeScroll(_ scroll: NSScrollView) {
+            scrollObserver = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) { [weak self] _ in
+                guard let self, self.onTopGroup != nil, self.topGroupCheck == nil else { return }
+                let check = DispatchWorkItem { [weak self] in
+                    guard let self else { return }
+                    self.topGroupCheck = nil
+                    let id = self.currentGroupID()
+                    guard id != self.topGroup else { return }
+                    self.topGroup = id
+                    self.onTopGroup?(id)
+                }
+                self.topGroupCheck = check
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: check)
+            }
+        }
+
         func setKeyHandler(_ handler: ((String) -> Bool)?) {
             onKey = handler
             if handler == nil {
@@ -520,7 +553,7 @@ struct DiffTableView: NSViewRepresentable {
             }
             guard keyMonitor == nil else { return }
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self, let handler = self.onKey, let table = self.table, let window = table.window,
+                guard let self, self.active, let handler = self.onKey, let table = self.table, let window = table.window,
                       event.window === window, window.isKeyWindow, !table.isHiddenOrHasHiddenAncestor, !table.visibleRect.isEmpty,
                       event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
                       let key = event.characters, Self.reviewKeys.contains(key),
@@ -542,6 +575,11 @@ struct DiffTableView: NSViewRepresentable {
             self.onComment = onComment
             DiffStyle.apply(scale: newZoom)
             let newIds = newRows.map(\.id)
+            if newVersion > 0, newVersion == version, newZoom == zoom, newWrap == wrap, newIds == ids {
+                rows = newRows
+                refreshVisibleHosts()
+                return
+            }
             let newSignature = newRows.map { row -> Int in
                 var h = Hasher()
                 switch row {
@@ -801,7 +839,7 @@ struct DiffTableView: NSViewRepresentable {
         }
 
         private func wrapped(id: String, content: () -> AnyView) -> AnyView {
-            AnyView(content().modifier(HeightReporter { [weak self] h in self?.report(id: id, height: h) }))
+            AnyView(content().id(id).modifier(HeightReporter { [weak self] h in self?.report(id: id, height: h) }))
         }
 
         private func report(id: String, height: CGFloat) {
@@ -810,10 +848,17 @@ struct DiffTableView: NSViewRepresentable {
             viewHeights[id] = h
             DispatchQueue.main.async { [weak self] in
                 guard let self, let table = self.table, let i = self.ids.firstIndex(of: id) else { return }
+                let old = table.rect(ofRow: i)
+                let top = table.visibleRect.minY
                 NSAnimationContext.runAnimationGroup { ctx in
                     ctx.duration = 0
                     table.noteHeightOfRows(withIndexesChanged: IndexSet(integer: i))
                 }
+                let delta = table.rect(ofRow: i).height - old.height
+                guard old.minY < top - 0.5, abs(delta) > 0.5, let scroll = table.enclosingScrollView else { return }
+                let clip = scroll.contentView
+                clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: max(0, clip.bounds.origin.y + delta)))
+                scroll.reflectScrolledClipView(clip)
             }
         }
     }

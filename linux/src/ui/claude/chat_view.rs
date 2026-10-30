@@ -133,6 +133,88 @@ fn tool_diff_stat(c: &ToolCall) -> Option<(i64, i64)> {
     None
 }
 
+pub fn hand_off_scroll(inner: &gtk::ScrolledWindow) {
+    let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let w = inner.downgrade();
+    scroll.connect_scroll(move |c, _, dy| {
+        let Some(inner) = w.upgrade() else { return glib::Propagation::Proceed };
+        if dy == 0.0 || c.current_event_state().contains(gdk::ModifierType::SHIFT_MASK) {
+            return glib::Propagation::Proceed;
+        }
+        let adj = inner.vadjustment();
+        let max = adj.upper() - adj.page_size();
+        let scrollable = max - adj.lower() > 1.0;
+        let at_edge = if dy < 0.0 { adj.value() <= adj.lower() + 0.5 } else { adj.value() >= max - 0.5 };
+        if scrollable && !at_edge {
+            return glib::Propagation::Proceed;
+        }
+        let Some(outer) = inner.parent().and_then(|p| p.ancestor(gtk::ScrolledWindow::static_type())).and_then(|o| o.downcast::<gtk::ScrolledWindow>().ok()) else {
+            return glib::Propagation::Proceed;
+        };
+        let oadj = outer.vadjustment();
+        let step = if c.unit() == gdk::ScrollUnit::Wheel { oadj.page_size().powf(2.0 / 3.0) } else { 1.0 };
+        let omax = (oadj.upper() - oadj.page_size()).max(oadj.lower());
+        oadj.set_value((oadj.value() + dy * step).clamp(oadj.lower(), omax));
+        glib::Propagation::Stop
+    });
+    inner.add_controller(scroll);
+}
+
+pub fn mono_output(text: &str, color: &str, max_height: i32) -> gtk::ScrolledWindow {
+    let shown: String = text.chars().take(200_000).collect();
+    let view = gtk::TextView::new();
+    view.set_editable(false);
+    view.set_cursor_visible(false);
+    view.set_monospace(true);
+    view.set_wrap_mode(gtk::WrapMode::None);
+    view.set_top_margin(8);
+    view.set_bottom_margin(8);
+    view.set_left_margin(8);
+    view.set_right_margin(8);
+    view.add_css_class("chat-output");
+    view.add_css_class(color);
+    view.buffer().set_text(shown.trim_end_matches('\n'));
+    let s = gtk::ScrolledWindow::new();
+    s.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
+    s.set_propagate_natural_height(true);
+    s.set_max_content_height(max_height);
+    s.set_hexpand(true);
+    s.add_css_class("chat-output-scroll");
+    s.set_child(Some(&view));
+    hand_off_scroll(&s);
+    s
+}
+
+pub fn tool_stop_button(chat: &Rc<ChatSession>, call: &Rc<ToolCall>) -> gtk::Button {
+    let b = gtk::Button::new();
+    b.set_child(Some(&crate::icons::image("sy-stop-symbolic", 10)));
+    b.add_css_class("flat");
+    b.add_css_class("chat-stop");
+    b.set_valign(gtk::Align::Center);
+    b.set_tooltip_text(Some(if call.task_id.borrow().is_some() { "Stop this task" } else { "Stop — interrupts Claude's current turn" }));
+    set_label(&b, "Stop");
+    let (chat, call) = (Rc::downgrade(chat), Rc::downgrade(call));
+    b.connect_clicked(move |btn| {
+        if let (Some(chat), Some(call)) = (chat.upgrade(), call.upgrade()) {
+            btn.set_sensitive(false);
+            chat.stop_task(&call);
+        }
+    });
+    b
+}
+
+fn task_state_label(c: &ToolCall) -> Option<gtk::Label> {
+    if !chat::TASK_TOOLS.contains(&c.name.as_str()) {
+        return None;
+    }
+    match c.task_state() {
+        chat::TaskState::Stopping => Some(label_with("Stopping…", &["sy-muted", "sy-small"])),
+        chat::TaskState::Stopped if c.task_status.borrow().is_some() => Some(label_with("Stopped", &["sy-muted", "sy-small"])),
+        _ => None,
+    }
+}
+
 fn output_view(text: Option<&str>, title: Option<&str>) -> Option<gtk::Widget> {
     let text = text?;
     if text.trim().is_empty() {
@@ -142,19 +224,7 @@ fn output_view(text: Option<&str>, title: Option<&str>) -> Option<gtk::Widget> {
     if let Some(t) = title {
         b.append(&label_with(t, &["sy-muted", "sy-small", "sy-bold"]));
     }
-    let shown: String = text.chars().take(20_000).collect();
-    let l = gtk::Label::new(Some(&shown));
-    l.set_xalign(0.0);
-    l.set_yalign(0.0);
-    l.set_selectable(true);
-    l.add_css_class("sy-mono");
-    l.add_css_class("sy-small");
-    let s = gtk::ScrolledWindow::new();
-    s.set_child(Some(&l));
-    s.set_max_content_height(220);
-    s.set_propagate_natural_height(true);
-    let f = frame(&s, "chat-code");
-    b.append(&f);
+    b.append(&mono_output(text, "sy-muted", 260));
     Some(b.upcast())
 }
 
@@ -1116,12 +1186,16 @@ impl ChatView {
         self.welcome.append(&label_with("/ commands · @ files · Shift+Enter new line · paste a screenshot Ctrl+V", &["sy-dim", "sy-small"]));
     }
 
-    fn edit_from_here(self: &Rc<Self>, item_id: &str, text: &str) {
+    fn can_edit(&self) -> bool {
+        !self.chat.busy.get() && self.chat.session_id.borrow().as_deref().is_some_and(|s| !s.is_empty())
+    }
+
+    fn edit_from_here(self: &Rc<Self>, item_id: &str, text: &str, replacement: &str) {
         let chat = self.chat.clone();
         let sid = chat.session_id.borrow().clone().filter(|s| !s.is_empty());
-        let index = chat.items.borrow().iter().position(|i| i.id() == item_id);
+        let index = chat.items.borrow().iter().position(|i| matches!(i, ChatItem::User { .. }) && i.id() == item_id);
         let (Some(sid), Some(index), false) = (sid, index, chat.busy.get()) else {
-            *chat.draft.borrow_mut() = Some(text.to_string());
+            *chat.draft.borrow_mut() = Some(replacement.to_string());
             self.composer.render_state();
             return;
         };
@@ -1131,40 +1205,126 @@ impl ChatView {
         if !roots.contains(&fallback) {
             roots.push(fallback);
         }
-        let (tab, prompt) = (self.tab.clone(), text.to_string());
+        let (tab, original, prompt) = (self.tab.clone(), text.to_string(), replacement.to_string());
         crate::rt::spawn_local(async move {
-            let p = prompt.clone();
-            let res = crate::rt::blocking(move || -> Result<(PathBuf, Option<SessionInfo>), String> {
+            let res = crate::rt::blocking(move || -> Result<Option<SessionInfo>, String> {
                 let file = rewind::session_file(&sid, &roots).ok_or_else(|| "Couldn't find the session file".to_string())?;
-                let (_, forked) = rewind::fork(&file, &p, later)?;
+                let (_, forked) = rewind::fork(&file, &original, later)?;
                 let info = sessions::parse(&forked);
-                Ok((forked, info))
+                if info.is_none() {
+                    let _ = std::fs::remove_file(&forked);
+                }
+                Ok(info)
             })
             .await;
             let Some(a) = app::try_get() else { return };
-            let title = format!("Edit · {}", tab.title.borrow());
             match res {
-                Ok((file, info)) => {
-                    let new = match info {
-                        Some(mut info) => {
-                            info.title = title;
-                            a.claude.resume(&info, false, Some(TabKind::Chat))
-                        }
-                        None => {
-                            let _ = std::fs::remove_file(&file);
-                            a.claude.new_session(&tab.folder, None, Some(title), None, Some(TabKind::Chat))
-                        }
-                    };
-                    if let Some(c) = &new.chat {
-                        *c.draft.borrow_mut() = Some(prompt);
-                        c.changed.emit(&Event::State);
-                    }
+                Ok(info) => {
+                    a.claude.continue_edited(&tab, info, prompt);
                 }
                 Err(e) => {
                     *chat.draft.borrow_mut() = Some(prompt);
                     *chat.last_error.borrow_mut() = Some(e);
                     chat.changed.emit(&Event::State);
                 }
+            }
+        });
+    }
+
+    fn user_editor(self: &Rc<Self>, item_id: &str, text: &str, bubble: &gtk::Box, actions: &gtk::Box, outer: &gtk::Box) {
+        let editor = vbox(8);
+        editor.add_css_class("chat-user");
+        editor.add_css_class("chat-user-edit");
+        let view = gtk::TextView::new();
+        view.set_wrap_mode(gtk::WrapMode::WordChar);
+        view.set_accepts_tab(false);
+        view.add_css_class("sy-text");
+        let buffer = view.buffer();
+        buffer.set_text(text);
+        buffer.place_cursor(&buffer.end_iter());
+        let scroll = gtk::ScrolledWindow::new();
+        scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
+        scroll.set_propagate_natural_height(true);
+        scroll.set_max_content_height(320);
+        scroll.set_child(Some(&view));
+        editor.append(&scroll);
+        let row = hbox(6);
+        row.set_halign(gtk::Align::End);
+        let cancel = button("Cancel");
+        let send = suggested("Send");
+        row.append(&cancel);
+        row.append(&send);
+        editor.append(&row);
+        let original = text.trim().to_string();
+        let changed = {
+            let (send, original) = (send.downgrade(), original.clone());
+            move |b: &gtk::TextBuffer| {
+                let draft = b.text(&b.start_iter(), &b.end_iter(), false).trim().to_string();
+                if let Some(send) = send.upgrade() {
+                    send.set_sensitive(!draft.is_empty() && draft != original);
+                }
+            }
+        };
+        changed(&buffer);
+        buffer.connect_changed(changed);
+        let close: Rc<dyn Fn()> = {
+            let (editor, bubble, actions, outer) = (editor.downgrade(), bubble.downgrade(), actions.downgrade(), outer.downgrade());
+            Rc::new(move || {
+                if let (Some(editor), Some(outer)) = (editor.upgrade(), outer.upgrade()) {
+                    outer.remove(&editor);
+                }
+                if let Some(b) = bubble.upgrade() {
+                    b.set_visible(true);
+                }
+                if let Some(a) = actions.upgrade() {
+                    a.set_visible(true);
+                }
+            })
+        };
+        let submit: Rc<dyn Fn()> = {
+            let (w, id, text, view, close) = (Rc::downgrade(self), item_id.to_string(), text.to_string(), view.downgrade(), close.clone());
+            Rc::new(move || {
+                let Some(view) = view.upgrade() else { return };
+                let b = view.buffer();
+                let draft = b.text(&b.start_iter(), &b.end_iter(), false).trim().to_string();
+                if draft.is_empty() || draft == text.trim() {
+                    return;
+                }
+                close();
+                if let Some(me) = w.upgrade() {
+                    me.edit_from_here(&id, &text, &draft);
+                }
+            })
+        };
+        let c = close.clone();
+        cancel.connect_clicked(move |_| c());
+        let sm = submit.clone();
+        send.connect_clicked(move |_| sm());
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let (c, sm) = (close.clone(), submit.clone());
+        keys.connect_key_pressed(move |_, key, _, state| match key {
+            gdk::Key::Escape => {
+                c();
+                glib::Propagation::Stop
+            }
+            gdk::Key::Return | gdk::Key::KP_Enter if !state.contains(gdk::ModifierType::SHIFT_MASK) => {
+                sm();
+                glib::Propagation::Stop
+            }
+            _ => glib::Propagation::Proceed,
+        });
+        view.add_controller(keys);
+        bubble.set_visible(false);
+        actions.set_visible(false);
+        outer.append(&editor);
+        view.grab_focus();
+        let v = view.downgrade();
+        glib::idle_add_local_once(move || {
+            if let Some(v) = v.upgrade() {
+                let b = v.buffer();
+                b.place_cursor(&b.end_iter());
+                v.grab_focus();
             }
         });
     }
@@ -1214,16 +1374,24 @@ impl ChatView {
                     actions.set_halign(gtk::Align::End);
                     let t = text.clone();
                     actions.append(&copy_button(move || t.clone()));
-                    let edit = action_button("edit-undo-symbolic", "Edit from here — continues in a new branch of this session");
-                    let (w, id, t) = (Rc::downgrade(self), item.id(), text.clone());
+                    let edit = action_button("document-edit-symbolic", "Edit message");
+                    edit.set_visible(self.can_edit());
+                    let (w, id, t, bubble, acts, out) = (Rc::downgrade(self), item.id(), text.clone(), b.downgrade(), actions.downgrade(), outer.downgrade());
                     edit.connect_clicked(move |_| {
-                        if let Some(me) = w.upgrade() {
-                            me.edit_from_here(&id, &t);
-                        }
+                        let (Some(me), Some(bubble), Some(acts), Some(out)) = (w.upgrade(), bubble.upgrade(), acts.upgrade(), out.upgrade()) else { return };
+                        acts.remove_css_class("shown");
+                        acts.set_can_target(false);
+                        me.user_editor(&id, &t, &bubble, &acts, &out);
                     });
                     actions.append(&edit);
                     outer.append(&actions);
-                    linger_hover(&outer, &actions, || true);
+                    let (w, e) = (Rc::downgrade(self), edit.downgrade());
+                    linger_hover(&outer, &actions, move || {
+                        if let (Some(me), Some(e)) = (w.upgrade(), e.upgrade()) {
+                            e.set_visible(me.can_edit());
+                        }
+                        true
+                    });
                 }
                 outer.upcast()
             }
@@ -1304,7 +1472,7 @@ impl ChatView {
         for (icon_name, tint) in tool_groups::kind_icons(&names) {
             hb.append(&colored_icon(icon_name, 12, tint));
         }
-        let l = label_with(&title, &[if running { "sy-text" } else { "sy-muted" }]);
+        let l = label_with(&title, &[if running { "sy-text" } else { "chat-step-title" }]);
         l.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
         hb.append(&l);
         let failed = calls.iter().filter(|c| c.status.get() == ToolStatus::Error).count();
@@ -1392,25 +1560,47 @@ impl ChatView {
                 hb.append(&g);
             }
             hb.append(&colored_icon(tool_groups::icon(&c.name), 14, tool_groups::Kind::of(&c.name).tint()));
-            let title = label_with(&tool_groups::step_title(c, &folder), &[if c.status.get() == ToolStatus::Running { "sy-text" } else { "sy-muted" }]);
+            let title = label_with(&tool_groups::step_title(c, &folder), &[if c.status.get() == ToolStatus::Running { "sy-text" } else { "chat-step-title" }]);
             title.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-            title.set_hexpand(true);
             title.set_xalign(0.0);
             hb.append(&title);
+            match c.command_hint() {
+                Some(cmd) => {
+                    let hint = label_with(&cmd, &["chat-command-hint"]);
+                    hint.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                    hint.set_hexpand(true);
+                    hint.set_xalign(0.0);
+                    hb.append(&hint);
+                }
+                None => title.set_hexpand(true),
+            }
         } else {
             hb.append(&status_glyph(c, pending_permission).unwrap_or_else(|| colored_icon("sy-check-symbolic", 14, "green").upcast()));
             hb.append(&colored_icon(tool_groups::icon(&c.name), 14, "muted"));
             hb.append(&label_with(&tool_title(c), &["sy-bold", "sy-text"]));
-            let summary = label_with(&tool_summary(c, &folder), &["sy-muted"]);
+            let summary = label_with(&tool_summary(c, &folder), &["chat-tool-summary"]);
             summary.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-            summary.set_hexpand(true);
             hb.append(&summary);
+            match c.command_hint() {
+                Some(cmd) => {
+                    let hint = label_with(&cmd, &["chat-command-hint"]);
+                    hint.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                    hint.set_hexpand(true);
+                    hint.set_xalign(0.0);
+                    hb.append(&hint);
+                }
+                None => summary.set_hexpand(true),
+            }
         }
         if let Some((a, d)) = tool_diff_stat(c) {
             hb.append(&diff_stat(a, d));
         }
+        if let Some(l) = task_state_label(c) {
+            hb.append(&l);
+        }
         hb.append(&icon(if open { "pan-down-symbolic" } else { "pan-end-symbolic" }, 12));
         head.set_child(Some(&hb));
+        head.set_hexpand(true);
         let w = Rc::downgrade(self);
         let id = c.id.clone();
         head.connect_clicked(move |_| {
@@ -1419,7 +1609,16 @@ impl ChatView {
                 me.refresh(format!("c{id}"));
             }
         });
-        card.append(&head);
+        if c.can_stop() {
+            let row = hbox(4);
+            row.append(&head);
+            let stop = tool_stop_button(&self.chat, c);
+            stop.set_margin_end(if in_group { 4 } else { 8 });
+            row.append(&stop);
+            card.append(&row);
+        } else {
+            card.append(&head);
+        }
         if open {
             if !in_group {
                 card.append(&line());
@@ -1478,8 +1677,7 @@ impl ChatView {
             }
             "Bash" => {
                 if let Some(cmd) = c.string("command") {
-                    let l = selectable(wrap_label(&format!("$ {cmd}"), &["sy-mono", "sy-text"]));
-                    b.append(&frame(&l, "chat-code"));
+                    b.append(&mono_output(&format!("$ {cmd}"), "sy-text", 180));
                 }
                 let out = match c.structured.borrow().as_ref() {
                     Some(s) => {

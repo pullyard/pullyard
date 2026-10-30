@@ -43,4 +43,27 @@ final class SessionTreeTests: XCTestCase {
             XCTFail()
         }
     }
+
+    @MainActor
+    func testTaskNotificationBecomesNotice() {
+        let raw = """
+        <task-notification>
+        <task-id>b1</task-id>
+        <status>completed</status>
+        <summary>Background command "pnpm run ship &amp;&amp; echo ok" completed (exit code 0)</summary>
+        </task-notification>
+        """
+        if case .notice(_, let text, let isError)? = ChatSession.historyUserItem(id: "1", text: raw) {
+            XCTAssertEqual(text, "Background task finished · pnpm run ship && echo ok")
+            XCTAssertFalse(isError)
+        } else {
+            XCTFail()
+        }
+        let failed = raw.replacingOccurrences(of: "exit code 0", with: "exit code 2")
+        if case .notice(_, _, let isError)? = ChatSession.historyUserItem(id: "2", text: failed) {
+            XCTAssertTrue(isError)
+        } else {
+            XCTFail()
+        }
+    }
 }

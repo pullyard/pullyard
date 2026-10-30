@@ -143,7 +143,7 @@ fn text_of(message: Option<&Value>) -> Option<String> {
 
 pub fn clean_prompt(raw: &str) -> Option<String> {
     let mut s = raw.trim().to_string();
-    if s.starts_with("<command-name>") || s.starts_with("<local-command") || s.starts_with("Caveat:") || s.starts_with("[Request interrupted") {
+    if s.starts_with("<command-name>") || s.starts_with("<local-command") || s.starts_with("<task-notification>") || s.starts_with("Caveat:") || s.starts_with("[Request interrupted") {
         return None;
     }
     if s.starts_with('<') {
@@ -328,6 +328,12 @@ mod tests {
         assert_eq!(s.branch.as_deref(), Some("feat-a"));
         assert_eq!(s.pr_number, Some(3));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn clean_prompt_skips_task_notifications() {
+        assert_eq!(clean_prompt("<task-notification><status>completed</status></task-notification>"), None);
+        assert_eq!(clean_prompt("  Fix   it  ").as_deref(), Some("Fix it"));
     }
 
     fn info(id: &str, parent: Option<&str>, secs: i64) -> SessionInfo {

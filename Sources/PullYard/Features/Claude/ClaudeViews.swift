@@ -529,7 +529,7 @@ struct ClaudeWorkspaceView: View {
                 ClaudeAuthView()
             } else if let tab = ws.selectedTab {
                 GeometryReader { geo in
-                    let maxWidth = max(Self.inspectorMin, Double(geo.size.width) * 0.6)
+                    let maxWidth = max(Self.inspectorMin, min(Double(geo.size.width) * 0.6, Double(geo.size.width) - 421))
                     let width = min(max(inspectorWidth, Self.inspectorMin), maxWidth)
                     let expanded = inspectorExpanded && ws.showInspector
                     ZStack(alignment: .trailing) {
@@ -564,10 +564,8 @@ struct ClaudeWorkspaceView: View {
                                 }
                             }
                             .id(tab.id)
-                            .transition(.opacity)
                         }
-                        .animation(Motion.fade, value: tab.id)
-                        .frame(minWidth: 420, maxWidth: .infinity)
+                        .frame(minWidth: ws.showInspector ? max(0, min(420, geo.size.width - width - 1)) : 0, maxWidth: .infinity)
                         .surface(.panel)
                         .padding(.trailing, ws.showInspector ? width + 1 : 0)
                         .allowsHitTesting(!expanded)

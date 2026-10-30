@@ -236,7 +236,7 @@ public sealed class SessionIndex
             return null;
         }
         var clean = raw.Trim();
-        if (clean.Length == 0 || clean.StartsWith("<command-name>") || clean.StartsWith("<local-command") || clean.StartsWith("Caveat:") || clean.StartsWith("[Request interrupted")) return null;
+        if (clean.Length == 0 || clean.StartsWith("<command-name>") || clean.StartsWith("<local-command") || clean.StartsWith(HistoryPrompt.TaskNotificationTag) || clean.StartsWith("Caveat:") || clean.StartsWith("[Request interrupted")) return null;
         return clean;
     }
 }

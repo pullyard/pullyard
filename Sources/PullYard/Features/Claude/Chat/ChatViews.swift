@@ -13,7 +13,7 @@ struct ChatView: View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 18) {
+                    LazyVStack(alignment: .leading, spacing: 14) {
                         if chat.items.isEmpty {
                             ChatWelcome(chat: chat, folder: tab.folder)
                         }
@@ -45,10 +45,8 @@ struct ChatView: View {
                         Color.clear.frame(height: 1).id("bottom")
                     }
                     .scrollTargetLayout()
-                    .allowsHitTesting(!follow.scrolling)
                     .padding(.horizontal, 28)
                     .padding(.vertical, 20)
-                    .animation(unlessPinned(Motion.smooth), value: chat.items.count)
                     .animation(unlessPinned(Motion.fade), value: chat.busy)
                     .animation(Motion.spring, value: chat.lastError)
                     .frame(maxWidth: 920)
@@ -76,19 +74,21 @@ struct ChatView: View {
                 .onAppear { jumpToBottom(proxy) }
                 .onChange(of: tab.id) { jumpToBottom(proxy) }
                 .overlay(alignment: .bottom) {
-                    if !follow.stick, !chat.items.isEmpty {
-                        JumpToLatestButton(newCount: max(0, chat.items.count - (awayCount ?? chat.items.count))) {
-                            follow.stick = true
-                            withAnimation(Motion.reduced ? nil : .spring(response: 0.55, dampingFraction: 0.86)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                    ZStack {
+                        if !follow.stick, !chat.items.isEmpty {
+                            JumpToLatestButton(newCount: max(0, chat.items.count - (awayCount ?? chat.items.count))) {
+                                follow.stick = true
+                                withAnimation(Motion.reduced ? nil : .spring(response: 0.55, dampingFraction: 0.86)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                            }
+                            .padding(.bottom, 16)
+                            .transition(Motion.reduced ? .opacity : .asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.6)).combined(with: .offset(y: 14)),
+                                removal: .opacity.combined(with: .scale(scale: 0.85)).combined(with: .offset(y: 10))
+                            ))
                         }
-                        .padding(.bottom, 16)
-                        .transition(Motion.reduced ? .opacity : .asymmetric(
-                            insertion: .opacity.combined(with: .scale(scale: 0.6)).combined(with: .offset(y: 14)),
-                            removal: .opacity.combined(with: .scale(scale: 0.85)).combined(with: .offset(y: 10))
-                        ))
                     }
+                    .animation(Motion.reduced ? nil : .spring(response: 0.42, dampingFraction: 0.7), value: follow.stick)
                 }
-                .animation(Motion.reduced ? nil : .spring(response: 0.42, dampingFraction: 0.7), value: follow.stick)
                 .onChange(of: follow.stick) { _, stick in awayCount = stick ? nil : chat.items.count }
             }
             if chat.sleeping && !chat.running {
@@ -125,16 +125,20 @@ struct ChatView: View {
         follow.stick = true
         proxy.scrollTo("bottom", anchor: .bottom)
         for delay in [0.05, 0.2, 0.5, 1.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { proxy.scrollTo("bottom", anchor: .bottom) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard follow.stick else { return }
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
         }
     }
 
     private func keepPosition(_ proxy: ScrollViewProxy) {
         guard !follow.stick, let id = follow.keptTopID else { return }
+        let started = Date()
         proxy.scrollTo(id, anchor: .top)
         for delay in [0.05, 0.15, 0.3, 0.5, 0.7] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                guard !follow.stick else { return }
+                guard !follow.stick, follow.lastUserScroll < started else { return }
                 proxy.scrollTo(id, anchor: .top)
             }
         }
@@ -149,7 +153,7 @@ struct ChatView: View {
 @Observable
 final class ChatFollow {
     var stick = true
-    var scrolling = false
+    @ObservationIgnored var lastUserScroll = Date.distantPast
     @ObservationIgnored var topID: String?
     @ObservationIgnored var keptTopID: String?
     var resizeTick = 0
@@ -173,7 +177,6 @@ private struct ChatScrollObserver: NSViewRepresentable {
     final class ObserverView: NSView {
         weak var follow: ChatFollow?
         private var monitor: Any?
-        private var scrollEnd: DispatchWorkItem?
         private weak var scroll: NSScrollView?
         private var observers: [NSObjectProtocol] = []
         private var lastWidth: CGFloat = 0
@@ -260,13 +263,10 @@ private struct ChatScrollObserver: NSViewRepresentable {
             guard let s = scroll, let window = s.window, event.window === window else { return }
             let point = s.convert(event.locationInWindow, from: nil)
             guard s.bounds.contains(point) else { return }
-            if follow?.scrolling == false { follow?.scrolling = true }
-            scrollEnd?.cancel()
-            let end = DispatchWorkItem { [weak self] in self?.follow?.scrolling = false }
-            scrollEnd = end
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: end)
+            follow?.lastUserScroll = Date()
             if event.scrollingDeltaY > 0 {
-                if follow?.stick == true { follow?.stick = false }
+                let scrollable = (s.documentView?.frame.height ?? 0) > s.contentView.bounds.height + 1
+                if scrollable, follow?.stick == true { follow?.stick = false }
                 return
             }
             guard event.scrollingDeltaY < 0 || event.phase == .ended || event.momentumPhase == .ended else { return }
@@ -291,8 +291,8 @@ struct JumpToLatestButton: View {
                 Circle()
                     .fill(Color.syRaised)
                     .shadow(color: .black.opacity(hover ? 0.32 : 0.2), radius: hover ? 14 : 9, y: hover ? 6 : 3)
-                let animate = !Motion.reduced && (hover || newCount > 0)
-                TimelineView(.animation(minimumInterval: 1 / 30, paused: !animate)) { context in
+                let animate = !Motion.reduced && hover
+                TimelineView(.animation(minimumInterval: 1 / 60, paused: !animate)) { context in
                     let t = context.date.timeIntervalSince(start)
                     ZStack {
                         DiveLogo(time: animate ? t : nil)
@@ -304,7 +304,6 @@ struct JumpToLatestButton: View {
                             )
                             .rotationEffect(.degrees(animate ? t * 70 : 0))
                     }
-                    .drawingGroup()
                 }
             }
             .frame(width: 44, height: 44)
@@ -602,24 +601,26 @@ struct ChatItemView: View {
 
     @Environment(AppModel.self) private var app
 
-    private func edit(id: String, text: String) {
-        guard !chat.busy, chat.sessionId?.isEmpty == false,
+    private var canEdit: Bool { !chat.busy && chat.sessionId?.isEmpty == false }
+
+    private func edit(id: String, text: String, replacement: String) {
+        guard canEdit,
               let tab = app.claude.tabs.first(where: { $0.chat === chat }),
-              let index = chat.items.firstIndex(where: { $0.id == id }) else {
-            chat.draftRequest = text
+              let index = chat.items.firstIndex(where: { if case .user(let uid, _, _) = $0 { return uid == id } else { return false } }) else {
+            chat.draftRequest = replacement
             return
         }
         let later = chat.items[(index + 1)...].filter {
             if case .user(_, let t, _) = $0 { return t == text }
             return false
         }.count
-        app.claude.rewind(tab, to: text, occurrenceFromEnd: later)
+        app.claude.rewind(tab, to: text, occurrenceFromEnd: later, replacement: replacement)
     }
 
     var body: some View {
         switch item {
         case .user(let id, let text, let images):
-            UserBubble(text: text, images: images) { edit(id: id, text: text) }
+            UserBubble(text: text, images: images, onEdit: canEdit ? { edit(id: id, text: text, replacement: $0) } : nil)
         case .text(let t):
             AssistantText(text: t)
         case .thinking(let t):
@@ -641,7 +642,10 @@ struct ChatItemView: View {
             } else {
                 HStack(spacing: 6) {
                     Rectangle().fill(Color.syLine).frame(height: 1)
-                    Text(text).font(.syCaption).foregroundStyle(isError ? Color.syRed : Color.syDim).fixedSize()
+                    Text(text).font(.syCaption).foregroundStyle(isError ? Color.syRed : Color.syMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .layoutPriority(1)
                     Rectangle().fill(Color.syLine).frame(height: 1)
                 }
             }
@@ -652,51 +656,118 @@ struct ChatItemView: View {
 struct UserBubble: View {
     let text: String
     let images: [ChatImage]
-    var onEdit: (() -> Void)?
+    var onEdit: ((String) -> Void)?
     @State private var expanded = false
     @State private var hover = false
+    @State private var editing = false
+    @State private var draft = ""
+    @FocusState private var editorFocused: Bool
+
+    private var canSend: Bool {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed != text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
-            HStack {
-                Spacer(minLength: 80)
-                VStack(alignment: .leading, spacing: 8) {
-                    if !images.isEmpty {
-                        HStack(spacing: 6) {
-                            ForEach(images) { img in
-                                if let ns = img.image {
-                                    Image(nsImage: ns).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 8))
-                                }
-                            }
-                        }
+            if editing {
+                editor
+                    .transition(.asymmetric(insertion: .opacity, removal: .identity))
+            } else {
+                bubble
+                    .transition(.asymmetric(insertion: .opacity, removal: .identity))
+                MessageActions(visible: hover && !text.isEmpty) {
+                    MessageActionButton(icon: "doc.on.doc", help: "Copy") { copyToPasteboard(text) }
+                    if onEdit != nil {
+                        MessageActionButton(icon: "pencil", help: "Edit message") { beginEditing() }
                     }
-                    if !text.isEmpty {
-                        Text(text)
-                            .foregroundStyle(Color.syText)
-                            .textSelection(.enabled)
-                            .lineLimit(expanded ? nil : 12)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if text.split(separator: "\n").count > 12 {
-                            Button(expanded ? "Collapse" : "Show all") { withAnimation(Motion.quick) { expanded.toggle() } }
-                                .buttonStyle(.link)
-                                .font(.syCaption)
-                        }
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.syAgentAccent.opacity(0.13)))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.syAgentAccent.opacity(0.22)))
-            }
-            MessageActions(visible: hover && !text.isEmpty) {
-                MessageActionButton(icon: "doc.on.doc", help: "Copy") { copyToPasteboard(text) }
-                if let onEdit {
-                    MessageActionButton(icon: "arrow.uturn.backward.circle", help: "Edit from here — continues in a new branch of this session") { onEdit() }
                 }
             }
         }
+        .animation(Motion.quick, value: editing)
         .contentShape(Rectangle())
         .modifier(LingeringHover(hover: $hover))
+    }
+
+    private var bubble: some View {
+        HStack {
+            Spacer(minLength: 80)
+            VStack(alignment: .leading, spacing: 8) {
+                if !images.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(images) { img in
+                            if let ns = img.image {
+                                Image(nsImage: ns).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+                    }
+                }
+                if !text.isEmpty {
+                    Text(text)
+                        .foregroundStyle(Color.syText)
+                        .textSelection(.enabled)
+                        .lineLimit(expanded ? nil : 12)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if text.split(separator: "\n").count > 12 {
+                        Button(expanded ? "Collapse" : "Show all") { withAnimation(Motion.quick) { expanded.toggle() } }
+                            .buttonStyle(.link)
+                            .font(.syCaption)
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.syAgentAccent.opacity(0.13)))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.syAgentAccent.opacity(0.22)))
+        }
+    }
+
+    private var editor: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            TextField("", text: $draft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.syBody)
+                .lineLimit(1...14)
+                .focused($editorFocused)
+                .onSubmit { send() }
+                .onExitCommand { cancelEditing() }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.syRaised))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.syAgentAccent.opacity(editorFocused ? 0.7 : 0.35), lineWidth: 1.5))
+            HStack(spacing: 8) {
+                Button("Cancel") { cancelEditing() }
+                Button("Send") { send() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.syAgentAccent)
+                    .disabled(!canSend)
+                    .help("Send the edited message. Later messages are replaced; the original stays in the session history.")
+            }
+            .controlSize(.regular)
+        }
+        .padding(.leading, 60)
+    }
+
+    private func beginEditing() {
+        draft = text
+        editing = true
+        DispatchQueue.main.async {
+            editorFocused = true
+            DispatchQueue.main.async { NSApp.sendAction(#selector(NSResponder.moveToEndOfDocument(_:)), to: nil, from: nil) }
+        }
+    }
+
+    private func cancelEditing() {
+        editing = false
+        editorFocused = false
+    }
+
+    private func send() {
+        guard canSend, let onEdit else { return }
+        let replacement = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        editing = false
+        onEdit(replacement)
     }
 }
 
@@ -726,7 +797,7 @@ struct MessageActions<Content: View>: View {
         HStack(spacing: 2) { content }
             .opacity(visible ? 1 : 0)
             .offset(y: visible || Motion.reduced ? 0 : -3)
-            .frame(height: 22)
+            .frame(height: 20)
     }
 }
 
@@ -885,26 +956,33 @@ struct ToolCallView: View {
     var body: some View {
         let isOpen = open ?? defaultOpen
         VStack(alignment: .leading, spacing: 0) {
-            Button { withAnimation(Motion.quick) { open = !isOpen } } label: {
-                HStack(spacing: 8) {
-                    statusIcon
-                    Image(systemName: ToolPresentation.icon(call.name)).foregroundStyle(Color.syMuted).frame(width: 16)
-                    Text(ToolPresentation.title(call)).fontWeight(.semibold).foregroundStyle(Color.syText)
-                    Text(ToolPresentation.summary(call, folder: folder))
-                        .foregroundStyle(Color.syMuted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 4)
-                    if let stat = ToolPresentation.diffStat(call) { stat }
-                    Image(systemName: "chevron.down").font(.syCaption2).foregroundStyle(Color.syDim).rotationEffect(.degrees(isOpen ? 180 : 0))
+            HStack(spacing: 6) {
+                Button { withAnimation(Motion.quick) { open = !isOpen } } label: {
+                    HStack(spacing: 8) {
+                        statusIcon
+                        Image(systemName: ToolPresentation.icon(call.name)).foregroundStyle(Color.syMuted).frame(width: 16)
+                        Text(ToolPresentation.title(call)).fontWeight(.semibold).foregroundStyle(Color.syText)
+                        Text(ToolPresentation.summary(call, folder: folder))
+                            .foregroundStyle(Color.syText.opacity(0.72))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        if let stat = ToolPresentation.diffStat(call) { stat }
+                        Image(systemName: "chevron.down").font(.syCaption2).foregroundStyle(Color.syDim).rotationEffect(.degrees(isOpen ? 180 : 0))
+                    }
+                    .font(.syCallout)
+                    .padding(.leading, 10)
+                    .padding(.trailing, ToolStopButton.shows(call) ? 0 : 10)
+                    .padding(.vertical, 7)
+                    .contentShape(Rectangle())
                 }
-                .font(.syCallout)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
+                if ToolStopButton.shows(call) {
+                    ToolStopButton(call: call, chat: chat)
+                        .padding(.trailing, 8)
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
             if isOpen {
                 Rectangle().fill(Color.syLine).frame(height: 1)
                 ToolDetails(call: call, folder: folder)
@@ -968,9 +1046,7 @@ struct ToolDetails: View {
                 InlineDiff(lines: diffLines)
             case "Bash":
                 if let cmd = call.string("command") {
-                    Text("$ " + cmd).font(.sy(size: 12, design: .monospaced)).foregroundStyle(Color.syText).textSelection(.enabled)
-                        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
-                        .card(radius: 8, fill: .sySunken)
+                    MonoOutputText(text: "$ " + cmd, size: 12, maxHeight: 180)
                 }
                 outputView(bashOutput)
             case "TodoWrite":
@@ -1010,15 +1086,7 @@ struct ToolDetails: View {
         if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 if let title { Text(title).font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted) }
-                ScrollView([.vertical, .horizontal]) {
-                    Text(String(text.prefix(20_000)))
-                        .font(.sy(size: 11.5, design: .monospaced))
-                        .textSelection(.enabled)
-                        .fixedSize()
-                        .padding(8)
-                }
-                .frame(maxHeight: 220)
-                .card(radius: 8, fill: .sySunken)
+                MonoOutputText(text: text, color: .syMuted, maxHeight: 260)
             }
         }
     }

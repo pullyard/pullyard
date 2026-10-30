@@ -81,7 +81,7 @@ public sealed class ClaudeInspector : Grid
 
     private int shownRunning = -1;
 
-    private int RunningTasks => tab.Chat?.Items.OfType<ToolItem>().Count(t => t.IsTask && t.TaskState == ChatTaskState.Running) ?? 0;
+    private int RunningTasks => tab.Chat?.Items.OfType<ToolItem>().Count(t => t.IsTask && t.TaskState.IsActive()) ?? 0;
 
     private void OnItems()
     {
@@ -170,8 +170,8 @@ public sealed class TasksPanel : Grid
     private void Render()
     {
         var calls = chat.Items.OfType<ToolItem>().Where(t => t.IsTask).Reverse().ToList();
-        var running = calls.Where(t => t.TaskState == ChatTaskState.Running).ToList();
-        var finished = calls.Where(t => t.TaskState != ChatTaskState.Running).ToList();
+        var running = calls.Where(t => t.TaskState.IsActive()).ToList();
+        var finished = calls.Where(t => !t.TaskState.IsActive()).ToList();
         list.Children.Clear();
         empty.Content = calls.Count == 0 ? Ui.Empty("", "dim", L.T("Tasks_Empty", "Commands and agents Claude runs will show up here")) : null;
         empty.Visibility = calls.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -224,7 +224,13 @@ public sealed class TasksPanel : Grid
 
     private static string? Subtitle(ToolItem t)
     {
-        if (t.Name == "Bash") return t.Backgrounded ? L.T("Tasks_Background", "Background") : null;
+        if (t.Name == "Bash")
+        {
+            var bits = new List<string>();
+            if (t.Backgrounded) bits.Add(L.T("Tasks_Background", "Background"));
+            if (t.CommandHint is { } hint) bits.Add(hint);
+            return bits.Count == 0 ? null : string.Join(" · ", bits);
+        }
         var parts = new List<string>();
         if (t.Str("subagent_type") is { Length: > 0 } type) parts.Add(type);
         if (t.TaskTokens is { } n) parts.Add((n >= 1000 ? (n / 1000.0).ToString("0.0") + "k" : n.ToString()) + " tokens");
@@ -252,15 +258,51 @@ public sealed class TasksPanel : Grid
     private static UIElement Trailing(ToolItem t) => t.TaskState switch
     {
         ChatTaskState.Running => Ui.H(6, t.StartedAt is { } start ? Ui.Caption(Duration(DateTime.Now - start)) : null, Ui.Spinner(12)),
+        ChatTaskState.Stopping => Ui.H(6, Ui.Caption(L.T("Tasks_Stopping", "Stopping…")), Ui.Spinner(12)),
         ChatTaskState.Failed => Ui.Text(L.T("Tasks_Failed", "Failed"), 12, "red", FontWeights.Medium),
         ChatTaskState.Stopped => Ui.Caption(L.T("Tasks_Stopped", "Stopped")),
         _ => Ui.Caption(t.StartedAt is { } a && t.FinishedAt is { } b ? Duration(b - a) : "")
     };
 
+    private static ScrollViewer MonoScroll(string text, string color, double maxHeight) => new()
+    {
+        Content = Ui.Text(text, 12, color, mono: true, select: true),
+        MaxHeight = maxHeight,
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+        HorizontalScrollMode = ScrollMode.Auto,
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        IsHorizontalScrollChainingEnabled = true,
+        IsVerticalScrollChainingEnabled = true
+    };
+
+    private Button StopButton(ToolItem t)
+    {
+        var tip = t.TaskId is null ? L.T("Tasks_StopTurnHint", "Stop — interrupts Claude's current turn") : L.T("Tasks_StopTaskHint", "Stop this task");
+        var b = new Button
+        {
+            Content = Ui.Glyph("\uE71A", 10, "red"),
+            Width = 24,
+            Height = 24,
+            Padding = new Thickness(0),
+            CornerRadius = new CornerRadius(12),
+            BorderThickness = new Thickness(0),
+            Background = Palette.Brush("red", 0.14),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        ToolTipService.SetToolTip(b, tip);
+        Ui.Named(b, L.T("Tasks_Stop", "Stop"), tip);
+        b.Click += (_, _) =>
+        {
+            chat.StopTask(t);
+            Render();
+        };
+        return b;
+    }
+
     private UIElement Row(ToolItem t)
     {
         var open = expanded.Contains(t.ToolId);
-        var titles = Ui.V(2, Ui.Text(Title(t), 13, "text", maxLines: 1), Subtitle(t) is { } sub ? Ui.Caption(sub) : null);
+        var titles = Ui.V(2, Ui.Text(Title(t), 13, "text", maxLines: 1), Subtitle(t) is { } sub ? Ui.Text(sub, t.Name == "Bash" ? 11 : 12, "muted", maxLines: 1, mono: t.Name == "Bash") : null);
         var line = Ui.Columns(
             (Ui.Glyph(t.Name == "Bash" ? "" : "", 12, "dim"), Ui.Auto),
             (titles, Ui.Star),
@@ -286,7 +328,14 @@ public sealed class TasksPanel : Grid
         button.ContextFlyout = Ui.Menu(
             string.IsNullOrEmpty(command) ? null : Ui.MenuItem(L.T("Tasks_CopyCommand", "Copy Command"), () => WindowInterop.Copy(command)),
             string.IsNullOrEmpty(output) ? null : Ui.MenuItem(L.T("Tasks_CopyOutput", "Copy Output"), () => WindowInterop.Copy(output)));
-        var box = Ui.V(6, button);
+        UIElement header = button;
+        if (t.Stoppable)
+        {
+            var stop = StopButton(t);
+            stop.Margin = new Thickness(0, 0, 4, 0);
+            header = Ui.Columns((button, Ui.Star), (stop, Ui.Auto));
+        }
+        var box = Ui.V(6, header);
         if (open)
         {
             var details = Ui.V(6);
@@ -294,7 +343,7 @@ public sealed class TasksPanel : Grid
             if (!string.IsNullOrEmpty(command))
                 details.Children.Add(new Border
                 {
-                    Child = Ui.Text("$ " + command, 12, "text", wrap: true, mono: true, select: true),
+                    Child = MonoScroll("$ " + command, "text", 160),
                     Background = Palette.Brush("sunken"),
                     BorderBrush = Palette.Brush("text", 0.1),
                     BorderThickness = new Thickness(1),
@@ -304,7 +353,7 @@ public sealed class TasksPanel : Grid
             if (!string.IsNullOrEmpty(output))
                 details.Children.Add(new Border
                 {
-                    Child = new ScrollViewer { Content = Ui.Text(output.Length > 8000 ? output[^8000..] : output, 12, t.TaskState == ChatTaskState.Failed ? "red" : "muted", wrap: true, mono: true, select: true), MaxHeight = 180 },
+                    Child = MonoScroll(output.Length > 8000 ? output[^8000..] : output, t.TaskState == ChatTaskState.Failed ? "red" : "muted", 220),
                     Background = Palette.Brush("text", 0.06),
                     CornerRadius = new CornerRadius(6),
                     Padding = new Thickness(8)

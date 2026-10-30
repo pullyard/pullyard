@@ -372,7 +372,9 @@ struct LogTextView: NSViewRepresentable {
             else if sub.contains("##[warning]") { attr.addAttribute(.foregroundColor, value: NSColor.systemOrange, range: range) }
             else if sub.hasPrefix("##[group]") { attr.addAttribute(.foregroundColor, value: NSColor.systemBlue, range: range) }
         }
+        let clip = tv.enclosingScrollView?.contentView
+        let atEnd = clip.map { $0.bounds.maxY >= tv.frame.height - 24 } ?? true
         tv.textStorage?.setAttributedString(attr)
-        tv.scrollToEndOfDocument(nil)
+        if atEnd { tv.scrollToEndOfDocument(nil) }
     }
 }

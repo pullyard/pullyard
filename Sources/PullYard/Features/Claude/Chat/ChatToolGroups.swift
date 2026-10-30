@@ -127,6 +127,12 @@ enum ToolGrouping {
         return text.prefix(1).uppercased() + text.dropFirst()
     }
 
+    static func commandHint(_ call: ChatToolCall) -> String? {
+        guard call.name == "Bash", let d = call.input["description"] as? String, !d.isEmpty,
+              let line = (call.input["command"] as? String)?.split(separator: "\n").first else { return nil }
+        return String(line)
+    }
+
     static func title(_ call: ChatToolCall, folder: String) -> String {
         let i = call.input
         let path = { (key: String) in ToolPresentation.relative(i[key] as? String ?? "", folder) }
@@ -274,35 +280,53 @@ struct ToolRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(Motion.quick) {
-                    if open { chat.expandedTools.remove(call.id) } else { chat.expandedTools.insert(call.id) }
+            HStack(spacing: 6) {
+                Button {
+                    withAnimation(Motion.quick) {
+                        if open { chat.expandedTools.remove(call.id) } else { chat.expandedTools.insert(call.id) }
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        statusGlyph
+                        Image(systemName: ToolPresentation.icon(call.name))
+                            .font(.syCaption)
+                            .foregroundStyle(ToolGrouping.tint(call.name))
+                            .frame(width: 14)
+                        Text(ToolGrouping.title(call, folder: folder))
+                            .foregroundStyle(Color.syText.opacity(call.status == .running ? 1 : 0.86))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .layoutPriority(1)
+                        if let command = ToolGrouping.commandHint(call) {
+                            Text(command)
+                                .font(.sy(size: 11.5, design: .monospaced))
+                                .foregroundStyle(Color.syMuted)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        if let stat = ToolPresentation.diffStat(call) { stat }
+                        if taskState == .stopped {
+                            Text("Stopped").font(.syCaption).foregroundStyle(Color.syMuted)
+                        } else if taskState == .stopping {
+                            Text("Stopping…").font(.syCaption).foregroundStyle(Color.syMuted)
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.syCaption2.weight(.semibold))
+                            .foregroundStyle(Color.syDim)
+                            .rotationEffect(.degrees(open ? 90 : 0))
+                        Spacer(minLength: 0)
+                    }
+                    .font(.syCallout)
+                    .contentShape(Rectangle())
                 }
-            } label: {
-                HStack(spacing: 7) {
-                    statusGlyph
-                    Image(systemName: ToolPresentation.icon(call.name))
-                        .font(.syCaption)
-                        .foregroundStyle(ToolGrouping.tint(call.name))
-                        .frame(width: 14)
-                    Text(ToolGrouping.title(call, folder: folder))
-                        .foregroundStyle(call.status == .running ? Color.syText : Color.syMuted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    if let stat = ToolPresentation.diffStat(call) { stat }
-                    Image(systemName: "chevron.right")
-                        .font(.syCaption2.weight(.semibold))
-                        .foregroundStyle(Color.syDim)
-                        .rotationEffect(.degrees(open ? 90 : 0))
-                    Spacer(minLength: 0)
+                .buttonStyle(.plain)
+                .accessibilityValue(open ? "Expanded" : "Collapsed")
+                if ToolStopButton.shows(call) {
+                    ToolStopButton(call: call, chat: chat)
                 }
-                .font(.syCallout)
-                .padding(.horizontal, framed ? 10 : 0)
-                .padding(.vertical, framed ? 7 : 0)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .accessibilityValue(open ? "Expanded" : "Collapsed")
+            .padding(.horizontal, framed ? 10 : 0)
+            .padding(.vertical, framed ? 7 : 0)
             if open {
                 details
                     .padding(.horizontal, framed ? 10 : 0)
@@ -313,8 +337,21 @@ struct ToolRowView: View {
         }
     }
 
+    private var taskState: ChatTaskState? {
+        ChatSession.taskTools.contains(call.name) ? ChatTaskState(call) : nil
+    }
+
     @ViewBuilder
     private var statusGlyph: some View {
+        if taskState?.isActive == true, call.status != .running {
+            WakeLoader()
+        } else {
+            plainStatusGlyph
+        }
+    }
+
+    @ViewBuilder
+    private var plainStatusGlyph: some View {
         switch call.status {
         case .running: WakeLoader()
         case .error: Image(systemName: "xmark.circle.fill").foregroundStyle(Color.syRed).accessibilityLabel("Failed")
@@ -337,9 +374,7 @@ struct ToolRowView: View {
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.syLine))
                 }
                 if let text = call.resultText ?? call.agentText, !text.isEmpty {
-                    MarkdownView(text: text)
-                        .font(.syCallout)
-                        .foregroundStyle(Color.syMuted)
+                    MarkdownView(text: text, muted: true, baseStyle: .callout)
                 }
             }
         } else {

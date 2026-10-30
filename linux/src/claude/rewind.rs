@@ -27,11 +27,11 @@ pub fn prompt_text(o: &Value) -> Option<String> {
     }
     let content = o.get("message")?.get("content")?;
     if let Some(text) = content.as_str() {
-        let clean = text.trim();
-        if clean.is_empty() || clean.starts_with("<command-name>") || clean.starts_with("<local-command") || clean.starts_with("Caveat:") {
+        let clean = super::chat::clean_user_text(text);
+        if super::chat::is_hidden_prompt(&clean) || clean.starts_with("<task-notification>") || clean.starts_with("[Request interrupted by user") {
             return None;
         }
-        return Some(clean.to_string());
+        return Some(clean);
     }
     let blocks = content.as_array()?;
     if blocks.iter().any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result")) {
@@ -46,7 +46,11 @@ pub fn prompt_text(o: &Value) -> Option<String> {
     if texts.is_empty() {
         return None;
     }
-    Some(texts.join("\n"))
+    let clean = super::chat::clean_user_text(&texts.join("\n"));
+    if super::chat::is_hidden_prompt(&clean) || clean.starts_with("<task-notification>") || clean.starts_with("[Request interrupted by user") {
+        return None;
+    }
+    Some(clean)
 }
 
 fn contains(hay: &[u8], needle: &[u8]) -> bool {

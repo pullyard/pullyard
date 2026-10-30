@@ -56,6 +56,7 @@ struct HTMLView: NSViewRepresentable {
         private var restoreY: Double?
         private var scrollBottom = false
         private var loading = false
+        private var ready = false
 
         init(_ parent: HTMLView) {
             self.parent = parent
@@ -74,12 +75,38 @@ struct HTMLView: NSViewRepresentable {
                 }
                 return
             }
-            let first = self.html.isEmpty
+            let previous = self.html
             self.html = html
-            if first {
+            if previous.isEmpty {
+                ready = false
                 view.loadHTMLString(html, baseURL: URL(string: "https://github.com/"))
                 return
             }
+            if ready, !loading, let body = Self.body(of: html), Self.head(of: html) == Self.head(of: previous),
+               let data = try? JSONEncoder().encode(body), let json = String(data: data, encoding: .utf8) {
+                let bottom = scrollBottom
+                scrollBottom = false
+                let script = "document.body.innerHTML=\(json);window.__pyTimes&&window.__pyTimes();" + (bottom ? "window.scrollTo(0, document.body.scrollHeight);" : "") + "void 0;"
+                view.evaluateJavaScript(script) { [weak self, weak view] _, error in
+                    guard error != nil, let self, let view, self.html == html else { return }
+                    self.reload(view, html: html)
+                }
+                return
+            }
+            reload(view, html: html)
+        }
+
+        private static func head(of html: String) -> Substring? {
+            html.range(of: "<body>").map { html[..<$0.lowerBound] }
+        }
+
+        private static func body(of html: String) -> String? {
+            guard let start = html.range(of: "<body>"), let end = html.range(of: "</body>", options: .backwards), start.upperBound <= end.lowerBound else { return nil }
+            return String(html[start.upperBound..<end.lowerBound])
+        }
+
+        private func reload(_ view: WKWebView, html: String) {
+            ready = false
             loading = true
             webView?.atTop = false
             view.evaluateJavaScript("window.scrollY") { [weak self, weak view] y, _ in
@@ -89,6 +116,7 @@ struct HTMLView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            ready = true
             if scrollBottom {
                 scrollBottom = false
                 webView.evaluateJavaScript("window.scrollTo(0, document.body.scrollHeight)")
@@ -113,6 +141,7 @@ struct HTMLView: NSViewRepresentable {
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
             loading = false
+            ready = false
             html = ""
         }
 

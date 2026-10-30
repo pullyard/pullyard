@@ -75,7 +75,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 
 fn clean(raw: &str) -> Option<String> {
     let s = raw.trim();
-    if s.is_empty() || s.starts_with("<command-name>") || s.starts_with("<local-command") || s.starts_with("Caveat:") || s.starts_with("[Request interrupted") || s.starts_with("<system-reminder>") {
+    if s.is_empty() || s.starts_with("<command-name>") || s.starts_with("<local-command") || s.starts_with("<task-notification>") || s.starts_with("Caveat:") || s.starts_with("[Request interrupted") || s.starts_with("<system-reminder>") {
         return None;
     }
     Some(s.to_string())

@@ -105,10 +105,25 @@ struct StackTab: View {
     @State private var sessions: [Int: ClaudeSessionInfo] = [:]
     @State private var notesFor: Int?
     @State private var refreshingStack = false
+    @State private var cache = StackGeometryCache()
     private let notes = StackNotes.shared
 
     private var geometry: StackGeometry {
-        StackGeometry(StackLayout(tree), noted: Set(tree.nodes.keys.filter { notes.hasNotes(noteKey($0)) }))
+        let noted = Set(tree.nodes.keys.filter { notes.hasNotes(noteKey($0)) })
+        if let cached = cache.geometry, cache.tree == tree, cache.noted == noted { return cached }
+        let g = StackGeometry(StackLayout(tree), noted: noted)
+        cache.tree = tree
+        cache.noted = noted
+        cache.geometry = g
+        cache.edges = nil
+        return g
+    }
+
+    private func edges(_ geometry: StackGeometry) -> StackEdgeDrawing {
+        if let cached = cache.edges { return cached }
+        let d = StackEdgeDrawing(tree: tree, geometry: geometry, path: tree.pathSet)
+        cache.edges = d
+        return d
     }
 
     private var isGraph: Bool { mode == StackViewMode.graph.rawValue }
@@ -211,7 +226,7 @@ struct StackTab: View {
                             }
                             .onEnded { _ in dragStart = nil }
                     )
-                StackEdgeLayer(drawing: StackEdgeDrawing(tree: tree, geometry: geometry, path: tree.pathSet), viewport: vp)
+                StackEdgeLayer(drawing: edges(geometry), viewport: vp)
                 StackCanvas(tree: tree, geometry: geometry, sessions: sessions, notes: notes, noteKey: noteKey,
                             visible: Self.visibleCards(tree: tree, geometry: geometry, viewport: vp, size: geo.size),
                             compact: vp.zoom < Self.compactBelow, onOpen: open, onSession: resume, onNote: showNotes)
@@ -550,6 +565,13 @@ struct StackCanvas: View, Equatable {
         .animation(Motion.smooth, value: tree)
         .onChange(of: tree.current) { opening = nil }
     }
+}
+
+final class StackGeometryCache {
+    var tree: StackTree?
+    var noted: Set<Int> = []
+    var geometry: StackGeometry?
+    var edges: StackEdgeDrawing?
 }
 
 struct StackEdgeDrawing: Equatable {

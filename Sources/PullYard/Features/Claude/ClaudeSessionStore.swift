@@ -208,7 +208,7 @@ enum ClaudeSessionParser {
 
     private static func cleanPrompt(_ raw: String) -> String? {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if s.hasPrefix("<command-name>") || s.hasPrefix("<local-command") || s.hasPrefix("Caveat:") || s.hasPrefix("[Request interrupted") { return nil }
+        if s.hasPrefix("<command-name>") || s.hasPrefix("<local-command") || s.hasPrefix("<task-notification>") || s.hasPrefix("Caveat:") || s.hasPrefix("[Request interrupted") { return nil }
         if s.hasPrefix("<") {
             s = s.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
         }

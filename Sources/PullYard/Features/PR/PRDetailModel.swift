@@ -100,11 +100,12 @@ final class PRDetailModel {
     var viewedPaths: Set<String> = []
     var collapsed: Set<String> = []
     var scrollTarget: String?
+    var scrollToken = 0
     var pending: [PendingComment] = []
     var composer: DiffAnchor?
     var replyThread: ReviewThread?
 
-    @ObservationIgnored private var flatCacheKey = ""
+    @ObservationIgnored private(set) var flatCacheKey = ""
     @ObservationIgnored private var flatCache: [FlatDiffRow] = []
     private var threadsVersion = 0
     private var filesVersion = 0
@@ -474,6 +475,7 @@ final class PRDetailModel {
         tab = .files
         collapsed.remove(path)
         scrollTarget = path
+        scrollToken += 1
     }
 
     @discardableResult
@@ -573,6 +575,10 @@ final class PRDetailModel {
         } else {
             viewedPaths.insert(path)
             collapsed.insert(path)
+            if tab == .files {
+                scrollTarget = path
+                scrollToken += 1
+            }
         }
         await run(reload: false) {
             try await api.mutate(viewed ? Q.unmarkViewed : Q.markViewed, ["id": pr.id, "p": path])

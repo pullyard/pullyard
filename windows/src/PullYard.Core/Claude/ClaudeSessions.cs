@@ -169,7 +169,7 @@ public static class ClaudeSessionParser
     public static string? CleanPrompt(string raw)
     {
         var s = raw.Trim();
-        if (s.StartsWith("<command-name>") || s.StartsWith("<local-command") || s.StartsWith("Caveat:") || s.StartsWith("[Request interrupted")) return null;
+        if (s.StartsWith("<command-name>") || s.StartsWith("<local-command") || s.StartsWith(HistoryPrompt.TaskNotificationTag) || s.StartsWith("Caveat:") || s.StartsWith("[Request interrupted")) return null;
         if (s.StartsWith('<')) s = TagRx.Replace(s, " ").Trim();
         s = SpaceRx.Replace(s, " ");
         return s.Length == 0 ? null : (s.Length > 160 ? s[..160] : s);

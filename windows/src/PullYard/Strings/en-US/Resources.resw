@@ -95,11 +95,12 @@
   <data name="Changes_None" xml:space="preserve"><value>No uncommitted changes</value></data>
   <data name="Changes_Unpushed" xml:space="preserve"><value>Unpushed commits · {0}</value></data>
   <data name="Changes_WrapTip" xml:space="preserve"><value>Wrap long lines</value></data>
+  <data name="ChatWeb_Cancel" xml:space="preserve"><value>Cancel</value></data>
   <data name="ChatWeb_Changed" xml:space="preserve"><value>{0} changed</value></data>
   <data name="ChatWeb_Copied" xml:space="preserve"><value>Copied</value></data>
   <data name="ChatWeb_Copy" xml:space="preserve"><value>Copy</value></data>
   <data name="ChatWeb_CopyLink" xml:space="preserve"><value>Copy link</value></data>
-  <data name="ChatWeb_EditFromHere" xml:space="preserve"><value>Edit from here — continues in a new branch of this session</value></data>
+  <data name="ChatWeb_Edit" xml:space="preserve"><value>Edit</value></data>
   <data name="ChatWeb_Failed" xml:space="preserve"><value>{0} failed</value></data>
   <data name="ChatWeb_Hint" xml:space="preserve"><value>/ commands · @ files · Shift+Enter new line · paste a screenshot Ctrl+V</value></data>
   <data name="ChatWeb_JumpLatest" xml:space="preserve"><value>Jump to the latest message</value></data>
@@ -109,10 +110,16 @@
   <data name="ChatWeb_Recent" xml:space="preserve"><value>Recent in this project</value></data>
   <data name="ChatWeb_RestartSession" xml:space="preserve"><value>Restart session</value></data>
   <data name="ChatWeb_Running" xml:space="preserve"><value>Running:</value></data>
+  <data name="ChatWeb_Send" xml:space="preserve"><value>Send</value></data>
   <data name="ChatWeb_SignInAgain" xml:space="preserve"><value>Sign in again</value></data>
   <data name="ChatWeb_SignInExpired" xml:space="preserve"><value>Claude sign-in expired</value></data>
   <data name="ChatWeb_SignInHint" xml:space="preserve"><value>Sign in again and the session resumes where it stopped.</value></data>
   <data name="ChatWeb_SignInWaitingHint" xml:space="preserve"><value>Finish signing in in the terminal. The session picks up where it stopped.</value></data>
+  <data name="ChatWeb_Stop" xml:space="preserve"><value>Stop</value></data>
+  <data name="ChatWeb_StopTask" xml:space="preserve"><value>Stop this task</value></data>
+  <data name="ChatWeb_StopTurn" xml:space="preserve"><value>Stop — interrupts Claude's current turn</value></data>
+  <data name="ChatWeb_Stopped" xml:space="preserve"><value>Stopped</value></data>
+  <data name="ChatWeb_Stopping" xml:space="preserve"><value>Stopping…</value></data>
   <data name="ChatWeb_SugAddress" xml:space="preserve"><value>Address review on #{0}</value></data>
   <data name="ChatWeb_SugBugs" xml:space="preserve"><value>Find bugs in recent changes</value></data>
   <data name="ChatWeb_SugExplain" xml:space="preserve"><value>Explain the project structure</value></data>
@@ -130,7 +137,6 @@
   <data name="Chat_ContextHint" xml:space="preserve"><value>Show usage and limits</value></data>
   <data name="Chat_ContextName" xml:space="preserve"><value>Context {0}% used</value></data>
   <data name="Chat_Deny" xml:space="preserve"><value>Deny</value></data>
-  <data name="Chat_EditTitle" xml:space="preserve"><value>Edit · {0}</value></data>
   <data name="Chat_ModeHelp" xml:space="preserve"><value>Permission mode (Shift+Tab to cycle)</value></data>
   <data name="Chat_NeedsPermission" xml:space="preserve"><value>Claude needs permission: {0}</value></data>
   <data name="Chat_Placeholder" xml:space="preserve"><value>Ask Claude or describe a task…</value></data>
@@ -903,7 +909,11 @@
   <data name="Tasks_Failed" xml:space="preserve"><value>Failed</value></data>
   <data name="Tasks_Finished" xml:space="preserve"><value>Finished</value></data>
   <data name="Tasks_Running" xml:space="preserve"><value>Running</value></data>
+  <data name="Tasks_Stop" xml:space="preserve"><value>Stop</value></data>
+  <data name="Tasks_StopTaskHint" xml:space="preserve"><value>Stop this task</value></data>
+  <data name="Tasks_StopTurnHint" xml:space="preserve"><value>Stop — interrupts Claude's current turn</value></data>
   <data name="Tasks_Stopped" xml:space="preserve"><value>Stopped</value></data>
+  <data name="Tasks_Stopping" xml:space="preserve"><value>Stopping…</value></data>
   <data name="Terminal_CloseTab" xml:space="preserve"><value>Close tab</value></data>
   <data name="Terminal_Ended" xml:space="preserve"><value>Session ended</value></data>
   <data name="Terminal_Resume" xml:space="preserve"><value>Resume session</value></data>

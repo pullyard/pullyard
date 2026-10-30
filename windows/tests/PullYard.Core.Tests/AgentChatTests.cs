@@ -197,6 +197,24 @@ public class AgentChatTests
     }
 
     [Fact]
+    public void TaskNotificationBecomesNotice()
+    {
+        const string raw = "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command \"pnpm run ship &amp;&amp; echo ok\" completed (exit code 0)</summary>\n</task-notification>";
+        var ok = Assert.IsType<NoticeItem>(HistoryPrompt.Item("1", raw));
+        Assert.Equal("Background task finished · pnpm run ship && echo ok", ok.Text);
+        Assert.False(ok.IsError);
+        var failed = Assert.IsType<NoticeItem>(HistoryPrompt.Item("2", raw.Replace("exit code 0", "exit code 2")));
+        Assert.True(failed.IsError);
+        Assert.StartsWith("Background task failed", failed.Text);
+        var killed = Assert.IsType<NoticeItem>(HistoryPrompt.Item("3", raw.Replace("completed</status>", "killed</status>")));
+        Assert.StartsWith("Background task stopped", killed.Text);
+        var user = Assert.IsType<UserItem>(HistoryPrompt.Item("4", "<pasted_content id=\"1\">Fix the build</pasted_content>"));
+        Assert.Equal("Fix the build", user.Text);
+        Assert.Null(SessionRewind.PromptText((JsonObject)JsonNode.Parse("""{"type":"user","message":{"content":"<task-notification><status>completed</status></task-notification>"}}""")!));
+        Assert.Null(ClaudeSessionParser.CleanPrompt(raw));
+    }
+
+    [Fact]
     public void ReauthPollingBacksOff()
     {
         Assert.Equal(3, ClaudeAccountStore.ReauthDelay(0));

@@ -66,6 +66,7 @@ pub struct ToolCall {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskState {
     Running,
+    Stopping,
     Done,
     Failed,
     Stopped,
@@ -118,6 +119,7 @@ impl ToolCall {
                     from_status
                 }
             }
+            Some("stopping") => TaskState::Stopping,
             Some("completed") => TaskState::Done,
             Some("failed") => TaskState::Failed,
             Some(_) => TaskState::Stopped,
@@ -126,6 +128,17 @@ impl ToolCall {
 
     pub fn string(&self, key: &str) -> Option<String> {
         self.input.borrow().get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+    }
+
+    pub fn can_stop(&self) -> bool {
+        TASK_TOOLS.contains(&self.name.as_str()) && self.task_state() == TaskState::Running && (self.task_id.borrow().is_some() || self.status.get() == ToolStatus::Running)
+    }
+
+    pub fn command_hint(&self) -> Option<String> {
+        if self.name != "Bash" || self.string("description").filter(|d| !d.is_empty()).is_none() {
+            return None;
+        }
+        self.string("command")?.lines().next().map(|l| l.trim().to_string()).filter(|l| !l.is_empty())
     }
 }
 
@@ -328,6 +341,72 @@ pub struct ChatSession {
 
 fn s(v: &Value, k: &str) -> Option<String> {
     v.get(k).and_then(|x| x.as_str()).map(|x| x.to_string())
+}
+
+fn decode_entities(s: &str) -> String {
+    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&")
+}
+
+fn xml_tag(text: &str, name: &str) -> Option<String> {
+    let re = regex::Regex::new(&format!(r"(?s)<{name}>(.*?)</{name}>")).ok()?;
+    let inner = re.captures(text)?.get(1)?.as_str();
+    Some(decode_entities(inner).trim().to_string())
+}
+
+pub fn clean_user_text(raw: &str) -> String {
+    let mut text = raw.to_string();
+    if let Ok(re) = regex::Regex::new(r"(?s)<system-reminder>.*?</system-reminder>") {
+        text = re.replace_all(&text, "").to_string();
+    }
+    if let Ok(re) = regex::Regex::new(r"</?pasted_content[^>]*>") {
+        text = re.replace_all(&text, "").to_string();
+    }
+    text.trim().to_string()
+}
+
+pub fn is_hidden_prompt(text: &str) -> bool {
+    text.is_empty() || text.starts_with("<command-name>") || text.starts_with("<local-command") || text.starts_with("<command-message>") || text.starts_with("Caveat:")
+}
+
+pub fn task_notification_item(id: &str, text: &str) -> ChatItem {
+    let status = xml_tag(text, "status").unwrap_or_default();
+    let summary = xml_tag(text, "summary").unwrap_or_default();
+    let nonzero_exit = regex::Regex::new(r"exit code [1-9]").map(|re| re.is_match(&summary)).unwrap_or(false);
+    let failed = status == "failed" || nonzero_exit;
+    let verb = match status.as_str() {
+        "completed" => if failed { "failed".to_string() } else { "finished".to_string() },
+        "failed" => "failed".to_string(),
+        "killed" | "stopped" => "stopped".to_string(),
+        "" => "updated".to_string(),
+        other => other.to_string(),
+    };
+    let mut subject = summary.clone();
+    if let (Some(open), Some(close)) = (summary.find('"'), summary.rfind('"')) {
+        if open < close {
+            subject = summary[open + 1..close].to_string();
+        }
+    }
+    subject = subject.split_whitespace().collect::<Vec<_>>().join(" ");
+    if subject.chars().count() > 60 {
+        subject = format!("{}…", subject.chars().take(59).collect::<String>());
+    }
+    let label = if summary.starts_with("Agent") { "Agent" } else { "Background task" };
+    let text = if subject.is_empty() { format!("{label} {verb}") } else { format!("{label} {verb} · {subject}") };
+    ChatItem::Notice { id: id.to_string(), text, is_error: failed }
+}
+
+pub fn history_user_item(id: &str, raw: &str) -> Option<ChatItem> {
+    let text = clean_user_text(raw);
+    if text.starts_with("<task-notification>") {
+        return Some(task_notification_item(id, &text));
+    }
+    if text.starts_with("[Request interrupted by user") {
+        return Some(ChatItem::Notice { id: id.to_string(), text: "Interrupted".into(), is_error: false });
+    }
+    if is_hidden_prompt(&text) {
+        return None;
+    }
+    Some(ChatItem::User { id: id.to_string(), text, images: vec![] })
 }
 
 pub fn result_text(content: Option<&Value>) -> Option<String> {
@@ -683,6 +762,25 @@ impl ChatSession {
 
     pub fn interrupt(&self) {
         self.control("interrupt", Map::new());
+    }
+
+    pub fn stop_task(&self, call: &ToolCall) {
+        let task_id = call.task_id.borrow().clone();
+        match task_id {
+            Some(id) => {
+                let mut m = Map::new();
+                m.insert("task_id".into(), Value::String(id));
+                self.control("stop_task", m);
+                *call.task_status.borrow_mut() = Some("stopping".into());
+                self.emit(Event::Updated(format!("c{}", call.id)));
+                self.emit(Event::State);
+            }
+            None => {
+                if call.status.get() == ToolStatus::Running {
+                    self.interrupt();
+                }
+            }
+        }
     }
 
     pub fn set_model(&self, value: &str) {
@@ -1260,11 +1358,9 @@ impl ChatSession {
                         if o.get("isCompactSummary").and_then(|v| v.as_bool()) == Some(true) {
                             continue;
                         }
-                        let clean = text.trim();
-                        if clean.starts_with("<command-name>") || clean.starts_with("<local-command") || clean.starts_with("Caveat:") || clean.is_empty() {
-                            continue;
+                        if let Some(item) = history_user_item(&uuid, text) {
+                            loaded.push(item);
                         }
-                        loaded.push(ChatItem::User { id: uuid, text: clean.to_string(), images: vec![] });
                     } else if let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) {
                         let mut texts = vec![];
                         for b in blocks {
@@ -1285,7 +1381,9 @@ impl ChatSession {
                             }
                         }
                         if !texts.is_empty() {
-                            loaded.push(ChatItem::User { id: uuid, text: texts.join("\n"), images: vec![] });
+                            if let Some(item) = history_user_item(&uuid, &texts.join("\n")) {
+                                loaded.push(item);
+                            }
                         }
                     }
                 }
@@ -1388,6 +1486,38 @@ mod tests {
             })
             .collect();
         assert_eq!(batches, vec![vec![json!(1)], vec![json!(2)]]);
+    }
+
+    #[test]
+    fn task_notification_becomes_notice() {
+        let raw = "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command \"pnpm run ship &amp;&amp; echo ok\" completed (exit code 0)</summary>\n</task-notification>";
+        match history_user_item("1", raw) {
+            Some(ChatItem::Notice { text, is_error, .. }) => {
+                assert_eq!(text, "Background task finished · pnpm run ship && echo ok");
+                assert!(!is_error);
+            }
+            _ => panic!("expected notice"),
+        }
+        match history_user_item("2", &raw.replace("exit code 0", "exit code 2")) {
+            Some(ChatItem::Notice { is_error, .. }) => assert!(is_error),
+            _ => panic!("expected notice"),
+        }
+        match history_user_item("3", &raw.replace("completed</status>", "killed</status>")) {
+            Some(ChatItem::Notice { text, is_error, .. }) => {
+                assert!(text.starts_with("Background task stopped"));
+                assert!(!is_error);
+            }
+            _ => panic!("expected notice"),
+        }
+    }
+
+    #[test]
+    fn history_strips_pasted_content_tags() {
+        match history_user_item("1", "<pasted_content id=\"1\">big log</pasted_content>\nwhy?") {
+            Some(ChatItem::User { text, .. }) => assert_eq!(text, "big log\nwhy?"),
+            _ => panic!("expected user message"),
+        }
+        assert!(history_user_item("2", "<command-name>/clear</command-name>").is_none());
     }
 
     #[test]

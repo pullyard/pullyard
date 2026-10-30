@@ -69,6 +69,8 @@ struct MainView: View {
                     RateLimitBanner()
                     ClipboardBanner()
                 }
+                .animation(Motion.smooth, value: app.clipboardRoute)
+                .animation(Motion.fade, value: app.rateLimitedUntil)
             }
             .overlay { CommandPaletteOverlay() }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -89,22 +91,20 @@ struct AppShell: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            HStack(spacing: 0) {
-                SidebarView()
-                    .frame(width: 220)
-                    .surface(.sidebar)
-                Rectangle().fill(Color.syLine).frame(width: 1)
-                ContentColumn()
-                    .id(app.section)
-                    .frame(width: listWidth)
-                    .frame(maxHeight: .infinity)
-                    .surface(.list)
-                ColumnResizeHandle(width: $listWidth, range: 280...560, edge: .leading)
+            if !hidden {
+                HStack(spacing: 0) {
+                    SidebarView()
+                        .frame(width: 220)
+                        .surface(.sidebar)
+                    Rectangle().fill(Color.syLine).frame(width: 1)
+                    ContentColumn()
+                        .frame(width: listWidth)
+                        .frame(maxHeight: .infinity)
+                        .surface(.list)
+                    ColumnResizeHandle(width: $listWidth, range: 280...560, edge: .leading)
+                }
+                .frame(width: 222 + listWidth)
             }
-            .frame(width: hidden ? 0 : 222 + listWidth, alignment: .trailing)
-            .clipped()
-            .allowsHitTesting(!hidden)
-            .accessibilityHidden(hidden)
             DetailColumn()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -115,7 +115,6 @@ struct AppShell: View {
                     .surface(.sidebar)
                 Rectangle().fill(Color.syLine).frame(width: 1)
                 ContentColumn()
-                    .id(app.section)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .surface(.list)
             }
@@ -143,7 +142,6 @@ struct DetailColumn: View {
                     .surface(.panel)
             } else if app.forge != nil {
                 ForgeDetailColumn()
-                    .animation(Motion.swap, value: app.forgeSelection?.id)
                     .surface(.panel)
             } else {
                 NavigationStack(path: $app.detailPath) {
@@ -161,7 +159,6 @@ struct DetailColumn: View {
                             .transition(.opacity)
                         }
                     }
-                    .animation(Motion.swap, value: app.detailRoot)
                     .navigationDestination(for: Route.self) { RouteView(route: $0) }
                 }
                 .surface(.panel)
@@ -187,6 +184,7 @@ struct ColumnResizeHandle: View {
     let edge: HorizontalEdge
     var reset: Double?
     @State private var start: Double?
+    @State private var cursorPushed = false
 
     var body: some View {
         Rectangle()
@@ -197,7 +195,17 @@ struct ColumnResizeHandle: View {
                     .frame(width: 8)
                     .contentShape(Rectangle())
                     .onHover { inside in
-                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                        if inside, !cursorPushed {
+                            NSCursor.resizeLeftRight.push()
+                            cursorPushed = true
+                        } else if !inside, cursorPushed {
+                            NSCursor.pop()
+                            cursorPushed = false
+                        }
+                    }
+                    .onDisappear {
+                        if cursorPushed { NSCursor.pop() }
+                        cursorPushed = false
                     }
                     .gesture(
                         DragGesture(minimumDistance: 1, coordinateSpace: .global)

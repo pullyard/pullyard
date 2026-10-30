@@ -151,12 +151,11 @@ private struct LiveRefreshModifier: ViewModifier {
     @ViewBuilder
     private func scrollArea(_ content: Content) -> some View {
         if web {
-            content.padding(.top, held ? heldMargin : 0)
+            content.padding(.top, held && !manual ? heldMargin : 0)
         } else {
             content
                 .scrollBounceBehavior(.always, axes: .vertical)
                 .contentMargins(.top, held && !manual ? heldMargin : nil, for: .scrollContent)
-                .padding(.top, held && manual ? heldMargin : 0)
         }
     }
 
@@ -239,11 +238,11 @@ private struct PullIndicator: View {
                     .padding(.vertical, 3)
                     .background(.regularMaterial, in: Capsule())
             case .idle:
-                PullYardLogoMark(progress: Double(progress), size: 30)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
+                let scale = 0.75 + 0.25 * progress
+                PullYardLogoMark(progress: Double(progress), size: 30 * scale)
+                    .padding(.horizontal, 8 * scale)
+                    .padding(.vertical, 3 * scale)
                     .background(.regularMaterial, in: Capsule())
-                    .scaleEffect(0.75 + 0.25 * progress)
             }
         }
         .frame(height: 26)

@@ -128,7 +128,14 @@ public sealed class ChatView : Grid
         {
             ["ChatWeb_Copy"] = L.T("ChatWeb_Copy", "Copy"),
             ["ChatWeb_Copied"] = L.T("ChatWeb_Copied", "Copied"),
-            ["ChatWeb_EditFromHere"] = L.T("ChatWeb_EditFromHere", "Edit from here — continues in a new branch of this session"),
+            ["ChatWeb_Edit"] = L.T("ChatWeb_Edit", "Edit"),
+            ["ChatWeb_Cancel"] = L.T("ChatWeb_Cancel", "Cancel"),
+            ["ChatWeb_Send"] = L.T("ChatWeb_Send", "Send"),
+            ["ChatWeb_Stop"] = L.T("ChatWeb_Stop", "Stop"),
+            ["ChatWeb_StopTask"] = L.T("ChatWeb_StopTask", "Stop this task"),
+            ["ChatWeb_StopTurn"] = L.T("ChatWeb_StopTurn", "Stop — interrupts Claude's current turn"),
+            ["ChatWeb_Stopping"] = L.T("ChatWeb_Stopping", "Stopping…"),
+            ["ChatWeb_Stopped"] = L.T("ChatWeb_Stopped", "Stopped"),
             ["ChatWeb_Thinking"] = L.T("ChatWeb_Thinking", "Thinking"),
             ["ChatWeb_Running"] = L.T("ChatWeb_Running", "Running:"),
             ["ChatWeb_Failed"] = L.T("ChatWeb_Failed", "{0} failed"),
@@ -187,8 +194,12 @@ public sealed class ChatView : Grid
             case "copy":
                 if (msg.Str("text") is { } copied) WindowInterop.Copy(copied);
                 break;
-            case "rewind":
-                if (msg.Str("id") is { } itemId) AppViewModel.Shared.Claude.Rewind(tab, itemId, L.F("Chat_EditTitle", "Edit · {0}", tab.Title));
+            case "edit":
+                if (msg.Str("id") is { } itemId && msg.Str("text") is { } replacement && replacement.Trim().Length > 0)
+                    AppViewModel.Shared.Claude.Rewind(tab, itemId, replacement.Trim());
+                break;
+            case "stopTool":
+                if (msg.Str("id") is { } toolItemId && chat.Items.OfType<ToolItem>().FirstOrDefault(t => t.Id == toolItemId) is { } tool) chat.StopTask(tool);
                 break;
             case "resume":
                 if (msg.Str("id") is { } sid && AppViewModel.Shared.Claude.AllSessions.FirstOrDefault(s => s.Id == sid) is { } info) AppViewModel.Shared.Claude.Resume(info);

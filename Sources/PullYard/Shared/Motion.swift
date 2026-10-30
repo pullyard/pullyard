@@ -4,17 +4,17 @@ import SwiftUI
 enum Motion {
     static var reduced: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
-    static var quick: Animation? { reduced ? nil : .snappy(duration: 0.16) }
-    static var smooth: Animation? { reduced ? nil : .smooth(duration: 0.26) }
+    static var quick: Animation? { reduced ? nil : .snappy(duration: 0.22) }
+    static var smooth: Animation? { reduced ? nil : .smooth(duration: 0.3) }
     static var spring: Animation? { reduced ? nil : .spring(response: 0.32, dampingFraction: 0.82) }
-    static var fade: Animation? { reduced ? nil : .easeOut(duration: 0.14) }
+    static var fade: Animation? { reduced ? nil : .easeOut(duration: 0.2) }
     static var swap: Animation? { reduced ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.22) }
-    static var insert: Animation { reduced ? .easeOut(duration: 0.2) : .timingCurve(0.22, 1, 0.36, 1, duration: 0.7) }
+    static var insert: Animation { reduced ? .easeOut(duration: 0.2) : .timingCurve(0.22, 1, 0.36, 1, duration: 0.45) }
 
-    static func rowIn(_ index: Int) -> Animation { rowIn(delay: Double(index) * 0.07) }
+    static func rowIn(_ index: Int) -> Animation { rowIn(delay: Double(index) * 0.035) }
 
     static func rowIn(delay: Double) -> Animation {
-        reduced ? .easeOut(duration: 0.2) : .timingCurve(0.22, 1, 0.36, 1, duration: 0.7).delay(delay)
+        reduced ? .easeOut(duration: 0.2) : .timingCurve(0.22, 1, 0.36, 1, duration: 0.45).delay(delay)
     }
 }
 
@@ -31,12 +31,14 @@ extension AnyTransition {
         Motion.reduced ? .opacity : .asymmetric(insertion: .opacity.combined(with: .offset(y: -6)), removal: .opacity.combined(with: .offset(y: -4)))
     }
 
+    private static var swapIn: Animation { .easeOut(duration: 0.16) }
+
     static var routeSwap: AnyTransition {
-        Motion.reduced ? .identity : .asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .opacity.animation(.easeOut(duration: 0.08)))
+        Motion.reduced ? .identity : .asymmetric(insertion: .opacity.animation(swapIn), removal: .opacity.animation(.easeOut(duration: 0.08)))
     }
 
     static var pop: AnyTransition {
-        Motion.reduced ? .opacity : .opacity.combined(with: .scale(scale: 0.96))
+        Motion.reduced ? .opacity : .opacity.combined(with: .offset(y: 4))
     }
 }
 

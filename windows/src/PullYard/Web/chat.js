@@ -7,6 +7,8 @@
   var versions = {};
   var openState = {};
   var expandedUser = {};
+  var editing = {};
+  var editFocus = null;
   var answers = {};
   var feedback = {};
   var strings = {};
@@ -39,6 +41,7 @@
     chat: '<path d="M2.5 3h11v7.5H7l-3 2.5v-2.5H2.5z"/>',
     map: '<path d="M1.8 3.5l4-1.5 4.4 1.5 4-1.5v10.5l-4 1.5-4.4-1.5-4 1.5z"/><path d="M5.8 2v10.5M10.2 3.5V14"/>',
     bug: '<rect x="4.5" y="5" width="7" height="8.5" rx="3.5"/><path d="M6 5V4a2 2 0 0 1 4 0v1M1.8 9h2.7M11.5 9h2.7M2.5 5.5l2 1.3M13.5 5.5l-2 1.3M2.5 13l2-1.5M13.5 13l-2-1.5"/>',
+    stop: '<rect x="4.5" y="4.5" width="7" height="7" rx="1.3"/>',
     test: '<path d="M8 1.6l1.7 1.3 2.1-.1.6 2 1.8 1.1-.7 2 .7 2-1.8 1.1-.6 2-2.1-.1L8 14.4 6.3 13.1l-2.1.1-.6-2-1.8-1.1.7-2-.7-2 1.8-1.1.6-2 2.1.1z"/><path d="M5.6 8.1l1.7 1.7 3.2-3.3"/>'
   };
 
@@ -146,8 +149,20 @@
 
   var lastY = window.scrollY;
 
+  function innerScrolls(target, dy) {
+    var n = target instanceof Element ? target : null;
+    while (n && n !== document.body && n !== document.documentElement) {
+      if (n.scrollHeight > n.clientHeight + 1) {
+        var oy = getComputedStyle(n).overflowY;
+        if ((oy === "auto" || oy === "scroll") && (dy < 0 ? n.scrollTop > 0 : n.scrollTop + n.clientHeight < n.scrollHeight - 1)) return true;
+      }
+      n = n.parentElement;
+    }
+    return false;
+  }
+
   window.addEventListener("wheel", function (e) {
-    if (e.deltaY >= 0 || jumping || !stick) return;
+    if (e.deltaY >= 0 || jumping || !stick || window.scrollY <= 0 || innerScrolls(e.target, e.deltaY)) return;
     stick = false;
     awayCount = items.length;
     updateJump();
@@ -454,7 +469,36 @@
     return ["Edit", "MultiEdit", "Write", "ExitPlanMode", "TodoWrite"].indexOf(item.name) >= 0;
   }
 
+  function taskActive(item) {
+    return item.taskState === "running" || item.taskState === "stopping";
+  }
+
+  function stateLabel(item) {
+    if (item.taskState === "stopping") return '<span class="tstate">' + esc(t("ChatWeb_Stopping", "Stopping…")) + "</span>";
+    if (item.taskState === "stopped" && item.background) return '<span class="tstate">' + esc(t("ChatWeb_Stopped", "Stopped")) + "</span>";
+    return "";
+  }
+
+  function hintHtml(item) {
+    return item.commandHint ? '<span class="hint">' + esc(item.commandHint) + "</span>" : "";
+  }
+
+  function addStop(item, head) {
+    if (!item.stoppable) return;
+    var label = t("ChatWeb_Stop", "Stop");
+    var b = el("button", "stopbtn", icon("stop"));
+    b.title = item.background ? t("ChatWeb_StopTask", "Stop this task") : t("ChatWeb_StopTurn", "Stop — interrupts Claude's current turn");
+    b.setAttribute("aria-label", label);
+    b.addEventListener("click", function (e) {
+      e.stopPropagation();
+      b.disabled = true;
+      send({ type: "stopTool", id: item.id });
+    });
+    head.insertBefore(b, head.querySelector(".chev"));
+  }
+
   function statusIcon(item) {
+    if (item.status !== "running" && taskActive(item)) return '<span class="st"><span class="spin"></span></span>';
     if (item.status === "running") {
       if (item.permission && !item.permission.resolved) return '<span class="st wait">✋</span>';
       return '<span class="st"><span class="spin"></span></span>';
@@ -498,8 +542,73 @@
     return row;
   }
 
+  function startEdit(item) {
+    editing[item.id] = item.text || "";
+    editFocus = item.id;
+    update(item);
+  }
+
+  function endEdit(item) {
+    delete editing[item.id];
+    update(item);
+  }
+
+  function editorNode(item) {
+    var box = el("div", "card user editing");
+    var ta = el("textarea", "edit");
+    ta.value = editing[item.id];
+    ta.rows = 1;
+    function fit() {
+      ta.style.height = "auto";
+      ta.style.height = Math.min(ta.scrollHeight, 320) + "px";
+    }
+    function submit() {
+      var text = ta.value.trim();
+      if (!text) return;
+      delete editing[item.id];
+      send({ type: "edit", id: item.id, text: text });
+      update(item);
+    }
+    ta.addEventListener("input", function () {
+      editing[item.id] = ta.value;
+      fit();
+    });
+    ta.addEventListener("keydown", function (e) {
+      if (e.isComposing) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        endEdit(item);
+      } else if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        submit();
+      }
+    });
+    box.appendChild(ta);
+    var row = el("div", "editrow");
+    row.appendChild(button(t("ChatWeb_Cancel", "Cancel"), "small", function () { endEdit(item); }));
+    row.appendChild(button(t("ChatWeb_Send", "Send"), "small primary", submit));
+    box.appendChild(row);
+    var focus = editFocus === item.id;
+    if (focus) editFocus = null;
+    setTimeout(function () {
+      if (!ta.isConnected) return;
+      fit();
+      if (focus) {
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+    }, 0);
+    return box;
+  }
+
   function userNode(item) {
     var wrap = el("div", "msg mine");
+    if (editing[item.id] != null) {
+      wrap.appendChild(editorNode(item));
+      return wrap;
+    }
     var long = (item.text || "").split("\n").length > 12;
     var node = el("div", "card user" + (long && !expandedUser[item.id] ? " clamped" : ""));
     if (item.images && item.images.length) {
@@ -526,7 +635,7 @@
     if (item.text) {
       wrap.appendChild(actions([
         { icon: "copy", title: t("ChatWeb_Copy", "Copy"), run: function () { copyText(item.text); } },
-        { icon: "rewind", title: t("ChatWeb_EditFromHere", "Edit from here — continues in a new branch of this session"), run: function () { send({ type: "rewind", id: item.id }); } }
+        { icon: "edit", title: t("ChatWeb_Edit", "Edit"), run: function () { startEdit(item); } }
       ]));
     }
     return wrap;
@@ -545,8 +654,9 @@
     var open = openState[item.id] != null ? openState[item.id] : defaultOpen(item);
     var node = el("div", "card tool " + item.status + (open ? " open" : ""));
     var head = el("div", "th");
-    head.innerHTML = statusIcon(item) + "<span>" + esc(item.icon) + '</span><span class="name">' + esc(item.title) + '</span><span class="sum">' + esc(item.summary) + "</span>" +
-      statHtml(item) + icon("chev", "chev");
+    head.innerHTML = statusIcon(item) + "<span>" + esc(item.icon) + '</span><span class="name">' + esc(item.title) + '</span><span class="sum">' + esc(item.summary) +
+      (item.commandHint ? ' <span class="hint">' + esc(item.commandHint) + "</span>" : "") + "</span>" + statHtml(item) + stateLabel(item) + icon("chev", "chev");
+    addStop(item, head);
     head.addEventListener("click", function () {
       openState[item.id] = !(openState[item.id] != null ? openState[item.id] : defaultOpen(item));
       update(item);
@@ -611,11 +721,12 @@
 
   function stepRow(item) {
     var open = openState[item.id] === true || (item.permission && !item.permission.resolved);
-    var row = el("div", "step" + (open ? " open" : "") + (item.status === "running" ? " live" : ""));
+    var row = el("div", "step" + (open ? " open" : "") + (item.status === "running" || taskActive(item) ? " live" : ""));
     var head = el("div", "sh");
-    var glyph = item.status === "running" ? '<span class="st"><span class="spin"></span></span>' :
+    var glyph = item.status === "running" || taskActive(item) ? '<span class="st"><span class="spin"></span></span>' :
       item.status === "error" ? '<span class="st error">✖</span>' : item.status === "denied" ? '<span class="st denied">⊘</span>' : "";
-    head.innerHTML = glyph + icon(item.group || "other", "k-" + (item.group || "other")) + '<span class="stitle">' + esc(item.step || item.title) + "</span>" + statHtml(item) + icon("chev", "chev");
+    head.innerHTML = glyph + icon(item.group || "other", "k-" + (item.group || "other")) + '<span class="stitle">' + esc(item.step || item.title) + "</span>" + hintHtml(item) + statHtml(item) + stateLabel(item) + icon("chev", "chev");
+    addStop(item, head);
     head.addEventListener("click", function (e) {
       e.stopPropagation();
       if (openState[item.id] === true) delete openState[item.id];

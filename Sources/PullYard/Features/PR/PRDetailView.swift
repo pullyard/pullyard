@@ -66,7 +66,6 @@ struct PRDetailContent: View {
                     if model.visitedTabs.contains(tab), tab != .stack || model.tab == .stack {
                         tabContent(tab)
                             .opacity(model.tab == tab ? 1 : 0)
-                            .offset(y: model.tab == tab || Motion.reduced ? 0 : 4)
                             .animation(Motion.fade, value: model.tab)
                             .allowsHitTesting(model.tab == tab)
                             .disabled(model.tab != tab)

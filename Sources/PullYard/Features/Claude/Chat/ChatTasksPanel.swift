@@ -2,12 +2,13 @@ import AppKit
 import SwiftUI
 
 enum ChatTaskState {
-    case running, done, failed, stopped
+    case running, stopping, done, failed, stopped
 
     init(_ call: ChatToolCall) {
         if call.backgrounded || call.taskStatus != nil {
             switch call.taskStatus {
             case nil, "running", "pending": self = call.backgrounded || call.status == .running ? .running : Self(status: call.status)
+            case "stopping": self = .stopping
             case "completed": self = .done
             case "failed": self = .failed
             default: self = .stopped
@@ -16,6 +17,8 @@ enum ChatTaskState {
             self = Self(status: call.status)
         }
     }
+
+    var isActive: Bool { self == .running || self == .stopping }
 
     private init(status: ChatToolCall.Status) {
         switch status {
@@ -45,8 +48,8 @@ struct ChatTasksPanel: View {
 
     var body: some View {
         let calls = chat.taskCalls.reversed()
-        let running = calls.filter { ChatTaskState($0) == .running }
-        let finished = calls.filter { ChatTaskState($0) != .running }
+        let running = calls.filter { ChatTaskState($0).isActive }
+        let finished = calls.filter { !ChatTaskState($0).isActive }
         Group {
             if calls.isEmpty {
                 VStack(spacing: 8) {
@@ -102,7 +105,7 @@ struct ChatTasksPanel: View {
     }
 
     private func row(_ call: ChatToolCall) -> some View {
-        ChatTaskRow(call: call, open: expanded.contains(call.id)) {
+        ChatTaskRow(call: call, chat: chat, open: expanded.contains(call.id)) {
             withAnimation(Motion.fade) {
                 if expanded.contains(call.id) { expanded.remove(call.id) } else { expanded.insert(call.id) }
             }
@@ -112,6 +115,7 @@ struct ChatTasksPanel: View {
 
 private struct ChatTaskRow: View {
     let call: ChatToolCall
+    let chat: ChatSession
     let open: Bool
     let toggle: () -> Void
     @State private var hover = false
@@ -127,7 +131,12 @@ private struct ChatTaskRow: View {
     }
 
     private var subtitle: String? {
-        guard isAgent else { return call.backgrounded ? "Background" : nil }
+        guard isAgent else {
+            let hasDescription = !(call.string("description") ?? "").isEmpty
+            let line = command.split(separator: "\n").first.map(String.init)
+            let parts = [call.backgrounded ? "Background" : nil, hasDescription ? line : nil].compactMap { $0 }
+            return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        }
         var parts: [String] = []
         if let type = call.string("subagent_type") { parts.append(type) }
         if let tokens = call.taskTokens { parts.append(Self.tokens(tokens) + " tokens") }
@@ -146,35 +155,43 @@ private struct ChatTaskRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Button(action: toggle) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: isAgent ? "person.2" : "terminal")
-                        .font(.syCaption)
-                        .foregroundStyle(Color.syDim)
-                        .frame(width: 14)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title)
-                            .font(.syCallout)
-                            .foregroundStyle(Color.syText)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        if let subtitle {
-                            Text(subtitle).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
+            HStack(spacing: 4) {
+                Button(action: toggle) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: isAgent ? "person.2" : "terminal")
+                            .font(.syCaption)
+                            .foregroundStyle(Color.syDim)
+                            .frame(width: 14)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(title)
+                                .font(.syCallout)
+                                .foregroundStyle(Color.syText)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            if let subtitle {
+                                Text(subtitle).font(isAgent ? .syCaption : .sy(size: 11, design: .monospaced)).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.tail)
+                            }
                         }
+                        Spacer(minLength: 6)
+                        trailing
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Color.syDim)
+                            .rotationEffect(.degrees(open ? 90 : 0))
                     }
-                    Spacer(minLength: 6)
-                    trailing
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Color.syDim)
-                        .rotationEffect(.degrees(open ? 90 : 0))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 6)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityValue(open ? "Expanded" : "Collapsed")
+                if ToolStopButton.shows(call) {
+                    ToolStopButton(call: call, chat: chat)
+                        .padding(.trailing, 4)
+                        .transition(.opacity)
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityValue(open ? "Expanded" : "Collapsed")
+            .animation(Motion.fade, value: ToolStopButton.shows(call))
             if open { details }
         }
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.syText.opacity(hover || open ? 0.05 : 0)))
@@ -203,6 +220,11 @@ private struct ChatTaskRow: View {
                 }
                 ProgressView().controlSize(.mini)
             }
+        case .stopping:
+            HStack(spacing: 6) {
+                Text("Stopping…").font(.syCaption).foregroundStyle(Color.syMuted)
+                ProgressView().controlSize(.mini)
+            }
         case .failed:
             Text("Failed").font(.syCaption.weight(.medium)).foregroundStyle(Color.syRed)
         case .stopped:
@@ -219,26 +241,11 @@ private struct ChatTaskRow: View {
     private var details: some View {
         VStack(alignment: .leading, spacing: 6) {
             if !command.isEmpty {
-                Text("$ " + command)
-                    .font(.syCaption.monospaced())
-                    .foregroundStyle(Color.syText)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.sySunken))
+                MonoOutputText(text: "$ " + command, size: 11, maxHeight: 160)
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.syLine))
             }
             if let output, !output.isEmpty {
-                ScrollView {
-                    Text(String(output.suffix(8_000)))
-                        .font(.syCaption.monospaced())
-                        .foregroundStyle(state == .failed ? Color.syRed : Color.syMuted)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                }
-                .frame(maxHeight: 180)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.syText.opacity(0.06)))
+                MonoOutputText(text: output, color: state == .failed ? .syRed : .syMuted, size: 11, maxHeight: 220)
             }
         }
         .padding(.horizontal, 6)
@@ -259,5 +266,31 @@ private struct ChatTaskRow: View {
 
     static func tokens(_ n: Int) -> String {
         n >= 1000 ? String(format: "%.1fk", Double(n) / 1000) : "\(n)"
+    }
+}
+
+struct ToolStopButton: View {
+    let call: ChatToolCall
+    let chat: ChatSession
+    @State private var hover = false
+
+    static func shows(_ call: ChatToolCall) -> Bool {
+        guard ChatSession.taskTools.contains(call.name), ChatTaskState(call) == .running else { return false }
+        return call.taskId != nil || call.status == .running
+    }
+
+    var body: some View {
+        Button { chat.stop(call) } label: {
+            Image(systemName: "stop.fill")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(hover ? Color.white : Color.syRed)
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(Color.syRed.opacity(hover ? 0.9 : 0.14)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(Motion.fade) { hover = h } }
+        .help(call.taskId == nil ? "Stop — interrupts Claude's current turn" : "Stop this task")
+        .accessibilityLabel("Stop")
     }
 }

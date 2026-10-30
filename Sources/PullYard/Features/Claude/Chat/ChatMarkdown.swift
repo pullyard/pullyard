@@ -206,11 +206,18 @@ private func parseInlineMarkdown(_ text: String) -> AttributedString {
 struct MarkdownView: View {
     let text: String
     var streaming = false
+    var muted = false
+    var baseStyle: NSFont.TextStyle = .body
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(MarkdownParser.parse(text, streaming: streaming).enumerated()), id: \.offset) { _, block in
-                blockView(block)
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(MDSegment.group(MarkdownParser.parse(text, streaming: streaming)).enumerated()), id: \.offset) { _, segment in
+                switch segment {
+                case .prose(let blocks):
+                    ProseText(blocks: blocks, muted: muted, baseStyle: baseStyle)
+                case .block(let block):
+                    blockView(block)
+                }
             }
         }
         .textSelection(.enabled)
