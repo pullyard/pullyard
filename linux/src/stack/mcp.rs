@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::context;
 use super::notes::{self, NoteKind, StackNote};
 use crate::brand;
 
@@ -36,7 +37,7 @@ pub fn notes_file() -> PathBuf {
     crate::settings::data_dir().join("stack-notes.json")
 }
 
-fn create_dir(dir: &Path) -> std::io::Result<()> {
+pub(super) fn create_dir(dir: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
     let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
@@ -94,6 +95,7 @@ pub struct Server {
     pub host: String,
     pub file: PathBuf,
     pub inbox: PathBuf,
+    pub context: PathBuf,
 }
 
 fn value_after(args: &[String], name: &str) -> Option<String> {
@@ -103,7 +105,7 @@ fn value_after(args: &[String], name: &str) -> Option<String> {
 
 impl Server {
     pub fn from_args(args: &[String]) -> Self {
-        Server { account: value_after(args, "--account"), host: value_after(args, "--host").unwrap_or_else(|| "github.com".into()), file: notes_file(), inbox: inbox_dir() }
+        Server { account: value_after(args, "--account"), host: value_after(args, "--host").unwrap_or_else(|| "github.com".into()), file: notes_file(), inbox: inbox_dir(), context: context::default_dir() }
     }
 
     pub fn handle(&self, message: &Value) -> Option<Value> {
@@ -120,7 +122,7 @@ impl Server {
                         "protocolVersion": version,
                         "capabilities": { "tools": {} },
                         "serverInfo": { "name": SERVER_NAME, "version": "1.0" },
-                        "instructions": format!("{} stack notes. Use add_stack_note when the user asks you to leave a note, question or decision on a pull request in their stack, or when you finish work on a stacked PR and something is worth remembering for the reviewer. Notes stay on the user's computer and are never posted to GitHub.", brand::APP_NAME),
+                        "instructions": format!("{} stack notes and pull request context. Use add_stack_note when the user asks you to leave a note, question or decision on a pull request in their stack, or when you finish work on a stacked PR and something is worth remembering for the reviewer. Notes stay on the user's computer and are never posted to GitHub. The read-only tools get_pull_request, list_review_threads, list_checks and list_changed_files return what {} last loaded for a pull request the user opened: merge requirements, required checks, review threads, code owners and changes since the user's last review.", brand::APP_NAME, brand::APP_NAME),
                     }),
                 ))
             }
@@ -159,6 +161,18 @@ impl Server {
                     Err(e) => text(id, &format!("Couldn't save the note: {e}"), true),
                 }
             }
+            Some(tool @ ("get_pull_request" | "list_review_threads" | "list_checks" | "list_changed_files")) => {
+                let Some(snapshot) = context::read(&key, &self.context) else {
+                    return text(id, &format!("{} has no context for {repo}#{number}. Ask the user to open that pull request in {}, then try again.", brand::APP_NAME, brand::APP_NAME), true);
+                };
+                let body = match tool {
+                    "get_pull_request" => context::overview(&snapshot),
+                    "list_review_threads" => context::threads(&snapshot, args.get("include_resolved").and_then(|v| v.as_bool()).unwrap_or(false)),
+                    "list_checks" => context::checks(&snapshot),
+                    _ => context::files(&snapshot),
+                };
+                text(id, &body, false)
+            }
             Some("list_stack_notes") => {
                 let list = read(&self.file, &self.inbox, &key);
                 if list.is_empty() {
@@ -196,6 +210,8 @@ pub fn tools() -> Value {
     let mut add = target.clone();
     add["kind"] = json!({ "type": "string", "enum": ["note", "question", "decision"], "description": "note (default), question or decision" });
     add["text"] = json!({ "type": "string", "description": "The note text, plain text or short Markdown" });
+    let mut thread_props = target.clone();
+    thread_props["include_resolved"] = json!({ "type": "boolean", "description": "Also return resolved threads (default false)" });
     json!([
         {
             "name": "add_stack_note",
@@ -205,6 +221,30 @@ pub fn tools() -> Value {
         {
             "name": "list_stack_notes",
             "description": format!("List the {} stack notes on a pull request.", brand::APP_NAME),
+            "inputSchema": { "type": "object", "properties": target, "required": ["repo", "pr"] },
+            "annotations": { "readOnlyHint": true },
+        },
+        {
+            "name": "get_pull_request",
+            "description": format!("Overview of a pull request as {} last loaded it: title, branches, description, merge status with each merge requirement (approvals, required checks, conversations, conflicts), reviewers, code owners and the commit the user last reviewed.", brand::APP_NAME),
+            "inputSchema": { "type": "object", "properties": target, "required": ["repo", "pr"] },
+            "annotations": { "readOnlyHint": true },
+        },
+        {
+            "name": "list_review_threads",
+            "description": "Review threads on a pull request with file, line and comments. Unresolved threads only unless include_resolved is true.",
+            "inputSchema": { "type": "object", "properties": thread_props, "required": ["repo", "pr"] },
+            "annotations": { "readOnlyHint": true },
+        },
+        {
+            "name": "list_checks",
+            "description": "CI checks on the pull request head commit, failing first, marked required or optional when GitHub reports it.",
+            "inputSchema": { "type": "object", "properties": target, "required": ["repo", "pr"] },
+            "annotations": { "readOnlyHint": true },
+        },
+        {
+            "name": "list_changed_files",
+            "description": "Files changed by the pull request, with their code owners when the repository has a CODEOWNERS file.",
             "inputSchema": { "type": "object", "properties": target, "required": ["repo", "pr"] },
             "annotations": { "readOnlyHint": true },
         },
@@ -269,7 +309,7 @@ mod tests {
 
     fn server() -> Server {
         let base = std::env::temp_dir().join(format!("pullyard-mcp-{}", uuid::Uuid::new_v4().simple()));
-        Server { account: Some("Me".into()), host: "github.com".into(), file: base.join("stack-notes.json"), inbox: base.join("inbox") }
+        Server { account: Some("Me".into()), host: "github.com".into(), file: base.join("stack-notes.json"), inbox: base.join("inbox"), context: base.join("pr-context") }
     }
 
     fn call(s: &Server, name: &str, args: Value) -> Value {
@@ -298,10 +338,58 @@ mod tests {
         let s = server();
         let r = s.handle(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })).unwrap();
         let tools = r["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 2);
-        assert_eq!(tools[0]["name"], "add_stack_note");
+        let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+        assert_eq!(names, ["add_stack_note", "list_stack_notes", "get_pull_request", "list_review_threads", "list_checks", "list_changed_files"]);
+        assert!(tools[1..].iter().all(|t| t["annotations"]["readOnlyHint"] == true));
         assert_eq!(tools[0]["inputSchema"]["required"], json!(["repo", "pr", "text"]));
         assert_eq!(tools[1]["annotations"]["readOnlyHint"], true);
+    }
+
+    fn context_server(account: &str) -> Server {
+        let base = context::tests::temp_dir();
+        Server { account: Some(account.into()), host: "github.com".into(), file: base.join("stack-notes.json"), inbox: base.join("inbox"), context: base.join("pr-context") }
+    }
+
+    fn cleanup(s: &Server) {
+        let _ = std::fs::remove_dir_all(s.context.parent().unwrap());
+    }
+
+    #[test]
+    fn context_tools_read_snapshot() {
+        let s = context_server("me");
+        context::write(&context::tests::sample(), &notes::key_for("me", "github.com", "o/r", 7), &s.context).unwrap();
+        let r = call(&s, "get_pull_request", json!({ "repo": "o/r", "pr": 7 }));
+        assert_eq!(r["result"]["isError"], false);
+        let overview = reply_text(&r);
+        assert!(overview.contains("Merge status: 1 required check failed"));
+        assert!(overview.contains("- [blocking] 1 required check failed — build"));
+        assert!(overview.contains("@bob (changes requested)"));
+        assert!(overview.contains("Code owners: @core (2 files)"));
+        assert!(overview.contains("last reviewed commit 1111111, 2 commit(s) ago"));
+        assert!(overview.contains("1 unresolved review thread(s), 1 failing check(s), 3 changed file(s)."));
+        assert_eq!(reply_text(&call(&s, "list_review_threads", json!({ "repo": "o/r", "pr": 7 }))), "1. a.swift:3\n   @bob: Rename this");
+        assert!(reply_text(&call(&s, "list_review_threads", json!({ "repo": "o/r", "pr": 7, "include_resolved": true }))).contains("2. b.swift (resolved, outdated)"));
+        assert_eq!(reply_text(&call(&s, "list_checks", json!({ "repo": "o/r", "pr": "7" }))), "- [failure] CI / build · required · https://ci/1\n- [success] lint · optional");
+        assert_eq!(reply_text(&call(&s, "list_changed_files", json!({ "repo": "o/r", "pr": 7 }))), "a.swift — @core\nb.swift — @core\nREADME.md");
+        cleanup(&s);
+    }
+
+    #[test]
+    fn missing_snapshot_is_an_error() {
+        let s = context_server("me");
+        let r = call(&s, "get_pull_request", json!({ "repo": "o/r", "pr": 8 }));
+        assert_eq!(r["result"]["isError"], true);
+        assert!(reply_text(&r).contains("open that pull request in"));
+        cleanup(&s);
+    }
+
+    #[test]
+    fn other_account_snapshot_is_not_visible() {
+        let s = context_server("me");
+        context::write(&context::tests::sample(), &notes::key_for("work", "github.com", "o/r", 7), &s.context).unwrap();
+        assert_eq!(call(&s, "list_checks", json!({ "repo": "o/r", "pr": 7 }))["result"]["isError"], true);
+        assert_eq!(call(&s, "list_checks", json!({ "repo": "o/r", "pr": 0 }))["result"]["isError"], true);
+        cleanup(&s);
     }
 
     #[test]

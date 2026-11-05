@@ -1,3 +1,4 @@
+pub mod context;
 pub mod mcp;
 pub mod notes;
 pub mod store;

@@ -8,14 +8,14 @@ use serde_json::json;
 
 use crate::api::code_owners::{CodeOwnersStatus, OwnershipSummary};
 use crate::api::interdiff::{self, DiffScope, ReviewedCommit};
-use crate::api::merge_readiness::{self, MergeRequirement, RulesStatus};
+use crate::api::merge_readiness::{self, MergeRequirement, RequirementState, RulesStatus};
 use crate::api::models::*;
 use crate::api::queries as q;
 use crate::api::{ApiError, ErrorKind, GitHubApi};
 use crate::conversation_html::{self, Look};
 use crate::diff::{DiffAnchor, DiffFile};
 use crate::signal::Signal;
-use crate::stack::{self, StackNode, StackTree};
+use crate::stack::{self, context, StackNode, StackTree};
 
 const FULL_REFRESH_EVERY: Duration = Duration::from_secs(300);
 
@@ -267,6 +267,19 @@ impl PrModel {
         }
     }
 
+    pub fn publish_context(&self) {
+        let snapshot = {
+            let pr = self.pr.borrow();
+            let Some(pr) = pr.as_ref() else { return };
+            context_snapshot(&self.r, pr, &self.requirements(), self.ownership().as_ref(), &self.changed_paths.borrow(), self.last_reviewed().as_ref())
+        };
+        let key = self.stack_note_key(self.r.number);
+        let dir = context::default_dir();
+        crate::rt::runtime().spawn_blocking(move || {
+            let _ = context::write(&snapshot, &key, &dir);
+        });
+    }
+
     fn load_more_viewed(self: &Rc<Self>, cursor: Option<String>) {
         let generation = self.viewed_gen.get() + 1;
         self.viewed_gen.set(generation);
@@ -293,6 +306,7 @@ impl PrModel {
             if matches!(*me.code_owners.borrow(), CodeOwnersStatus::Loaded(_)) {
                 me.emit(Change::Rules);
             }
+            me.publish_context();
         });
     }
 
@@ -311,6 +325,7 @@ impl PrModel {
             if me.owners_key.borrow().as_deref() != Some(key.as_str()) {
                 return;
             }
+            let loaded = res.is_ok();
             match res {
                 Ok(Some(owners)) => *me.code_owners.borrow_mut() = CodeOwnersStatus::Loaded(owners),
                 Ok(None) => *me.code_owners.borrow_mut() = CodeOwnersStatus::Missing,
@@ -320,6 +335,9 @@ impl PrModel {
                 }
             }
             me.emit(Change::Rules);
+            if loaded {
+                me.publish_context();
+            }
         });
     }
 
@@ -344,6 +362,7 @@ impl PrModel {
             if me.rules_key.borrow().as_deref() != Some(key.as_str()) {
                 return;
             }
+            let loaded = res.is_ok();
             match res {
                 Ok(rules) => *me.rules_state.borrow_mut() = RulesStatus::Loaded(rules),
                 Err(_) => {
@@ -354,6 +373,9 @@ impl PrModel {
                 }
             }
             me.emit(Change::Rules);
+            if loaded {
+                me.publish_context();
+            }
         });
     }
 
@@ -536,6 +558,7 @@ impl PrModel {
                 self.load_rules(base, reason == "refresh");
                 self.load_code_owners(base_oid);
                 self.emit(Change::Pr);
+                self.publish_context();
                 if self.stack_fresh.get() || self.stack_key.borrow().as_deref() != Some(stack_key.as_str()) {
                     let force = self.stack_fresh.replace(false);
                     let me = self.clone();
@@ -998,6 +1021,117 @@ fn stack_cache_key(pr: &PullRequestDetail) -> String {
     format!("{}|{}|{}|{}|{}|{}", pr.number, pr.state, pr.is_draft, pr.head_repository.as_ref().map(|h| h.name_with_owner.as_str()).unwrap_or(""), pr.head_ref_name, pr.base_ref_name)
 }
 
+pub fn context_snapshot(r: &ItemRef, pr: &PullRequestDetail, requirements: &[MergeRequirement], ownership: Option<&OwnershipSummary>, files: &[String], reviewed: Option<&ReviewedCommit>) -> context::Snapshot {
+    let merge_status = if pr.is_open() {
+        super::merge_status(pr, requirements).text
+    } else if pr.merged {
+        "Merged".to_string()
+    } else {
+        let lower = pr.state.to_lowercase();
+        let mut chars = lower.chars();
+        chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+    };
+    let requirement_label = |s: RequirementState| match s {
+        RequirementState::Satisfied => "met",
+        RequirementState::Missing => "blocking",
+        RequirementState::Pending => "in progress",
+        RequirementState::Unknown => "unknown",
+        RequirementState::Advisory => "does not block",
+    };
+    let outcome_label = |o: CheckOutcome| match o {
+        CheckOutcome::Failure => "failure",
+        CheckOutcome::Pending => "pending",
+        CheckOutcome::Neutral => "neutral",
+        CheckOutcome::Skipped => "skipped",
+        CheckOutcome::Success => "success",
+    };
+    let mut reviews: Vec<context::Review> = pr.latest_opinionated_reviews.nodes.iter().filter_map(|rv| rv.author.as_ref().map(|a| context::Review { login: a.login.clone(), state: rv.state.clone() })).collect();
+    reviews.extend(pr.review_requests.nodes.iter().filter_map(|q| q.requested_reviewer.as_ref().map(|x| context::Review { login: x.display(), state: "REVIEW_REQUESTED".into() })));
+    context::Snapshot {
+        repo: r.repo.full(),
+        number: pr.number,
+        title: pr.title.clone(),
+        url: pr.url.clone(),
+        state: pr.state.clone(),
+        is_draft: pr.is_draft,
+        author: pr.author.as_ref().map(|a| a.login.clone()),
+        base_ref: pr.base_ref_name.clone(),
+        head_ref: pr.head_ref_name.clone(),
+        head_oid: pr.head_ref_oid.clone(),
+        body: pr.body.clone(),
+        merge_status,
+        requirements: requirements.iter().map(|q| context::Requirement { state: requirement_label(q.state).into(), title: q.title.clone(), detail: q.detail.clone() }).collect(),
+        checks: pr
+            .checks()
+            .iter()
+            .map(|c| context::Check {
+                name: c.workflow_name().map(|w| format!("{w} / {}", c.title())).unwrap_or_else(|| c.title()),
+                outcome: outcome_label(c.outcome()).into(),
+                required: c.is_required,
+                url: c.link(),
+            })
+            .collect(),
+        reviews,
+        threads: pr
+            .review_threads
+            .nodes
+            .iter()
+            .map(|t| context::Thread {
+                path: t.path.clone(),
+                line: t.line.or(t.original_line),
+                resolved: t.is_resolved,
+                outdated: t.is_outdated,
+                comments: t.comments.nodes.iter().map(|c| context::Comment { author: c.author.as_ref().map(|a| a.login.clone()).unwrap_or_else(|| "ghost".into()), body: c.body.clone() }).collect(),
+            })
+            .collect(),
+        files: files.to_vec(),
+        code_owners: ownership.map(|o| o.groups.iter().map(|g| context::OwnerGroup { owners: g.owners.iter().map(|e| format!("@{}", e.handle)).collect(), files: g.files.clone() }).collect()),
+        unowned_files: ownership.map(|o| o.unowned.clone()),
+        reviewed_oid: reviewed.map(|x| x.oid.clone()),
+        commits_since_review: reviewed.and_then(|x| x.commits_since).map(|n| n as i64),
+        captured: Utc::now(),
+    }
+}
+
 fn changed_paths(pr: &PullRequestDetail) -> Vec<String> {
     pr.files.as_ref().map(|f| f.nodes.iter().map(|n| n.path.clone()).collect()).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_snapshot_maps_model() {
+        let check = json!({ "__typename": "CheckRun", "databaseId": 1, "name": "build", "status": "COMPLETED", "conclusion": "FAILURE", "isRequired": true,
+            "checkSuite": { "workflowRun": { "databaseId": 9, "workflow": { "name": "CI" } } } });
+        let comment = json!({ "id": "c", "author": { "login": "bob", "avatarUrl": "" }, "body": "fix", "bodyHTML": "", "createdAt": "2026-01-01T00:00:00Z" });
+        let mut value = json!({
+            "id": "PR_1", "number": 7, "title": "T", "url": "u", "state": "OPEN", "isDraft": false, "merged": false, "mergeable": "MERGEABLE",
+            "mergeStateStatus": "BLOCKED", "body": "b", "bodyHTML": "", "createdAt": "2026-01-01T00:00:00Z", "headRefName": "f", "baseRefName": "main",
+            "headRefOid": "h", "additions": 1, "deletions": 1, "changedFiles": 1, "viewerCanUpdate": true, "viewerDidAuthor": false
+        });
+        let extra = json!({
+            "labels": { "nodes": [] }, "assignees": { "nodes": [] },
+            "reviewRequests": { "nodes": [{ "requestedReviewer": { "__typename": "Team", "name": "Core", "combinedSlug": "o/core" } }] },
+            "latestOpinionatedReviews": { "nodes": [] },
+            "lastCommit": { "nodes": [{ "commit": { "oid": "h", "statusCheckRollup": { "state": "FAILURE", "contexts": { "nodes": [check] } } } }] },
+            "allCommits": { "nodes": [] }, "timelineItems": { "nodes": [] },
+            "reviewThreads": { "nodes": [{ "id": "t", "isResolved": false, "isOutdated": false, "path": "a", "line": 2, "diffSide": "RIGHT", "viewerCanResolve": true, "viewerCanUnresolve": false, "viewerCanReply": true,
+                "comments": { "nodes": [comment] } }] }
+        });
+        for (k, v) in extra.as_object().cloned().unwrap_or_default() {
+            value[k] = v;
+        }
+        let pr: PullRequestDetail = serde_json::from_value(value).unwrap();
+        let r = ItemRef { repo: RepoRef { owner: "o".into(), name: "r".into() }, number: 7 };
+        let reqs = merge_readiness::requirements(&pr, &RulesStatus::Loading);
+        let s = context_snapshot(&r, &pr, &reqs, None, &["a".to_string()], None);
+        assert_eq!(s.checks, vec![context::Check { name: "CI / build".into(), outcome: "failure".into(), required: Some(true), url: None }]);
+        assert_eq!(s.reviews, vec![context::Review { login: "o/core".into(), state: "REVIEW_REQUESTED".into() }]);
+        assert_eq!(s.threads[0].comments, vec![context::Comment { author: "bob".into(), body: "fix".into() }]);
+        assert_eq!(s.merge_status, "1 required check failed");
+        assert_eq!(s.repo, "o/r");
+        assert!(s.code_owners.is_none());
+    }
 }
