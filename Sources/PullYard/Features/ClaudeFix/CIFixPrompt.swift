@@ -162,7 +162,7 @@ enum CIFixPrompt {
         out += """
 
         Steps:
-        1. Make sure the working tree is on the PR branch: run `gh pr checkout \(number)` and `git pull`. If there are uncommitted local changes, stop and ask me first.\(safeSha.isEmpty ? "" : " The failures below were produced at commit \(safeSha.prefix(12)); if HEAD is newer, check whether they still apply.")
+        1. \(FixPrompt.checkoutStep(number))\(safeSha.isEmpty ? "" : " The failures below were produced at commit \(safeSha.prefix(12)); if HEAD is newer, check whether they still apply.")
         2. Read the failure output below and find the root cause. Reproduce it locally if possible by running the same command the failing CI step runs.
         3. Fix the root cause in code. Do not skip, disable or weaken tests, checks or CI configuration just to make them pass. If the failure is unrelated to this PR (flaky test, infrastructure, expired secret), do not change code — explain it in your summary.
         4. Run the relevant build and tests locally to confirm the fix.

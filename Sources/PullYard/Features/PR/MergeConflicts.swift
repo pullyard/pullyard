@@ -72,7 +72,7 @@ enum ConflictPrompt {
         GitHub reports that \(pr.headRefName) can't be merged into \(pr.baseRefName) because of conflicts.
 
         Steps:
-        1. Make sure the working tree is on the PR branch: run `gh pr checkout \(pr.number)` and `git pull`. If there are uncommitted local changes, stop and ask me first.
+        1. \(FixPrompt.checkoutStep(pr.number))
         2. Fetch the latest \(pr.baseRefName) from the remote that points to \(repo.full) (usually `origin`) and merge it into the PR branch, e.g. `git fetch origin \(pr.baseRefName)` and `git merge origin/\(pr.baseRefName)`. Merge — do not rebase or force-push.
         3. Resolve every conflict. For each file, read what both sides changed and keep the intent of both; don't just take one side. If a conflict can't be resolved safely, stop and explain why.
         4. Check that no conflict markers are left (`git diff --check`), then build the project and run the tests related to the conflicting code if the project has an obvious way to do so.
