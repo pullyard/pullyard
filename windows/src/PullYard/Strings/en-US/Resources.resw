@@ -1006,5 +1006,12 @@
   <data name="Welcome_InboxTitle" xml:space="preserve"><value>Inbox for reviews</value></data>
   <data name="Welcome_ReviewDetail" xml:space="preserve"><value>Diffs, threads and checks — no browser tab needed.</value></data>
   <data name="Welcome_ReviewTitle" xml:space="preserve"><value>Review &amp; merge</value></data>
+  <data name="Worktree_Creates" xml:space="preserve"><value>Creates {0} on branch {1} at the pull request head. The checkout step in the prompt is replaced when it starts.</value></data>
+  <data name="Worktree_Isolate" xml:space="preserve"><value>Work in an isolated git worktree</value></data>
+  <data name="Worktree_IsolateHelp" xml:space="preserve"><value>PullYard checks out the pull request in a separate worktree next to your clone, so your current branch and uncommitted changes stay untouched</value></data>
+  <data name="Worktree_Remove" xml:space="preserve"><value>Remove worktree</value></data>
+  <data name="Worktree_RemoveHelp" xml:space="preserve"><value>Delete {0} and its local branch. Refuses if it has uncommitted changes</value></data>
+  <data name="Worktree_Removing" xml:space="preserve"><value>Removing…</value></data>
+  <data name="Worktree_Reuses" xml:space="preserve"><value>Reuses {0} on branch {1} at the pull request head. The checkout step in the prompt is replaced when it starts.</value></data>
   <data name="Zoom_Toast" xml:space="preserve"><value>Text size {0}%</value></data>
 </root>
