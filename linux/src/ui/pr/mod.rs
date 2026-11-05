@@ -849,7 +849,14 @@ impl PrPage {
                 let mm = m.clone();
                 menu.item("Approve", move || {
                     let mm = mm.clone();
-                    dialogs::confirm("Approve this pull request?", None, "Approve", false, move || {
+                    let pending = mm.pending.borrow().len();
+                    let heading = if pending > 0 {
+                        format!("Approve and submit {pending} pending comment{}?", if pending == 1 { "" } else { "s" })
+                    } else {
+                        "Approve this pull request?".to_string()
+                    };
+                    let label = if pending > 0 { "Approve and submit" } else { "Approve" };
+                    dialogs::confirm(&heading, None, label, false, move || {
                         let mm = mm.clone();
                         crate::rt::spawn_local(async move {
                             mm.submit_review("APPROVE".into(), String::new()).await;

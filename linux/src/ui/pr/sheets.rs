@@ -80,10 +80,16 @@ pub fn review(model: Rc<PrModel>) {
         let m = model.clone();
         let d = sheet.dialog.clone();
         discard.connect_clicked(move |_| {
-            m.pending.borrow_mut().clear();
-            m.emit(Change::Diff);
-            m.emit(Change::Pr);
-            d.close();
+            let m = m.clone();
+            let d = d.clone();
+            let count = m.pending.borrow().len();
+            let heading = format!("Discard {count} pending comment{}?", if count == 1 { "" } else { "s" });
+            crate::ui::dialogs::confirm(&heading, Some("The inline comments you haven’t submitted yet will be lost."), "Discard", true, move || {
+                m.pending.borrow_mut().clear();
+                m.emit(Change::Diff);
+                m.emit(Change::Pr);
+                d.close();
+            });
         });
         sheet.footer.append(&discard);
     }
