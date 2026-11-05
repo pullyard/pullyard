@@ -212,6 +212,9 @@ public sealed partial class GitHubApi
         return all;
     }
 
+    public Task<CompareResult> Compare(RepoRef repo, string @base, string head, CancellationToken ct = default) =>
+        Rest<CompareResult>("GET", $"/repos/{repo.Full}/compare/{@base}...{head}", ct: ct);
+
     public Task<CommitDetailRest> Commit(RepoRef repo, string sha, CancellationToken ct = default) =>
         Rest<CommitDetailRest>("GET", $"/repos/{repo.Full}/commits/{sha}", ct: ct);
 

@@ -45,6 +45,12 @@ public sealed partial class PRDetailViewModel : ObservableObject
     [ObservableProperty] private CiFixLaunch? ciFix;
     [ObservableProperty] private RulesStatus rulesState = RulesStatus.Loading;
     [ObservableProperty] private CodeOwnersStatus codeOwnersState = CodeOwnersStatus.Loading;
+    [ObservableProperty] private DiffScope diffScope = DiffScope.All;
+    [ObservableProperty] private List<DiffFile> interdiffFiles = new();
+    [ObservableProperty] private bool interdiffLoading;
+    [ObservableProperty] private string? interdiffError;
+    [ObservableProperty] private bool interdiffRebased;
+    private string? interdiffKey;
     private string? rulesKey;
     private string? ownersKey;
     private DateTimeOffset? rulesFetched;
@@ -89,6 +95,51 @@ public sealed partial class PRDetailViewModel : ObservableObject
     public bool CanWrite => Repo?.CanWrite ?? false;
 
     public int PendingCount => Pending.Count;
+
+    public ReviewedCommit? LastReviewed => Pr is { } pr ? Interdiff.LastReviewed(pr, ViewerLogin) : null;
+
+    public List<DiffFile> DisplayedFiles => DiffScope == DiffScope.SinceReview ? InterdiffFiles : Files;
+
+    partial void OnDiffScopeChanged(DiffScope value)
+    {
+        DiffVersion++;
+        if (value == DiffScope.SinceReview) LoadInterdiff().Forget();
+    }
+
+    public async Task LoadInterdiff(bool force = false)
+    {
+        if (Pr is not { } pr || LastReviewed is not { } reviewed)
+        {
+            DiffScope = DiffScope.All;
+            return;
+        }
+        var key = $"{reviewed.Oid}...{pr.HeadRefOid}";
+        if ((!force && key == interdiffKey) || InterdiffLoading) return;
+        InterdiffLoading = true;
+        try
+        {
+            var result = await Api.Compare(Ref.Repo, reviewed.Oid, pr.HeadRefOid);
+            var raw = result.Files ?? new();
+            var parsed = await Task.Run(() => raw.Select(f => new DiffFile(f)).ToList());
+            InterdiffFiles = parsed;
+            interdiffKey = key;
+            InterdiffError = null;
+            InterdiffRebased = reviewed.Rewritten || (result.BehindBy ?? 0) > 0;
+            Collapsed.ExceptWith(parsed.Select(f => f.Id));
+            DiffVersion++;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception e)
+        {
+            InterdiffError = e.Message;
+        }
+        finally
+        {
+            InterdiffLoading = false;
+        }
+    }
 
     public List<ReviewerInfo> Reviewers
     {
@@ -227,6 +278,11 @@ public sealed partial class PRDetailViewModel : ObservableObject
             RefreshError = null;
             LastUpdated = DateTimeOffset.Now;
             NotifyDerived();
+            if (DiffScope == DiffScope.SinceReview)
+            {
+                if (LastReviewed is null) DiffScope = DiffScope.All;
+                else LoadInterdiff().Forget();
+            }
             if (reloadStack)
             {
                 reloadStack = false;
@@ -354,6 +410,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
         OnPropertyChanged(nameof(Requirements));
         OnPropertyChanged(nameof(StaleReviews));
         OnPropertyChanged(nameof(LastCommitDate));
+        OnPropertyChanged(nameof(LastReviewed));
     }
 
     private void ScheduleMergeRecheck(PullRequestDetail pr)
@@ -480,23 +537,27 @@ public sealed partial class PRDetailViewModel : ObservableObject
         outdatedByPath = outdated;
     }
 
-    public DiffRenderOptions RenderOptions(string filter, bool wrap = true, bool split = false) => new()
+    public DiffRenderOptions RenderOptions(string filter, bool wrap = true, bool split = false)
     {
-        Wrap = wrap,
-        Split = split,
-        Review = true,
-        Commentable = Pr?.IsOpen ?? false,
-        ShowViewed = true,
-        ShowBlame = Pr is not null,
-        BlameLabel = L.T("Code_Blame", "Blame"),
-        BlameTitle = L.T("PR_BlameAtHead", "Blame this file at the pull request head"),
-        Viewed = ViewedPaths,
-        Collapsed = Collapsed,
-        Threads = threadIndex,
-        Outdated = outdatedByPath,
-        Pending = Pending,
-        Filter = filter
-    };
+        var interdiff = DiffScope == DiffScope.SinceReview;
+        return new()
+        {
+            Wrap = wrap,
+            Split = split,
+            Review = true,
+            Commentable = !interdiff && (Pr?.IsOpen ?? false),
+            ShowViewed = true,
+            ShowBlame = Pr is not null,
+            BlameLabel = L.T("Code_Blame", "Blame"),
+            BlameTitle = L.T("PR_BlameAtHead", "Blame this file at the pull request head"),
+            Viewed = ViewedPaths,
+            Collapsed = Collapsed,
+            Threads = interdiff ? new Dictionary<string, List<ReviewThread>>() : threadIndex,
+            Outdated = interdiff ? new Dictionary<string, List<ReviewThread>>() : outdatedByPath,
+            Pending = interdiff ? Array.Empty<PendingComment>() : Pending,
+            Filter = filter
+        };
+    }
 
     public int ThreadCount(string path) => (Pr?.ReviewThreads.Items ?? new()).Count(t => t.Path == path);
 

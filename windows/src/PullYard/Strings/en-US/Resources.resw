@@ -381,6 +381,12 @@
   <data name="Files_PrevFile" xml:space="preserve"><value>Previous file</value></data>
   <data name="Files_PrevHunk" xml:space="preserve"><value>Previous hunk</value></data>
   <data name="Files_ReviewBar" xml:space="preserve"><value>Review navigation</value></data>
+  <data name="Files_ScopeAll" xml:space="preserve"><value>All changes</value></data>
+  <data name="Files_ScopeName" xml:space="preserve"><value>Changes to show</value></data>
+  <data name="Files_ScopeSince" xml:space="preserve"><value>Since your review</value></data>
+  <data name="Files_ScopeSinceN" xml:space="preserve"><value>Since your review · {0} commits</value></data>
+  <data name="Files_ScopeSinceOne" xml:space="preserve"><value>Since your review · 1 commit</value></data>
+  <data name="Files_ScopeTip" xml:space="preserve"><value>Show only what changed since your last review</value></data>
   <data name="Files_ShortcutTip" xml:space="preserve"><value>{0} ({1})</value></data>
   <data name="Files_Split" xml:space="preserve"><value>Split</value></data>
   <data name="Files_Unified" xml:space="preserve"><value>Unified</value></data>
@@ -465,6 +471,12 @@
   <data name="Inspector_Tasks" xml:space="preserve"><value>Tasks</value></data>
   <data name="Inspector_ThisBranch" xml:space="preserve"><value>This branch</value></data>
   <data name="Inspector_Unresolved" xml:space="preserve"><value>Unresolved comments ({0})</value></data>
+  <data name="Interdiff_BaseBranch" xml:space="preserve"><value>the base branch</value></data>
+  <data name="Interdiff_Empty" xml:space="preserve"><value>No file changes since your review.</value></data>
+  <data name="Interdiff_Error" xml:space="preserve"><value>Couldn’t load changes since your review: {0}</value></data>
+  <data name="Interdiff_Loading" xml:space="preserve"><value>Comparing with the commit you reviewed…</value></data>
+  <data name="Interdiff_ReadOnly" xml:space="preserve"><value>Read-only: comments are hidden while comparing with your last review. Switch to All changes to comment.</value></data>
+  <data name="Interdiff_Rebased" xml:space="preserve"><value>The branch was rebased or force-pushed after your review, so this can include changes from {0}.</value></data>
   <data name="Issue_Close" xml:space="preserve"><value>Close issue</value></data>
   <data name="Issue_CloseShort" xml:space="preserve"><value>Close</value></data>
   <data name="Issue_Reopen" xml:space="preserve"><value>Reopen issue</value></data>

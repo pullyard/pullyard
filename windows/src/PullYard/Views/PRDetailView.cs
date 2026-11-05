@@ -124,6 +124,8 @@ public sealed class PRContent : Grid, IShortcutHost
     private string lastHtml = "";
     private CheckBox? wrapBox;
     private ComboBox? layoutBox;
+    private ComboBox? scopeBox;
+    private readonly ContentControl interdiffBanner = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, IsTabStop = false };
     private bool splitFits;
     private bool syncingReviewBar;
 
@@ -269,6 +271,16 @@ public sealed class PRContent : Grid, IShortcutHost
                     model.ActionError = null;
                     Dialogs.Alert(XamlRoot, L.T("Common_Error", "Error"), err).Forget();
                 }
+                break;
+            case nameof(PRDetailViewModel.LastReviewed):
+            case nameof(PRDetailViewModel.DiffScope):
+            case nameof(PRDetailViewModel.InterdiffLoading):
+            case nameof(PRDetailViewModel.InterdiffError):
+            case nameof(PRDetailViewModel.InterdiffRebased):
+            case nameof(PRDetailViewModel.InterdiffFiles):
+                SyncScope();
+                RenderInterdiffBanner();
+                RenderFiles();
                 break;
             case nameof(PRDetailViewModel.DiffVersion):
             case nameof(PRDetailViewModel.Files):
@@ -1108,8 +1120,12 @@ public sealed class PRContent : Grid, IShortcutHost
 
         var right = new Grid();
         right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         right.Children.Add(ReviewBar());
+        SetRow(interdiffBanner, 1);
+        right.Children.Add(interdiffBanner);
+        RenderInterdiffBanner();
         diff = new HtmlView();
         diff.LinkClicked += url => HtmlView.OpenLink(url);
         diff.ActionInvoked += OnDiffAction;
@@ -1121,7 +1137,7 @@ public sealed class PRContent : Grid, IShortcutHost
             SyncReviewBar();
             RenderFiles();
         };
-        SetRow(diff, 1);
+        SetRow(diff, 2);
         right.Children.Add(diff);
         SetColumn(right, 2);
         grid.Children.Add(right);
@@ -1168,11 +1184,22 @@ public sealed class PRContent : Grid, IShortcutHost
             Ui.Line(vertical: true),
             Nav("\uE74A", L.T("Files_PrevHunk", "Previous hunk"), "[", "["),
             Nav("\uE74B", L.T("Files_NextHunk", "Next hunk"), "]", "]"));
+        scopeBox = new ComboBox { MinWidth = 120, VerticalAlignment = VerticalAlignment.Center };
+        scopeBox.Items.Add(L.T("Files_ScopeAll", "All changes"));
+        scopeBox.Items.Add("");
+        AutomationProperties.SetName(scopeBox, L.T("Files_ScopeName", "Changes to show"));
+        ToolTipService.SetToolTip(scopeBox, L.T("Files_ScopeTip", "Show only what changed since your last review"));
+        scopeBox.SelectionChanged += (_, _) =>
+        {
+            if (!syncingReviewBar && scopeBox.SelectedIndex >= 0) model.DiffScope = scopeBox.SelectedIndex == 1 ? DiffScope.SinceReview : DiffScope.All;
+        };
         var options = Ui.H(12, wrapBox, layoutBox);
-        var row = Ui.Columns((nav, Ui.Auto), (null, Ui.Star), (options, Ui.Auto));
+        var row = Ui.Columns((nav, Ui.Auto), (scopeBox, Ui.Auto), (null, Ui.Star), (options, Ui.Auto));
+        row.ColumnSpacing = 12;
         row.Padding = new Thickness(8, 4, 10, 4);
         AutomationProperties.SetName(row, L.T("Files_ReviewBar", "Review navigation"));
         SyncReviewBar();
+        SyncScope();
         var line = Ui.Line();
         line.VerticalAlignment = VerticalAlignment.Bottom;
         var bar = new Grid();
@@ -1190,6 +1217,71 @@ public sealed class PRContent : Grid, IShortcutHost
         layoutBox.IsEnabled = splitFits;
         ToolTipService.SetToolTip(layoutBox, splitFits ? L.T("Files_LayoutTip", "Unified or side-by-side diff (S)") : L.T("Files_LayoutNarrow", "Widen the window to use split view"));
         syncingReviewBar = false;
+    }
+
+    private static string SinceTitle(ReviewedCommit r) => r.CommitsSince switch
+    {
+        null => L.T("Files_ScopeSince", "Since your review"),
+        1 => L.T("Files_ScopeSinceOne", "Since your review · 1 commit"),
+        { } n => L.F("Files_ScopeSinceN", "Since your review · {0} commits", n)
+    };
+
+    private void SyncScope()
+    {
+        if (scopeBox is null) return;
+        syncingReviewBar = true;
+        if (model.LastReviewed is { } reviewed)
+        {
+            scopeBox.Items[1] = SinceTitle(reviewed);
+            scopeBox.SelectedIndex = model.DiffScope == DiffScope.SinceReview ? 1 : 0;
+            scopeBox.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            scopeBox.SelectedIndex = 0;
+            scopeBox.Visibility = Visibility.Collapsed;
+        }
+        syncingReviewBar = false;
+    }
+
+    private void RenderInterdiffBanner()
+    {
+        if (model.DiffScope != DiffScope.SinceReview)
+        {
+            interdiffBanner.Content = null;
+            interdiffBanner.Visibility = Visibility.Collapsed;
+            return;
+        }
+        interdiffBanner.Visibility = Visibility.Visible;
+        string? text = null;
+        if (model.InterdiffLoading) text = L.T("Interdiff_Loading", "Comparing with the commit you reviewed…");
+        else if (model.InterdiffError is { } e) text = L.F("Interdiff_Error", "Couldn’t load changes since your review: {0}", e);
+        else if (model.InterdiffRebased) text = L.F("Interdiff_Rebased", "The branch was rebased or force-pushed after your review, so this can include changes from {0}.", model.Pr?.BaseRefName ?? L.T("Interdiff_BaseBranch", "the base branch"));
+        else if (model.InterdiffFiles.Count == 0) text = L.T("Interdiff_Empty", "No file changes since your review.");
+        var line = Ui.Line();
+        line.VerticalAlignment = VerticalAlignment.Bottom;
+        var host = new Grid();
+        if (text is null)
+        {
+            var note = Ui.Caption(L.T("Interdiff_ReadOnly", "Read-only: comments are hidden while comparing with your last review. Switch to All changes to comment."));
+            note.TextWrapping = TextWrapping.WrapWholeWords;
+            note.Margin = new Thickness(12, 4, 12, 4);
+            host.Children.Add(note);
+        }
+        else
+        {
+            var failed = model.InterdiffError is not null;
+            var message = Ui.Caption(text);
+            message.TextWrapping = TextWrapping.WrapWholeWords;
+            var retry = failed ? Ui.Button(L.T("Common_Retry", "Retry"), () => model.LoadInterdiff(true).Forget()) : null;
+            var row = Ui.Columns((Ui.Glyph(failed ? "\uE7BA" : "\uE946", 13, failed ? "amber" : "muted"), Ui.Auto), (message, Ui.Star), (retry, Ui.Auto));
+            row.ColumnSpacing = 8;
+            row.Padding = new Thickness(12, 5, 12, 5);
+            host.Background = Palette.Brush("amber", 0.12);
+            host.Children.Add(row);
+        }
+        host.Children.Add(line);
+        interdiffBanner.Content = host;
     }
 
     private void OnSettings(string key)
@@ -1246,24 +1338,26 @@ public sealed class PRContent : Grid, IShortcutHost
     private void RenderFiles()
     {
         if (diff is null || fileList is null) return;
-        if (!model.FilesLoaded)
+        var interdiff = model.DiffScope == DiffScope.SinceReview;
+        if (!model.FilesLoaded && !interdiff)
         {
             if (model.FilesError is { } e) diff.Render($"<div class=\"tl\"><p class=\"empty\">{ConversationHtml.Esc(e)}</p></div>");
             return;
         }
         var filter = fileFilter?.Text.Trim() ?? "";
-        var visible = model.Files.Where(f => filter.Length == 0 || f.Id.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
+        var shown = model.DisplayedFiles;
+        var visible = shown.Where(f => filter.Length == 0 || f.Id.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
         var selected = model.ScrollTarget;
         fileList.ItemsSource = visible.Select(f => new FileListItem(f, model.ViewedPaths.Contains(f.Id), model.ThreadCount(f.Id))).ToList();
         if (selected is not null) fileList.SelectedItem = (fileList.ItemsSource as List<FileListItem>)?.FirstOrDefault(f => f.File.Id == selected);
-        if (viewedCount is not null) viewedCount.Text = $"{model.ViewedPaths.Intersect(model.Files.Select(f => f.Id)).Count()}/{model.Files.Count}";
-        var layout = $"{WrapPref}|{SplitActive}";
+        if (viewedCount is not null) viewedCount.Text = $"{model.ViewedPaths.Intersect(shown.Select(f => f.Id)).Count()}/{shown.Count}";
+        var layout = $"{WrapPref}|{SplitActive}|{model.DiffScope}";
         if (renderedDiffVersion == model.DiffVersion && renderedFilter == filter && renderedLayout == layout) return;
         var first = renderedDiffVersion < 0;
         renderedDiffVersion = model.DiffVersion;
         renderedFilter = filter;
         renderedLayout = layout;
-        var html = DiffHtml.Render(model.Files, model.RenderOptions(filter, WrapPref, SplitActive));
+        var html = DiffHtml.Render(shown, model.RenderOptions(filter, WrapPref, SplitActive));
         diff.Render(html, "diff", first && selected is not null ? "file:" + selected : first ? "top" : null, "flush review");
     }
 
@@ -1274,7 +1368,7 @@ public sealed class PRContent : Grid, IShortcutHost
             case "comment":
             {
                 var parts = id.Split('|');
-                if (parts.Length >= 3 && int.TryParse(parts[^1], out var line))
+                if (model.DiffScope == DiffScope.All && parts.Length >= 3 && int.TryParse(parts[^1], out var line))
                 {
                     var path = string.Join("|", parts[..^2]);
                     Dialogs.InlineComment(XamlRoot, model, new DiffAnchor(path, line, parts[^2])).Forget();
@@ -1295,7 +1389,7 @@ public sealed class PRContent : Grid, IShortcutHost
                 break;
             case "expand":
                 model.Collapsed.Remove(id);
-                if (model.Files.FirstOrDefault(f => f.Id == id) is { } file)
+                if (model.DisplayedFiles.FirstOrDefault(f => f.Id == id) is { } file)
                     diff?.Send(new JsonObject { ["op"] = "fileBody", ["path"] = id, ["html"] = DiffHtml.Body(file, model.RenderOptions("", WrapPref, SplitActive)) });
                 break;
             case "review":

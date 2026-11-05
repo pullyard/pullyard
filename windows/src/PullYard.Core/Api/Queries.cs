@@ -31,7 +31,7 @@ fragment IssueItem on Issue { number title url issueState: state stateReason cre
 ... on RenamedTitleEvent {{ actor {Actor} createdAt previousTitle currentTitle }}
 ... on CrossReferencedEvent {{ actor {Actor} createdAt source {{ __typename ... on PullRequest {{ number title url repository {{ nameWithOwner }} }} ... on Issue {{ number title url repository {{ nameWithOwner }} }} }} }}";
 
-    public static readonly string PrTimeline = $@"... on PullRequestReview {{ id author {Actor} state body bodyHTML createdAt url }}
+    public static readonly string PrTimeline = $@"... on PullRequestReview {{ id author {Actor} state body bodyHTML createdAt url commit {{ oid }} }}
 ... on PullRequestCommit {{ commit {{ oid abbreviatedOid messageHeadline committedDate author {{ name avatarUrl user {{ login }} }} }} }}
 ... on MergedEvent {{ actor {Actor} createdAt mergeRefName commit {{ abbreviatedOid }} }}
 ... on HeadRefForcePushedEvent {{ actor {Actor} createdAt }}
