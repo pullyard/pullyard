@@ -42,7 +42,7 @@ fn common_timeline() -> String {
 
 fn pr_timeline() -> String {
     format!(
-        "... on PullRequestReview {{ id author {ACTOR} state body bodyHTML createdAt url }}
+        "... on PullRequestReview {{ id author {ACTOR} state body bodyHTML createdAt url commit {{ oid }} }}
 ... on PullRequestCommit {{ commit {{ oid abbreviatedOid messageHeadline committedDate author {{ name avatarUrl user {{ login }} }} }} }}
 ... on MergedEvent {{ actor {ACTOR} createdAt mergeRefName commit {{ abbreviatedOid }} }}
 ... on HeadRefForcePushedEvent {{ actor {ACTOR} createdAt }}

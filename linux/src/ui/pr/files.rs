@@ -7,6 +7,7 @@ use gtk::{gio, glib};
 
 use super::diff_view::{self, DiffSelection, HScroll, OnComment, RowLine, RowOpts, Side};
 use super::model::{Change, FlatRow, PrModel};
+use crate::api::interdiff::{DiffScope, ReviewedCommit};
 use crate::api::models::{PendingComment, RepoRef, ReviewThread};
 use crate::diff::{DiffAnchor, DiffFile, DiffLine, LineKind};
 use crate::diff_layout::{self, SplitRow};
@@ -40,6 +41,11 @@ pub struct FilesTab {
     side: gtk::Box,
     filter: RefCell<String>,
     viewed_label: gtk::Label,
+    scope_box: gtk::Box,
+    all_toggle: gtk::ToggleButton,
+    since_toggle: gtk::ToggleButton,
+    scope_syncing: Cell<bool>,
+    banner: gtk::Box,
     expanded_threads: RefCell<std::collections::HashMap<String, bool>>,
     pending_reveal: RefCell<Option<String>>,
     suppress_select: Cell<bool>,
@@ -148,6 +154,14 @@ fn status_label(f: &DiffFile) -> gtk::Label {
     l
 }
 
+fn since_title(r: &ReviewedCommit) -> String {
+    match r.commits_since {
+        None => "Since your review".into(),
+        Some(1) => "Since your review · 1 commit".into(),
+        Some(n) => format!("Since your review · {n} commits"),
+    }
+}
+
 pub fn line_widget(line: &DiffLine, commentable: bool) -> gtk::Box {
     diff_view::line_row(line, &RowOpts { wrap: true, commentable, ..Default::default() }, None)
 }
@@ -182,6 +196,18 @@ impl FilesTab {
         hunk_nav.append(&prev_hunk);
         hunk_nav.append(&next_hunk);
         review_bar.append(&hunk_nav);
+        let scope_box = hbox(0);
+        scope_box.add_css_class("linked");
+        let all_toggle = gtk::ToggleButton::with_label("All changes");
+        let since_toggle = gtk::ToggleButton::with_label("Since your review");
+        since_toggle.set_group(Some(&all_toggle));
+        all_toggle.set_active(true);
+        scope_box.append(&all_toggle);
+        scope_box.append(&since_toggle);
+        scope_box.set_tooltip_text(Some("Show only what changed since your last review"));
+        scope_box.update_property(&[gtk::accessible::Property::Label("Changes to show")]);
+        scope_box.set_visible(false);
+        review_bar.append(&scope_box);
         review_bar.append(&spacer());
         review_bar.append(&diff_view::wrap_check());
         let layout_box = hbox(0);
@@ -197,6 +223,9 @@ impl FilesTab {
 
         let diff_column = vbox(0);
         diff_column.append(&review_bar);
+        let banner = vbox(0);
+        banner.set_visible(false);
+        diff_column.append(&banner);
         diff_column.append(&diff_scroll);
         diff_column.append(&hscroll.bar);
         let diff_area = adw::BreakpointBin::new();
@@ -259,6 +288,11 @@ impl FilesTab {
             side,
             filter: RefCell::new(String::new()),
             viewed_label,
+            scope_box,
+            all_toggle: all_toggle.clone(),
+            since_toggle: since_toggle.clone(),
+            scope_syncing: Cell::new(false),
+            banner,
             expanded_threads: RefCell::new(std::collections::HashMap::new()),
             pending_reveal: RefCell::new(None),
             suppress_select: Cell::new(false),
@@ -302,7 +336,7 @@ impl FilesTab {
         me.selection.set_source(Rc::new(move |pos, side| {
             let Some(me) = w.upgrade() else { return RowLine::Other };
             let rows = me.rows.borrow();
-            let files = me.model.files.borrow();
+            let files = me.model.displayed_files();
             let line = |fi: usize, li: Option<usize>| li.and_then(|li| files.get(fi).and_then(|f| f.lines.get(li))).cloned().map(RowLine::Line).unwrap_or(RowLine::Other);
             match rows.get(pos as usize) {
                 Some(ViewRow::Flat(FlatRow::Header(_))) => RowLine::Header,
@@ -356,6 +390,17 @@ impl FilesTab {
                 glib::idle_add_local_once(move || diff_view::set_split(on));
             }
         });
+        for (toggle, scope) in [(all_toggle, DiffScope::All), (since_toggle, DiffScope::SinceReview)] {
+            let w = Rc::downgrade(&me);
+            toggle.connect_toggled(move |t| {
+                let Some(me) = w.upgrade() else { return };
+                if me.scope_syncing.get() || !t.is_active() {
+                    return;
+                }
+                let m = me.model.clone();
+                glib::idle_add_local_once(move || m.set_diff_scope(scope));
+            });
+        }
         let w = Rc::downgrade(&me);
         diff_view::on_prefs(move |_| match w.upgrade() {
             Some(me) => {
@@ -442,11 +487,12 @@ impl FilesTab {
             return;
         }
         self.widget.set_visible_child_name("files");
+        self.sync_scope();
         let filter = self.filter.borrow().clone();
         let flat = m.flat_rows(&filter);
         let wrap = diff_view::wrap();
         let split = self.split_active();
-        let rows: Vec<ViewRow> = if split { split_rows(flat, &m.files.borrow()) } else { flat.into_iter().map(ViewRow::Flat).collect() };
+        let rows: Vec<ViewRow> = if split { split_rows(flat, &m.displayed_files()) } else { flat.into_iter().map(ViewRow::Flat).collect() };
         let keys: Vec<RowKey> = rows.iter().map(|r| self.row_key(r)).collect();
         let open = Some(m.pr.borrow().as_ref().map(|p| p.is_open()).unwrap_or(false));
         let old = self.row_keys.replace(vec![]);
@@ -484,6 +530,69 @@ impl FilesTab {
             let me = self.clone();
             glib::idle_add_local_once(move || me.reveal(&p));
         }
+    }
+
+    fn sync_scope(&self) {
+        let m = &self.model;
+        let reviewed = m.last_reviewed();
+        let scope = m.diff_scope.get();
+        self.scope_box.set_visible(reviewed.is_some());
+        if let Some(r) = &reviewed {
+            self.since_toggle.set_label(&since_title(r));
+        }
+        self.scope_syncing.set(true);
+        match scope {
+            DiffScope::All if !self.all_toggle.is_active() => self.all_toggle.set_active(true),
+            DiffScope::SinceReview if !self.since_toggle.is_active() => self.since_toggle.set_active(true),
+            _ => {}
+        }
+        self.scope_syncing.set(false);
+        clear(&self.banner);
+        self.banner.set_visible(scope == DiffScope::SinceReview);
+        if scope != DiffScope::SinceReview {
+            return;
+        }
+        let error = m.interdiff_error.borrow().clone();
+        let text = if m.interdiff_loading.get() {
+            Some("Comparing with the commit you reviewed…".to_string())
+        } else if let Some(e) = &error {
+            Some(format!("Couldn’t load changes since your review: {e}"))
+        } else if m.interdiff_rebased.get() {
+            let base = m.pr.borrow().as_ref().map(|p| p.base_ref_name.clone()).unwrap_or_else(|| "the base branch".into());
+            Some(format!("The branch was rebased or force-pushed after your review, so this can include changes from {base}."))
+        } else if m.interdiff_files.borrow().is_empty() {
+            Some("No file changes since your review.".to_string())
+        } else {
+            None
+        };
+        let row = hbox(8);
+        row.add_css_class("diff-review-bar");
+        let Some(text) = text else {
+            let note = wrap_label("Read-only: comments are hidden while comparing with your last review. Switch to All changes to comment.", &["sy-muted", "sy-small"]);
+            note.set_xalign(0.0);
+            row.append(&note);
+            self.banner.append(&row);
+            return;
+        };
+        row.add_css_class("bg-amber");
+        let (icon_name, color) = if error.is_some() { ("dialog-warning-symbolic", "amber") } else { ("dialog-information-symbolic", "muted") };
+        let glyph = colored_icon(icon_name, 14, color);
+        decorative(&glyph);
+        row.append(&glyph);
+        let l = wrap_label(&text, &["sy-muted", "sy-small"]);
+        l.set_xalign(0.0);
+        l.set_hexpand(true);
+        row.append(&l);
+        if error.is_some() {
+            let retry = button("Retry");
+            let mm = m.clone();
+            retry.connect_clicked(move |_| {
+                let mm = mm.clone();
+                crate::rt::spawn_local(async move { mm.load_interdiff(true).await });
+            });
+            row.append(&retry);
+        }
+        self.banner.append(&row);
     }
 
     fn split_active(&self) -> bool {
@@ -528,7 +637,7 @@ impl FilesTab {
     }
 
     fn longest_columns(&self, rows: &[ViewRow]) -> usize {
-        let files = self.model.files.borrow();
+        let files = self.model.displayed_files();
         let line = |fi: usize, li: Option<usize>| li.and_then(|li| files.get(fi).and_then(|f| f.lines.get(li))).map(diff_layout::display_columns).unwrap_or(0);
         rows.iter()
             .map(|r| match r {
@@ -542,10 +651,14 @@ impl FilesTab {
 
     fn row_opts(&self, file: &DiffFile, item: &gtk::ListItem) -> RowOpts {
         let open = self.model.pr.borrow().as_ref().map(|p| p.is_open()).unwrap_or(false);
-        RowOpts { ext: diff_view::file_ext(file), wrap: diff_view::wrap(), commentable: open, scroll: Some(self.hscroll.clone()), select: Some((self.selection.clone(), item.clone())) }
+        let commentable = open && self.model.diff_scope.get() == DiffScope::All;
+        RowOpts { ext: diff_view::file_ext(file), wrap: diff_view::wrap(), commentable, scroll: Some(self.hscroll.clone()), select: Some((self.selection.clone(), item.clone())) }
     }
 
     fn comment_handler(&self, file: &DiffFile) -> Option<OnComment> {
+        if self.model.diff_scope.get() != DiffScope::All {
+            return None;
+        }
         let m = self.model.clone();
         let path = file.id.clone();
         Some(Rc::new(move |line: &DiffLine| {
@@ -678,7 +791,7 @@ impl FilesTab {
     }
 
     fn current_file(&self) -> Option<String> {
-        let files = self.model.files.borrow();
+        let files = self.model.displayed_files();
         let fi = self
             .current_index()
             .and_then(|i| self.header_at_or_before(i))
@@ -720,7 +833,7 @@ impl FilesTab {
             None => 0,
         };
         let fi = headers[target].1;
-        let Some(path) = self.model.files.borrow().get(fi).map(|f| f.id.clone()) else { return };
+        let Some(path) = self.model.displayed_files().get(fi).map(|f| f.id.clone()) else { return };
         if self.model.collapsed.borrow_mut().remove(&path) {
             self.model.emit(Change::Diff);
         }
@@ -740,7 +853,7 @@ impl FilesTab {
         let Some(current) = self.current_index() else { return };
         let target = {
             let rows = self.rows.borrow();
-            let files = self.model.files.borrow();
+            let files = self.model.displayed_files();
             let is_hunk = |r: &ViewRow| matches!(r, ViewRow::Flat(FlatRow::Line(fi, li)) if files.get(*fi).and_then(|f| f.lines.get(*li)).is_some_and(|l| l.kind == LineKind::Hunk));
             if step > 0 {
                 (current + 1..rows.len()).find(|i| is_hunk(&rows[*i]))
@@ -760,7 +873,7 @@ impl FilesTab {
         };
         match row {
             FlatRow::Header(fi) => {
-                let files = self.model.files.borrow();
+                let files = self.model.displayed_files();
                 let id = files.get(*fi).map(|f| f.id.as_str()).unwrap_or("");
                 RowKey::Header(*fi, self.model.collapsed.borrow().contains(id), self.model.viewed.borrow().contains(id))
             }
@@ -774,7 +887,7 @@ impl FilesTab {
 
     fn rebuild_file_list(&self) {
         let m = &self.model;
-        let files = m.files.borrow();
+        let files = m.displayed_files();
         let viewed = m.viewed.borrow();
         let filter = self.filter.borrow().clone();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -818,7 +931,7 @@ impl FilesTab {
     }
 
     fn reveal(self: &Rc<Self>, path: &str) {
-        let files = self.model.files.borrow();
+        let files = self.model.displayed_files();
         let idx = self.rows.borrow().iter().position(|r| matches!(r, ViewRow::Flat(FlatRow::Header(i)) if files.get(*i).map(|f| f.id.as_str()) == Some(path)));
         drop(files);
         match idx {
@@ -831,7 +944,7 @@ impl FilesTab {
         let row = match row {
             ViewRow::Flat(r) => r,
             ViewRow::Split(fi, a, b) => {
-                let files = self.model.files.borrow();
+                let files = self.model.displayed_files();
                 let Some(file) = files.get(*fi) else { return vbox(0).upcast() };
                 let left = a.and_then(|i| file.lines.get(i));
                 let right = b.and_then(|i| file.lines.get(i));
@@ -841,14 +954,14 @@ impl FilesTab {
         };
         match row {
             FlatRow::Header(fi) => {
-                let f = self.model.files.borrow().get(*fi).cloned();
+                let f = self.model.displayed_files().get(*fi).cloned();
                 match f {
                     Some(f) => self.header(&f).upcast(),
                     None => vbox(0).upcast(),
                 }
             }
             FlatRow::Line(fi, li) => {
-                let files = self.model.files.borrow();
+                let files = self.model.displayed_files();
                 let Some(file) = files.get(*fi) else { return vbox(0).upcast() };
                 let Some(line) = file.lines.get(*li) else { return vbox(0).upcast() };
                 let opts = self.row_opts(file, item);
@@ -919,7 +1032,7 @@ impl FilesTab {
         menu.item(if self.side.is_visible() { "Hide file list" } else { "Show file list" }, move || side.set_visible(!side.is_visible()));
         let mm = m.clone();
         menu.item("Collapse all", move || {
-            let all: std::collections::HashSet<String> = mm.files.borrow().iter().map(|f| f.id.clone()).collect();
+            let all: std::collections::HashSet<String> = mm.displayed_files().iter().map(|f| f.id.clone()).collect();
             *mm.collapsed.borrow_mut() = all;
             mm.emit(Change::Diff);
         });

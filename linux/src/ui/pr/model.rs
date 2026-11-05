@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, Ref, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::api::code_owners::{CodeOwnersStatus, OwnershipSummary};
+use crate::api::interdiff::{self, DiffScope, ReviewedCommit};
 use crate::api::merge_readiness::{self, MergeRequirement, RulesStatus};
 use crate::api::models::*;
 use crate::api::queries as q;
@@ -105,6 +106,12 @@ pub struct PrModel {
     pub files_loaded: Cell<bool>,
     pub files_loading: Cell<bool>,
     pub files_error: RefCell<Option<String>>,
+    pub diff_scope: Cell<DiffScope>,
+    pub interdiff_files: RefCell<Vec<DiffFile>>,
+    pub interdiff_loading: Cell<bool>,
+    pub interdiff_error: RefCell<Option<String>>,
+    pub interdiff_rebased: Cell<bool>,
+    interdiff_key: RefCell<Option<String>>,
     pub viewed: RefCell<HashSet<String>>,
     pub collapsed: RefCell<HashSet<String>>,
     pub pending: RefCell<Vec<PendingComment>>,
@@ -155,6 +162,12 @@ impl PrModel {
             files_loaded: Cell::new(false),
             files_loading: Cell::new(false),
             files_error: RefCell::new(None),
+            diff_scope: Cell::new(DiffScope::All),
+            interdiff_files: RefCell::new(vec![]),
+            interdiff_loading: Cell::new(false),
+            interdiff_error: RefCell::new(None),
+            interdiff_rebased: Cell::new(false),
+            interdiff_key: RefCell::new(None),
             viewed: RefCell::new(HashSet::new()),
             collapsed: RefCell::new(HashSet::new()),
             pending: RefCell::new(vec![]),
@@ -506,6 +519,14 @@ impl PrModel {
                 }
                 *self.repo.borrow_mut() = Some(repo);
                 *self.pr.borrow_mut() = Some(pr);
+                if self.diff_scope.get() == DiffScope::SinceReview {
+                    if self.last_reviewed().is_none() {
+                        self.set_diff_scope(DiffScope::All);
+                    } else {
+                        let me = self.clone();
+                        crate::rt::spawn_local(async move { me.load_interdiff(false).await });
+                    }
+                }
                 *self.error.borrow_mut() = None;
                 *self.refresh_error.borrow_mut() = None;
                 self.last_updated.set(Some(Utc::now()));
@@ -666,6 +687,70 @@ impl PrModel {
         self.emit(Change::Files);
     }
 
+    pub fn last_reviewed(&self) -> Option<ReviewedCommit> {
+        let pr = self.pr.borrow();
+        interdiff::last_reviewed(pr.as_ref()?, &self.viewer_login.borrow())
+    }
+
+    pub fn displayed_files(&self) -> Ref<'_, Vec<DiffFile>> {
+        match self.diff_scope.get() {
+            DiffScope::SinceReview => self.interdiff_files.borrow(),
+            DiffScope::All => self.files.borrow(),
+        }
+    }
+
+    pub fn set_diff_scope(self: &Rc<Self>, scope: DiffScope) {
+        if self.diff_scope.replace(scope) == scope {
+            return;
+        }
+        self.emit(Change::Files);
+        if scope == DiffScope::SinceReview {
+            let me = self.clone();
+            crate::rt::spawn_local(async move { me.load_interdiff(false).await });
+        }
+    }
+
+    pub async fn load_interdiff(self: Rc<Self>, force: bool) {
+        let head = self.pr.borrow().as_ref().map(|p| p.head_ref_oid.clone());
+        let (Some(head), Some(reviewed)) = (head, self.last_reviewed()) else {
+            self.set_diff_scope(DiffScope::All);
+            return;
+        };
+        let key = format!("{}...{head}", reviewed.oid);
+        if (!force && self.interdiff_key.borrow().as_deref() == Some(key.as_str())) || self.interdiff_loading.get() {
+            return;
+        }
+        self.interdiff_loading.set(true);
+        self.emit(Change::Files);
+        let api = self.api.clone();
+        let repo = self.r.repo.clone();
+        let base = reviewed.oid.clone();
+        let res = crate::rt::run(async move {
+            api.compare(&repo, &base, &head).await.map(|c| {
+                let behind = c.behind_by.unwrap_or(0);
+                (c.files.unwrap_or_default().iter().map(DiffFile::new).collect::<Vec<_>>(), behind)
+            })
+        })
+        .await;
+        self.interdiff_loading.set(false);
+        match res {
+            Ok((parsed, behind)) => {
+                {
+                    let mut collapsed = self.collapsed.borrow_mut();
+                    for f in &parsed {
+                        collapsed.remove(&f.id);
+                    }
+                }
+                *self.interdiff_files.borrow_mut() = parsed;
+                *self.interdiff_key.borrow_mut() = Some(key);
+                *self.interdiff_error.borrow_mut() = None;
+                self.interdiff_rebased.set(reviewed.rewritten() || behind > 0);
+            }
+            Err(e) => *self.interdiff_error.borrow_mut() = Some(e.message),
+        }
+        self.emit(Change::Files);
+    }
+
     fn index_threads(&self, threads: &[ReviewThread]) {
         let mut idx: HashMap<String, Vec<ReviewThread>> = HashMap::new();
         let mut outdated: HashMap<String, Vec<ReviewThread>> = HashMap::new();
@@ -680,7 +765,8 @@ impl PrModel {
     }
 
     pub fn flat_rows(&self, filter: &str) -> Vec<FlatRow> {
-        let files = self.files.borrow();
+        let files = self.displayed_files();
+        let since_review = self.diff_scope.get() == DiffScope::SinceReview;
         let collapsed = self.collapsed.borrow();
         let pending = self.pending.borrow();
         let composer = self.composer.borrow().clone();
@@ -697,6 +783,10 @@ impl PrModel {
             }
             if !file.has_patch {
                 out.push(FlatRow::Note("Diff unavailable (binary or too large)".into()));
+                continue;
+            }
+            if since_review {
+                out.extend((0..file.lines.len()).map(|li| FlatRow::Line(fi, li)));
                 continue;
             }
             let file_pending: Vec<&PendingComment> = pending.iter().filter(|p| p.path == file.id).collect();

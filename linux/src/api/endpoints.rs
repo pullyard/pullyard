@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::code_owners::{CodeOwners, CODE_OWNERS_PATHS};
+use super::interdiff::CompareResult;
 use super::merge_readiness::BranchRules;
 use super::models::*;
 use super::queries as q;
@@ -278,6 +279,10 @@ impl GitHubApi {
             }
         }
         Ok(all)
+    }
+
+    pub async fn compare(&self, repo: &RepoRef, base: &str, head: &str) -> ApiResult<CompareResult> {
+        self.rest(Method::GET, &format!("/repos/{}/compare/{base}...{head}", repo.full()), None).await
     }
 
     pub async fn commit(&self, repo: &RepoRef, sha: &str) -> ApiResult<CommitDetailRest> {

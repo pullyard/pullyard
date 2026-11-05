@@ -1,5 +1,6 @@
 pub mod code_owners;
 pub mod endpoints;
+pub mod interdiff;
 pub mod merge_readiness;
 pub mod models;
 pub mod queries;
