@@ -49,7 +49,7 @@ enum Q {
     """
 
     static let prTimeline = """
-    ... on PullRequestReview { id author \(actor) state body bodyHTML createdAt url }
+    ... on PullRequestReview { id author \(actor) state body bodyHTML createdAt url commit { oid } }
     ... on PullRequestCommit { commit { oid abbreviatedOid messageHeadline committedDate author { name avatarUrl user { login } } } }
     ... on MergedEvent { actor \(actor) createdAt mergeRefName commit { abbreviatedOid } }
     ... on HeadRefForcePushedEvent { actor \(actor) createdAt }

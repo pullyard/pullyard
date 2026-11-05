@@ -170,6 +170,10 @@ extension GitHubAPI {
         return all
     }
 
+    func compare(_ repo: RepoRef, base: String, head: String) async throws -> CompareResult {
+        try await rest("GET", "/repos/\(repo.full)/compare/\(base)...\(head)")
+    }
+
     func commit(_ repo: RepoRef, sha: String) async throws -> CommitDetailREST {
         try await rest("GET", "/repos/\(repo.full)/commits/\(sha)")
     }

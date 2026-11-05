@@ -103,6 +103,18 @@ final class PRDetailModel {
     @ObservationIgnored private var rulesKey: String?
     @ObservationIgnored private var rulesFetched: Date?
     @ObservationIgnored private var viewedLoad: Task<Void, Never>?
+    var diffScope: DiffScope = .all {
+        didSet {
+            guard diffScope != oldValue else { return }
+            filesVersion += 1
+            if diffScope == .sinceReview { Task { await loadInterdiff() } }
+        }
+    }
+    var interdiffFiles: [DiffFile] = []
+    var interdiffLoading = false
+    var interdiffError: String?
+    var interdiffRebased = false
+    @ObservationIgnored private var interdiffKey: String?
     var html = ""
     var scrollToBottomToken = 0
     var conflicts: ConflictState?
@@ -155,6 +167,38 @@ final class PRDetailModel {
     var ownership: OwnershipSummary? {
         guard let pr, case .loaded(let owners) = codeOwners else { return nil }
         return OwnershipSummary.build(owners: owners, files: changedPaths, pr: pr)
+    }
+
+    var lastReviewed: ReviewedCommit? {
+        guard let pr else { return nil }
+        return Interdiff.lastReviewed(pr, viewer: viewerLogin)
+    }
+
+    var displayedFiles: [DiffFile] { diffScope == .sinceReview ? interdiffFiles : files }
+
+    func loadInterdiff(force: Bool = false) async {
+        guard let pr, let reviewed = lastReviewed else {
+            diffScope = .all
+            return
+        }
+        let key = "\(reviewed.oid)...\(pr.headRefOid)"
+        guard force || key != interdiffKey, !interdiffLoading else { return }
+        interdiffLoading = true
+        defer { interdiffLoading = false }
+        do {
+            let result = try await api.compare(ref.repo, base: reviewed.oid, head: pr.headRefOid)
+            let raw = result.files ?? []
+            let parsed = await Task.detached(priority: .userInitiated) { raw.map(DiffFile.init) }.value
+            interdiffFiles = parsed
+            interdiffKey = key
+            interdiffError = nil
+            interdiffRebased = reviewed.rewritten || (result.behindBy ?? 0) > 0
+            collapsed.subtract(parsed.map(\.id))
+            filesVersion += 1
+        } catch {
+            if isCancellation(error) { return }
+            interdiffError = error.localizedDescription
+        }
     }
 
     var requirements: [MergeRequirement] {
@@ -257,6 +301,9 @@ final class PRDetailModel {
             loadMoreViewed(after: pr.files?.nextCursor)
             loadRules(pr, force: forced != nil && reason.hasPrefix("refresh"))
             loadCodeOwners(pr)
+            if diffScope == .sinceReview {
+                if lastReviewed == nil { diffScope = .all } else { Task { await loadInterdiff() } }
+            }
             indexThreads(pr.reviewThreads.nodes)
             error = nil
             refreshError = nil
@@ -521,10 +568,10 @@ final class PRDetailModel {
     }
 
     func flatRows(filter: String) -> [FlatDiffRow] {
-        let key = "\(filter)|\(filesVersion)|\(collapsed.sorted().joined(separator: ","))|\(pending.map { $0.id.uuidString }.joined())|\(composer.map { "\($0.path):\($0.side):\($0.line)" } ?? "")|\(threadsVersion)"
+        let key = "\(diffScope)|\(filter)|\(filesVersion)|\(collapsed.sorted().joined(separator: ","))|\(pending.map { $0.id.uuidString }.joined())|\(composer.map { "\($0.path):\($0.side):\($0.line)" } ?? "")|\(threadsVersion)"
         if key == flatCacheKey { return flatCache }
         var out: [FlatDiffRow] = []
-        for file in files where filter.isEmpty || file.id.localizedCaseInsensitiveContains(filter) {
+        for file in displayedFiles where filter.isEmpty || file.id.localizedCaseInsensitiveContains(filter) {
             out.append(.header(file))
             if collapsed.contains(file.id) { continue }
             for r in rows(for: file) { out.append(.row(file, r)) }
@@ -540,6 +587,7 @@ final class PRDetailModel {
 
     func rows(for file: DiffFile) -> [DiffRow] {
         guard file.hasPatch else { return [.note("Diff unavailable (binary or too large)")] }
+        if diffScope == .sinceReview { return file.lines.map { .line($0) } }
         var rows: [DiffRow] = []
         rows.reserveCapacity(file.lines.count + 4)
         let filePending = pending.filter { $0.path == file.id }

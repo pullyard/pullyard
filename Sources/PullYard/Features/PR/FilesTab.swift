@@ -24,6 +24,7 @@ struct FilesTab: View {
                     }
                     VStack(spacing: 0) {
                         reviewBar
+                        if model.diffScope == .sinceReview { interdiffBanner }
                         DiffRefreshHost(model: model) { diff }
                     }
                     .background(GeometryReader { g in
@@ -61,7 +62,7 @@ struct FilesTab: View {
     }
 
     private var visibleFiles: [DiffFile] {
-        filter.isEmpty ? model.files : model.files.filter { $0.id.localizedCaseInsensitiveContains(filter) }
+        filter.isEmpty ? model.displayedFiles : model.displayedFiles.filter { $0.id.localizedCaseInsensitiveContains(filter) }
     }
 
     private var currentFile: String? {
@@ -117,6 +118,17 @@ struct FilesTab: View {
                     navButton("arrow.down.message", "Next comment", key: "C") { perform("c") }
                 }
             }
+            if let reviewed = model.lastReviewed {
+                Picker("Changes", selection: $model.diffScope) {
+                    Text("All changes").tag(DiffScope.all)
+                    Text(sinceTitle(reviewed)).tag(DiffScope.sinceReview)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .help("Show only what changed since your last review")
+                .accessibilityLabel("Changes to show")
+            }
             Spacer()
             Toggle("Wrap lines", isOn: $wrap)
                 .toggleStyle(.checkbox)
@@ -138,6 +150,46 @@ struct FilesTab: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
         .overlay(alignment: .bottom) { Rectangle().fill(Color.syLine).frame(height: 1) }
+    }
+
+    private func sinceTitle(_ r: ReviewedCommit) -> String {
+        guard let n = r.commitsSince else { return "Since your review" }
+        return n == 1 ? "Since your review · 1 commit" : "Since your review · \(n) commits"
+    }
+
+    @ViewBuilder
+    private var interdiffBanner: some View {
+        let text: String? = {
+            if model.interdiffLoading { return "Comparing with the commit you reviewed…" }
+            if let e = model.interdiffError { return "Couldn’t load changes since your review: \(e)" }
+            if model.interdiffRebased { return "The branch was rebased or force-pushed after your review, so this can include changes from \(model.pr?.baseRefName ?? "the base branch")." }
+            if model.interdiffFiles.isEmpty { return "No file changes since your review." }
+            return nil
+        }()
+        if let text {
+            HStack(spacing: 8) {
+                Image(systemName: model.interdiffError == nil ? "info.circle" : "exclamationmark.triangle")
+                    .foregroundStyle(model.interdiffError == nil ? Color.syMuted : Color.syAmber)
+                    .accessibilityHidden(true)
+                Text(text).font(.syCaption).foregroundStyle(Color.syMuted)
+                Spacer()
+                if model.interdiffError != nil {
+                    Button("Retry") { Task { await model.loadInterdiff(force: true) } }.controlSize(.small)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Color.syAmber.opacity(Tint.banner))
+            .overlay(alignment: .bottom) { Rectangle().fill(Color.syLine).frame(height: 1) }
+        } else {
+            Text("Read-only: comments are hidden while comparing with your last review. Switch to All changes to comment.")
+                .font(.syCaption)
+                .foregroundStyle(Color.syMuted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .overlay(alignment: .bottom) { Rectangle().fill(Color.syLine).frame(height: 1) }
+        }
     }
 
     private func navButton(_ symbol: String, _ title: String, key: String, action: @escaping () -> Void) -> some View {
@@ -172,7 +224,7 @@ struct FilesTab: View {
             onTopGroup: { id in focus.current = id.flatMap { $0.hasPrefix("h:") ? String($0.dropFirst(2)) : nil } },
             onKey: { perform($0) },
             onComment: { id, line in
-                guard let path = fileOf[id], let n = line.anchorLine else { return }
+                guard model.diffScope == .all, let path = fileOf[id], let n = line.anchorLine else { return }
                 let anchor = DiffAnchor(path: path, line: n, side: line.anchorSide)
                 if model.composer == anchor { return }
                 if let open = model.composer, open != anchor, !model.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -257,7 +309,7 @@ struct FilesTab: View {
         switch row {
         case .line(let line):
             DiffLineView(line: line) {
-                guard let n = line.anchorLine else { return }
+                guard model.diffScope == .all, let n = line.anchorLine else { return }
                 model.composer = DiffAnchor(path: file.id, line: n, side: line.anchorSide)
             }
             .equatable()
@@ -305,7 +357,7 @@ private struct FileListPane: View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 TextField("Filter files", text: $filter).textFieldStyle(.roundedBorder).controlSize(.small)
-                Text("\(model.viewedPaths.intersection(model.files.map(\.id)).count)/\(model.files.count)")
+                Text("\(model.viewedPaths.intersection(model.displayedFiles.map(\.id)).count)/\(model.displayedFiles.count)")
                     .font(.syCaption.monospacedDigit()).foregroundStyle(Color.syMuted).help("Viewed")
             }
             .padding(8)

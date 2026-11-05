@@ -72,6 +72,14 @@ enum SelfTest {
                     let groups = s.groups.map { g in g.owners.map { "\($0.handle)=\($0.status)" }.joined(separator: ",") + " (\(g.files.count))" }
                     return "\(owners.path) rules=\(owners.rules.count) invalid=\(owners.invalidLines) groups=\(groups) unowned=\(s.unowned.count) suggest=\(s.suggestions(excluding: []).map(\.handle))"
                 }
+                await step("interdiff") {
+                    let r = try await api.pullRequest(pr)
+                    guard let p = r.repository?.pullRequest else { return "not a PR" }
+                    guard let reviewed = Interdiff.lastReviewed(p, viewer: r.viewer.login) else { return "no earlier review by \(r.viewer.login)" }
+                    let c = try await api.compare(pr.repo, base: reviewed.oid, head: p.headRefOid)
+                    let files = (c.files ?? []).map { "\($0.filename) +\($0.additions) -\($0.deletions)" }
+                    return "reviewed=\(reviewed.oid.prefix(7)) since=\(reviewed.commitsSince.map(String.init) ?? "rewritten") status=\(c.status ?? "-") ahead=\(c.aheadBy ?? 0) behind=\(c.behindBy ?? 0) files=\(files.prefix(5))\(files.count > 5 ? " +\(files.count - 5)" : "")"
+                }
                 await step("pulse") {
                     let full = try await api.pullRequest(pr)
                     let light = try await api.pullRequestPulse(pr)
