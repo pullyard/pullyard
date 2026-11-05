@@ -76,9 +76,13 @@ struct FilesTab: View {
         case "p": stepFile(-1)
         case "]": navigator.jumpHunk(1)
         case "[": navigator.jumpHunk(-1)
+        case "c": navigator.jumpThread(1)
+        case "C": navigator.jumpThread(-1)
         case "v":
             guard let path = currentFile else { return false }
-            Task { await model.toggleViewed(path) }
+            let markingViewed = !model.viewedPaths.contains(path)
+            Task { await model.toggleViewed(path, scroll: !markingViewed) }
+            if markingViewed { stepFile(1) }
         case "w": wrap.toggle()
         case "s":
             guard splitAvailable else { return false }
@@ -107,6 +111,12 @@ struct FilesTab: View {
                 navButton("arrow.up.to.line", "Previous hunk", key: "[") { perform("[") }
                 navButton("arrow.down.to.line", "Next hunk", key: "]") { perform("]") }
             }
+            if model.pr?.reviewThreads.nodes.contains(where: { !$0.isOutdated }) == true {
+                HStack(spacing: 2) {
+                    navButton("text.bubble", "Previous comment", key: "⇧C") { perform("C") }
+                    navButton("arrow.down.message", "Next comment", key: "C") { perform("c") }
+                }
+            }
             Spacer()
             Toggle("Wrap lines", isOn: $wrap)
                 .toggleStyle(.checkbox)
@@ -132,7 +142,7 @@ struct FilesTab: View {
 
     private func navButton(_ symbol: String, _ title: String, key: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).frame(width: 18, height: 16)
+            Image(systemName: symbol).frame(width: 22, height: 20).contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
         .help("\(title) (\(key))")
@@ -163,7 +173,16 @@ struct FilesTab: View {
             onKey: { perform($0) },
             onComment: { id, line in
                 guard let path = fileOf[id], let n = line.anchorLine else { return }
-                model.composer = DiffAnchor(path: path, line: n, side: line.anchorSide)
+                let anchor = DiffAnchor(path: path, line: n, side: line.anchorSide)
+                if model.composer == anchor { return }
+                if let open = model.composer, open != anchor, !model.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    app.showToast("Finish or cancel the comment on line \(open.line) first", isError: true)
+                    model.scrollTarget = open.path
+                    model.scrollToken += 1
+                    return
+                }
+                model.composerDraft = ""
+                model.composer = anchor
             }
         )
     }
@@ -272,7 +291,7 @@ private struct DiffRefreshHost<Content: View>: View {
 
     var body: some View {
         content
-            .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false) { await model.load(full: true) }
+            .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, button: false) { await model.load(full: true) }
     }
 }
 
@@ -471,18 +490,21 @@ struct DiffLineView: View, Equatable {
 }
 
 struct InlineThreadView: View {
-    let model: PRDetailModel
+    @Bindable var model: PRDetailModel
     let thread: ReviewThread
     @State private var expanded: Bool?
-    @State private var reply = ""
-    @State private var replying = false
+
+    private var replying: Bool { model.replyDrafts[thread.id] != nil }
+    private var reply: Binding<String> {
+        Binding(get: { model.replyDrafts[thread.id] ?? "" }, set: { model.replyDrafts[thread.id] = $0 })
+    }
 
     var body: some View {
         let open = expanded ?? !thread.isResolved
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Button { expanded = !open } label: {
-                    Image(systemName: open ? "chevron.down" : "chevron.right").frame(width: 10)
+                    Image(systemName: open ? "chevron.down" : "chevron.right").frame(width: 20, height: 20).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(open ? "Collapse thread" : "Expand thread")
@@ -523,22 +545,34 @@ struct InlineThreadView: View {
                         Divider()
                         if replying {
                             VStack(alignment: .trailing, spacing: 6) {
-                                ComposerBox(text: $reply, placeholder: "Reply", minHeight: 50).frame(maxHeight: 120)
+                                ComposerBox(text: reply, placeholder: "Reply", minHeight: 50).frame(maxHeight: 120)
                                 HStack {
-                                    Button("Cancel") { replying = false; reply = "" }
+                                    Button("Cancel") { model.replyDrafts[thread.id] = nil }
+                                    if !thread.isResolved, thread.viewerCanResolve {
+                                        Button("Reply and resolve") {
+                                            let body = reply.wrappedValue
+                                            Task {
+                                                if await model.reply(thread.id, body: body) {
+                                                    model.replyDrafts[thread.id] = nil
+                                                    await model.setResolved(thread.id, true)
+                                                }
+                                            }
+                                        }
+                                        .disabled(reply.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy)
+                                    }
                                     Button("Reply") {
-                                        let body = reply
-                                        Task { if await model.reply(thread.id, body: body) { reply = ""; replying = false } }
+                                        let body = reply.wrappedValue
+                                        Task { if await model.reply(thread.id, body: body) { model.replyDrafts[thread.id] = nil } }
                                     }
                                     .buttonStyle(.borderedProminent)
                                     .keyboardShortcut(.return, modifiers: .command)
-                                    .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy)
+                                    .disabled(reply.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy)
                                 }
                                 .controlSize(.small)
                             }
                             .padding(8)
                         } else {
-                            Button("Reply…") { replying = true }
+                            Button("Reply…") { model.replyDrafts[thread.id] = "" }
                                 .buttonStyle(.borderless)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
@@ -586,18 +620,25 @@ struct PendingCommentView: View {
 }
 
 struct InlineComposer: View {
-    let model: PRDetailModel
+    @Bindable var model: PRDetailModel
     let anchor: DiffAnchor
-    @State private var text = ""
     @FocusState private var focused: Bool
+    @State private var confirmDiscard = false
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
-            ComposerBox(text: $text, placeholder: "Comment on line \(anchor.line) (Markdown)", minHeight: 70)
+            ComposerBox(text: $model.composerDraft, placeholder: "Comment on line \(anchor.line) (Markdown)", minHeight: 70)
                 .frame(maxHeight: 160)
                 .focused($focused)
             HStack {
-                Button("Cancel") { model.composer = nil }.keyboardShortcut(.cancelAction)
+                Button("Cancel") {
+                    if empty { cancel() } else { confirmDiscard = true }
+                }
+                .keyboardShortcut(.cancelAction)
+                .confirmationDialog("Discard this comment?", isPresented: $confirmDiscard) {
+                    Button("Discard", role: .destructive) { cancel() }
+                    Button("Keep editing", role: .cancel) {}
+                }
                 Spacer()
                 Button("Add to review") { submit(immediately: false) }
                     .keyboardShortcut(.return, modifiers: .command)
@@ -619,10 +660,15 @@ struct InlineComposer: View {
         .onAppear { focused = true }
     }
 
-    private var empty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var empty: Bool { model.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    private func cancel() {
+        model.composerDraft = ""
+        model.composer = nil
+    }
 
     private func submit(immediately: Bool) {
-        let body = text
+        let body = model.composerDraft
         Task { _ = await model.addInline(anchor, body: body, immediately: immediately) }
     }
 }

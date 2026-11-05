@@ -23,6 +23,11 @@ enum DiffTableRow {
         if case .view(_, let group, _) = self { return group }
         return false
     }
+
+    var isThread: Bool {
+        guard case .view(let id, false, _) = self, id.hasPrefix("r:"), let last = id.split(separator: ":").last else { return false }
+        return last.hasPrefix("t")
+    }
 }
 
 private enum DiffStyle {
@@ -148,6 +153,38 @@ final class DiffLineCell: NSView {
     weak var state: DiffRenderState?
 
     override var isFlipped: Bool { true }
+
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .staticText }
+
+    override func accessibilityLabel() -> String? {
+        if isSplit {
+            let parts = [left.map { "Old: " + Self.spoken($0) }, right.map { "New: " + Self.spoken($0) }].compactMap { $0 }
+            return parts.joined(separator: ". ")
+        }
+        return line.map(Self.spoken)
+    }
+
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        guard commentable else { return nil }
+        let targets = (isSplit ? [left, right] : [line]).compactMap { $0 }.filter(\.commentable)
+        return targets.map { target in
+            NSAccessibilityCustomAction(name: "Comment on line \(target.anchorLine ?? 0)") { [weak self] in
+                self?.onComment?(target)
+                return true
+            }
+        }
+    }
+
+    private static func spoken(_ line: DiffLine) -> String {
+        switch line.kind {
+        case .add: return "Added line \(line.newLine ?? 0): \(line.text)"
+        case .del: return "Removed line \(line.oldLine ?? 0): \(line.text)"
+        case .context: return "Line \(line.newLine ?? line.oldLine ?? 0): \(line.text)"
+        case .hunk: return "Hunk \(line.text)"
+        case .meta: return line.text
+        }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         if isSplit {
@@ -398,6 +435,7 @@ final class DiffNavigator {
 
     func currentGroupID() -> String? { coordinator?.currentGroupID() }
     func jumpHunk(_ step: Int) { coordinator?.jump(step, where: \.isHunk) }
+    func jumpThread(_ step: Int) { coordinator?.jump(step, where: \.isThread) }
     func scroll(to id: String) { coordinator?.scroll(to: id, remember: true) }
 }
 
@@ -499,7 +537,7 @@ struct DiffTableView: NSViewRepresentable {
         private var widthSettle: DispatchWorkItem?
         private var onKey: ((String) -> Bool)?
         private var keyMonitor: Any?
-        private static let reviewKeys: Set<String> = ["n", "p", "[", "]", "v", "w", "s"]
+        private static let reviewKeys: Set<String> = ["n", "p", "[", "]", "v", "w", "s", "c", "C"]
 
         deinit {
             if let widthObserver { NotificationCenter.default.removeObserver(widthObserver) }

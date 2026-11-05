@@ -67,7 +67,7 @@ struct NotificationsView: View {
         .onChange(of: selection) { _, id in
             guard let id, let n = items.first(where: { $0.id == id }) else { return }
             if let route = n.route { app.select(route) } else { openInBrowser(n.webURL) }
-            if n.unread { Task { await markRead(n) } }
+            if n.unread { Task { await markRead(n, quiet: true) } }
         }
     }
 
@@ -114,9 +114,12 @@ struct NotificationsView: View {
         }
     }
 
-    private func markRead(_ n: NotificationThread) async {
+    private func markRead(_ n: NotificationThread, quiet: Bool = false) async {
         guard let api = app.api else { return }
-        try? await api.markNotificationRead(n.id)
+        do { try await api.markNotificationRead(n.id) } catch {
+            if !quiet, !isCancellation(error) { app.showToast("Couldn’t mark as read: \(error.localizedDescription)", isError: true) }
+            return
+        }
         if let i = items.firstIndex(where: { $0.id == n.id }) { items[i].unread = false }
         app.unreadCount = max(0, app.unreadCount - 1)
         persistChange()
@@ -130,7 +133,10 @@ struct NotificationsView: View {
 
     private func markDone(_ n: NotificationThread) async {
         guard let api = app.api else { return }
-        try? await api.markNotificationDone(n.id)
+        do { try await api.markNotificationDone(n.id) } catch {
+            if !isCancellation(error) { app.showToast("Couldn’t mark as done: \(error.localizedDescription)", isError: true) }
+            return
+        }
         items.removeAll { $0.id == n.id }
         if n.unread { app.unreadCount = max(0, app.unreadCount - 1) }
         persistChange()
@@ -138,7 +144,10 @@ struct NotificationsView: View {
 
     private func markAll() async {
         guard let api = app.api else { return }
-        try? await api.markAllNotificationsRead()
+        do { try await api.markAllNotificationsRead() } catch {
+            if !isCancellation(error) { app.showToast("Couldn’t mark all as read: \(error.localizedDescription)", isError: true) }
+            return
+        }
         for i in items.indices { items[i].unread = false }
         app.unreadCount = 0
         persistChange()

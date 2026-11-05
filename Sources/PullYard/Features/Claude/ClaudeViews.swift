@@ -154,6 +154,9 @@ struct ClaudeProjectsColumn: View {
                     .modifier(HoverHighlight(radius: 6))
                     .contentShape(Rectangle())
                     .onTapGesture { ws.selectedTabID = tab.id }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(ws.selectedTabID == tab.id ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityAction { ws.selectedTabID = tab.id }
                     .contextMenu {
                         if tab.running {
                             Button("Free memory (sleep)") { tab.sleepNow() }
@@ -161,7 +164,7 @@ struct ClaudeProjectsColumn: View {
                         } else {
                             Button("Wake up") { ws.restart(tab) }
                         }
-                        Button("Close") { ws.close(tab) }
+                        Button("Close") { ws.requestClose(tab) }
                     }
                     .transition(.opacity)
             }
@@ -468,6 +471,8 @@ struct SessionStateGlyph: View {
             }
         }
         .frame(width: 12, height: 12)
+        .help(state.help)
+        .accessibilityLabel(state.title)
     }
 }
 
@@ -681,18 +686,22 @@ struct ClaudeTabBar: View {
                         SessionStateGlyph(state: tab.state)
                         Text(tab.title).lineLimit(1).frame(maxWidth: 180, alignment: .leading).foregroundStyle(selected ? Color.syText : Color.syMuted)
                         Text(tab.projectName).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
-                        Button { ws.close(tab) } label: { Image(systemName: "xmark").font(.syCaption2.weight(.bold)) }
+                        Button { ws.requestClose(tab) } label: { Image(systemName: "xmark").font(.syCaption2.weight(.bold)).frame(width: 16, height: 16).contentShape(Rectangle()) }
                             .buttonStyle(.borderless)
-                            .foregroundStyle(Color.syDim)
-                            .help("Close")
-                            .accessibilityLabel("Close")
+                            .foregroundStyle(Color.syMuted)
+                            .help("Close \(tab.title)")
+                            .accessibilityLabel("Close \(tab.title)")
                     }
                     .font(.syCallout)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.syText.opacity(0.08) : Color.clear))
+                    .background(RoundedRectangle(cornerRadius: Radius.m).fill(selected ? Color.sySelected : Color.clear))
                     .contentShape(Rectangle())
                     .onTapGesture { ws.selectedTabID = tab.id }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("\(tab.title), \(tab.projectName), \(tab.state.title)")
+                    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityAction { ws.selectedTabID = tab.id }
                 }
                 Menu {
                     if let current = ws.selectedTab {

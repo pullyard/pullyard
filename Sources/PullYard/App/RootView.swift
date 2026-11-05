@@ -63,6 +63,16 @@ struct MainView: View {
             .modifier(BrandToolbar())
             .sheet(isPresented: $app.showOpenLink) { OpenLinkSheet() }
             .sheet(isPresented: $app.showQuickOpen) { AgentQuickOpen().environment(app) }
+            .confirmationDialog(
+                "Close “\(app.claude.pendingClose?.title ?? "")”?",
+                isPresented: Binding(get: { app.claude.pendingClose != nil }, set: { if !$0 { app.claude.pendingClose = nil } }),
+                presenting: app.claude.pendingClose
+            ) { tab in
+                Button("Stop and close", role: .destructive) { app.claude.close(tab) }
+                Button("Cancel", role: .cancel) {}
+            } message: { tab in
+                Text(tab.state == .waiting ? "The agent is waiting for your answer. Closing stops the session." : "The agent is still working. Closing stops it mid-task; you can resume the session later from history.")
+            }
             .overlay(alignment: .bottom) {
                 VStack(spacing: 8) {
                     ToastBanner()
@@ -88,30 +98,47 @@ struct AppShell: View {
     @Environment(AppModel.self) private var app
     @AppStorage("agents.sidebarHidden") private var hidden = false
     @AppStorage("shell.listWidth") private var listWidth: Double = 360
+    @State private var windowWidth: CGFloat = 0
+
+    static let compactBelow: CGFloat = 1180
+    static let sidebarWidth: CGFloat = 220
+    static let railWidth: CGFloat = 60
+
+    private var compact: Bool { windowWidth > 0 && windowWidth < Self.compactBelow }
+    private var sidebarWidth: CGFloat { compact ? Self.railWidth : Self.sidebarWidth }
+    private var effectiveListWidth: Double { compact ? min(listWidth, 320) : listWidth }
 
     var body: some View {
         HStack(spacing: 0) {
             if !hidden {
                 HStack(spacing: 0) {
-                    SidebarView()
-                        .frame(width: 220)
+                    SidebarView(compact: compact)
+                        .frame(width: sidebarWidth)
                         .surface(.sidebar)
                     Rectangle().fill(Color.syLine).frame(width: 1)
                     ContentColumn()
-                        .frame(width: listWidth)
+                        .frame(width: effectiveListWidth)
                         .frame(maxHeight: .infinity)
                         .surface(.list)
-                    ColumnResizeHandle(width: $listWidth, range: 280...560, edge: .leading)
+                    ColumnResizeHandle(width: $listWidth, range: 280...(compact ? 320 : 560), edge: .leading, reset: compact ? 320 : 360)
                 }
-                .frame(width: 222 + listWidth)
+                .frame(width: sidebarWidth + 2 + effectiveListWidth)
             }
             DetailColumn()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .edgeReveal(.leading, enabled: hidden, width: 221 + listWidth) {
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { windowWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, w in windowWidth = w }
+            }
+        }
+        .animation(Motion.smooth, value: compact)
+        .edgeReveal(.leading, enabled: hidden, width: Self.sidebarWidth + 1 + listWidth) {
             HStack(spacing: 0) {
                 SidebarView()
-                    .frame(width: 220)
+                    .frame(width: Self.sidebarWidth)
                     .surface(.sidebar)
                 Rectangle().fill(Color.syLine).frame(width: 1)
                 ContentColumn()
@@ -153,7 +180,7 @@ struct DetailColumn: View {
                                 IconTile(systemImage: "arrow.triangle.pull", color: .syViolet, size: 56)
                                     .opacity(0.9)
                                 Text("Select a pull request, issue or project").foregroundStyle(Color.syMuted)
-                                Text("⌘L — open by link").font(.syCaption).foregroundStyle(Color.syDim)
+                                Text("⌘L to open by link · ⌘K for the command palette").font(.syCaption).foregroundStyle(Color.syMuted)
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .transition(.opacity)
@@ -171,10 +198,11 @@ struct SidebarToggleButton: View {
     @Binding var hidden: Bool
 
     var body: some View {
-        Button { hidden.toggle() } label: {
-            Label("Toggle sidebar", systemImage: "sidebar.left")
+        Button { withAnimation(Motion.smooth) { hidden.toggle() } } label: {
+            Label(hidden ? "Show sidebar" : "Hide sidebar", systemImage: "sidebar.left")
         }
-        .help("Toggle sidebar")
+        .keyboardShortcut("s", modifiers: [.control, .command])
+        .help(hidden ? "Show sidebar (⌃⌘S)" : "Hide sidebar (⌃⌘S)")
     }
 }
 
@@ -246,6 +274,7 @@ struct RouteView: View {
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var app
+    var compact = false
 
     var body: some View {
         List {
@@ -259,10 +288,11 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .environment(\.sidebarCompact, compact)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
                 if let version = Updater.shared.availableVersion {
-                    UpdateAvailableRow(version: version)
+                    UpdateAvailableRow(version: version, compact: compact)
                 }
                 userFooter
             }
@@ -324,9 +354,9 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var userFooter: some View {
-        if app.user != nil {
-            AccountSwitcherFooter()
-                .padding(10)
+        if app.user != nil || app.account != nil {
+            AccountSwitcherFooter(compact: compact)
+                .padding(compact ? Space.m : 10)
                 .background(Theme.isBrand ? AnyShapeStyle(Color.sySidebar) : AnyShapeStyle(.clear))
                 .overlay(alignment: .top) { if Theme.isBrand { Rectangle().fill(Color.syLine).frame(height: 1) } }
         }
@@ -335,14 +365,17 @@ struct SidebarView: View {
 
 struct UpdateAvailableRow: View {
     let version: String
+    var compact = false
 
     var body: some View {
         Button { Updater.shared.present() } label: {
             HStack(spacing: 8) {
                 Image(systemName: "arrow.down.circle.fill").foregroundStyle(Color.sySky)
-                Text("Update to \(version)").foregroundStyle(Color.syText)
-                Spacer()
-                Image(systemName: "chevron.right").font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syDim)
+                if !compact {
+                    Text("Update to \(version)").foregroundStyle(Color.syText)
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syDim)
+                }
             }
             .font(.syCallout.weight(.medium))
             .padding(.horizontal, 10)
@@ -353,7 +386,8 @@ struct UpdateAvailableRow: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
-        .help("A new version of PullYard is available")
+        .help("Update to PullYard \(version)")
+        .accessibilityLabel("Update to PullYard \(version)")
     }
 }
 
@@ -372,17 +406,35 @@ struct SidebarGroup<Content: View>: View {
         self.content = content()
     }
 
+    @Environment(\.sidebarCompact) private var compact
+
     var body: some View {
         Section {
             content
         } header: {
-            title.font(.sySubheadline.weight(.semibold))
+            if compact {
+                Rectangle().fill(Color.syLine).frame(height: 1).padding(.horizontal, Space.s).accessibilityHidden(true)
+            } else {
+                title.font(.sySubheadline.weight(.semibold))
+            }
         }
+    }
+}
+
+private struct SidebarCompactKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var sidebarCompact: Bool {
+        get { self[SidebarCompactKey.self] }
+        set { self[SidebarCompactKey.self] = newValue }
     }
 }
 
 struct SidebarRow: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.sidebarCompact) private var compact
     let section: SidebarSection
     let title: String
     let icon: String
@@ -392,34 +444,59 @@ struct SidebarRow: View {
 
     var body: some View {
         let selected = app.section == section
-        HStack(spacing: 8) {
-            SidebarIcon(systemImage: icon, color: color)
-            Text(title)
-                .font(.syBody)
-                .foregroundStyle(Color.syText)
-                .fontWeight(selected ? .medium : .regular)
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            if count > 0 {
-                Text("\(count)").font(.syCallout.monospacedDigit()).foregroundStyle(Color.syMuted)
+        Button { app.section = section } label: {
+            Group {
+                if compact {
+                    SidebarIcon(systemImage: icon, color: color)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, Space.xs)
+                        .overlay(alignment: .topTrailing) {
+                            if count > 0 {
+                                Text(count > 99 ? "99+" : "\(count)")
+                                    .font(.syCaption2.monospacedDigit().weight(.semibold))
+                                    .foregroundStyle(Color.syOnAccent)
+                                    .lineLimit(1)
+                                    .fixedSize()
+                                    .padding(.horizontal, 4)
+                                    .background(Capsule().fill(Color.syAccentFill))
+                                    .offset(x: 2, y: -3)
+                            }
+                        }
+                } else {
+                    HStack(spacing: 8) {
+                        SidebarIcon(systemImage: icon, color: color)
+                        Text(title)
+                            .font(.syBody)
+                            .foregroundStyle(Color.syText)
+                            .fontWeight(selected ? .medium : .regular)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        if count > 0 {
+                            Text("\(count)").font(.syCallout.monospacedDigit()).foregroundStyle(Color.syMuted)
+                        }
+                    }
+                    .padding(.leading, Space.m)
+                    .padding(.trailing, Space.m)
+                    .padding(.vertical, 5)
+                }
             }
-        }
-        .padding(.leading, 9)
-        .padding(.trailing, 8)
-        .padding(.vertical, 5)
-        .background {
-            ZStack(alignment: .leading) {
-                Color.syText.opacity(selected ? 0.06 : hovering ? 0.035 : 0)
-                if selected { color.frame(width: 3) }
+            .background {
+                ZStack(alignment: .leading) {
+                    selected ? Color.sySelected : hovering ? Color.syHover : Color.clear
+                    if selected { color.frame(width: 3) }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: Radius.m - 1))
             }
-            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .contentShape(Rectangle())
         }
-        .contentShape(Rectangle())
-        .onTapGesture { app.section = section }
+        .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .animation(Motion.fade, value: selected)
         .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .help(compact ? (count > 0 ? "\(title) (\(count))" : title) : "")
+        .accessibilityLabel(title)
+        .accessibilityValue(count > 0 ? "\(count)" : "")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -429,9 +506,10 @@ struct SidebarIcon: View {
 
     var body: some View {
         Image(systemName: systemImage.hasSuffix(".fill") ? String(systemImage.dropLast(5)) : systemImage)
-            .font(.system(size: 10.5, weight: .semibold))
+            .font(.syIcon(10.5))
             .foregroundStyle(color)
             .frame(width: 21, height: 21)
+            .accessibilityHidden(true)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.syText.opacity(0.05)))
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
@@ -555,14 +633,26 @@ struct OpenLinkSheet: View {
 
     var body: some View {
         SheetFrame(title: "Open by link") {
+            if app.forge != nil {
+                Label("Opening links works with GitHub accounts. \(app.provider.title) \(app.provider.requestTitle)s open from the lists in the sidebar.", systemImage: "info.circle")
+                    .font(.syCallout)
+                    .foregroundStyle(Color.syMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             TextField("https://github.com/org/repo/pull/123 or org/repo#123", text: $text)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(open)
-            if invalid { Text("Couldn't recognize the link").font(.syCaption).foregroundStyle(.red) }
+                .disabled(app.forge != nil)
+                .accessibilityLabel("Link")
+            if invalid {
+                Label("Couldn’t recognize the link. Paste a GitHub pull request, issue, commit or repository URL.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syRed)
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Open", action: open).buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                Button("Open", action: open).buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(app.forge != nil)
             }
         }
         .onAppear {
@@ -571,6 +661,7 @@ struct OpenLinkSheet: View {
     }
 
     private func open() {
+        guard app.forge == nil else { return }
         guard let r = GitHubURL.parse(text) else {
             invalid = true
             return

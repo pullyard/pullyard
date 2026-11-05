@@ -51,6 +51,8 @@ final class PRDetailModel {
     var refreshError: String?
     var error: String?
     var actionError: String?
+    var sheetDepth = 0
+    var deferredError: String?
     var busy = false
     var tab: PRTab = .conversation {
         didSet {
@@ -103,6 +105,8 @@ final class PRDetailModel {
     var scrollToken = 0
     var pending: [PendingComment] = []
     var composer: DiffAnchor?
+    var composerDraft = ""
+    var replyDrafts: [String: String] = [:]
     var replyThread: ReviewThread?
 
     @ObservationIgnored private(set) var flatCacheKey = ""
@@ -515,11 +519,15 @@ final class PRDetailModel {
         if immediately {
             guard let pr else { return false }
             let ok = await run { try await api.addReview(pr: pr.id, event: "COMMENT", body: nil, comments: [c]) }
-            if ok { composer = nil }
+            if ok {
+                composer = nil
+                composerDraft = ""
+            }
             return ok
         }
         pending.append(c)
         composer = nil
+        composerDraft = ""
         return true
     }
 
@@ -534,12 +542,21 @@ final class PRDetailModel {
     func merge(method: String, title: String?, body: String?, deleteBranch: Bool) async -> Bool {
         guard let pr else { return false }
         invalidateStack()
-        return await run {
+        var branchError: String?
+        let ok = await run {
             try await api.mutate(Q.merge, ["id": pr.id, "m": method, "t": title, "b": body])
             if deleteBranch, let head = pr.headRepository?.nameWithOwner {
-                try? await api.deleteBranch(repo: head, branch: pr.headRefName)
+                do {
+                    try await api.deleteBranch(repo: head, branch: pr.headRefName)
+                } catch {
+                    branchError = error.localizedDescription
+                }
             }
         }
+        if ok, let branchError {
+            deferredError = "Merged, but the branch \(pr.headRefName) couldn’t be deleted: \(branchError)"
+        }
+        return ok
     }
 
     func enableAutoMerge(method: String) async -> Bool {
@@ -547,10 +564,11 @@ final class PRDetailModel {
         return await run { try await api.mutate(Q.enableAutoMerge, ["id": pr.id, "m": method]) }
     }
 
-    func simple(_ mutation: String) async {
-        guard let pr else { return }
+    @discardableResult
+    func simple(_ mutation: String) async -> Bool {
+        guard let pr else { return false }
         invalidateStack()
-        await run { try await api.mutate(mutation, ["id": pr.id]) }
+        return await run { try await api.mutate(mutation, ["id": pr.id]) }
     }
 
     func edit(title: String, body: String) async -> Bool {
@@ -567,21 +585,26 @@ final class PRDetailModel {
         await run { try await api.deleteBranch(repo: head, branch: pr.headRefName) }
     }
 
-    func toggleViewed(_ path: String) async {
+    func toggleViewed(_ path: String, scroll: Bool = true) async {
         guard let pr else { return }
         let viewed = viewedPaths.contains(path)
+        let wasCollapsed = collapsed.contains(path)
         if viewed {
             viewedPaths.remove(path)
         } else {
             viewedPaths.insert(path)
             collapsed.insert(path)
-            if tab == .files {
+            if scroll, tab == .files {
                 scrollTarget = path
                 scrollToken += 1
             }
         }
-        await run(reload: false) {
+        let ok = await run(reload: false) {
             try await api.mutate(viewed ? Q.unmarkViewed : Q.markViewed, ["id": pr.id, "p": path])
+        }
+        if !ok {
+            if viewed { viewedPaths.insert(path) } else { viewedPaths.remove(path) }
+            if !wasCollapsed { collapsed.remove(path) }
         }
     }
 

@@ -15,16 +15,62 @@ enum MergeMethod: String, CaseIterable, Identifiable {
 
 struct SheetFrame<Content: View>: View {
     let title: String
+    var model: PRDetailModel?
     @ViewBuilder let content: Content
 
+    init(title: String, model: PRDetailModel? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.model = model
+        self.content = content()
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.syTitle3.weight(.semibold))
+        VStack(alignment: .leading, spacing: Space.l) {
+            Text(title).font(.syTitle3.weight(.semibold)).accessibilityAddTraits(.isHeader)
+            if let error = model?.actionError {
+                SheetErrorRow(message: error) { model?.actionError = nil }
+            }
             content
         }
         .padding(20)
         .frame(width: 560)
         .surface(.panel)
+        .animation(Motion.fade, value: model?.actionError)
+        .onAppear {
+            model?.actionError = nil
+            model?.sheetDepth += 1
+        }
+        .onDisappear {
+            if let model {
+                model.sheetDepth = max(0, model.sheetDepth - 1)
+                if model.sheetDepth == 0, model.busy == false {
+                    model.actionError = model.deferredError
+                    model.deferredError = nil
+                }
+            }
+        }
+    }
+}
+
+struct SheetErrorRow: View {
+    let message: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Space.m) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.syRed).accessibilityHidden(true)
+            Text(message).font(.syCallout).foregroundStyle(Color.syText).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            Button { dismiss() } label: { Image(systemName: "xmark").font(.syCaption.weight(.semibold)) }
+                .buttonStyle(.borderless)
+                .help("Dismiss")
+                .accessibilityLabel("Dismiss error")
+        }
+        .padding(Space.m + 2)
+        .background(RoundedRectangle(cornerRadius: Radius.m).fill(Color.syRed.opacity(Tint.banner)))
+        .overlay(RoundedRectangle(cornerRadius: Radius.m).strokeBorder(Color.syRed.opacity(Tint.strong)))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Error: \(message)")
+        .onAppear { AccessibilityNotification.Announcement("Error: \(message)").post() }
     }
 }
 
@@ -34,9 +80,10 @@ struct ReviewSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @State private var event = "COMMENT"
+    @State private var confirmDiscard = false
 
     var body: some View {
-        SheetFrame(title: "Review #\(pr.number)") {
+        SheetFrame(title: "Review #\(pr.number)", model: model) {
             if !model.pending.isEmpty {
                 Label("Inline comments to be submitted: \(model.pending.count)", systemImage: "text.bubble")
                     .foregroundStyle(Color.syMuted)
@@ -52,7 +99,13 @@ struct ReviewSheet: View {
             .labelsHidden()
             HStack {
                 if !model.pending.isEmpty {
-                    Button("Discard pending comments", role: .destructive) { model.pending.removeAll() }
+                    Button("Discard pending comments", role: .destructive) { confirmDiscard = true }
+                        .confirmationDialog("Discard \(plural(model.pending.count, "pending comment", "pending comments"))?", isPresented: $confirmDiscard) {
+                            Button("Discard", role: .destructive) { model.pending.removeAll() }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("The inline comments you haven’t submitted yet will be lost.")
+                        }
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -89,7 +142,16 @@ struct MergeSheet: View {
     }
 
     var body: some View {
-        SheetFrame(title: "Merge #\(pr.number) into \(pr.baseRefName)") {
+        let readiness = MergeStatusBar.status(pr)
+        let blocked = !readiness.ready && pr.mergeStateStatus != nil && pr.mergeStateStatus != "UNKNOWN"
+        SheetFrame(title: "Merge #\(pr.number) into \(pr.baseRefName)", model: model) {
+            Label(readiness.text, systemImage: readiness.icon)
+                .font(.syCallout)
+                .foregroundStyle(readiness.ready ? Color.syText : readiness.color)
+                .padding(.horizontal, Space.m + 2)
+                .padding(.vertical, Space.s)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: Radius.m).fill(readiness.color.opacity(Tint.banner)))
             Picker("Method", selection: $method) {
                 ForEach(allowed) { Text($0.title).tag($0) }
             }
@@ -111,7 +173,7 @@ struct MergeSheet: View {
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Merge") {
+                Button(blocked ? "Merge anyway" : "Merge") {
                     let t = title.trimmingCharacters(in: .whitespaces)
                     let b = message.trimmingCharacters(in: .whitespacesAndNewlines)
                     let del = deleteBranch && !(model.repo?.deleteBranchOnMerge ?? false) && pr.headRepository?.nameWithOwner == model.ref.repo.full
@@ -120,7 +182,8 @@ struct MergeSheet: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Color.ghGreen)
+                .tint(blocked ? Color.syRedFill : Color.syGreenFill)
+                .help(blocked ? "GitHub may reject this merge: \(readiness.text)" : "Merge pull request")
                 .disabled(model.busy || allowed.isEmpty)
             }
         }
@@ -148,7 +211,7 @@ struct EditPRSheet: View {
     @State private var text = ""
 
     var body: some View {
-        SheetFrame(title: "Edit #\(pr.number)") {
+        SheetFrame(title: "Edit #\(pr.number)", model: model) {
             TextField("Title", text: $title).textFieldStyle(.roundedBorder)
             ComposerBox(text: $text, placeholder: "Description (Markdown)", minHeight: 260)
                 .frame(maxHeight: 420)
@@ -192,7 +255,7 @@ struct ReviewersSheet: View {
     }
 
     var body: some View {
-        SheetFrame(title: "Request review") {
+        SheetFrame(title: "Request review", model: model) {
             if !candidates.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Reviewers on this pull request").font(.syCaption).foregroundStyle(Color.syMuted)
@@ -236,7 +299,7 @@ struct ReplySheet: View {
     @State private var text = ""
 
     var body: some View {
-        SheetFrame(title: "Reply to thread") {
+        SheetFrame(title: "Reply to thread", model: model) {
             Text("\(thread.path)\(thread.line.map { ":\($0)" } ?? "")").font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
             if let last = thread.comments.nodes.last {
                 HStack(alignment: .top, spacing: 8) {
@@ -312,7 +375,10 @@ struct JobLogSheet: View {
         }
         .frame(width: 980, height: 640)
         .task {
-            guard let id = check.databaseId else { return }
+            guard let id = check.databaseId else {
+                error = "This check has no job log. Open it on GitHub to see its output."
+                return
+            }
             do {
                 let raw = try await api.jobLog(repo: repo, jobId: id)
                 log = await Task.detached { Self.clean(raw) }.value

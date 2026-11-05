@@ -14,11 +14,47 @@ struct SettingsView: View {
     @State private var pendingSwitch: GitAccount?
     @State private var confirmSignOut = false
     @State private var showLicenses = false
+    @AppStorage("settings.tab") private var tab = "general"
     @AppStorage(Updater.autoCheckKey) private var autoCheckUpdates = true
     @AppStorage(Diagnostics.enabledKey) private var diagnosticsEnabled = false
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        TabView(selection: $tab) {
+            generalForm
+                .tabItem { Label("General", systemImage: "gearshape") }
+                .tag("general")
+            accountsForm
+                .tabItem { Label("Accounts", systemImage: "person.crop.circle") }
+                .tag("accounts")
+            integrationsForm
+                .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
+                .tag("integrations")
+            advancedForm
+                .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
+                .tag("advanced")
+        }
+        .task { await ClaudeAccountStore.shared.refresh() }
+        .sheet(isPresented: $showAddProfile) { AddClaudeProfileSheet().environment(app) }
+        .sheet(isPresented: $showLicenses) { LicensesSheet() }
+        .modifier(AccountDialogs(pendingSwitch: $pendingSwitch, confirmSignOut: $confirmSignOut, showAdd: $showAddAccount))
+        .confirmationDialog("Sign out of Claude Code?", isPresented: $confirmClaudeLogout) {
+            Button("Sign out", role: .destructive) {
+                loggingOut = true
+                Task {
+                    app.claude.sleepAll()
+                    await ClaudeAccountStore.shared.logout()
+                    loggingOut = false
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This also signs out Claude Code in Terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Agents section.")
+        }
+        .frame(width: 560, height: 580)
+    }
+
+    private var generalForm: some View {
         Form {
             Section {
                 Picker("Theme", selection: $themeStyle) {
@@ -32,6 +68,51 @@ struct SettingsView: View {
             } header: {
                 SettingsHeader(title: "Appearance", icon: "paintpalette.fill", color: .syViolet)
             }
+            Section {
+                Picker("Open links in", selection: Binding(get: { LinkBrowser.selected }, set: { LinkBrowser.selected = $0; browserTick += 1 })) {
+                    Text("System default").tag(LinkBrowser.systemDefault)
+                    ForEach(LinkBrowser.installed) { Text($0.name).tag($0.id) }
+                }
+                .id(browserTick)
+            } header: {
+                SettingsHeader(title: "Links", icon: "link", color: .syIndigo)
+            }
+            Section {
+                Picker("Auto-refresh pull requests", selection: $pollInterval) {
+                    Text("Every 15 seconds").tag(15.0)
+                    Text("Every 30 seconds").tag(30.0)
+                    Text("Every minute").tag(60.0)
+                    Text("Every 2 minutes").tag(120.0)
+                    Text("Every 5 minutes").tag(300.0)
+                    Text("Every 15 minutes").tag(900.0)
+                }
+                .onChange(of: pollInterval) { app.startPolling() }
+            } header: {
+                SettingsHeader(title: "Refresh", icon: "arrow.clockwise", color: .syGreen)
+            }
+            NotificationSettingsSection()
+            Section {
+                Toggle("Check for updates automatically", isOn: $autoCheckUpdates)
+                HStack {
+                    Text("Current version \(Updater.shared.currentVersion)")
+                        .foregroundStyle(Color.syMuted)
+                    Spacer()
+                    Button("Check Now") {
+                        openWindow(id: "update")
+                        Task { await Updater.shared.check(userInitiated: true) }
+                    }
+                    .disabled(Updater.shared.isBusy)
+                }
+            } header: {
+                SettingsHeader(title: "Updates", icon: "arrow.down.circle", color: .syGreen)
+            }
+        }
+        .formStyle(.grouped)
+        .surface(.panel)
+    }
+
+    private var accountsForm: some View {
+        Form {
             Section {
                 if let u = app.user {
                     HStack(spacing: 10) {
@@ -68,29 +149,6 @@ struct SettingsView: View {
             } header: {
                 SettingsHeader(title: "Account", icon: "person.fill", color: .syTeal)
             }
-            Section {
-                Picker("Open links in", selection: Binding(get: { LinkBrowser.selected }, set: { LinkBrowser.selected = $0; browserTick += 1 })) {
-                    Text("System default").tag(LinkBrowser.systemDefault)
-                    ForEach(LinkBrowser.installed) { Text($0.name).tag($0.id) }
-                }
-                .id(browserTick)
-            } header: {
-                SettingsHeader(title: "Links", icon: "link", color: .syIndigo)
-            }
-            Section {
-                Picker("Auto-refresh pull requests", selection: $pollInterval) {
-                    Text("Every 15 seconds").tag(15.0)
-                    Text("Every 30 seconds").tag(30.0)
-                    Text("Every minute").tag(60.0)
-                    Text("Every 2 minutes").tag(120.0)
-                    Text("Every 5 minutes").tag(300.0)
-                    Text("Every 15 minutes").tag(900.0)
-                }
-                .onChange(of: pollInterval) { app.startPolling() }
-            } header: {
-                SettingsHeader(title: "Refresh", icon: "arrow.clockwise", color: .syGreen)
-            }
-            NotificationSettingsSection()
             if app.phase == .loggedIn {
                 Section {
                     HStack {
@@ -136,21 +194,25 @@ struct SettingsView: View {
                     SettingsHeader(title: "Agents", icon: "terminal.fill", color: .syCoral)
                 }
             }
+        }
+        .formStyle(.grouped)
+        .surface(.panel)
+    }
+
+    private var integrationsForm: some View {
+        Form {
             Section {
-                Toggle("Check for updates automatically", isOn: $autoCheckUpdates)
-                HStack {
-                    Text("Current version \(Updater.shared.currentVersion)")
-                        .foregroundStyle(Color.syMuted)
-                    Spacer()
-                    Button("Check Now") {
-                        openWindow(id: "update")
-                        Task { await Updater.shared.check(userInitiated: true) }
-                    }
-                    .disabled(Updater.shared.isBusy)
-                }
+                JiraConnectForm()
             } header: {
-                SettingsHeader(title: "Updates", icon: "arrow.down.circle", color: .syGreen)
+                SettingsHeader(title: "Jira", icon: "ticket", color: .sySky)
             }
+        }
+        .formStyle(.grouped)
+        .surface(.panel)
+    }
+
+    private var advancedForm: some View {
+        Form {
             Section {
                 Toggle("Record network diagnostics", isOn: $diagnosticsEnabled)
                     .onChange(of: diagnosticsEnabled) { Diagnostics.shared.setEnabled(diagnosticsEnabled) }
@@ -165,14 +227,9 @@ struct SettingsView: View {
                 SettingsHeader(title: "Diagnostics", icon: "gauge.with.dots.needle.33percent", color: .sySky)
             }
             Section {
-                JiraConnectForm()
-            } header: {
-                SettingsHeader(title: "Jira", icon: "ticket", color: .sySky)
-            }
-            Section {
                 TextField("Client ID", text: $clientID)
             } header: {
-                SettingsHeader(title: "OAuth Device Flow", icon: "key.fill", color: .syAmber)
+                SettingsHeader(title: "GitHub OAuth app (advanced)", icon: "key.fill", color: .syAmber)
             }
             Section {
                 HStack {
@@ -205,25 +262,6 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .surface(.panel)
-        .task { await ClaudeAccountStore.shared.refresh() }
-        .sheet(isPresented: $showAddProfile) { AddClaudeProfileSheet().environment(app) }
-        .sheet(isPresented: $showLicenses) { LicensesSheet() }
-        .modifier(AccountDialogs(pendingSwitch: $pendingSwitch, confirmSignOut: $confirmSignOut, showAdd: $showAddAccount))
-        .confirmationDialog("Sign out of Claude Code?", isPresented: $confirmClaudeLogout) {
-            Button("Sign out", role: .destructive) {
-                loggingOut = true
-                Task {
-                    app.claude.sleepAll()
-                    await ClaudeAccountStore.shared.logout()
-                    loggingOut = false
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This also signs out Claude Code in Terminal. Open sessions will go to sleep. You can sign in again (including with another account) here or in the Agents section.")
-        }
-        .frame(width: 500, height: 560)
-        .padding(.vertical, 10)
     }
 }
 
