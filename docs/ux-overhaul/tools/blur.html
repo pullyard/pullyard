@@ -1,0 +1,4 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>blur</title>
+<style>html,body{margin:0;background:#000}div{position:relative;width:100vw;height:100vh;overflow:hidden}img{width:100%;display:block}div::after{content:"";position:absolute;left:16%;top:7%;right:0;bottom:0;backdrop-filter:blur(14px);background:rgba(15,21,34,.2)}</style></head>
+<body><div><img id="i"></div><script>i.src=new URLSearchParams(location.search).get("src")</script></body></html>
