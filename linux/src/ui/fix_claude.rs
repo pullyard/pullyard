@@ -13,6 +13,7 @@ use crate::ci_fix::{self, Details, Failure, PrInfo};
 use crate::claude::accounts;
 use crate::claude::launcher::{self, PermissionMode, Target};
 use crate::claude::workspace::Tab;
+use crate::claude::worktree;
 use crate::claude::TabState;
 use crate::fix_prompt::{self, FixOptions, FoundFixPrompt};
 use crate::{app, local_repo, settings, util};
@@ -182,6 +183,12 @@ struct State {
     launch: gtk::Button,
     target: Cell<Target>,
     suppress: Cell<bool>,
+    isolate: Cell<bool>,
+    launching: Cell<bool>,
+    worktree_row: gtk::Box,
+    worktree_existing: RefCell<Option<String>>,
+    worktree_removing: Cell<bool>,
+    worktree_error: RefCell<Option<String>>,
 }
 
 impl State {
@@ -228,8 +235,14 @@ impl State {
         self.launch.set_label(if target == Target::Copy { "Copy" } else { "Launch" });
         let loading = self.ci.as_ref().is_some_and(|c| c.loading());
         let empty = self.ci.as_ref().is_some_and(|c| c.selected.borrow().is_empty());
-        self.launch.set_sensitive(!p.trim().is_empty() && !loading && !empty && (target == Target::Copy || self.folder.borrow().is_some()));
-        self.launch.set_tooltip_text(if loading { Some("Collecting CI logs…") } else { None });
+        self.launch.set_sensitive(!self.launching.get() && !p.trim().is_empty() && !loading && !empty && (target == Target::Copy || self.folder.borrow().is_some()));
+        self.launch.set_tooltip_text(if loading {
+            Some("Collecting CI logs…")
+        } else if self.launching.get() {
+            Some("Preparing the worktree…")
+        } else {
+            None
+        });
         self.prompt_view.set_editable(!loading);
     }
 
@@ -321,6 +334,120 @@ impl State {
         });
         self.folder_row.append(&choose);
         self.update();
+        self.refresh_worktree();
+    }
+
+    fn refresh_worktree(self: &Rc<Self>) {
+        let Some(folder) = self.folder.borrow().clone() else {
+            *self.worktree_existing.borrow_mut() = None;
+            self.render_worktree();
+            return;
+        };
+        self.render_worktree();
+        let n = self.pr.number;
+        let w = Rc::downgrade(self);
+        crate::rt::spawn_local(async move {
+            let found = crate::rt::blocking(move || worktree::existing(&folder, n)).await;
+            if let Some(me) = w.upgrade() {
+                *me.worktree_existing.borrow_mut() = found;
+                me.render_worktree();
+            }
+        });
+    }
+
+    fn render_worktree(self: &Rc<Self>) {
+        clear(&self.worktree_row);
+        let folder = self.folder.borrow().clone();
+        let target = self.target.get();
+        let existing = self.worktree_existing.borrow().clone();
+        let top = hbox(8);
+        let check = gtk::CheckButton::with_label("Work in an isolated git worktree");
+        check.set_active(self.isolate.get());
+        check.set_sensitive(folder.is_some() && target != Target::Copy && !self.launching.get());
+        check.set_tooltip_text(Some(&format!("{} checks out the pull request in a separate worktree next to your clone, so your current branch and uncommitted changes stay untouched", crate::brand::APP_NAME)));
+        let w = Rc::downgrade(self);
+        check.connect_toggled(move |c| {
+            let on = c.is_active();
+            settings::update(|s| s.agent_fix_isolated_worktree = on);
+            if let Some(me) = w.upgrade() {
+                me.isolate.set(on);
+                let st = me.clone();
+                gtk::glib::idle_add_local_once(move || st.render_worktree());
+            }
+        });
+        top.append(&check);
+        top.append(&spacer());
+        if let Some(path) = existing.clone() {
+            let removing = self.worktree_removing.get();
+            let remove = button(if removing { "Removing…" } else { "Remove worktree" });
+            remove.set_sensitive(!removing && !self.launching.get());
+            remove.set_tooltip_text(Some(&format!("Delete {} and its local branch. Refuses if it has uncommitted changes", util::tilde(&path))));
+            let w = Rc::downgrade(self);
+            remove.connect_clicked(move |_| {
+                if let Some(me) = w.upgrade() {
+                    me.remove_worktree();
+                }
+            });
+            top.append(&remove);
+        }
+        self.worktree_row.append(&top);
+        if let (Some(f), true, true) = (folder, self.isolate.get(), target != Target::Copy) {
+            let n = self.pr.number;
+            self.worktree_row.append(&wrap_label(
+                &format!(
+                    "{} {} on branch {} at the pull request head. The checkout step in the prompt is replaced when it starts.",
+                    if existing.is_none() { "Creates" } else { "Reuses" },
+                    util::tilde(&worktree::path(&f, n)),
+                    worktree::branch(n)
+                ),
+                &["sy-muted", "sy-small"],
+            ));
+        }
+        if let Some(e) = self.worktree_error.borrow().clone() {
+            self.worktree_row.append(&wrap_label(&e, &["fg-red", "sy-small"]));
+        }
+    }
+
+    fn remove_worktree(self: &Rc<Self>) {
+        let Some(folder) = self.folder.borrow().clone() else { return };
+        self.worktree_removing.set(true);
+        *self.worktree_error.borrow_mut() = None;
+        self.render_worktree();
+        let n = self.pr.number;
+        let w = Rc::downgrade(self);
+        crate::rt::spawn_local(async move {
+            let res = crate::rt::blocking(move || worktree::remove(&folder, n)).await;
+            let Some(me) = w.upgrade() else { return };
+            me.worktree_removing.set(false);
+            if let Err(e) = res {
+                *me.worktree_error.borrow_mut() = Some(e);
+            }
+            me.refresh_worktree();
+        });
+    }
+
+    fn start(&self, dialog: &adw::Dialog, prompt: String, folder: Option<String>, target: Target, mode: PermissionMode, name: String) {
+        if target == Target::App {
+            if let Some(f) = folder {
+                let tab = app::get().claude.new_session(&f, Some(prompt), Some(name), None, None);
+                if self.ci.is_some() {
+                    CI_SESSIONS.with(|m| m.borrow_mut().insert(self.model.r.title(), Rc::downgrade(&tab)));
+                    app::get().claude.emit(crate::claude::workspace::WsEvent::TabState);
+                }
+                app::set_section(app::Section::Claude);
+                dialog.close();
+            }
+            return;
+        }
+        match launcher::launch(&prompt, folder.as_deref().unwrap_or(""), target, mode, &name, None, accounts::active_override().as_deref()) {
+            Ok(()) => {
+                if target == Target::Copy {
+                    app::toast("Prompt copied");
+                }
+                dialog.close();
+            }
+            Err(e) => dialogs::error(&e),
+        }
     }
 }
 
@@ -463,6 +590,7 @@ fn present(model: Rc<PrModel>, ci: Option<Rc<CiFix>>) -> Option<Rc<State>> {
     folder_row.add_css_class("sy-card-flat");
     pad(&folder_row, 8);
     let launch = tinted("Launch", "coral");
+    let worktree_row = vbox(4);
     let saved_target = Target::from_key(&settings::read(|s| s.claude_target.clone()));
     let target = if saved_target.available() { saved_target } else { Target::Copy };
     let threads: Vec<ReviewThread> = pr.review_threads.nodes.iter().filter(|t| !t.is_resolved).cloned().collect();
@@ -488,6 +616,12 @@ fn present(model: Rc<PrModel>, ci: Option<Rc<CiFix>>) -> Option<Rc<State>> {
         launch: launch.clone(),
         target: Cell::new(target),
         suppress: Cell::new(false),
+        isolate: Cell::new(settings::read(|s| s.agent_fix_isolated_worktree)),
+        launching: Cell::new(false),
+        worktree_row: worktree_row.clone(),
+        worktree_existing: RefCell::new(None),
+        worktree_removing: Cell::new(false),
+        worktree_error: RefCell::new(None),
     });
 
     let composed_box = vbox(4);
@@ -656,6 +790,7 @@ fn present(model: Rc<PrModel>, ci: Option<Rc<CiFix>>) -> Option<Rc<State>> {
     let st = state.clone();
     reset.connect_clicked(move |_| st.refresh_prompt());
     sheet.body.append(&folder_row);
+    sheet.body.append(&worktree_row);
 
     let targets: Vec<Target> = Target::ALL.into_iter().filter(|t| t.available()).collect();
     let names: Vec<&str> = targets.iter().map(|t| t.title()).collect();
@@ -676,6 +811,7 @@ fn present(model: Rc<PrModel>, ci: Option<Rc<CiFix>>) -> Option<Rc<State>> {
         settings::update(|s| s.claude_target = t.key().to_string());
         md.set_sensitive(t == Target::Terminal);
         st.update();
+        st.render_worktree();
     });
     mode_dd.connect_selected_notify(move |d| {
         let m = modes.get(d.selected() as usize).copied().unwrap_or(PermissionMode::Standard);
@@ -691,32 +827,44 @@ fn present(model: Rc<PrModel>, ci: Option<Rc<CiFix>>) -> Option<Rc<State>> {
     let d = sheet.dialog.clone();
     let st = state.clone();
     launch.connect_clicked(move |_| {
+        if st.launching.get() {
+            return;
+        }
         let prompt = st.prompt();
         let name = if st.ci.is_some() { format!("Fix CI on PR #{}: {}", st.pr.number, st.pr.title) } else { format!("Fix PR #{}: {}", st.pr.number, st.pr.title) };
         let folder = st.folder.borrow().clone();
         let target = st.target.get();
-        if target == Target::App {
-            if let Some(f) = folder {
-                let tab = app::get().claude.new_session(&f, Some(prompt), Some(name), None, None);
-                if st.ci.is_some() {
-                    CI_SESSIONS.with(|m| m.borrow_mut().insert(st.model.r.title(), Rc::downgrade(&tab)));
-                    app::get().claude.emit(crate::claude::workspace::WsEvent::TabState);
-                }
-                app::set_section(app::Section::Claude);
-                d.close();
-            }
-            return;
-        }
         let mode = modes.get(mode_dd.selected() as usize).copied().unwrap_or(PermissionMode::Standard);
-        match launcher::launch(&prompt, folder.as_deref().unwrap_or(""), target, mode, &name, None, accounts::active_override().as_deref()) {
-            Ok(()) => {
-                if target == Target::Copy {
-                    app::toast("Prompt copied");
+        let isolated = folder.clone().filter(|_| st.isolate.get() && target != Target::Copy);
+        let Some(clone) = isolated else {
+            return st.start(&d, prompt, folder, target, mode, name);
+        };
+        st.launching.set(true);
+        *st.worktree_error.borrow_mut() = None;
+        st.render_worktree();
+        st.update();
+        let me = st.clone();
+        let d = d.clone();
+        let repo = st.model.r.repo.clone();
+        let n = st.pr.number;
+        crate::rt::spawn_local(async move {
+            let res = crate::rt::blocking(move || worktree::prepare(&clone, &repo, n)).await;
+            me.launching.set(false);
+            match res {
+                Ok(wt) => {
+                    let adapted = worktree::adapt(&prompt, &wt, &me.pr, &me.model.r.repo);
+                    me.start(&d, adapted, Some(wt.path.clone()), target, mode, name);
+                    if !wt.reused {
+                        me.refresh_worktree();
+                    }
                 }
-                d.close();
+                Err(e) => {
+                    *me.worktree_error.borrow_mut() = Some(e);
+                    me.render_worktree();
+                }
             }
-            Err(e) => dialogs::error(&e),
-        }
+            me.update();
+        });
     });
     state.refresh_prompt();
     state.render_folder();
