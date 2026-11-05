@@ -468,7 +468,7 @@ pub fn run(_app: Rc<App>) {
     });
     step(next(400), "deep link", || app::get().handle_url(&format!("{}://section/repos", crate::brand::URL_SCHEME)));
     step(next(300), "gitlab account", || {
-        let caps = ForgeCapabilities { pull_filters: PrFilter::ALL.to_vec(), issue_filters: IssueFilter::ALL.to_vec(), inbox_title: Some("To-Do List"), repositories: true };
+        let caps = ForgeCapabilities { pull_filters: PrFilter::ALL.to_vec(), issue_filters: IssueFilter::ALL.to_vec(), inbox_title: Some("To-Do List"), repositories: true, ..Default::default() };
         app::set_smoke_forge(GitProvider::Gitlab, caps)
     });
     step(next(400), "forge item", || {
@@ -506,7 +506,7 @@ pub fn run(_app: Rc<App>) {
         crate::ui::accounts::menu();
     });
     step(next(300), "bitbucket account", || {
-        let caps = ForgeCapabilities { pull_filters: vec![PrFilter::ReviewRequested, PrFilter::Mine, PrFilter::Reviewed], issue_filters: vec![], inbox_title: None, repositories: true };
+        let caps = ForgeCapabilities { pull_filters: vec![PrFilter::ReviewRequested, PrFilter::Mine, PrFilter::Reviewed], issue_filters: vec![], inbox_title: None, repositories: true, ..Default::default() };
         app::set_smoke_forge(GitProvider::Bitbucket, caps)
     });
     step(next(300), "bitbucket repos", || app::set_section(Section::Repos));

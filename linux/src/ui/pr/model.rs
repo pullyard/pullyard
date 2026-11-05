@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use serde_json::json;
 
+use crate::api::code_owners::{CodeOwnersStatus, OwnershipSummary};
+use crate::api::merge_readiness::{self, MergeRequirement, RulesStatus};
 use crate::api::models::*;
 use crate::api::queries as q;
 use crate::api::{ApiError, ErrorKind, GitHubApi};
@@ -59,6 +61,7 @@ pub enum Change {
     Tab,
     Diff,
     ScrollBottom,
+    Rules,
     Reveal(String),
     ActionError(String),
 }
@@ -78,6 +81,8 @@ pub struct ReviewerInfo {
     pub login: String,
     pub avatar: Option<String>,
     pub state: String,
+    pub is_team: bool,
+    pub code_owner: bool,
 }
 
 pub struct PrModel {
@@ -118,6 +123,13 @@ pub struct PrModel {
     pub files_oid: RefCell<Option<String>>,
     merge_rechecks: Cell<u32>,
     recheck_pending: Cell<bool>,
+    pub rules_state: RefCell<RulesStatus>,
+    rules_key: RefCell<Option<String>>,
+    rules_fetched: Cell<Option<Instant>>,
+    pub code_owners: RefCell<CodeOwnersStatus>,
+    owners_key: RefCell<Option<String>>,
+    pub changed_paths: RefCell<Vec<String>>,
+    viewed_gen: Cell<u64>,
     pub changed: Signal<Change>,
 }
 
@@ -161,6 +173,13 @@ impl PrModel {
             files_oid: RefCell::new(None),
             merge_rechecks: Cell::new(0),
             recheck_pending: Cell::new(false),
+            rules_state: RefCell::new(RulesStatus::Loading),
+            rules_key: RefCell::new(None),
+            rules_fetched: Cell::new(None),
+            code_owners: RefCell::new(CodeOwnersStatus::Loading),
+            owners_key: RefCell::new(None),
+            changed_paths: RefCell::new(vec![]),
+            viewed_gen: Cell::new(0),
             changed: Signal::new(),
         })
     }
@@ -170,7 +189,8 @@ impl PrModel {
         let Some(mut repo) = resp.repository else { return };
         let Some(pr) = repo.pull_request.take() else { return };
         *self.html.borrow_mut() = conversation_html::render_pr(&pr, Look::current());
-        *self.viewed.borrow_mut() = pr.files.as_ref().map(|f| f.nodes.iter().filter(|v| v.viewer_viewed_state == "VIEWED").map(|v| v.path.clone()).collect()).unwrap_or_default();
+        *self.viewed.borrow_mut() = pr.files.as_ref().map(|f| f.viewed_paths()).unwrap_or_default();
+        *self.changed_paths.borrow_mut() = changed_paths(&pr);
         self.index_threads(&pr.review_threads.nodes);
         *self.files_oid.borrow_mut() = Some(pr.head_ref_oid.clone());
         *self.repo.borrow_mut() = Some(repo);
@@ -204,17 +224,124 @@ impl PrModel {
             .latest_opinionated_reviews
             .nodes
             .iter()
-            .filter_map(|r| r.author.as_ref().map(|a| ReviewerInfo { login: a.login.clone(), avatar: a.avatar_url.clone(), state: r.state.clone() }))
+            .filter_map(|r| r.author.as_ref().map(|a| ReviewerInfo { login: a.login.clone(), avatar: a.avatar_url.clone(), state: r.state.clone(), is_team: false, code_owner: false }))
             .collect();
         let done: HashSet<String> = result.iter().map(|r| r.login.clone()).collect();
         for req in &pr.review_requests.nodes {
             if let Some(r) = &req.requested_reviewer {
                 if !done.contains(&r.display()) {
-                    result.push(ReviewerInfo { login: r.display(), avatar: r.avatar_url.clone(), state: "PENDING".into() });
+                    result.push(ReviewerInfo { login: r.display(), avatar: r.avatar_url.clone(), state: "PENDING".into(), is_team: r.is_team(), code_owner: req.as_code_owner == Some(true) });
                 }
             }
         }
         result
+    }
+
+    pub fn requirements(&self) -> Vec<MergeRequirement> {
+        let pr = self.pr.borrow();
+        match pr.as_ref() {
+            Some(pr) => merge_readiness::requirements(pr, &self.rules_state.borrow()),
+            None => vec![],
+        }
+    }
+
+    pub fn ownership(&self) -> Option<OwnershipSummary> {
+        let pr = self.pr.borrow();
+        let owners = self.code_owners.borrow();
+        match (pr.as_ref(), &*owners) {
+            (Some(pr), CodeOwnersStatus::Loaded(o)) => Some(OwnershipSummary::build(o, &self.changed_paths.borrow(), pr)),
+            _ => None,
+        }
+    }
+
+    fn load_more_viewed(self: &Rc<Self>, cursor: Option<String>) {
+        let generation = self.viewed_gen.get() + 1;
+        self.viewed_gen.set(generation);
+        let Some(mut cursor) = cursor else { return };
+        let me = self.clone();
+        crate::rt::spawn_local(async move {
+            for _ in 0..30 {
+                let api = me.api.clone();
+                let r = me.r.clone();
+                let after = cursor.clone();
+                let res = crate::rt::run(async move { api.pull_request_files_page(&r, &after).await }).await;
+                if me.viewed_gen.get() != generation {
+                    return;
+                }
+                let Ok(Some(page)) = res else { return };
+                me.viewed.borrow_mut().extend(page.viewed_paths());
+                me.changed_paths.borrow_mut().extend(page.nodes.iter().map(|n| n.path.clone()));
+                match page.next_cursor() {
+                    Some(next) => cursor = next,
+                    None => break,
+                }
+            }
+            me.emit(Change::Diff);
+            if matches!(*me.code_owners.borrow(), CodeOwnersStatus::Loaded(_)) {
+                me.emit(Change::Rules);
+            }
+        });
+    }
+
+    fn load_code_owners(self: &Rc<Self>, base_oid: Option<String>) {
+        let Some(base) = base_oid else { return };
+        let key = format!("{}|{base}", self.r.repo.full());
+        if self.owners_key.borrow().as_deref() == Some(key.as_str()) {
+            return;
+        }
+        *self.owners_key.borrow_mut() = Some(key.clone());
+        let me = self.clone();
+        crate::rt::spawn_local(async move {
+            let api = me.api.clone();
+            let repo = me.r.repo.clone();
+            let res = crate::rt::run(async move { api.code_owners(&repo, &base).await }).await;
+            if me.owners_key.borrow().as_deref() != Some(key.as_str()) {
+                return;
+            }
+            match res {
+                Ok(Some(owners)) => *me.code_owners.borrow_mut() = CodeOwnersStatus::Loaded(owners),
+                Ok(None) => *me.code_owners.borrow_mut() = CodeOwnersStatus::Missing,
+                Err(_) => {
+                    *me.owners_key.borrow_mut() = None;
+                    *me.code_owners.borrow_mut() = CodeOwnersStatus::Failed;
+                }
+            }
+            me.emit(Change::Rules);
+        });
+    }
+
+    fn load_rules(self: &Rc<Self>, base: String, force: bool) {
+        let key = format!("{}|{base}", self.r.repo.full());
+        let fresh = self.rules_fetched.get().map(|t| t.elapsed() < Duration::from_secs(300)).unwrap_or(false);
+        let same = self.rules_key.borrow().as_deref() == Some(key.as_str());
+        if !force && same && (fresh || *self.rules_state.borrow() == RulesStatus::Loading) {
+            return;
+        }
+        if !same {
+            *self.rules_state.borrow_mut() = RulesStatus::Loading;
+        }
+        *self.rules_key.borrow_mut() = Some(key.clone());
+        self.rules_fetched.set(Some(Instant::now()));
+        let admin = self.repo.borrow().as_ref().and_then(|r| r.viewer_permission.clone()).as_deref() == Some("ADMIN");
+        let me = self.clone();
+        crate::rt::spawn_local(async move {
+            let api = me.api.clone();
+            let repo = me.r.repo.clone();
+            let res = crate::rt::run(async move { api.branch_rules(&repo, &base, admin).await }).await;
+            if me.rules_key.borrow().as_deref() != Some(key.as_str()) {
+                return;
+            }
+            match res {
+                Ok(rules) => *me.rules_state.borrow_mut() = RulesStatus::Loaded(rules),
+                Err(_) => {
+                    me.rules_fetched.set(None);
+                    if me.rules_state.borrow().rules().is_none() {
+                        *me.rules_state.borrow_mut() = RulesStatus::Failed;
+                    }
+                }
+            }
+            me.emit(Change::Rules);
+        });
     }
 
     pub fn stale_reviews(&self) -> Vec<(String, Option<usize>)> {
@@ -364,7 +491,11 @@ impl PrModel {
                 };
                 let html = conversation_html::render_pr(&pr, Look::current());
                 *self.html.borrow_mut() = html;
-                *self.viewed.borrow_mut() = pr.files.as_ref().map(|f| f.nodes.iter().filter(|v| v.viewer_viewed_state == "VIEWED").map(|v| v.path.clone()).collect()).unwrap_or_default();
+                *self.viewed.borrow_mut() = pr.files.as_ref().map(|f| f.viewed_paths()).unwrap_or_default();
+                let viewed_cursor = pr.files.as_ref().and_then(|f| f.next_cursor());
+                *self.changed_paths.borrow_mut() = changed_paths(&pr);
+                let base = pr.base_ref_name.clone();
+                let base_oid = pr.base_tip_oid().map(str::to_string);
                 self.index_threads(&pr.review_threads.nodes);
                 let head = pr.head_ref_oid.clone();
                 let stack_key = stack_cache_key(&pr);
@@ -380,6 +511,9 @@ impl PrModel {
                 self.last_updated.set(Some(Utc::now()));
                 self.last_full.set(Some(Instant::now()));
                 *self.preview.borrow_mut() = None;
+                self.load_more_viewed(viewed_cursor);
+                self.load_rules(base, reason == "refresh");
+                self.load_code_owners(base_oid);
                 self.emit(Change::Pr);
                 if self.stack_fresh.get() || self.stack_key.borrow().as_deref() != Some(stack_key.as_str()) {
                     let force = self.stack_fresh.replace(false);
@@ -772,4 +906,8 @@ impl PrModel {
 
 fn stack_cache_key(pr: &PullRequestDetail) -> String {
     format!("{}|{}|{}|{}|{}|{}", pr.number, pr.state, pr.is_draft, pr.head_repository.as_ref().map(|h| h.name_with_owner.as_str()).unwrap_or(""), pr.head_ref_name, pr.base_ref_name)
+}
+
+fn changed_paths(pr: &PullRequestDetail) -> Vec<String> {
+    pr.files.as_ref().map(|f| f.nodes.iter().map(|n| n.path.clone()).collect()).unwrap_or_default()
 }

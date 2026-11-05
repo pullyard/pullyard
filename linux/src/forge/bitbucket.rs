@@ -167,7 +167,7 @@ pub(super) async fn current_user(c: &ForgeClient) -> ApiResult<ForgeUser> {
 }
 
 pub(super) fn capabilities() -> ForgeCapabilities {
-    ForgeCapabilities { pull_filters: vec![PrFilter::ReviewRequested, PrFilter::Mine, PrFilter::Reviewed], issue_filters: vec![], inbox_title: None, repositories: true }
+    ForgeCapabilities { pull_filters: vec![PrFilter::ReviewRequested, PrFilter::Mine, PrFilter::Reviewed], issue_filters: vec![], inbox_title: None, repositories: true, ..Default::default() }
 }
 
 fn state_query(state: StateFilter) -> Query {

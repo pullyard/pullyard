@@ -766,7 +766,7 @@ impl PrDetail {
         self.body.append(&head);
         if pr.is_open() {
             let rr = self.r.clone();
-            if let Some(bar) = crate::ui::pr::merge_status_bar(m, &pr, Rc::new(move || app::open(Route::Pr(rr.clone()), false))) {
+            if let Some(bar) = crate::ui::pr::merge_status_bar(m, &pr, Rc::new(move || app::open(Route::Pr(rr.clone()), false)), None) {
                 self.body.append(&bar);
             }
             let rr = self.r.clone();

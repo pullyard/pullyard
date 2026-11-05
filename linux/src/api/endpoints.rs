@@ -4,6 +4,8 @@ use reqwest::Method;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use super::code_owners::{CodeOwners, CODE_OWNERS_PATHS};
+use super::merge_readiness::BranchRules;
 use super::models::*;
 use super::queries as q;
 use super::{ApiError, ApiResult, GitHubApi};
@@ -176,7 +178,75 @@ impl GitHubApi {
     }
 
     pub async fn pull_request(&self, r: &ItemRef) -> ApiResult<PrDetailResponse> {
-        self.graphql("pullRequest", &q::pull_request(), json!({ "owner": r.repo.owner, "name": r.repo.name, "number": r.number }), false).await
+        let vars = json!({ "owner": r.repo.owner, "name": r.repo.name, "number": r.number });
+        match self.graphql("pullRequest", &q::pull_request(), vars.clone(), false).await {
+            Err(e) if e.kind == super::ErrorKind::Schema => self.graphql("pullRequest", &q::pull_request_legacy(), vars, false).await,
+            other => other,
+        }
+    }
+
+    pub async fn pull_request_files_page(&self, r: &ItemRef, after: &str) -> ApiResult<Option<FileViewedPage>> {
+        #[derive(Deserialize)]
+        struct Pr {
+            files: Option<FileViewedPage>,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Repo {
+            pull_request: Option<Pr>,
+        }
+        #[derive(Deserialize)]
+        struct R {
+            repository: Option<Repo>,
+        }
+        let res: R = self.graphql("pullRequestFiles", q::PULL_REQUEST_FILES, json!({ "owner": r.repo.owner, "name": r.repo.name, "number": r.number, "after": after }), false).await?;
+        Ok(res.repository.and_then(|r| r.pull_request).and_then(|p| p.files))
+    }
+
+    pub async fn code_owners(&self, repo: &RepoRef, rev: &str) -> ApiResult<Option<CodeOwners>> {
+        #[derive(Deserialize)]
+        struct Blob {
+            #[serde(default)]
+            text: Option<String>,
+        }
+        #[derive(Deserialize)]
+        struct Repo {
+            #[serde(default)]
+            a: Option<Blob>,
+            #[serde(default)]
+            b: Option<Blob>,
+            #[serde(default)]
+            c: Option<Blob>,
+        }
+        #[derive(Deserialize)]
+        struct R {
+            repository: Option<Repo>,
+        }
+        let [pa, pb, pc] = CODE_OWNERS_PATHS;
+        let vars = json!({ "owner": repo.owner, "name": repo.name, "a": format!("{rev}:{pa}"), "b": format!("{rev}:{pb}"), "c": format!("{rev}:{pc}") });
+        let res: R = self.graphql("codeOwners", q::CODE_OWNERS, vars, false).await?;
+        let Some(r) = res.repository else { return Ok(None) };
+        Ok(CODE_OWNERS_PATHS.iter().zip([r.a, r.b, r.c]).find_map(|(path, blob)| blob.and_then(|b| b.text).map(|text| CodeOwners::parse(&text, path))))
+    }
+
+    pub async fn branch_rules(&self, repo: &RepoRef, branch: &str, admin: bool) -> ApiResult<BranchRules> {
+        let encoded: String = branch.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+        let rules = self.optional_rest(&format!("/repos/{}/rules/branches/{encoded}", repo.full())).await?;
+        let info = self.optional_rest(&format!("/repos/{}/branches/{encoded}", repo.full())).await?;
+        let protection = if admin && BranchRules::is_classic_protected(info.as_deref()) {
+            self.optional_rest(&format!("/repos/{}/branches/{encoded}/protection", repo.full())).await?
+        } else {
+            None
+        };
+        Ok(BranchRules::from_responses(rules.as_deref(), info.as_deref(), protection.as_deref()))
+    }
+
+    async fn optional_rest(&self, path: &str) -> ApiResult<Option<Vec<u8>>> {
+        match self.rest_raw(Method::GET, path, None).await {
+            Ok((data, _)) => Ok(Some(data)),
+            Err(e) if e.status == 403 || e.status == 404 => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     pub async fn pull_request_light(&self, r: &ItemRef) -> ApiResult<Option<PrLight>> {

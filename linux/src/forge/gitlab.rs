@@ -138,7 +138,7 @@ pub(super) async fn capabilities(c: &ForgeClient) -> ForgeCapabilities {
     if approval_filter_available(c).await {
         pull_filters.push(PrFilter::Reviewed);
     }
-    ForgeCapabilities { pull_filters, issue_filters: IssueFilter::ALL.to_vec(), inbox_title: Some("To-Do List"), repositories: true }
+    ForgeCapabilities { pull_filters, issue_filters: IssueFilter::ALL.to_vec(), inbox_title: Some("To-Do List"), repositories: true, ..Default::default() }
 }
 
 fn list_query() -> Query {
