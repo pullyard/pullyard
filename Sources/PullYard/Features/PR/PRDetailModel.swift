@@ -36,6 +36,14 @@ enum DiffRow: Identifiable {
     }
 }
 
+struct PRReviewer: Hashable {
+    let login: String
+    let avatar: String?
+    let state: String
+    var isTeam = false
+    var codeOwner = false
+}
+
 @Observable
 @MainActor
 final class PRDetailModel {
@@ -88,6 +96,13 @@ final class PRDetailModel {
     private static let manualRefreshGrace: TimeInterval = 20
     @ObservationIgnored private var mergeRecheck: Task<Void, Never>?
     @ObservationIgnored private var mergeRechecks = 0
+    var branchRules: RulesStatus = .loading
+    var codeOwners: CodeOwnersStatus = .loading
+    var changedPaths: [String] = []
+    @ObservationIgnored private var ownersKey: String?
+    @ObservationIgnored private var rulesKey: String?
+    @ObservationIgnored private var rulesFetched: Date?
+    @ObservationIgnored private var viewedLoad: Task<Void, Never>?
     var html = ""
     var scrollToBottomToken = 0
     var conflicts: ConflictState?
@@ -123,18 +138,28 @@ final class PRDetailModel {
 
     var canWrite: Bool { repo?.canWrite ?? false }
 
-    var reviewers: [(login: String, avatar: String?, state: String)] {
+    var reviewers: [PRReviewer] {
         guard let pr else { return [] }
-        var result: [(String, String?, String)] = pr.latestOpinionatedReviews.nodes.compactMap { r in
+        var result: [PRReviewer] = pr.latestOpinionatedReviews.nodes.compactMap { r in
             guard let a = r.author else { return nil }
-            return (a.login, a.avatarUrl, r.state)
+            return PRReviewer(login: a.login, avatar: a.avatarUrl, state: r.state)
         }
-        let done = Set(result.map(\.0))
+        let done = Set(result.map(\.login))
         for req in pr.reviewRequests.nodes {
             guard let r = req.requestedReviewer, !done.contains(r.display) else { continue }
-            result.append((r.display, r.avatarUrl, "PENDING"))
+            result.append(PRReviewer(login: r.display, avatar: r.avatarUrl, state: "PENDING", isTeam: r.isTeam, codeOwner: req.asCodeOwner == true))
         }
         return result
+    }
+
+    var ownership: OwnershipSummary? {
+        guard let pr, case .loaded(let owners) = codeOwners else { return nil }
+        return OwnershipSummary.build(owners: owners, files: changedPaths, pr: pr)
+    }
+
+    var requirements: [MergeRequirement] {
+        guard let pr else { return [] }
+        return MergeReadiness.requirements(pr, rules: branchRules)
     }
 
     var lastCommitDate: Date? { pr?.lastCommit.nodes.first?.commit.committedDate }
@@ -227,7 +252,11 @@ final class PRDetailModel {
             self.pr = pr
             updateConflicts(pr)
             renderHTML()
-            viewedPaths = Set(pr.files?.nodes.filter { $0.viewerViewedState == "VIEWED" }.map(\.path) ?? [])
+            viewedPaths = pr.files?.viewedPaths ?? []
+            changedPaths = pr.files?.nodes.map(\.path) ?? []
+            loadMoreViewed(after: pr.files?.nextCursor)
+            loadRules(pr, force: forced != nil && reason.hasPrefix("refresh"))
+            loadCodeOwners(pr)
             indexThreads(pr.reviewThreads.nodes)
             error = nil
             refreshError = nil
@@ -245,6 +274,64 @@ final class PRDetailModel {
         } catch {
             if isCancellation(error) { return }
             if pr == nil { self.error = error.localizedDescription } else { refreshError = error.localizedDescription }
+        }
+    }
+
+    private func loadMoreViewed(after cursor: String?) {
+        viewedLoad?.cancel()
+        guard let cursor else { return }
+        viewedLoad = Task { [weak self] in
+            var next: String? = cursor
+            var pages = 0
+            while let after = next, pages < 30 {
+                guard let self, !Task.isCancelled else { return }
+                guard let page = try? await self.api.pullRequestFilesPage(self.ref, after: after), !Task.isCancelled else { return }
+                self.viewedPaths.formUnion(page.viewedPaths)
+                self.changedPaths += page.nodes.map(\.path)
+                next = page.nextCursor
+                pages += 1
+            }
+        }
+    }
+
+    private func loadCodeOwners(_ pr: PullRequestDetail) {
+        guard let base = pr.baseTipOid else { return }
+        let key = "\(ref.repo.full)|\(base)"
+        guard key != ownersKey else { return }
+        ownersKey = key
+        Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            do {
+                let owners = try await self.api.codeOwners(self.ref.repo, ref: base)
+                guard self.ownersKey == key else { return }
+                self.codeOwners = owners.map { .loaded($0) } ?? .missing
+            } catch {
+                guard self.ownersKey == key, !isCancellation(error) else { return }
+                self.ownersKey = nil
+                self.codeOwners = .failed
+            }
+        }
+    }
+
+    private func loadRules(_ pr: PullRequestDetail, force: Bool) {
+        let key = "\(ref.repo.full)|\(pr.baseRefName)"
+        let fresh = rulesFetched.map { Date().timeIntervalSince($0) < 300 } ?? false
+        if !force, key == rulesKey, fresh || branchRules == .loading { return }
+        if key != rulesKey { branchRules = .loading }
+        rulesKey = key
+        rulesFetched = Date()
+        let admin = repo?.viewerPermission == "ADMIN"
+        Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            do {
+                let rules = try await self.api.branchRules(self.ref.repo, branch: pr.baseRefName, admin: admin)
+                guard self.rulesKey == key else { return }
+                self.branchRules = .loaded(rules)
+            } catch {
+                guard self.rulesKey == key, !isCancellation(error) else { return }
+                self.rulesFetched = nil
+                if self.branchRules.rules == nil { self.branchRules = .failed }
+            }
         }
     }
 

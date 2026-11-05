@@ -97,7 +97,56 @@ extension GitHubAPI {
     }
 
     func pullRequest(_ ref: ItemRef) async throws -> PRDetailResponse {
-        try await graphQL(Q.pullRequest, ["owner": ref.repo.owner, "name": ref.repo.name, "number": ref.number])
+        let vars: [String: Any?] = ["owner": ref.repo.owner, "name": ref.repo.name, "number": ref.number]
+        do {
+            return try await graphQL(Q.pullRequest, vars)
+        } catch let error as APIError where error.schemaError {
+            return try await graphQL(Q.pullRequestLegacy, vars)
+        }
+    }
+
+    func pullRequestFilesPage(_ ref: ItemRef, after: String) async throws -> FileViewedPage? {
+        struct R: Decodable {
+            struct PR: Decodable { let files: FileViewedPage? }
+            struct Repo: Decodable { let pullRequest: PR? }
+            let repository: Repo?
+        }
+        let r: R = try await graphQL(Q.pullRequestFiles, ["owner": ref.repo.owner, "name": ref.repo.name, "number": ref.number, "after": after])
+        return r.repository?.pullRequest?.files
+    }
+
+    func codeOwners(_ repo: RepoRef, ref: String) async throws -> CodeOwners? {
+        struct Blob: Decodable { let text: String?; let isTruncated: Bool? }
+        struct R: Decodable {
+            struct Repo: Decodable { let a: Blob?; let b: Blob?; let c: Blob? }
+            let repository: Repo?
+        }
+        let paths = CodeOwners.paths
+        let r: R = try await graphQL(Q.codeOwners, ["owner": repo.owner, "name": repo.name, "a": "\(ref):\(paths[0])", "b": "\(ref):\(paths[1])", "c": "\(ref):\(paths[2])"])
+        let blobs = [r.repository?.a, r.repository?.b, r.repository?.c]
+        for (path, blob) in zip(paths, blobs) {
+            if let text = blob?.text { return CodeOwners(text: text, path: path) }
+        }
+        return nil
+    }
+
+    func branchRules(_ repo: RepoRef, branch: String, admin: Bool) async throws -> BranchRules {
+        let encoded = branch.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._~"))) ?? branch
+        let rules = try await optionalREST("/repos/\(repo.full)/rules/branches/\(encoded)")
+        let info = try await optionalREST("/repos/\(repo.full)/branches/\(encoded)")
+        var protection: Data?
+        if admin, BranchRules.isClassicProtected(info) {
+            protection = try await optionalREST("/repos/\(repo.full)/branches/\(encoded)/protection")
+        }
+        return BranchRules.parse(rules: rules, branch: info, protection: protection)
+    }
+
+    private func optionalREST(_ path: String) async throws -> Data? {
+        do {
+            return try await restRaw("GET", path).0
+        } catch let error as APIError where [403, 404].contains(error.status) {
+            return nil
+        }
     }
 
     func pullRequestPulse(_ ref: ItemRef) async throws -> PRPulse? {

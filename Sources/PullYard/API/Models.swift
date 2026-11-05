@@ -187,14 +187,17 @@ struct Reviewer: Decodable, Hashable {
     let login: String?
     let avatarUrl: String?
     let name: String?
+    var combinedSlug: String? = nil
 
-    enum CodingKeys: String, CodingKey { case typename = "__typename", login, avatarUrl, name }
+    enum CodingKeys: String, CodingKey { case typename = "__typename", login, avatarUrl, name, combinedSlug }
 
-    var display: String { login ?? name ?? "?" }
+    var isTeam: Bool { typename == "Team" }
+    var display: String { login ?? combinedSlug ?? name ?? "?" }
 }
 
 struct ReviewRequest: Decodable {
     let requestedReviewer: Reviewer?
+    var asCodeOwner: Bool? = nil
 }
 
 struct ReviewCommit: Decodable {
@@ -239,9 +242,10 @@ struct CheckContext: Decodable, Identifiable {
     let state: String?
     let targetUrl: String?
     let description: String?
+    var isRequired: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
-        case typename = "__typename", databaseId, name, status, conclusion, detailsUrl, startedAt, completedAt, checkSuite, context, state, targetUrl, description
+        case typename = "__typename", databaseId, name, status, conclusion, detailsUrl, startedAt, completedAt, checkSuite, context, state, targetUrl, description, isRequired
     }
 
     var id: String { "\(typename)-\(databaseId.map(String.init) ?? context ?? name ?? UUID().uuidString)" }
@@ -313,6 +317,30 @@ struct CommitInfoNode: Decodable {
 struct FileViewed: Decodable {
     let path: String
     let viewerViewedState: String
+}
+
+struct FileViewedPage: Decodable {
+    var nodes: [FileViewed]
+    var totalCount: Int?
+    var pageInfo: PageInfo?
+
+    enum CodingKeys: String, CodingKey { case nodes, totalCount, pageInfo }
+
+    init(nodes: [FileViewed] = [], totalCount: Int? = nil, pageInfo: PageInfo? = nil) {
+        self.nodes = nodes
+        self.totalCount = totalCount
+        self.pageInfo = pageInfo
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        nodes = (try c.decodeIfPresent([FileViewed?].self, forKey: .nodes) ?? []).compactMap { $0 }
+        totalCount = try c.decodeIfPresent(Int.self, forKey: .totalCount)
+        pageInfo = try c.decodeIfPresent(PageInfo.self, forKey: .pageInfo)
+    }
+
+    var viewedPaths: Set<String> { Set(nodes.filter { $0.viewerViewedState == "VIEWED" }.map(\.path)) }
+    var nextCursor: String? { pageInfo?.hasNextPage == true ? pageInfo?.endCursor : nil }
 }
 
 struct XRefSource: Decodable {
@@ -429,7 +457,7 @@ struct PullRequestDetail: Decodable {
     let latestOpinionatedReviews: Nodes<LatestReview>
     let lastCommit: Nodes<LastCommitNode>
     let allCommits: Nodes<CommitInfoNode>
-    let files: Nodes<FileViewed>?
+    let files: FileViewedPage?
     let timelineItems: Nodes<TimelineItem>
     let reviewThreads: Nodes<ReviewThread>
 

@@ -142,7 +142,7 @@ struct MergeSheet: View {
     }
 
     var body: some View {
-        let readiness = MergeStatusBar.status(pr)
+        let readiness = MergeStatusBar.status(pr, requirements: model.requirements)
         let blocked = !readiness.ready && pr.mergeStateStatus != nil && pr.mergeStateStatus != "UNKNOWN"
         SheetFrame(title: "Merge #\(pr.number) into \(pr.baseRefName)", model: model) {
             Label(readiness.text, systemImage: readiness.icon)
@@ -241,17 +241,25 @@ struct ReviewersSheet: View {
     @State private var logins = ""
     @State private var selected: Set<String> = []
 
-    private var candidates: [(login: String, avatar: String?, state: String)] {
-        model.reviewers.filter { $0.login != model.viewerLogin && !$0.login.hasSuffix("[bot]") && !$0.login.contains("/") }
+    private var candidates: [PRReviewer] {
+        model.reviewers.filter { $0.login != model.viewerLogin && !$0.login.hasSuffix("[bot]") && ($0.isTeam || !$0.login.contains("/")) }
     }
 
     private var typed: [String] {
         logins.split(whereSeparator: { $0 == "," || $0 == " " }).map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "@ ")) }.filter { !$0.isEmpty }
     }
 
+    private var ownerSuggestions: [OwnerEntry] {
+        var exclude = Set(candidates.map { $0.login.lowercased() })
+        exclude.insert(model.viewerLogin.lowercased())
+        if let author = model.pr?.author?.login { exclude.insert(author.lowercased()) }
+        return model.ownership?.suggestions(excluding: exclude) ?? []
+    }
+
     private var requested: [String] {
         var seen = Set<String>()
-        return (candidates.map(\.login).filter(selected.contains) + typed).filter { seen.insert($0).inserted }
+        let picked = candidates.map(\.login) + ownerSuggestions.map(\.handle)
+        return (picked.filter(selected.contains) + typed).filter { seen.insert($0).inserted }
     }
 
     var body: some View {
@@ -264,6 +272,12 @@ struct ReviewersSheet: View {
                             HStack(spacing: 6) {
                                 ReviewerBadge(login: r.login, avatar: r.avatar, state: r.state)
                                 Text(r.login)
+                                if r.isTeam {
+                                    Text("team").font(.syCaption).foregroundStyle(Color.syMuted)
+                                }
+                                if r.codeOwner {
+                                    Text("code owner").font(.syCaption).foregroundStyle(Color.syViolet)
+                                }
                                 if model.reviewersToReRequest.contains(r.login) {
                                     Text("reviewed before latest push").font(.syCaption).foregroundStyle(Color.syAmber)
                                 } else if r.state == "PENDING" {
@@ -275,7 +289,24 @@ struct ReviewersSheet: View {
                     }
                 }
             }
-            TextField("Other logins, comma-separated, e.g. alice, bob", text: $logins).textFieldStyle(.roundedBorder)
+            if !ownerSuggestions.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Code owners of changed files").font(.syCaption).foregroundStyle(Color.syMuted)
+                    ForEach(ownerSuggestions, id: \.handle) { o in
+                        Toggle(isOn: Binding(get: { selected.contains(o.handle) }, set: { if $0 { selected.insert(o.handle) } else { selected.remove(o.handle) } })) {
+                            HStack(spacing: 6) {
+                                Text(o.handle)
+                                if o.isTeam {
+                                    Text("team").font(.syCaption).foregroundStyle(Color.syMuted)
+                                }
+                                Text("not requested").font(.syCaption).foregroundStyle(Color.syMuted)
+                            }
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
+            }
+            TextField("Other logins or teams, comma-separated, e.g. alice, org/team", text: $logins).textFieldStyle(.roundedBorder)
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)

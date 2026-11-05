@@ -53,6 +53,25 @@ enum SelfTest {
                     }
                     return "state=\(p.state) timeline=\(p.timelineItems.nodes.count) threads=\(p.reviewThreads.nodes.count) unresolved=\(unresolved.count) html=\(html.count) fixPrompt=\(fix.map { "@\($0.author) \($0.text.count)ch \(Fmt.rel($0.date))" } ?? "none") composed=\(composed.count)ch folder=\(folder)"
                 }
+                await step("merge readiness") {
+                    let r = try await api.pullRequest(pr)
+                    guard let repo = r.repository, let p = repo.pullRequest else { return "not a PR" }
+                    let rules = try await api.branchRules(pr.repo, branch: p.baseRefName, admin: repo.viewerPermission == "ADMIN")
+                    let list = MergeReadiness.requirements(p, rules: .loaded(rules))
+                    let headline = await MainActor.run { MergeStatusBar.status(p, requirements: list).text }
+                    let required = p.checks.filter { $0.isRequired == true }.map(\.title)
+                    let teams = p.reviewRequests.nodes.compactMap { $0.requestedReviewer }.filter(\.isTeam).map(\.display)
+                    let rows = list.map { "\($0.state) \($0.title)\($0.detail.map { " — \($0)" } ?? "")" }
+                    return "merge=\(p.mergeStateStatus ?? "-") decision=\(p.reviewDecision ?? "-") approvals=\(rules.requiredApprovals) reviewKnown=\(rules.reviewRulesKnown) checkKnown=\(rules.checkRulesKnown) ruleChecks=\(rules.requiredChecks.sorted()) isRequired=\(required) teams=\(teams) files=\(p.files?.nodes.count ?? 0)/\(p.files?.totalCount ?? 0) headline=\"\(headline)\"\n       " + rows.joined(separator: "\n       ")
+                }
+                await step("code owners") {
+                    let r = try await api.pullRequest(pr)
+                    guard let p = r.repository?.pullRequest, let base = p.baseTipOid else { return "no base" }
+                    guard let owners = try await api.codeOwners(pr.repo, ref: base) else { return "no CODEOWNERS" }
+                    let s = OwnershipSummary.build(owners: owners, files: p.files?.nodes.map(\.path) ?? [], pr: p)
+                    let groups = s.groups.map { g in g.owners.map { "\($0.handle)=\($0.status)" }.joined(separator: ",") + " (\(g.files.count))" }
+                    return "\(owners.path) rules=\(owners.rules.count) invalid=\(owners.invalidLines) groups=\(groups) unowned=\(s.unowned.count) suggest=\(s.suggestions(excluding: []).map(\.handle))"
+                }
                 await step("pulse") {
                     let full = try await api.pullRequest(pr)
                     let light = try await api.pullRequestPulse(pr)

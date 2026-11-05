@@ -7,11 +7,17 @@ struct ForgeUser {
     let id: String?
 }
 
+enum CapabilityState: Equatable {
+    case supported, unsupported, unavailable, unknown
+}
+
 struct ForgeCapabilities: Equatable {
     var pullFilters: [PRFilter]
     var issueFilters: [IssueFilter] = []
     var inboxTitle: String?
     var repositories = false
+    var pullRequestReview: CapabilityState = .unsupported
+    var mergeRequirements: CapabilityState = .unsupported
 
     var hasInbox: Bool { inboxTitle != nil }
 }
