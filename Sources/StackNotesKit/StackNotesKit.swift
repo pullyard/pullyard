@@ -117,10 +117,12 @@ public enum StackNotesMCPServer {
         public static let versions = ["2025-06-18", "2025-03-26", "2024-11-05"]
         public let account: String?
         public let host: String
+        public let contextDirectory: URL
 
-        public init(account: String?, host: String) {
+        public init(account: String?, host: String, contextDirectory: URL = PRContextStore.defaultDirectory) {
             self.account = account
             self.host = host
+            self.contextDirectory = contextDirectory
         }
 
         public func handle(_ message: [String: Any]) -> [String: Any]? {
@@ -132,7 +134,7 @@ public enum StackNotesMCPServer {
                     "protocolVersion": Self.versions.contains(params["protocolVersion"] as? String ?? "") ? params["protocolVersion"] as! String : Self.versions[0],
                     "capabilities": ["tools": [:]],
                     "serverInfo": ["name": "pullyard", "version": "1.0"],
-                    "instructions": "PullYard stack notes. Use add_stack_note when the user asks you to leave a note, question or decision on a pull request in their stack, or when you finish work on a stacked PR and something is worth remembering for the reviewer. Notes stay on the user's Mac and are never posted to GitHub.",
+                    "instructions": "PullYard stack notes and pull request context. Use add_stack_note when the user asks you to leave a note, question or decision on a pull request in their stack, or when you finish work on a stacked PR and something is worth remembering for the reviewer. Notes stay on the user's Mac and are never posted to GitHub. The read-only tools get_pull_request, list_review_threads, list_checks and list_changed_files return what PullYard last loaded for a pull request the user opened: merge requirements, required checks, review threads, code owners and changes since the user's last review.",
                 ])
             case "ping":
                 return result(id, [:])
@@ -171,6 +173,16 @@ public enum StackNotesMCPServer {
                 } catch {
                     return text(id, "Couldn't save the note: \(error.localizedDescription)", error: true)
                 }
+            case "get_pull_request", "list_review_threads", "list_checks", "list_changed_files":
+                guard let snapshot = PRContextStore.read(key: key, directory: contextDirectory) else {
+                    return text(id, "PullYard has no context for \(repoName)#\(number). Ask the user to open that pull request in PullYard, then try again.", error: true)
+                }
+                switch name {
+                case "get_pull_request": return text(id, PRContextFormatter.overview(snapshot))
+                case "list_review_threads": return text(id, PRContextFormatter.threads(snapshot, includeResolved: args["include_resolved"] as? Bool ?? false))
+                case "list_checks": return text(id, PRContextFormatter.checks(snapshot))
+                default: return text(id, PRContextFormatter.files(snapshot))
+                }
             case "list_stack_notes":
                 let notes = StackNotesFile.read(key: key)
                 guard !notes.isEmpty else { return text(id, "No notes on \(repoName)#\(number).") }
@@ -189,6 +201,8 @@ public enum StackNotesMCPServer {
             var addProps = target
             addProps["kind"] = ["type": "string", "enum": ["note", "question", "decision"], "description": "note (default), question or decision"]
             addProps["text"] = ["type": "string", "description": "The note text, plain text or short Markdown"]
+            var threadProps = target
+            threadProps["include_resolved"] = ["type": "boolean", "description": "Also return resolved threads (default false)"]
             return [
                 [
                     "name": "add_stack_note",
@@ -198,6 +212,30 @@ public enum StackNotesMCPServer {
                 [
                     "name": "list_stack_notes",
                     "description": "List the PullYard stack notes on a pull request.",
+                    "inputSchema": ["type": "object", "properties": target, "required": ["repo", "pr"]],
+                    "annotations": ["readOnlyHint": true],
+                ],
+                [
+                    "name": "get_pull_request",
+                    "description": "Overview of a pull request as PullYard last loaded it: title, branches, description, merge status with each merge requirement (approvals, required checks, conversations, conflicts), reviewers, code owners and the commit the user last reviewed.",
+                    "inputSchema": ["type": "object", "properties": target, "required": ["repo", "pr"]],
+                    "annotations": ["readOnlyHint": true],
+                ],
+                [
+                    "name": "list_review_threads",
+                    "description": "Review threads on a pull request with file, line and comments. Unresolved threads only unless include_resolved is true.",
+                    "inputSchema": ["type": "object", "properties": threadProps, "required": ["repo", "pr"]],
+                    "annotations": ["readOnlyHint": true],
+                ],
+                [
+                    "name": "list_checks",
+                    "description": "CI checks on the pull request head commit, failing first, marked required or optional when GitHub reports it.",
+                    "inputSchema": ["type": "object", "properties": target, "required": ["repo", "pr"]],
+                    "annotations": ["readOnlyHint": true],
+                ],
+                [
+                    "name": "list_changed_files",
+                    "description": "Files changed by the pull request, with their code owners when the repository has a CODEOWNERS file.",
                     "inputSchema": ["type": "object", "properties": target, "required": ["repo", "pr"]],
                     "annotations": ["readOnlyHint": true],
                 ],

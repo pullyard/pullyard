@@ -1,4 +1,5 @@
 import Foundation
+import StackNotesKit
 import SwiftUI
 
 enum PRTab: String, CaseIterable, Identifiable {
@@ -201,6 +202,13 @@ final class PRDetailModel {
         }
     }
 
+    func publishContext() {
+        guard let pr else { return }
+        let key = StackNotesFile.key(account: cacheAccount, host: api.host, repo: ref.repo.full, number: ref.number)
+        let snapshot = PRContextPublisher.snapshot(ref: ref, pr: pr, requirements: requirements, ownership: ownership, files: changedPaths, reviewed: lastReviewed)
+        Task.detached(priority: .utility) { try? PRContextStore.write(snapshot, key: key) }
+    }
+
     var requirements: [MergeRequirement] {
         guard let pr else { return [] }
         return MergeReadiness.requirements(pr, rules: branchRules)
@@ -315,6 +323,7 @@ final class PRDetailModel {
                 Task(priority: .utility) { await self.loadStack() }
             }
             scheduleMergeRecheck(pr)
+            publishContext()
             if reloadFiles, filesLoaded { markFilesStale() }
             reloadFiles = false
             ensureFiles()
@@ -338,6 +347,7 @@ final class PRDetailModel {
                 next = page.nextCursor
                 pages += 1
             }
+            self?.publishContext()
         }
     }
 
@@ -352,6 +362,7 @@ final class PRDetailModel {
                 let owners = try await self.api.codeOwners(self.ref.repo, ref: base)
                 guard self.ownersKey == key else { return }
                 self.codeOwners = owners.map { .loaded($0) } ?? .missing
+                self.publishContext()
             } catch {
                 guard self.ownersKey == key, !isCancellation(error) else { return }
                 self.ownersKey = nil
@@ -374,6 +385,7 @@ final class PRDetailModel {
                 let rules = try await self.api.branchRules(self.ref.repo, branch: pr.baseRefName, admin: admin)
                 guard self.rulesKey == key else { return }
                 self.branchRules = .loaded(rules)
+                self.publishContext()
             } catch {
                 guard self.rulesKey == key, !isCancellation(error) else { return }
                 self.rulesFetched = nil

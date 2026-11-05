@@ -19,7 +19,7 @@ final class StackNotesMCPTests: XCTestCase {
     func testToolsList() throws {
         let reply = try XCTUnwrap(server.handle(["jsonrpc": "2.0", "id": 2, "method": "tools/list"]))
         let tools = try XCTUnwrap((reply["result"] as? [String: Any])?["tools"] as? [[String: Any]])
-        XCTAssertEqual(tools.compactMap { $0["name"] as? String }, ["add_stack_note", "list_stack_notes"])
+        XCTAssertEqual(tools.compactMap { $0["name"] as? String }, ["add_stack_note", "list_stack_notes", "get_pull_request", "list_review_threads", "list_checks", "list_changed_files"])
     }
 
     func testRejectsBadArguments() throws {
