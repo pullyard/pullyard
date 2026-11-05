@@ -106,7 +106,7 @@ struct AppShell: View {
 
     private var compact: Bool { windowWidth > 0 && windowWidth < Self.compactBelow }
     private var sidebarWidth: CGFloat { compact ? Self.railWidth : Self.sidebarWidth }
-    private var effectiveListWidth: Double { compact ? min(listWidth, 320) : listWidth }
+    private var effectiveListWidth: CGFloat { compact ? min(CGFloat(listWidth), 320) : CGFloat(listWidth) }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -135,7 +135,7 @@ struct AppShell: View {
             }
         }
         .animation(Motion.smooth, value: compact)
-        .edgeReveal(.leading, enabled: hidden, width: Self.sidebarWidth + 1 + listWidth) {
+        .edgeReveal(.leading, enabled: hidden, width: Self.sidebarWidth + 1 + CGFloat(listWidth)) {
             HStack(spacing: 0) {
                 SidebarView()
                     .frame(width: Self.sidebarWidth)
