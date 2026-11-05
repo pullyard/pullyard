@@ -87,7 +87,7 @@ struct PRDetailContent: View {
         .sheet(item: $ciFix) { FixWithClaudeSheet(model: model, pr: pr, ci: $0) }
         .sheet(isPresented: $model.showResolveConflicts) { ResolveConflictsSheet(model: model, pr: pr) }
         .sheet(item: $model.replyThread) { ReplySheet(model: model, thread: $0) }
-        .alert("Error", isPresented: Binding(get: { model.actionError != nil }, set: { if !$0 { model.actionError = nil } })) {
+        .alert("Couldn’t complete the action", isPresented: Binding(get: { model.actionError != nil && model.sheetDepth == 0 }, set: { if !$0 { model.actionError = nil } })) {
             Button("OK") {}
         } message: {
             Text(model.actionError ?? "")
@@ -119,7 +119,7 @@ struct PRDetailContent: View {
         var items = [
             TabItem(id: PRTab.conversation, title: "Conversation", icon: "bubble.left.and.bubble.right", badge: commentsBadge),
             TabItem(id: PRTab.commits, title: "Commits", icon: "point.3.connected.trianglepath.dotted", badge: "\(pr.allCommits.totalCount ?? pr.allCommits.nodes.count)"),
-            TabItem(id: PRTab.checks, title: "Checks", icon: "checklist", badge: checksSummary, badgeColor: checksColor),
+            TabItem(id: PRTab.checks, title: "Checks", icon: "checklist", badge: checksSummary, badgeColor: checksColor, badgeLabel: checksSpoken),
             TabItem(id: PRTab.files, title: "Files changed", icon: "doc.text", badge: "\(pr.changedFiles)")
         ]
         if let tree = model.stackTree {
@@ -144,6 +144,16 @@ struct PRDetailContent: View {
         return checks.isEmpty ? .secondary : .ghGreen
     }
 
+    private var checksSpoken: String {
+        let checks = pr.checks
+        let failed = checks.filter { $0.outcome == .failure }.count
+        let pending = checks.filter { $0.outcome == .pending }.count
+        if checks.isEmpty { return "no checks" }
+        if failed > 0 { return "\(failed) failing" }
+        if pending > 0 { return "\(pending) running" }
+        return "all \(checks.count) passed"
+    }
+
     private var checksSummary: String {
         let checks = pr.checks
         if checks.isEmpty { return "0" }
@@ -156,7 +166,7 @@ struct PRDetailContent: View {
 
     private var confirmTitle: String {
         switch confirm {
-        case .approve: return "Approve this pull request?"
+        case .approve: return model.pending.isEmpty ? "Approve this pull request?" : "Approve and submit \(plural(model.pending.count, "pending comment", "pending comments"))?"
         case .close: return "Close pull request without merging?"
         case .deleteBranch: return "Delete branch \(pr.headRefName)?"
         case .disableAutoMerge: return "Disable auto-merge?"
@@ -169,7 +179,7 @@ struct PRDetailContent: View {
 
     private func confirmButton(_ c: PRConfirm) -> String {
         switch c {
-        case .approve: return "Approve"
+        case .approve: return model.pending.isEmpty ? "Approve" : "Approve and submit"
         case .close: return "Close pull request"
         case .deleteBranch: return "Delete branch"
         case .disableAutoMerge: return "Disable"
@@ -200,9 +210,15 @@ struct PRDetailContent: View {
                 if model.busy {
                     ProgressView().controlSize(.small)
                 }
-                RefreshStatus(updated: model.lastUpdated, refreshing: model.loading, error: model.refreshError, compact: true) {
+                Button {
                     Task { await model.load(full: true) }
+                } label: {
+                    RefreshStatus(updated: model.lastUpdated, refreshing: model.loading, error: model.refreshError, compact: true)
                 }
+                .buttonStyle(.borderless)
+                .disabled(model.loading)
+                .help(model.refreshError.map { "Last refresh failed: \($0). Click to retry (⌘R)" } ?? "Refresh (⌘R)")
+                .accessibilityLabel("Refresh")
             }
         }
         if pr.isOpen {
@@ -220,17 +236,19 @@ struct PRDetailContent: View {
                     showReview = true
                 }
                 .labelStyle(.titleAndIcon)
-                .help("Submit review")
+                .help(model.pending.isEmpty ? "Write a review" : "Submit review with \(plural(model.pending.count, "pending comment", "pending comments"))")
             }
             ToolbarItem(id: "pr.requestReview", placement: .primaryAction, showsByDefault: false) {
                 Button { showReviewers = true } label: { Label("Request review", systemImage: "person.crop.circle.badge.plus") }
                     .help("Request or re-request review")
             }
         }
-        ToolbarItem(id: "pr.fix", placement: .primaryAction) {
-            Button { showFix = true } label: { Label("Fix with agent", systemImage: "wrench.and.screwdriver") }
-                .labelStyle(.titleAndIcon)
-                .help("Send review comments to a new agent session")
+        if pr.isOpen {
+            ToolbarItem(id: "pr.fix", placement: .primaryAction) {
+                Button { showFix = true } label: { Label("Fix with agent", systemImage: "wrench.and.screwdriver") }
+                    .labelStyle(.titleAndIcon)
+                    .help("Send review comments to a new agent session")
+            }
         }
         if canMerge {
             ToolbarItem(id: "pr.merge", placement: .primaryAction) {
@@ -257,8 +275,6 @@ struct PRDetailContent: View {
 
     @ViewBuilder
     private var moreMenu: some View {
-        Button("Open in browser") { openInBrowser(pr.url) }
-        Divider()
         Button("Copy link") { copyToPasteboard(pr.url) }
         Button("Copy short link") { app.copyShortLink(ShortLink.ref(url: pr.url) ?? model.ref) }
         Button("Copy “gh pr checkout \(pr.number)”") { copyToPasteboard("gh pr checkout \(pr.number) -R \(model.ref.repo.full)") }
@@ -268,19 +284,18 @@ struct PRDetailContent: View {
             Button("Edit title and description…") { showEdit = true }
         }
         if pr.isOpen {
-            Button("Request review…") { showReviewers = true }
             if pr.viewerCanUpdate {
                 if pr.isDraft {
-                    Button("Ready for review") { Task { await model.simple(Q.readyForReview) } }
+                    Button("Ready for review") { Task { if await model.simple(Q.readyForReview) { app.showToast("Marked ready for review") } } }
                 } else {
-                    Button("Convert to draft") { Task { await model.simple(Q.convertToDraft) } }
+                    Button("Convert to draft") { Task { if await model.simple(Q.convertToDraft) { app.showToast("Converted to draft") } } }
                 }
             }
             if MergeConflicts.applies(pr) {
                 Button("Resolve conflicts with agent…") { model.showResolveConflicts = true }
             }
             if pr.mergeStateStatus == "BEHIND" || pr.mergeStateStatus == "BLOCKED" || pr.mergeStateStatus == "UNSTABLE" {
-                Button("Update branch from \(pr.baseRefName)") { Task { await model.simple(Q.updateBranch) } }
+                Button("Update branch from \(pr.baseRefName)") { Task { if await model.simple(Q.updateBranch) { app.showToast("Branch updated from \(pr.baseRefName)") } } }
             }
             if pr.autoMergeRequest != nil {
                 Button("Disable auto-merge") { confirm = .disableAutoMerge }
@@ -290,7 +305,7 @@ struct PRDetailContent: View {
                 Button("Close pull request…") { confirm = .close }
             }
         } else if !pr.merged, pr.viewerCanUpdate {
-            Button("Reopen pull request") { Task { await model.simple(Q.reopenPR) } }
+            Button("Reopen pull request") { Task { if await model.simple(Q.reopenPR) { app.showToast("Pull request reopened") } } }
         }
         if !pr.isOpen, pr.headRef != nil, model.canWrite {
             Button("Delete branch \(pr.headRefName)…") { confirm = .deleteBranch }
@@ -528,13 +543,14 @@ struct MergeStatusBar: View {
     let model: PRDetailModel
     let pr: PullRequestDetail
     let onMerge: () -> Void
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         if pr.isOpen {
-            let s = status
+            let s = Self.status(pr)
             HStack(spacing: 8) {
-                Image(systemName: s.icon).foregroundStyle(s.color)
-                Text(s.text).font(.syCallout)
+                Image(systemName: s.icon).foregroundStyle(s.color).accessibilityHidden(true)
+                Text(s.text).font(.syCallout).lineLimit(2)
                 if let auto = pr.autoMergeRequest {
                     Text("· auto-merge enabled" + (auto.mergeMethod.map { " (\(MergeMethod(rawValue: $0)?.title ?? $0))" } ?? ""))
                         .font(.syCallout).foregroundStyle(Color.ghGreen)
@@ -550,18 +566,35 @@ struct MergeStatusBar: View {
                     .help("Show the conflicting files at the end of the conversation")
                 }
                 if pr.mergeStateStatus == "BEHIND", model.canWrite || pr.viewerCanUpdate {
-                    Button("Update branch") { Task { await model.simple(Q.updateBranch) } }.controlSize(.small)
+                    Button("Update branch") {
+                        Task { if await model.simple(Q.updateBranch) { app.showToast("Branch updated from \(pr.baseRefName)") } }
+                    }
+                    .controlSize(.small)
+                }
+                if pr.isDraft, pr.viewerCanUpdate {
+                    Button("Ready for review") {
+                        Task { if await model.simple(Q.readyForReview) { app.showToast("Marked ready for review") } }
+                    }
+                    .controlSize(.small)
+                    .help("Mark this draft as ready for review")
                 }
                 if model.canWrite, !pr.isDraft {
-                    Button("Merge…", action: onMerge)
-                        .controlSize(.small)
-                        .buttonStyle(.borderedProminent)
-                        .tint(s.ready ? Color.ghGreen : .gray)
+                    if s.ready {
+                        Button("Merge…", action: onMerge)
+                            .controlSize(.small)
+                            .buttonStyle(.borderedProminent)
+                            .tint(Color.syGreenFill)
+                    } else {
+                        Button("Merge…", action: onMerge)
+                            .controlSize(.small)
+                            .help("Not ready to merge: \(s.text)")
+                    }
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 8).fill(s.color.opacity(0.08)))
+            .background(RoundedRectangle(cornerRadius: Radius.m).fill(s.color.opacity(Tint.banner)))
+            .accessibilityElement(children: .contain)
         }
     }
 
@@ -594,13 +627,12 @@ struct MergeStatusBar: View {
         return count > 0 ? "View \(plural(count, "conflict", "conflicts"))" : "View conflicts"
     }
 
-    private var failedChecks: Int { pr.checks.filter { $0.outcome == .failure }.count }
-    private var pendingChecks: Int { pr.checks.filter { $0.outcome == .pending }.count }
-    private var failedChecksText: String { failedChecks == 1 ? "1 check failed" : "\(failedChecks) checks failed" }
-    private var pendingChecksText: String { pendingChecks == 1 ? "1 check is still running" : "\(pendingChecks) checks are still running" }
-
-    private var status: (icon: String, color: Color, text: String, ready: Bool) {
-        if pr.isDraft { return ("pencil.circle", .secondary, "Draft — merging is unavailable", false) }
+    static func status(_ pr: PullRequestDetail) -> (icon: String, color: Color, text: String, ready: Bool) {
+        let failedChecks = pr.checks.filter { $0.outcome == .failure }.count
+        let pendingChecks = pr.checks.filter { $0.outcome == .pending }.count
+        let failedChecksText = failedChecks == 1 ? "1 check failed" : "\(failedChecks) checks failed"
+        let pendingChecksText = pendingChecks == 1 ? "1 check is still running" : "\(pendingChecks) checks are still running"
+        if pr.isDraft { return ("pencil.circle", .sySlate, "Draft — mark it ready for review to merge", false) }
         if pr.mergeable == "CONFLICTING" || pr.mergeStateStatus == "DIRTY" {
             return ("exclamationmark.triangle.fill", .ghRed, "Has conflicts with \(pr.baseRefName)", false)
         }
@@ -620,7 +652,7 @@ struct MergeStatusBar: View {
             if pendingChecks > 0 { return ("clock", .ghYellow, pendingChecksText, true) }
             return ("checkmark.circle.fill", .ghGreen, "Ready to merge", true)
         case "CLEAN", "HAS_HOOKS": return ("checkmark.circle.fill", .ghGreen, "Ready to merge", true)
-        default: return ("hourglass", .secondary, "Checking mergeability…", false)
+        default: return ("hourglass", .sySlate, "Checking mergeability…", false)
         }
     }
 }
@@ -634,7 +666,7 @@ struct ConversationTab: View {
     var body: some View {
         VStack(spacing: 0) {
             HTMLView(html: model.html, scrollToBottomToken: model.scrollToBottomToken, onAction: handle, onLink: openLink)
-                .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, web: true) { await model.load(full: true) }
+                .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, web: true, button: false) { await model.load(full: true) }
             Divider()
             HStack(alignment: .bottom, spacing: 8) {
                 ComposerBox(text: $text, placeholder: "Comment (Markdown) — ⌘↩ to send", minHeight: 56).frame(height: 64)
@@ -717,7 +749,7 @@ struct CommitsTab: View {
                 Button("Show all \(pr.allCommits.totalCount ?? 0) commits in browser") { openInBrowser(pr.url + "/commits") }
             }
         }
-        .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false) { await model.load(full: true) }
+        .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, button: false) { await model.load(full: true) }
     }
 }
 
@@ -769,7 +801,7 @@ struct ChecksTab: View {
                 .rowAppear(c.id, model.checkRows)
             }
         }
-        .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false) { await model.load(full: true) }
+        .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, button: false) { await model.load(full: true) }
         .sheet(item: $logTarget, onDismiss: {
             guard let request = fixAfterLog else { return }
             fixAfterLog = nil

@@ -1,0 +1,19 @@
+:root { --bg: #0F1522; --card: #151D2E; --text: #E6EBF2; --muted: #8693A8; --red: #E8746A; --green: #5DBE8A; --accent: #5BB8EC; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 18px/1.45 -apple-system, "SF Pro Text", system-ui, sans-serif; padding: 36px 40px; }
+header h1 { margin: 0; font-size: 30px; letter-spacing: -.01em; } header p { margin: 4px 0 22px; color: var(--muted); font-size: 16px; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+figure { margin: 0; background: var(--card); border-radius: 14px; padding: 14px; }
+figcaption { font-size: 15px; color: var(--muted); margin-bottom: 10px; display: flex; gap: 8px; align-items: center; }
+.tag { font-weight: 700; font-size: 13px; padding: 3px 10px; border-radius: 99px; color: #0F1522; }
+.tag.before { background: var(--red); } .tag.after { background: var(--green); }
+.img { border-radius: 8px; overflow: hidden; position: relative; }
+.img img { width: 100%; display: block; }
+.img.blur::after { content: ""; position: absolute; left: 16%; top: 7%; right: 0; bottom: 0; backdrop-filter: blur(9px); background: rgba(15, 21, 34, .25); }
+.callouts { margin: 22px 0 0; padding: 18px 22px 18px 44px; background: var(--card); border-radius: 14px; columns: 2; column-gap: 40px; }
+.callouts li { margin: 4px 0; break-inside: avoid; }
+.callouts li::marker { color: var(--accent); font-weight: 700; }
+body.overview { font-size: 15px; }
+.overview section { margin-bottom: 26px; } .overview h2 { font-size: 20px; margin: 0 0 8px; }
+.overview ul { margin: 8px 0 0; color: var(--muted); padding-left: 20px; }
+.pair.small figure { padding: 8px; } .pair.small figcaption { font-size: 13px; margin-bottom: 6px; }

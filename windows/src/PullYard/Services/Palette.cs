@@ -20,7 +20,7 @@ public static class Palette
         ["bar"] = (0xF5F3EE, 0x111A2C),
         ["text"] = (0x1A2333, 0xE6EBF2),
         ["muted"] = (0x5F6B7E, 0x8693A8),
-        ["dim"] = (0x939AA8, 0x5F6B80),
+        ["dim"] = (0x7C8494, 0x6B778C),
         ["accent"] = (0x2A8BC8, 0x5BB8EC),
         ["sky"] = (0x1F7FB8, 0x5BB8EC),
         ["violet"] = (0x6B55D6, 0x9D8CF0),

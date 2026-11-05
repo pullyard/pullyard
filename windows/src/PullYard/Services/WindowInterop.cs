@@ -29,7 +29,23 @@ public static class WindowInterop
     [DllImport("user32.dll")]
     private static extern bool FlashWindowEx(ref FlashInfo info);
 
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hWnd);
+
     public static IntPtr Handle(Window window) => WinRT.Interop.WindowNative.GetWindowHandle(window);
+
+    public static double Scale(Window window)
+    {
+        try
+        {
+            var dpi = GetDpiForWindow(Handle(window));
+            return dpi > 0 ? dpi / 96.0 : 1;
+        }
+        catch
+        {
+            return 1;
+        }
+    }
 
     public static void BringToFront(Window window)
     {

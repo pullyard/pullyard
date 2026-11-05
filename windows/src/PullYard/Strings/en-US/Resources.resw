@@ -662,6 +662,8 @@
   <data name="OpenLink_Title" xml:space="preserve"><value>Open by link</value></data>
   <data name="PR_AllCommits" xml:space="preserve"><value>Show all {0} commits in browser</value></data>
   <data name="PR_Approve" xml:space="preserve"><value>Approve</value></data>
+  <data name="PR_ApproveAndSubmit" xml:space="preserve"><value>Approve and submit</value></data>
+  <data name="PR_ApprovePendingQ" xml:space="preserve"><value>Approve and submit {0} pending comment(s)?</value></data>
   <data name="PR_ApproveQ" xml:space="preserve"><value>Approve this pull request?</value></data>
   <data name="PR_Assignees" xml:space="preserve"><value>Assignees:</value></data>
   <data name="PR_BlameAtHead" xml:space="preserve"><value>Blame this file at the pull request head</value></data>

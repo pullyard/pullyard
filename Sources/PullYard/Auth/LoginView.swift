@@ -58,6 +58,15 @@ struct LoginView: View {
                 }
 
                 VStack(spacing: 18) {
+                    if !embedded, let notice = app.loginNotice {
+                        Label(notice, systemImage: "exclamationmark.triangle.fill")
+                            .font(.syCallout)
+                            .foregroundStyle(Color.syText)
+                            .padding(Space.m + 2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(RoundedRectangle(cornerRadius: Radius.m).fill(Color.syAmber.opacity(Tint.chip)))
+                            .accessibilityLabel("Notice: \(notice)")
+                    }
                     Picker("Service", selection: $providerRaw) {
                         ForEach(GitProvider.allCases) { Text($0.shortTitle).tag($0.rawValue) }
                     }
@@ -102,7 +111,7 @@ struct LoginView: View {
                             }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.large)
-                            .disabled(effectiveHost.isEmpty)
+                            .disabled(effectiveHost.isEmpty || busy)
                         }
                     }
 
@@ -120,7 +129,7 @@ struct LoginView: View {
                                 .onSubmit(loginWithToken)
                             Button("Sign in", action: loginWithToken)
                                 .buttonStyle(.borderedProminent)
-                                .disabled(!canSubmitToken)
+                                .disabled(!canSubmitToken || busy)
                         }
                         if let url = provider.tokenCreateURL(host: effectiveHost) {
                             Button(provider == .bitbucket ? "Create an API token at id.atlassian.com" : "Create a token on \(effectiveHost)") {

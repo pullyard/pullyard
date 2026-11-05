@@ -101,6 +101,7 @@ final class SearchListModel {
     private var cursor: String?
     private var hasMore = false
     private var loadingMore = false
+    private(set) var loadMoreError: String?
     private var currentQuery = ""
     private var currentKey = ""
     private var generation = 0
@@ -111,6 +112,7 @@ final class SearchListModel {
     }
 
     func load(api: GitHubAPI?, account: String?, query: String, silent: Bool = false, typing: Bool = false, persist: Bool = false) async {
+        loadMoreError = nil
         guard let api else { return }
         var switched = false
         var cached = false
@@ -181,6 +183,7 @@ final class SearchListModel {
     }
 
     private func apply(_ snap: Snapshot, mode: RowAppearMode) {
+        loadMoreError = nil
         rows.ingest(snap.items.map(\.id), mode: mode)
         items = snap.items
         total = snap.total
@@ -190,12 +193,23 @@ final class SearchListModel {
     }
 
     func loadMore(api: GitHubAPI?) async {
+        if !hasMore { loadMoreError = nil }
         guard let api, hasMore, !loadingMore, let cursor else { return }
         let query = currentQuery
         let key = currentKey
         loadingMore = true
+        loadMoreError = nil
         defer { loadingMore = false }
-        if let r = try? await api.search(query, after: cursor), key == currentKey {
+        let fetched: (nodes: [SearchItem], pageInfo: PageInfo?)
+        do {
+            let r = try await api.search(query, after: cursor)
+            fetched = (r.nodes, r.pageInfo)
+        } catch {
+            if !isCancellation(error), key == currentKey { loadMoreError = error.localizedDescription }
+            return
+        }
+        if key == currentKey {
+            let r = fetched
             let known = Set(items.map(\.id))
             let added = r.nodes.filter { !known.contains($0.id) }
             rows.ingest(added.map(\.id), mode: .append)
@@ -305,6 +319,10 @@ struct SearchListView: View {
                     }
                 } else {
                     ForEach(model.items) { row($0) }
+                    if let e = model.loadMoreError {
+                        LoadMoreErrorRow(message: e) { await model.loadMore(api: app.api) }
+                            .listRowSeparator(.hidden)
+                    }
                 }
             }
             .opacity(model.loading && !model.showingCached && !model.items.isEmpty ? 0.55 : 1)
@@ -325,7 +343,7 @@ struct SearchListView: View {
         }
         .toolbarSearch(text: $text, prompt: "Filter: text, repo:org/name, label:bug")
         .navigationTitle(title)
-        .navigationSubtitle(model.total > 0 ? "\(model.total)" : "")
+        .navigationSubtitle(model.total > 0 ? plural(model.total, "result", "results") : "")
         .task(id: "\(query)|\(app.cacheAccount ?? "")|\(app.api != nil)") {
             if !text.isEmpty { try? await Task.sleep(nanoseconds: 350_000_000) }
             guard !Task.isCancelled else { return }
@@ -352,6 +370,34 @@ struct SearchListView: View {
     private func reload(silent: Bool = false, typing: Bool = false) async {
         await model.load(api: app.api, account: app.cacheAccount, query: query, silent: silent, typing: typing, persist: text.isEmpty)
         if grouped { await model.loadAll(api: app.api) }
+    }
+}
+
+struct LoadMoreErrorRow: View {
+    let message: String
+    let retry: () async -> Void
+    @State private var retrying = false
+
+    var body: some View {
+        HStack(spacing: Space.m) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.syAmber).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Couldn’t load more results").font(.syCallout.weight(.medium)).foregroundStyle(Color.syText)
+                Text(message).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(2)
+            }
+            Spacer(minLength: Space.s)
+            Button(retrying ? "Retrying…" : "Retry") {
+                retrying = true
+                Task {
+                    await retry()
+                    retrying = false
+                }
+            }
+            .controlSize(.small)
+            .disabled(retrying)
+        }
+        .padding(.vertical, Space.s)
+        .accessibilityElement(children: .combine)
     }
 }
 

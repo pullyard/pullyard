@@ -57,16 +57,12 @@ struct PullYardApp: App {
                     .disabled(app.phase != .loggedIn)
                 Button("Open by Link…") { app.showOpenLink = true }
                     .keyboardShortcut("l")
+                    .disabled(app.phase != .loggedIn || app.forge != nil)
                 Button("Back") { if !app.detailPath.isEmpty { app.detailPath.removeLast() } }
                     .keyboardShortcut("[")
                     .disabled(app.detailPath.isEmpty)
                 Divider()
-                Button("Review Requests") { app.section = .prs(.reviewRequested) }.keyboardShortcut("1")
-                Button("My Pull Requests") { app.section = .prs(.mine) }.keyboardShortcut("2")
-                Button("Notifications") { app.section = .notifications }.keyboardShortcut("3")
-                Button("Repositories") { app.section = .repos }.keyboardShortcut("4")
-                Button("Projects") { app.section = .projects }.keyboardShortcut("5")
-                Button("Agents") { app.section = .claude }.keyboardShortcut("6")
+                GoSectionCommands(app: app)
                 Divider()
                 Button("Go to Session…") { app.showQuickOpen = true }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
@@ -100,6 +96,30 @@ struct PullYardApp: App {
         Settings {
             ThemedRoot { SettingsView().environment(app) }
         }
+    }
+}
+
+struct GoSectionCommands: View {
+    let app: AppModel
+
+    var body: some View {
+        let forge = app.forge != nil
+        Button("Review Requests") { app.section = .prs(.reviewRequested) }
+            .keyboardShortcut("1")
+            .disabled(forge && !app.forgeSupports(.prs(.reviewRequested)))
+        Button(app.provider == .gitlab ? "My Merge Requests" : "My Pull Requests") { app.section = .prs(.mine) }
+            .keyboardShortcut("2")
+            .disabled(forge && !app.forgeSupports(.prs(.mine)))
+        Button(forge ? (app.forgeCaps.inboxTitle ?? "Notifications") : "Notifications") { app.section = .notifications }
+            .keyboardShortcut("3")
+            .disabled(forge && !app.forgeSupports(.notifications))
+        Button(app.provider.repositoriesTitle) { app.section = .repos }
+            .keyboardShortcut("4")
+            .disabled(forge && !app.forgeSupports(.repos))
+        if !forge {
+            Button("Projects") { app.section = .projects }.keyboardShortcut("5")
+        }
+        Button("Agents") { app.section = .claude }.keyboardShortcut("6")
     }
 }
 

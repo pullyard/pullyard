@@ -482,7 +482,18 @@ final class ClaudeWorkspace {
         }
     }
 
+    var pendingClose: ClaudeTab?
+
+    func requestClose(_ tab: ClaudeTab) {
+        if tab.state == .working || tab.state == .waiting {
+            pendingClose = tab
+        } else {
+            close(tab)
+        }
+    }
+
     func close(_ tab: ClaudeTab) {
+        if pendingClose?.id == tab.id { pendingClose = nil }
         tab.chat?.stop()
         if tab.terminalRunning { tab.terminal.terminate() }
         tabs.removeAll { $0.id == tab.id }

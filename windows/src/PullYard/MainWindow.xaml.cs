@@ -36,11 +36,12 @@ public sealed partial class MainWindow : Window
         {
         }
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(1380, 860));
+        var scale = WindowInterop.Scale(this);
+        PlaceInitial(scale);
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
-            presenter.PreferredMinimumWidth = 960;
-            presenter.PreferredMinimumHeight = 600;
+            presenter.PreferredMinimumWidth = (int)(960 * scale);
+            presenter.PreferredMinimumHeight = (int)(600 * scale);
         }
         AppWindow.Closing += OnClosing;
         Activated += OnActivated;
@@ -61,6 +62,23 @@ public sealed partial class MainWindow : Window
         model.OpenLinkRequested += () => OpenLinkDialog.Show(RootGrid.XamlRoot).Forget();
         Host.Content = new SplashView();
         HoldSplash().Forget();
+    }
+
+    private void PlaceInitial(double scale)
+    {
+        var width = (int)(1380 * scale);
+        var height = (int)(860 * scale);
+        var area = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary)?.WorkArea;
+        if (area is { } work)
+        {
+            width = Math.Min(width, work.Width);
+            height = Math.Min(height, work.Height);
+            AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(work.X + (work.Width - width) / 2, work.Y + (work.Height - height) / 2, width, height));
+        }
+        else
+        {
+            AppWindow.Resize(new Windows.Graphics.SizeInt32(width, height));
+        }
     }
 
     private async Task HoldSplash()
@@ -161,6 +179,8 @@ public sealed partial class MainWindow : Window
         Add(VirtualKey.Number5, VirtualKeyModifiers.Control, () => model.Section = Section.Projects);
         Add(VirtualKey.Number6, VirtualKeyModifiers.Control, () => model.Section = Section.Claude);
         Add(VirtualKey.Left, VirtualKeyModifiers.Menu, () => ShellView.Current?.GoBack());
+        Add((VirtualKey)219, VirtualKeyModifiers.Control, () => ShellView.Current?.GoBack());
+        Add(VirtualKey.GoBack, VirtualKeyModifiers.None, () => ShellView.Current?.GoBack());
         Add(VirtualKey.K, VirtualKeyModifiers.Control, () => CommandPalette.Toggle(RootGrid.XamlRoot));
         Add(VirtualKey.K, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => { if (model.Phase == Phase.LoggedIn) AgentQuickOpen.Show(RootGrid.XamlRoot).Forget(); });
         AppShortcut = id =>

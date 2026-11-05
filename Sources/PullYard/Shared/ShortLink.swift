@@ -45,17 +45,20 @@ struct ToastBanner: View {
     var body: some View {
         if let text = app.toast {
             HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.syGreen)
-                Text(text).foregroundStyle(Color.syText).lineLimit(1)
+                Image(systemName: app.toastIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(app.toastIsError ? Color.syRed : Color.syGreen)
+                Text(text).foregroundStyle(Color.syText).lineLimit(app.toastIsError ? 3 : 1)
             }
+            .frame(maxWidth: 520)
             .font(.syCallout)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(.regularMaterial, in: Capsule())
-            .overlay(Capsule().stroke(Color(nsColor: .separatorColor)))
-            .shadow(radius: 6, y: 2)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Radius.xl, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Radius.xl, style: .continuous).stroke(app.toastIsError ? Color.syRed.opacity(Tint.strong) : Color.syLineStrong))
+            .elevation(.floating)
             .padding(.bottom, bottomInset ?? (app.clipboardRoute == nil && app.rateLimitedUntil == nil ? 16 : 0))
             .allowsHitTesting(false)
+            .accessibilityElement(children: .combine)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .id(text)
         }

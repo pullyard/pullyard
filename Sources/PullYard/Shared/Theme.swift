@@ -84,7 +84,7 @@ extension NSColor {
 
     static let syText = Theme.color("text", light: 0x1A2333, dark: 0xE6EBF2, system: .labelColor)
     static let syMuted = Theme.color("muted", light: 0x5F6B7E, dark: 0x8693A8, system: .secondaryLabelColor)
-    static let syDim = Theme.color("dim", light: 0x939AA8, dark: 0x5F6B80, system: .tertiaryLabelColor)
+    static let syDim = Theme.color("dim", light: 0x7C8494, dark: 0x6B778C, system: .tertiaryLabelColor)
 
     static let syAccent = Theme.color("accent", light: 0x2A8BC8, dark: 0x5BB8EC, system: .controlAccentColor)
     static let sySky = Theme.color("sky", light: 0x1F7FB8, dark: 0x5BB8EC, system: .systemBlue)
@@ -104,6 +104,15 @@ extension NSColor {
     static let syDelText = Theme.color("delText", light: 0x7A2A20, dark: 0xF3C4BE, system: .textColor)
     static let syHunkText = Theme.color("hunkText", light: 0x1F6E9E, dark: 0x8CCBEE, system: .secondaryLabelColor)
     static let syGutter = Theme.color("gutter", light: 0x9AA2B0, dark: 0x4A5670, system: .tertiaryLabelColor)
+
+    static let syAccentFill = Theme.color("accentFill", light: 0x1D70A6, dark: 0x1D70A6, system: .controlAccentColor)
+    static let syGreenFill = Theme.color("greenFill", light: 0x2B7F50, dark: 0x2B7F50, system: .systemGreen)
+    static let syVioletFill = Theme.color("violetFill", light: 0x5E48C8, dark: 0x5E48C8, system: .systemPurple)
+    static let syRedFill = Theme.color("redFill", light: 0xB23A2A, dark: 0xB23A2A, system: .systemRed)
+    static let sySlateFill = Theme.color("slateFill", light: 0x5B6476, dark: 0x5B6476, system: .systemGray)
+    static let syOnAccent = Theme.color("onAccent", light: 0xFFFFFF, dark: 0xFFFFFF, system: .white)
+    static let syHover = Theme.color("hover", light: 0x1A2333, dark: 0xE6EBF2, lightAlpha: 0.04, darkAlpha: 0.05, system: NSColor.labelColor.withAlphaComponent(0.05))
+    static let sySelected = Theme.color("selected", light: 0x1A2333, dark: 0xE6EBF2, lightAlpha: 0.07, darkAlpha: 0.08, system: NSColor.labelColor.withAlphaComponent(0.08))
 }
 
 extension Color {
@@ -132,6 +141,69 @@ extension Color {
     static let sySlate = Color(nsColor: .sySlate)
     static let syAddBG = Color(nsColor: .syAddBG)
     static let syDelBG = Color(nsColor: .syDelBG)
+    static let syAccentFill = Color(nsColor: .syAccentFill)
+    static let syGreenFill = Color(nsColor: .syGreenFill)
+    static let syVioletFill = Color(nsColor: .syVioletFill)
+    static let syRedFill = Color(nsColor: .syRedFill)
+    static let sySlateFill = Color(nsColor: .sySlateFill)
+    static let syOnAccent = Color(nsColor: .syOnAccent)
+    static let syHover = Color(nsColor: .syHover)
+    static let sySelected = Color(nsColor: .sySelected)
+}
+
+enum Space {
+    static let xxs: CGFloat = 2
+    static let xs: CGFloat = 4
+    static let s: CGFloat = 6
+    static let m: CGFloat = 8
+    static let l: CGFloat = 12
+    static let xl: CGFloat = 16
+    static let xxl: CGFloat = 24
+}
+
+enum Radius {
+    static let xs: CGFloat = 4
+    static let s: CGFloat = 6
+    static let m: CGFloat = 8
+    static let card: CGFloat = 10
+    static let l: CGFloat = 12
+    static let xl: CGFloat = 16
+}
+
+enum Tint {
+    static let subtle = 0.06
+    static let banner = 0.08
+    static let chip = 0.12
+    static let tile = 0.14
+    static let strong = 0.22
+}
+
+enum Elevation {
+    case popover, floating, sheet
+
+    var radius: CGFloat {
+        switch self {
+        case .popover: return 4
+        case .floating: return 8
+        case .sheet: return 16
+        }
+    }
+
+    var y: CGFloat {
+        switch self {
+        case .popover: return 1
+        case .floating: return 2
+        case .sheet: return 6
+        }
+    }
+
+    var opacity: Double {
+        switch self {
+        case .popover: return 0.10
+        case .floating: return 0.16
+        case .sheet: return 0.22
+        }
+    }
 }
 
 @Observable
@@ -222,6 +294,10 @@ extension Font {
     static func sy(size: CGFloat, weight: Font.Weight? = nil, design: Font.Design? = nil) -> Font {
         .system(size: TextZoom.shared.size(size), weight: weight, design: design)
     }
+
+    static func syIcon(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+        .system(size: TextZoom.shared.size(size), weight: weight)
+    }
 }
 
 enum Surface {
@@ -252,7 +328,7 @@ struct SurfaceBackground: ViewModifier {
 }
 
 struct CardStyle: ViewModifier {
-    var radius: CGFloat = 10
+    var radius: CGFloat = Radius.card
     var fill: Color = .syRaised
 
     func body(content: Content) -> some View {
@@ -263,7 +339,8 @@ struct CardStyle: ViewModifier {
 
 extension View {
     func surface(_ s: Surface) -> some View { modifier(SurfaceBackground(surface: s)) }
-    func card(radius: CGFloat = 10, fill: Color = .syRaised) -> some View { modifier(CardStyle(radius: radius, fill: fill)) }
+    func card(radius: CGFloat = Radius.card, fill: Color = .syRaised) -> some View { modifier(CardStyle(radius: radius, fill: fill)) }
+    func elevation(_ e: Elevation) -> some View { shadow(color: .black.opacity(e.opacity), radius: e.radius, y: e.y) }
 }
 
 struct IconTile: View {
@@ -276,7 +353,8 @@ struct IconTile: View {
             .font(.system(size: size * 0.55, weight: .semibold))
             .foregroundStyle(color)
             .frame(width: size, height: size)
-            .background(RoundedRectangle(cornerRadius: size * 0.28).fill(color.opacity(0.14)))
+            .background(RoundedRectangle(cornerRadius: size * 0.28).fill(color.opacity(Tint.tile)))
+            .accessibilityHidden(true)
     }
 }
 
@@ -294,7 +372,7 @@ struct ChipView: View {
         .font(mono ? .syCaption.monospaced() : .syCaption.weight(.medium))
         .foregroundStyle(color)
         .padding(.horizontal, 7)
-        .padding(.vertical, 2)
-        .background(Capsule().fill(color.opacity(0.12)))
+        .padding(.vertical, Space.xxs)
+        .background(Capsule().fill(color.opacity(Tint.chip)))
     }
 }

@@ -71,7 +71,7 @@ struct ForgeInboxView: View {
             withAnimation(Motion.quick) { items.removeAll { $0.id == n.id } }
             app.unreadCount = items.filter(\.unread).count
         } catch {
-            app.showToast(error.localizedDescription)
+            app.showToast(error.localizedDescription, isError: true)
         }
     }
 }

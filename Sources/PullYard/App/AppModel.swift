@@ -112,6 +112,8 @@ final class AppModel {
     var recentRoutes: [Route] = []
     var clipboardRoute: Route?
     var toast: String?
+    var loginNotice: String?
+    var toastIsError = false
     var pendingCode: CodeOpenRequest?
     var reviewRequests: [SearchItem] = []
     var myPRs: [SearchItem] = []
@@ -247,6 +249,7 @@ final class AppModel {
             user = cached
             ListCache.activate(account?.cacheKey ?? cached.login)
             if let account { bindClaude(to: account) }
+            loginNotice = nil
             phase = .loggedIn
             startPolling()
             await verify(api, token: token)
@@ -262,6 +265,7 @@ final class AppModel {
             self.account = account
             self.api = api
             if let account { bindClaude(to: account) }
+            loginNotice = nil
             phase = .loggedIn
             startPolling()
         }
@@ -313,7 +317,7 @@ final class AppModel {
 
     func switchAccountReportingErrors(to id: String) {
         Task {
-            do { try await switchAccount(to: id) } catch { showToast(error.localizedDescription) }
+            do { try await switchAccount(to: id) } catch { showToast(error.localizedDescription, isError: true) }
         }
     }
 
@@ -370,6 +374,7 @@ final class AppModel {
                 ListCache.activate(account.cacheKey)
             }
         }
+        loginNotice = nil
         phase = .loggedIn
         startPolling()
     }
@@ -403,6 +408,7 @@ final class AppModel {
         detailRoot = nil
         detailPath = []
         forgeSelection = nil
+        loginNotice = nil
         phase = .loggedIn
         startPolling()
     }
@@ -509,6 +515,11 @@ final class AppModel {
     }
 
     private func revoked() {
+        if let account {
+            loginNotice = "The sign-in for \(account.subtitle) expired or was revoked. Sign in again to continue."
+        } else {
+            loginNotice = "Your sign-in expired or was revoked. Sign in again to continue."
+        }
         if let account { GitAccounts.shared.forgetCredential(account.id) } else { Keychain.delete() }
         ClaudeProfiles.shared.scope = nil
         resetSession(forgetCache: false)
@@ -716,11 +727,15 @@ final class AppModel {
         showToast("Copied \(link)")
     }
 
-    func showToast(_ text: String) {
+    func showToast(_ text: String, isError: Bool = false) {
         toastTask?.cancel()
-        withAnimation(Motion.quick) { toast = text }
+        withAnimation(Motion.quick) {
+            toast = text
+            toastIsError = isError
+        }
+        AccessibilityNotification.Announcement(text).post()
         toastTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            try? await Task.sleep(nanoseconds: isError ? 5_000_000_000 : 1_800_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(Motion.fade) { self?.toast = nil }
         }

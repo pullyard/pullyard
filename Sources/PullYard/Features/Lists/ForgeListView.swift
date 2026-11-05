@@ -229,10 +229,21 @@ struct ForgeDetailColumn: View {
         } else {
             VStack(spacing: 12) {
                 IconTile(systemImage: app.provider.icon, color: .syViolet, size: 56).opacity(0.9)
-                Text("Select a \(app.provider.requestTitle)").foregroundStyle(Color.syMuted)
+                Text(placeholder).foregroundStyle(Color.syMuted)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .transition(.opacity)
+        }
+    }
+}
+
+private extension ForgeDetailColumn {
+    var placeholder: String {
+        switch app.section {
+        case .issues?: return "Select an issue"
+        case .notifications?: return "Select an item from \(app.forgeCaps.inboxTitle ?? "the inbox")"
+        case .repos?: return "Select a \(app.provider == .gitlab ? "project" : "repository")"
+        default: return "Select a \(app.provider.requestTitle)"
         }
     }
 }

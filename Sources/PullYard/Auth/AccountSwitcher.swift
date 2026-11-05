@@ -60,30 +60,52 @@ struct AccountDialogs: ViewModifier {
 
 struct AccountSwitcherFooter: View {
     @Environment(AppModel.self) private var app
+    var compact = false
     @State private var pendingSwitch: GitAccount?
     @State private var confirmSignOut = false
 
     var body: some View {
         @Bindable var app = app
-        if let user = app.user {
-            HStack(spacing: 8) {
-                Avatar(url: user.avatarUrl, size: 24)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(user.name ?? user.login).font(.syCallout.weight(.medium)).lineLimit(1)
-                    Text(app.accountSubtitle ?? "").font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
+        if app.user != nil || app.account != nil {
+            let name = app.user.map { $0.name ?? $0.login } ?? app.account?.name ?? app.account?.login ?? ""
+            let avatar = app.user?.avatarUrl ?? app.account?.avatarUrl
+            Group {
+                if compact {
+                    VStack(spacing: 10) {
+                        Menu {
+                            AccountMenuItems(pendingSwitch: $pendingSwitch, confirmSignOut: $confirmSignOut, showAdd: $app.showAddAccount)
+                        } label: {
+                            Image(systemName: "person.crop.circle")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help("\(name) — switch account")
+                        .accessibilityLabel("Account \(name), switch account")
+                        SettingsLink { Image(systemName: "gearshape") }.buttonStyle(.borderless).help("Settings (⌘,)").accessibilityLabel("Settings")
+                    }
+                    .frame(maxWidth: .infinity)
+                } else {
+                    HStack(spacing: 8) {
+                        Avatar(url: avatar, size: 24)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(name).font(.syCallout.weight(.medium)).lineLimit(1)
+                            Text(app.accountSubtitle ?? app.account?.subtitle ?? "").font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
+                        }
+                        Spacer()
+                        Menu {
+                            AccountMenuItems(pendingSwitch: $pendingSwitch, confirmSignOut: $confirmSignOut, showAdd: $app.showAddAccount)
+                        } label: {
+                            Image(systemName: "person.2")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help("Switch account")
+                        .accessibilityLabel("Switch account")
+                        SettingsLink { Image(systemName: "gearshape") }.buttonStyle(.borderless).help("Settings (⌘,)").accessibilityLabel("Settings")
+                    }
                 }
-                Spacer()
-                Menu {
-                    AccountMenuItems(pendingSwitch: $pendingSwitch, confirmSignOut: $confirmSignOut, showAdd: $app.showAddAccount)
-                } label: {
-                    Image(systemName: "person.2")
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Switch account")
-                .accessibilityLabel("Switch account")
-                SettingsLink { Image(systemName: "gearshape") }.buttonStyle(.borderless).help("Settings").accessibilityLabel("Settings")
             }
             .modifier(AccountDialogs(pendingSwitch: $pendingSwitch, confirmSignOut: $confirmSignOut, showAdd: $app.showAddAccount))
         }

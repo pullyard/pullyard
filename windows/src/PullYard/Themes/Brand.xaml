@@ -14,7 +14,7 @@
             <SolidColorBrush x:Key="SyLineStrongBrush" Color="#261A2333" />
             <SolidColorBrush x:Key="SyTextBrush" Color="#FF1A2333" />
             <SolidColorBrush x:Key="SyMutedBrush" Color="#FF5F6B7E" />
-            <SolidColorBrush x:Key="SyDimBrush" Color="#FF939AA8" />
+            <SolidColorBrush x:Key="SyDimBrush" Color="#FF7C8494" />
             <SolidColorBrush x:Key="SyAccentBrush" Color="#FF2A8BC8" />
             <SolidColorBrush x:Key="SySkyBrush" Color="#FF1F7FB8" />
             <SolidColorBrush x:Key="SyVioletBrush" Color="#FF6B55D6" />
@@ -412,7 +412,7 @@
             <SolidColorBrush x:Key="SyLineStrongBrush" Color="#2EA0AEC4" />
             <SolidColorBrush x:Key="SyTextBrush" Color="#FFE6EBF2" />
             <SolidColorBrush x:Key="SyMutedBrush" Color="#FF8693A8" />
-            <SolidColorBrush x:Key="SyDimBrush" Color="#FF5F6B80" />
+            <SolidColorBrush x:Key="SyDimBrush" Color="#FF6B778C" />
             <SolidColorBrush x:Key="SyAccentBrush" Color="#FF5BB8EC" />
             <SolidColorBrush x:Key="SySkyBrush" Color="#FF5BB8EC" />
             <SolidColorBrush x:Key="SyVioletBrush" Color="#FF9D8CF0" />

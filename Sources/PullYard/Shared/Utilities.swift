@@ -111,9 +111,18 @@ enum VisualState {
     var color: Color {
         switch self {
         case .open, .issueOpen: return .ghGreen
-        case .draft, .notPlanned: return .secondary
+        case .draft, .notPlanned: return .sySlate
         case .merged, .completed: return .ghPurple
         case .closed: return .ghRed
+        }
+    }
+
+    var fill: Color {
+        switch self {
+        case .open, .issueOpen: return .syGreenFill
+        case .draft, .notPlanned: return .sySlateFill
+        case .merged, .completed: return .syVioletFill
+        case .closed: return .syRedFill
         }
     }
 
@@ -174,19 +183,21 @@ struct StateBadge: View {
     var body: some View {
         if compact {
             Image(systemName: state.icon)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.syIcon(11))
                 .foregroundStyle(state.color)
                 .frame(width: 22, height: 22)
-                .background(Circle().fill(state.color.opacity(0.15)))
+                .background(Circle().fill(state.color.opacity(Tint.tile)))
                 .help(state.title)
                 .accessibilityLabel(state.title)
         } else {
             Label(state.title, systemImage: state.icon)
                 .font(.syCallout.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.syOnAccent)
+                .lineLimit(1)
+                .fixedSize()
                 .padding(.horizontal, 10)
                 .padding(.vertical, 3)
-                .background(Capsule().fill(state.color == .secondary ? Color.sySlate : state.color))
+                .background(Capsule().fill(state.fill))
         }
     }
 }
