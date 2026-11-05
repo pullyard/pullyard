@@ -159,6 +159,65 @@ public sealed partial class PRDetailViewModel : ObservableObject
 
     public List<MergeRequirement> Requirements => Pr is { } pr ? MergeReadiness.Requirements(pr, RulesState) : new();
 
+    public static (string glyph, string color, string text, bool ready) Headline(PullRequestDetail pr, List<MergeRequirement> requirements)
+    {
+        var checks = pr.Checks;
+        var anyFailed = checks.Count(c => c.Outcome == CheckOutcome.Failure);
+        var anyPending = checks.Count(c => c.Outcome == CheckOutcome.Pending);
+        var breakdown = MergeReadiness.Checks(checks, null);
+        var failed = breakdown.FailedRequired.Count;
+        var pending = breakdown.RunningRequired.Count;
+        var firstMissing = requirements.FirstOrDefault(r => r.State == RequirementState.Missing);
+        var firstPending = requirements.FirstOrDefault(r => r.State == RequirementState.Pending);
+        var failedText = failed == 1 ? L.T("Merge_OneCheckFailed", "1 check failed") : L.F("Merge_ChecksFailed", "{0} checks failed", failed);
+        var pendingText = pending == 1 ? L.T("Merge_OneCheckRunning", "1 check is still running") : L.F("Merge_ChecksRunning", "{0} checks are still running", pending);
+        (string glyph, string color, string text, bool ready) s;
+        if (pr.IsDraft) s = ("", "slate", L.T("Merge_Draft", "Draft — merging is unavailable"), false);
+        else if (pr.Mergeable == "CONFLICTING" || pr.MergeStateStatus == "DIRTY") s = ("", "red", L.F("Merge_Conflicts", "Has conflicts with {0}", pr.BaseRefName), false);
+        else
+        {
+            s = pr.MergeStateStatus switch
+            {
+                "BEHIND" => ("", "amber", L.F("Merge_Behind", "Branch is behind {0}", pr.BaseRefName), false),
+                "BLOCKED" => pr.ReviewDecision switch
+                {
+                    "CHANGES_REQUESTED" => ("", "red", L.T("Review_ChangesRequested", "Changes requested"), false),
+                    "REVIEW_REQUIRED" => ("", "amber", L.T("Review_Required", "Review required"), false),
+                    _ => failed > 0 ? ("", "red", failedText, false)
+                        : firstMissing is not null ? ("", "amber", firstMissing.Title, false)
+                        : pending > 0 ? ("", "amber", pendingText, false)
+                        : firstPending is not null ? ("", "amber", firstPending.Title, false)
+                        : ("", "amber", L.T("Merge_Blocked", "Blocked by branch protection"), false)
+                },
+                "UNSTABLE" => anyFailed > 0 ? ("", "amber", L.T("Merge_CanMergeBut", "Can be merged, but ") + (anyFailed == 1 ? L.T("Merge_OneCheckFailed", "1 check failed") : L.F("Merge_ChecksFailed", "{0} checks failed", anyFailed)).ToLowerInvariant(), true)
+                    : anyPending > 0 ? ("", "amber", anyPending == 1 ? L.T("Merge_OneCheckRunning", "1 check is still running") : L.F("Merge_ChecksRunning", "{0} checks are still running", anyPending), true)
+                    : ("", "green", L.T("Merge_Ready", "Ready to merge"), true),
+                "CLEAN" or "HAS_HOOKS" => ("", "green", L.T("Merge_Ready", "Ready to merge"), true),
+                _ => ("", "slate", L.T("Merge_Checking", "Checking mergeability…"), false)
+            };
+        }
+        return s;
+    }
+
+    public void PublishContext()
+    {
+        if (Pr is not { } pr) return;
+        var key = StackNotes.Key(CacheAccount, Api.Host, Ref.Repo, Ref.Number);
+        var requirements = Requirements;
+        var status = pr.IsOpen ? Headline(pr, requirements).text : pr.Merged ? "Merged" : pr.State.Length == 0 ? "" : pr.State[..1].ToUpperInvariant() + pr.State[1..].ToLowerInvariant();
+        var snapshot = PRContextPublisher.Snapshot(Ref, pr, requirements, Ownership, ChangedPaths, LastReviewed, status);
+        Task.Run(() =>
+        {
+            try
+            {
+                PRContextStore.Write(snapshot, key);
+            }
+            catch (Exception)
+            {
+            }
+        }).Forget();
+    }
+
     public OwnershipSummary? Ownership => Pr is { } pr && CodeOwnersState.Owners is { } owners ? OwnershipSummary.Build(owners, ChangedPaths, pr) : null;
 
     public DateTimeOffset? LastCommitDate => Pr?.LastCommit.Items.FirstOrDefault()?.Commit.CommittedDate;
@@ -278,6 +337,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
             RefreshError = null;
             LastUpdated = DateTimeOffset.Now;
             NotifyDerived();
+            PublishContext();
             if (DiffScope == DiffScope.SinceReview)
             {
                 if (LastReviewed is null) DiffScope = DiffScope.All;
@@ -354,6 +414,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
             }
             DiffVersion++;
             if (CodeOwnersState.Owners is not null) OnPropertyChanged(nameof(Ownership));
+            PublishContext();
         }
         catch (Exception)
         {
@@ -371,7 +432,9 @@ public sealed partial class PRDetailViewModel : ObservableObject
         try
         {
             var rules = await Api.BranchRules(Ref.Repo, pr.BaseRefName, Repo?.ViewerPermission == "ADMIN");
-            if (rulesKey == key) RulesState = RulesStatus.Loaded(rules);
+            if (rulesKey != key) return;
+            RulesState = RulesStatus.Loaded(rules);
+            PublishContext();
         }
         catch (Exception)
         {
@@ -390,7 +453,9 @@ public sealed partial class PRDetailViewModel : ObservableObject
         try
         {
             var owners = await Api.CodeOwners(Ref.Repo, baseOid);
-            if (ownersKey == key) CodeOwnersState = owners is null ? CodeOwnersStatus.Missing : CodeOwnersStatus.Loaded(owners);
+            if (ownersKey != key) return;
+            CodeOwnersState = owners is null ? CodeOwnersStatus.Missing : CodeOwnersStatus.Loaded(owners);
+            PublishContext();
         }
         catch (OperationCanceledException)
         {

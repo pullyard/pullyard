@@ -390,41 +390,10 @@ public sealed class PRContent : Grid, IShortcutHost
         if (model.Pr is not { IsOpen: true } pr) return null;
         var checks = pr.Checks;
         var requirements = model.Requirements;
-        var breakdown = MergeReadiness.Checks(checks, null);
-        var failed = breakdown.FailedRequired.Count;
-        var pending = breakdown.RunningRequired.Count;
         var ok = checks.Count(c => c.Outcome == CheckOutcome.Success);
         var anyFailed = checks.Count(c => c.Outcome == CheckOutcome.Failure);
         var anyPending = checks.Count(c => c.Outcome == CheckOutcome.Pending);
-        var firstMissing = requirements.FirstOrDefault(r => r.State == RequirementState.Missing);
-        var firstPending = requirements.FirstOrDefault(r => r.State == RequirementState.Pending);
-        var failedText = failed == 1 ? L.T("Merge_OneCheckFailed", "1 check failed") : L.F("Merge_ChecksFailed", "{0} checks failed", failed);
-        var pendingText = pending == 1 ? L.T("Merge_OneCheckRunning", "1 check is still running") : L.F("Merge_ChecksRunning", "{0} checks are still running", pending);
-        (string glyph, string color, string text, bool ready) s;
-        if (pr.IsDraft) s = ("", "slate", L.T("Merge_Draft", "Draft — merging is unavailable"), false);
-        else if (pr.Mergeable == "CONFLICTING" || pr.MergeStateStatus == "DIRTY") s = ("", "red", L.F("Merge_Conflicts", "Has conflicts with {0}", pr.BaseRefName), false);
-        else
-        {
-            s = pr.MergeStateStatus switch
-            {
-                "BEHIND" => ("", "amber", L.F("Merge_Behind", "Branch is behind {0}", pr.BaseRefName), false),
-                "BLOCKED" => pr.ReviewDecision switch
-                {
-                    "CHANGES_REQUESTED" => ("", "red", L.T("Review_ChangesRequested", "Changes requested"), false),
-                    "REVIEW_REQUIRED" => ("", "amber", L.T("Review_Required", "Review required"), false),
-                    _ => failed > 0 ? ("", "red", failedText, false)
-                        : firstMissing is not null ? ("", "amber", firstMissing.Title, false)
-                        : pending > 0 ? ("", "amber", pendingText, false)
-                        : firstPending is not null ? ("", "amber", firstPending.Title, false)
-                        : ("", "amber", L.T("Merge_Blocked", "Blocked by branch protection"), false)
-                },
-                "UNSTABLE" => anyFailed > 0 ? ("", "amber", L.T("Merge_CanMergeBut", "Can be merged, but ") + (anyFailed == 1 ? L.T("Merge_OneCheckFailed", "1 check failed") : L.F("Merge_ChecksFailed", "{0} checks failed", anyFailed)).ToLowerInvariant(), true)
-                    : anyPending > 0 ? ("", "amber", anyPending == 1 ? L.T("Merge_OneCheckRunning", "1 check is still running") : L.F("Merge_ChecksRunning", "{0} checks are still running", anyPending), true)
-                    : ("", "green", L.T("Merge_Ready", "Ready to merge"), true),
-                "CLEAN" or "HAS_HOOKS" => ("", "green", L.T("Merge_Ready", "Ready to merge"), true),
-                _ => ("", "slate", L.T("Merge_Checking", "Checking mergeability…"), false)
-            };
-        }
+        var s = PRDetailViewModel.Headline(pr, requirements);
         var row = new WrapPanel(8, Ui.Glyph(s.glyph, 14, s.color), Ui.Text(s.text, 13));
         if (pr.AutoMergeRequest is { } auto)
         {

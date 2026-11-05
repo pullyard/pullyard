@@ -61,7 +61,9 @@ public class StackNotesMcpTests : IDisposable
     public void ToolsListMatchesSchemas()
     {
         var tools = Server().Handle(Request("tools/list"))!["result"]!["tools"]!.AsArray();
-        Assert.Equal(new[] { "add_stack_note", "list_stack_notes" }, tools.Select(t => t!["name"]!.GetValue<string>()));
+        Assert.Equal(new[] { "add_stack_note", "list_stack_notes", "get_pull_request", "list_review_threads", "list_checks", "list_changed_files" }, tools.Select(t => t!["name"]!.GetValue<string>()));
+        Assert.All(tools.Skip(1), t => Assert.True(t!["annotations"]!["readOnlyHint"]!.GetValue<bool>()));
+        Assert.Equal("boolean", tools[3]!["inputSchema"]!["properties"]!["include_resolved"]!["type"]!.GetValue<string>());
         var add = tools[0]!["inputSchema"]!;
         Assert.Equal(new[] { "repo", "pr", "text" }, add["required"]!.AsArray().Select(n => n!.GetValue<string>()));
         Assert.Equal(new[] { "note", "question", "decision" }, add["properties"]!["kind"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()));
