@@ -663,7 +663,12 @@ public sealed class PRContent : Grid, IShortcutHost
 
     private async Task ConfirmApprove()
     {
-        if (await Dialogs.Confirm(XamlRoot, L.T("PR_ApproveQ", "Approve this pull request?"), L.T("PR_Approve", "Approve"), destructive: false))
+        var pending = model.PendingCount;
+        var title = pending > 0
+            ? L.F("PR_ApprovePendingQ", "Approve and submit {0} pending comment(s)?", pending)
+            : L.T("PR_ApproveQ", "Approve this pull request?");
+        var button = pending > 0 ? L.T("PR_ApproveAndSubmit", "Approve and submit") : L.T("PR_Approve", "Approve");
+        if (await Dialogs.Confirm(XamlRoot, title, button, destructive: false))
             await model.SubmitReview("APPROVE", "");
     }
 
