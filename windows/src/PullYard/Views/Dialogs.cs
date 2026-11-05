@@ -193,7 +193,7 @@ public static class Dialogs
     public static async Task Reviewers(XamlRoot? root, PRDetailViewModel model)
     {
         if (root is null) return;
-        var candidates = model.Reviewers.Where(r => r.Login != model.ViewerLogin && !r.Login.EndsWith("[bot]") && !r.Login.Contains('/')).ToList();
+        var candidates = model.Reviewers.Where(r => r.Login != model.ViewerLogin && !r.Login.EndsWith("[bot]") && (r.IsTeam || !r.Login.Contains('/'))).ToList();
         var stale = model.ReviewersToReRequest;
         var checks = new List<(CheckBox Box, string Login)>();
         var panel = Ui.V(8);
@@ -203,6 +203,8 @@ public static class Dialogs
             foreach (var r in candidates)
             {
                 var content = Ui.H(6, PRContent.ReviewerBadge(r), Ui.Text(r.Login, 13));
+                if (r.IsTeam) content.Children.Add(Ui.Caption(L.T("Reviewers_Team", "team")));
+                if (r.CodeOwner) content.Children.Add(Ui.Caption(L.T("Reviewers_CodeOwner", "code owner"), "violet"));
                 if (stale.Contains(r.Login)) content.Children.Add(Ui.Caption(L.T("Reviewers_Stale", "reviewed before latest push"), "amber"));
                 else if (r.State == "PENDING") content.Children.Add(Ui.Caption(L.T("Reviewers_Already", "already requested")));
                 var box = new CheckBox { Content = content, IsChecked = stale.Contains(r.Login) };
@@ -210,7 +212,24 @@ public static class Dialogs
                 panel.Children.Add(box);
             }
         }
-        var typed = new TextBox { PlaceholderText = L.T("Reviewers_Other", "Other logins, comma-separated, e.g. alice, bob") };
+        var exclude = candidates.Select(r => r.Login.ToLowerInvariant()).ToHashSet();
+        exclude.Add(model.ViewerLogin.ToLowerInvariant());
+        if (model.Pr?.Author?.Login is { } author) exclude.Add(author.ToLowerInvariant());
+        var suggestions = model.Ownership?.Suggestions(exclude) ?? new();
+        if (suggestions.Count > 0)
+        {
+            panel.Children.Add(Ui.Caption(L.T("Reviewers_CodeOwners", "Code owners of changed files")));
+            foreach (var o in suggestions)
+            {
+                var content = Ui.H(6, Ui.Text(o.Handle, 13));
+                if (o.IsTeam) content.Children.Add(Ui.Caption(L.T("Reviewers_Team", "team")));
+                content.Children.Add(Ui.Caption(L.T("Owners_NotRequested", "not requested")));
+                var box = new CheckBox { Content = content };
+                checks.Add((box, o.Handle));
+                panel.Children.Add(box);
+            }
+        }
+        var typed = new TextBox { PlaceholderText = L.T("Reviewers_Other", "Other logins or teams, comma-separated, e.g. alice, org/team") };
         panel.Children.Add(typed);
         List<string> Requested()
         {

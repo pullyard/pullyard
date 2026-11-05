@@ -237,6 +237,11 @@ public sealed class PRContent : Grid, IShortcutHost
                 RenderHeader();
                 RenderBanners();
                 break;
+            case nameof(PRDetailViewModel.RulesState):
+            case nameof(PRDetailViewModel.CodeOwnersState):
+            case nameof(PRDetailViewModel.Ownership):
+                RenderHeader();
+                break;
             case nameof(PRDetailViewModel.Tab):
                 ShowTab();
                 break;
@@ -339,7 +344,7 @@ public sealed class PRContent : Grid, IShortcutHost
             header.Children.Add(row);
         }
         if (model.StackTree is { } tree) header.Children.Add(StackUi.Strip(tree, model.Ref.Repo, () => model.Tab = PRTab.Stack));
-        if (MergeStatusBar(model, app, () => Dialogs.Merge(XamlRoot, model).Forget()) is { } bar) header.Children.Add(bar);
+        if (MergeStatusBar(model, app, () => Dialogs.Merge(XamlRoot, model).Forget(), () => Dialogs.Reviewers(XamlRoot, model).Forget()) is { } bar) header.Children.Add(bar);
     }
 
     public static Border BranchChip(string name, string color)
@@ -366,13 +371,21 @@ public sealed class PRContent : Grid, IShortcutHost
         return p;
     }
 
-    public static FrameworkElement? MergeStatusBar(PRDetailViewModel model, AppViewModel app, Action onMerge)
+    private static bool requirementsExpanded = true;
+
+    public static FrameworkElement? MergeStatusBar(PRDetailViewModel model, AppViewModel app, Action onMerge, Action? onRequestReview = null)
     {
         if (model.Pr is not { IsOpen: true } pr) return null;
         var checks = pr.Checks;
-        var failed = checks.Count(c => c.Outcome == CheckOutcome.Failure);
-        var pending = checks.Count(c => c.Outcome == CheckOutcome.Pending);
+        var requirements = model.Requirements;
+        var breakdown = MergeReadiness.Checks(checks, null);
+        var failed = breakdown.FailedRequired.Count;
+        var pending = breakdown.RunningRequired.Count;
         var ok = checks.Count(c => c.Outcome == CheckOutcome.Success);
+        var anyFailed = checks.Count(c => c.Outcome == CheckOutcome.Failure);
+        var anyPending = checks.Count(c => c.Outcome == CheckOutcome.Pending);
+        var firstMissing = requirements.FirstOrDefault(r => r.State == RequirementState.Missing);
+        var firstPending = requirements.FirstOrDefault(r => r.State == RequirementState.Pending);
         var failedText = failed == 1 ? L.T("Merge_OneCheckFailed", "1 check failed") : L.F("Merge_ChecksFailed", "{0} checks failed", failed);
         var pendingText = pending == 1 ? L.T("Merge_OneCheckRunning", "1 check is still running") : L.F("Merge_ChecksRunning", "{0} checks are still running", pending);
         (string glyph, string color, string text, bool ready) s;
@@ -387,9 +400,15 @@ public sealed class PRContent : Grid, IShortcutHost
                 {
                     "CHANGES_REQUESTED" => ("", "red", L.T("Review_ChangesRequested", "Changes requested"), false),
                     "REVIEW_REQUIRED" => ("", "amber", L.T("Review_Required", "Review required"), false),
-                    _ => failed > 0 ? ("", "red", failedText, false) : pending > 0 ? ("", "amber", pendingText, false) : ("", "amber", L.T("Merge_Blocked", "Blocked by branch protection"), false)
+                    _ => failed > 0 ? ("", "red", failedText, false)
+                        : firstMissing is not null ? ("", "amber", firstMissing.Title, false)
+                        : pending > 0 ? ("", "amber", pendingText, false)
+                        : firstPending is not null ? ("", "amber", firstPending.Title, false)
+                        : ("", "amber", L.T("Merge_Blocked", "Blocked by branch protection"), false)
                 },
-                "UNSTABLE" => failed > 0 ? ("", "amber", L.T("Merge_CanMergeBut", "Can be merged, but ") + failedText.ToLowerInvariant(), true) : pending > 0 ? ("", "amber", pendingText, true) : ("", "green", L.T("Merge_Ready", "Ready to merge"), true),
+                "UNSTABLE" => anyFailed > 0 ? ("", "amber", L.T("Merge_CanMergeBut", "Can be merged, but ") + (anyFailed == 1 ? L.T("Merge_OneCheckFailed", "1 check failed") : L.F("Merge_ChecksFailed", "{0} checks failed", anyFailed)).ToLowerInvariant(), true)
+                    : anyPending > 0 ? ("", "amber", anyPending == 1 ? L.T("Merge_OneCheckRunning", "1 check is still running") : L.F("Merge_ChecksRunning", "{0} checks are still running", anyPending), true)
+                    : ("", "green", L.T("Merge_Ready", "Ready to merge"), true),
                 "CLEAN" or "HAS_HOOKS" => ("", "green", L.T("Merge_Ready", "Ready to merge"), true),
                 _ => ("", "slate", L.T("Merge_Checking", "Checking mergeability…"), false)
             };
@@ -403,12 +422,12 @@ public sealed class PRContent : Grid, IShortcutHost
         if (checks.Count > 0)
         {
             var chips = Ui.H(6);
-            if (failed > 0) chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "red"), Ui.Caption(failed.ToString(), "red")));
-            if (pending > 0) chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "amber"), Ui.Caption(pending.ToString(), "amber")));
+            if (anyFailed > 0) chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "red"), Ui.Caption(anyFailed.ToString(), "red")));
+            if (anyPending > 0) chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "amber"), Ui.Caption(anyPending.ToString(), "amber")));
             chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "green"), Ui.Caption(ok.ToString(), "green")));
             var b = new Button { Content = chips, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(4, 0, 4, 0) };
             Ui.Tip(b, L.T("PR_Checks", "Checks"));
-            Ui.Named(b, L.T("PR_Checks", "Checks"), L.F("PR_ChecksSummary", "{0} failed, {1} pending, {2} passed", failed, pending, ok));
+            Ui.Named(b, L.T("PR_Checks", "Checks"), L.F("PR_ChecksSummary", "{0} failed, {1} pending, {2} passed", anyFailed, anyPending, ok));
             b.Click += (_, _) => model.Tab = PRTab.Checks;
             row.Children.Add(b);
         }
@@ -421,7 +440,161 @@ public sealed class PRContent : Grid, IShortcutHost
             actions.Children.Add(merge);
         }
         var grid = Ui.Columns((row, Ui.Star), (actions, Ui.Auto));
-        return new Border { Background = Palette.Brush(s.color, 0.08), CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 6, 8, 6), Child = grid };
+        if (requirements.Count == 0)
+            return new Border { Background = Palette.Brush(s.color, 0.08), CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 6, 8, 6), Child = grid };
+        var list = RequirementsList(model, pr, requirements, onRequestReview);
+        list.Visibility = requirementsExpanded ? Visibility.Visible : Visibility.Collapsed;
+        var toggle = new Button { Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(4, 2, 4, 2) };
+        void SyncToggle()
+        {
+            var label = requirementsExpanded ? L.T("Merge_HideRequirements", "Hide merge requirements") : L.T("Merge_ShowRequirements", "Show merge requirements");
+            toggle.Content = Ui.Glyph(requirementsExpanded ? "" : "", 11, "muted");
+            Ui.Tip(toggle, label);
+            Ui.Named(toggle, label);
+        }
+        SyncToggle();
+        toggle.Click += (_, _) =>
+        {
+            requirementsExpanded = !requirementsExpanded;
+            list.Visibility = requirementsExpanded ? Visibility.Visible : Visibility.Collapsed;
+            SyncToggle();
+        };
+        actions.Children.Add(toggle);
+        return new Border { Background = Palette.Brush(s.color, 0.08), CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 6, 8, 6), Child = Ui.V(6, grid, list) };
+    }
+
+    private static StackPanel RequirementsList(PRDetailViewModel model, PullRequestDetail pr, List<MergeRequirement> requirements, Action? onRequestReview)
+    {
+        static int Rank(RequirementState s) => s switch
+        {
+            RequirementState.Missing => 0,
+            RequirementState.Pending => 1,
+            RequirementState.Unknown => 2,
+            RequirementState.Advisory => 3,
+            _ => 4
+        };
+        bool CanPerform(RequirementAction a) => a switch
+        {
+            RequirementAction.RequestReview => onRequestReview is not null && (model.CanWrite || pr.ViewerDidAuthor),
+            RequirementAction.UpdateBranch => false,
+            RequirementAction.ReadyForReview => pr.ViewerCanUpdate,
+            _ => true
+        };
+        void Perform(RequirementAction a)
+        {
+            switch (a)
+            {
+                case RequirementAction.RequestReview: onRequestReview?.Invoke(); break;
+                case RequirementAction.ShowChecks: model.Tab = PRTab.Checks; break;
+                case RequirementAction.ShowConversation: model.Tab = PRTab.Conversation; break;
+                case RequirementAction.ShowConflicts:
+                    model.Tab = PRTab.Conversation;
+                    model.ScrollToBottomToken++;
+                    break;
+                case RequirementAction.UpdateBranch: model.Simple(Q.UpdateBranch).Forget(); break;
+                case RequirementAction.ReadyForReview: model.Simple(Q.ReadyForReview).Forget(); break;
+            }
+        }
+        var panel = Ui.V(4);
+        Ui.Named(panel, L.T("Merge_Requirements", "Merge requirements"));
+        foreach (var r in requirements.Select((r, i) => (r, i)).OrderBy(x => Rank(x.r.State)).ThenBy(x => x.i).Select(x => x.r))
+        {
+            var (glyph, color, spoken) = r.State switch
+            {
+                RequirementState.Satisfied => ("", "green", L.T("Merge_ReqMet", "met")),
+                RequirementState.Missing => ("", "red", L.T("Merge_ReqBlocking", "blocking")),
+                RequirementState.Pending => ("", "amber", L.T("Merge_ReqPending", "in progress")),
+                RequirementState.Unknown => ("", "muted", L.T("Merge_ReqUnknown", "unknown")),
+                _ => ("", "muted", L.T("Merge_ReqAdvisory", "doesn’t block"))
+            };
+            var text = Ui.V(1, Ui.Text(r.Title, 13, r.State == RequirementState.Satisfied ? "muted" : "text", wrap: true));
+            if (r.Detail is { } d) text.Children.Add(Ui.Caption(d));
+            UIElement? action = null;
+            if (r.Action is { } a && r.State != RequirementState.Satisfied && CanPerform(a))
+            {
+                var title = a switch
+                {
+                    RequirementAction.RequestReview => L.T("Merge_ActRequestReview", "Request review"),
+                    RequirementAction.ShowChecks => L.T("Merge_ActShowChecks", "Show checks"),
+                    RequirementAction.ShowConversation => L.T("Merge_ActShowConversation", "Show conversation"),
+                    RequirementAction.ShowConflicts => L.T("Merge_ActShowConflicts", "View conflicts"),
+                    RequirementAction.UpdateBranch => L.T("Merge_UpdateBranch", "Update branch"),
+                    _ => L.T("Merge_ActReady", "Ready for review")
+                };
+                action = Ui.Link(title, () => Perform(a));
+            }
+            var line = Ui.Columns((Ui.Glyph(glyph, 12, color), Ui.Auto), (text, Ui.Star), (action, Ui.Auto));
+            Ui.Named(line, r.Title, spoken);
+            panel.Children.Add(line);
+        }
+        if (model.Ownership is { } ownership && (ownership.Groups.Count > 0 || ownership.Unowned.Count > 0))
+        {
+            var owners = CodeOwnersSection(ownership, CanPerform(RequirementAction.RequestReview) ? () => Perform(RequirementAction.RequestReview) : null);
+            owners.Margin = new Thickness(0, 4, 0, 0);
+            panel.Children.Add(owners);
+        }
+        return panel;
+    }
+
+    private const int OwnerGroupLimit = 6;
+
+    private static StackPanel CodeOwnersSection(OwnershipSummary summary, Action? onRequestReview)
+    {
+        static string Files(int n) => n == 1 ? L.T("Owners_OneFile", "1 file") : L.F("Owners_Files", "{0} files", n);
+        static string Color(OwnerStatus s) => s switch
+        {
+            OwnerStatus.Approved => "green",
+            OwnerStatus.ChangesRequested => "red",
+            OwnerStatus.Requested => "amber",
+            _ => "text"
+        };
+        static string Title(OwnerStatus s) => s switch
+        {
+            OwnerStatus.Approved => L.T("Owners_Approved", "approved"),
+            OwnerStatus.ChangesRequested => L.T("Owners_ChangesRequested", "changes requested"),
+            OwnerStatus.Requested => L.T("Owners_Requested", "review requested"),
+            _ => L.T("Owners_NotRequested", "not requested")
+        };
+        var title = L.T("Owners_Title", "Code owners");
+        var panel = Ui.V(4);
+        Ui.Named(panel, title);
+        var header = Ui.H(6, Ui.Text(title, 12, "muted", FontWeights.SemiBold), Ui.Text(summary.SourcePath, 12, "dim", mono: true));
+        UIElement? request = onRequestReview is not null && summary.Suggestions(new HashSet<string>()).Count > 0
+            ? Ui.Link(L.T("Owners_Request", "Request owners"), onRequestReview)
+            : null;
+        panel.Children.Add(Ui.Columns((header, Ui.Star), (request, Ui.Auto)));
+        foreach (var group in summary.Groups.Take(OwnerGroupLimit))
+        {
+            var row = new WrapPanel(6);
+            foreach (var o in group.Owners)
+            {
+                var handle = Ui.Text("@" + o.Handle, 13, Color(o.Status));
+                Ui.Tip(handle, $"@{o.Handle}: {Title(o.Status)}");
+                row.Children.Add(handle);
+            }
+            var count = Ui.Caption(Files(group.Files.Count));
+            Ui.Tip(count, string.Join("\n", group.Files));
+            row.Children.Add(count);
+            var line = Ui.Columns((Ui.Glyph(group.Satisfied ? "\ue73e" : "\ue716", 12, group.Satisfied ? "green" : "muted"), Ui.Auto), (row, Ui.Star));
+            Ui.Named(line, string.Join(", ", group.Owners.Select(o => $"{o.Handle}, {Title(o.Status)}")), Files(group.Files.Count));
+            panel.Children.Add(line);
+        }
+        if (summary.Groups.Count > OwnerGroupLimit)
+        {
+            var more = Ui.Caption(L.F("Owners_MoreGroups", "+{0} more owner groups", summary.Groups.Count - OwnerGroupLimit));
+            more.Margin = new Thickness(20, 0, 0, 0);
+            panel.Children.Add(more);
+        }
+        if (summary.Unowned.Count > 0)
+        {
+            var text = L.F("Owners_Unowned", "{0} without a code owner", Files(summary.Unowned.Count));
+            var caption = Ui.Caption(text);
+            Ui.Tip(caption, string.Join("\n", summary.Unowned));
+            var line = Ui.Columns((Ui.Glyph("\ue9ce", 12, "amber"), Ui.Auto), (caption, Ui.Star));
+            Ui.Named(line, text);
+            panel.Children.Add(line);
+        }
+        return panel;
     }
 
     private void RenderBanners()

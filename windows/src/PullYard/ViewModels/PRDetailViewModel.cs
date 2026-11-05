@@ -10,7 +10,7 @@ namespace PullYard.ViewModels;
 
 public enum PRTab { Conversation, Commits, Checks, Files, Stack, Jira }
 
-public sealed record ReviewerInfo(string Login, string? Avatar, string State);
+public sealed record ReviewerInfo(string Login, string? Avatar, string State, bool IsTeam = false, bool CodeOwner = false);
 
 public sealed record StaleReview(string Login, int? Commits);
 
@@ -43,8 +43,15 @@ public sealed partial class PRDetailViewModel : ObservableObject
     [ObservableProperty] private string? scrollTarget;
     [ObservableProperty] private int diffVersion;
     [ObservableProperty] private CiFixLaunch? ciFix;
+    [ObservableProperty] private RulesStatus rulesState = RulesStatus.Loading;
+    [ObservableProperty] private CodeOwnersStatus codeOwnersState = CodeOwnersStatus.Loading;
+    private string? rulesKey;
+    private string? ownersKey;
+    private DateTimeOffset? rulesFetched;
+    private CancellationTokenSource? viewedLoad;
 
     public HashSet<string> ViewedPaths { get; private set; } = new();
+    public List<string> ChangedPaths { get; private set; } = new();
     public HashSet<string> Collapsed { get; private set; } = new();
     public List<PendingComment> Pending { get; } = new();
     public bool FilesInInspector { get; set; }
@@ -93,11 +100,15 @@ public sealed partial class PRDetailViewModel : ObservableObject
             foreach (var req in pr.ReviewRequests.Items)
             {
                 if (req.RequestedReviewer is not { } rv || done.Contains(rv.Display)) continue;
-                result.Add(new ReviewerInfo(rv.Display, rv.AvatarUrl, "PENDING"));
+                result.Add(new ReviewerInfo(rv.Display, rv.AvatarUrl, "PENDING", rv.IsTeam, req.AsCodeOwner == true));
             }
             return result;
         }
     }
+
+    public List<MergeRequirement> Requirements => Pr is { } pr ? MergeReadiness.Requirements(pr, RulesState) : new();
+
+    public OwnershipSummary? Ownership => Pr is { } pr && CodeOwnersState.Owners is { } owners ? OwnershipSummary.Build(owners, ChangedPaths, pr) : null;
 
     public DateTimeOffset? LastCommitDate => Pr?.LastCommit.Items.FirstOrDefault()?.Commit.CommittedDate;
 
@@ -199,7 +210,11 @@ public sealed partial class PRDetailViewModel : ObservableObject
             }
             Repo = r.Repository;
             var newHtml = ConversationHtml.Render(pr);
-            ViewedPaths = (pr.Files?.Items ?? new()).Where(f => f.ViewerViewedState == "VIEWED").Select(f => f.Path).ToHashSet();
+            ViewedPaths = pr.Files?.ViewedPaths ?? new();
+            ChangedPaths = pr.Files?.Items.Select(f => f.Path).ToList() ?? new();
+            LoadMoreViewed(pr.Files?.NextCursor);
+            LoadRules(pr, forced == "refresh");
+            LoadCodeOwners(pr);
             IndexThreads(pr.ReviewThreads.Items);
             signature = PullRequestSignature.Of(pr);
             lastFullFetch = DateTimeOffset.Now;
@@ -265,10 +280,78 @@ public sealed partial class PRDetailViewModel : ObservableObject
         }
     }
 
+    private async void LoadMoreViewed(string? cursor)
+    {
+        viewedLoad?.Cancel();
+        if (cursor is null) return;
+        var cts = new CancellationTokenSource();
+        viewedLoad = cts;
+        try
+        {
+            for (var pages = 0; cursor is not null && pages < 30; pages++)
+            {
+                var page = await Api.PullRequestFilesPage(Ref, cursor, cts.Token);
+                if (cts.IsCancellationRequested || page is null) return;
+                ViewedPaths.UnionWith(page.ViewedPaths);
+                ChangedPaths.AddRange(page.Items.Select(f => f.Path));
+                cursor = page.NextCursor;
+            }
+            DiffVersion++;
+            if (CodeOwnersState.Owners is not null) OnPropertyChanged(nameof(Ownership));
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private async void LoadRules(PullRequestDetail pr, bool force)
+    {
+        var key = $"{Ref.Repo.Full}|{pr.BaseRefName}";
+        var fresh = rulesFetched is { } at && DateTimeOffset.Now - at < TimeSpan.FromMinutes(5);
+        if (!force && key == rulesKey && (fresh || RulesState.Phase == RulesPhase.Loading)) return;
+        if (key != rulesKey) RulesState = RulesStatus.Loading;
+        rulesKey = key;
+        rulesFetched = DateTimeOffset.Now;
+        try
+        {
+            var rules = await Api.BranchRules(Ref.Repo, pr.BaseRefName, Repo?.ViewerPermission == "ADMIN");
+            if (rulesKey == key) RulesState = RulesStatus.Loaded(rules);
+        }
+        catch (Exception)
+        {
+            if (rulesKey != key) return;
+            rulesFetched = null;
+            if (RulesState.Rules is null) RulesState = RulesStatus.Failed;
+        }
+    }
+
+    private async void LoadCodeOwners(PullRequestDetail pr)
+    {
+        if (pr.BaseTipOid is not { } baseOid) return;
+        var key = $"{Ref.Repo.Full}|{baseOid}";
+        if (key == ownersKey) return;
+        ownersKey = key;
+        try
+        {
+            var owners = await Api.CodeOwners(Ref.Repo, baseOid);
+            if (ownersKey == key) CodeOwnersState = owners is null ? CodeOwnersStatus.Missing : CodeOwnersStatus.Loaded(owners);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception)
+        {
+            if (ownersKey != key) return;
+            ownersKey = null;
+            CodeOwnersState = CodeOwnersStatus.Failed;
+        }
+    }
+
     private void NotifyDerived()
     {
         OnPropertyChanged(nameof(CanWrite));
         OnPropertyChanged(nameof(Reviewers));
+        OnPropertyChanged(nameof(Requirements));
         OnPropertyChanged(nameof(StaleReviews));
         OnPropertyChanged(nameof(LastCommitDate));
     }
