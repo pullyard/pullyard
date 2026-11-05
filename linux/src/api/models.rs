@@ -418,11 +418,17 @@ pub struct Reviewer {
     pub avatar_url: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
+    #[serde(default)]
+    pub combined_slug: Option<String>,
 }
 
 impl Reviewer {
     pub fn display(&self) -> String {
-        self.login.clone().or_else(|| self.name.clone()).unwrap_or_else(|| "?".into())
+        self.login.clone().or_else(|| self.combined_slug.clone()).or_else(|| self.name.clone()).unwrap_or_else(|| "?".into())
+    }
+
+    pub fn is_team(&self) -> bool {
+        self.typename.as_deref() == Some("Team")
     }
 }
 
@@ -431,6 +437,8 @@ impl Reviewer {
 pub struct ReviewRequest {
     #[serde(default)]
     pub requested_reviewer: Option<Reviewer>,
+    #[serde(default)]
+    pub as_code_owner: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -509,6 +517,8 @@ pub struct CheckContext {
     pub target_url: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub is_required: Option<bool>,
 }
 
 impl CheckContext {
@@ -624,6 +634,40 @@ pub struct FileViewed {
     pub viewer_viewed_state: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct FileViewedPage {
+    pub nodes: Vec<FileViewed>,
+    pub total_count: Option<i64>,
+    pub page_info: Option<PageInfo>,
+}
+
+impl<'de> Deserialize<'de> for FileViewedPage {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Raw {
+            #[serde(default)]
+            nodes: Option<Vec<Value>>,
+            #[serde(default)]
+            total_count: Option<i64>,
+            #[serde(default)]
+            page_info: Option<PageInfo>,
+        }
+        let raw = Raw::deserialize(d)?;
+        Ok(FileViewedPage { nodes: lenient_vec(raw.nodes.unwrap_or_default()), total_count: raw.total_count, page_info: raw.page_info })
+    }
+}
+
+impl FileViewedPage {
+    pub fn viewed_paths(&self) -> std::collections::HashSet<String> {
+        self.nodes.iter().filter(|v| v.viewer_viewed_state == "VIEWED").map(|v| v.path.clone()).collect()
+    }
+
+    pub fn next_cursor(&self) -> Option<String> {
+        self.page_info.as_ref().filter(|p| p.has_next_page).and_then(|p| p.end_cursor.clone())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct XRefSource {
@@ -735,6 +779,12 @@ pub struct AutoMergeRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct BaseRef {
+    #[serde(default)]
+    pub target: Option<ReviewCommit>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestDetail {
     pub id: String,
@@ -756,6 +806,8 @@ pub struct PullRequestDetail {
     pub head_ref_name: String,
     pub base_ref_name: String,
     pub head_ref_oid: String,
+    #[serde(default)]
+    pub base_ref: Option<BaseRef>,
     #[serde(default)]
     pub head_repository: Option<RepoName>,
     #[serde(default)]
@@ -782,7 +834,7 @@ pub struct PullRequestDetail {
     #[serde(default)]
     pub all_commits: Nodes<CommitInfoNode>,
     #[serde(default)]
-    pub files: Option<Nodes<FileViewed>>,
+    pub files: Option<FileViewedPage>,
     #[serde(default)]
     pub timeline_items: Nodes<TimelineItem>,
     #[serde(default)]
@@ -946,6 +998,10 @@ impl PullRequestDetail {
 
     pub fn last_commit_date(&self) -> Option<Date> {
         self.last_commit.nodes.first()?.commit.committed_date
+    }
+
+    pub fn base_tip_oid(&self) -> Option<&str> {
+        self.base_ref.as_ref()?.target.as_ref().map(|t| t.oid.as_str())
     }
 }
 

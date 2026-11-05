@@ -19,6 +19,8 @@ use super::html::HtmlView;
 use super::menu::{context_menu, Menu};
 use super::tabstrip::{TabItem, TabStrip};
 use super::widgets::*;
+use crate::api::code_owners::{OwnerEntry, OwnerStatus, OwnershipSummary};
+use crate::api::merge_readiness::{self, MergeRequirement, RequirementAction, RequirementState};
 use crate::api::models::*;
 use crate::api::queries as q;
 use crate::stack::{StackNode, StackTree};
@@ -239,6 +241,7 @@ impl PrPage {
                     self.model.refresh_stale_files();
                 }
             }
+            Change::Rules => self.render_header(),
             Change::Reveal(_) => {}
         }
     }
@@ -729,7 +732,10 @@ impl PrPage {
         if let Some(bar) = merge_status_bar(&self.model, &pr, Rc::new({
             let m = self.model.clone();
             move || sheets::merge(m.clone())
-        })) {
+        }), Some(Rc::new({
+            let m = self.model.clone();
+            move || sheets::reviewers(m.clone())
+        }))) {
             self.header_box.append(&bar);
         }
     }
@@ -998,12 +1004,17 @@ pub struct MergeStatus {
     pub ready: bool,
 }
 
-pub fn merge_status(pr: &PullRequestDetail) -> MergeStatus {
+pub fn merge_status(pr: &PullRequestDetail, requirements: &[MergeRequirement]) -> MergeStatus {
     let checks = pr.checks();
-    let failed = checks.iter().filter(|c| c.outcome() == CheckOutcome::Failure).count();
-    let pending = checks.iter().filter(|c| c.outcome() == CheckOutcome::Pending).count();
-    let failed_text = if failed == 1 { "1 check failed".to_string() } else { format!("{failed} checks failed") };
-    let pending_text = if pending == 1 { "1 check is still running".to_string() } else { format!("{pending} checks are still running") };
+    let breakdown = merge_readiness::check_breakdown(&checks, None);
+    let noun = if breakdown.required_known { "required check" } else { "check" };
+    let failed = breakdown.failed_required().len();
+    let pending = breakdown.running_required().len();
+    let failed_text = if failed == 1 { format!("1 {noun} failed") } else { format!("{failed} {noun}s failed") };
+    let pending_text = if pending == 1 { format!("1 {noun} is still running") } else { format!("{pending} {noun}s are still running") };
+    let any_failed = checks.iter().filter(|c| c.outcome() == CheckOutcome::Failure).count();
+    let any_pending = checks.iter().filter(|c| c.outcome() == CheckOutcome::Pending).count();
+    let first = |state: RequirementState| requirements.iter().find(|r| r.state == state).map(|r| r.title.clone());
     let s = |icon: &'static str, color: &'static str, text: String, ready: bool| MergeStatus { icon, color, text, ready };
     if pr.is_draft {
         return s("sy-pr-draft-symbolic", "slate", "Draft — merging is unavailable".into(), false);
@@ -1019,18 +1030,24 @@ pub fn merge_status(pr: &PullRequestDetail) -> MergeStatus {
             _ => {
                 if failed > 0 {
                     s("sy-x-circle-symbolic", "red", failed_text, false)
+                } else if let Some(t) = first(RequirementState::Missing) {
+                    s("sy-lock-symbolic", "amber", t, false)
                 } else if pending > 0 {
                     s("sy-clock-symbolic", "amber", pending_text, false)
+                } else if let Some(t) = first(RequirementState::Pending) {
+                    s("sy-clock-symbolic", "amber", t, false)
                 } else {
                     s("sy-lock-symbolic", "amber", "Blocked by branch protection".into(), false)
                 }
             }
         },
         Some("UNSTABLE") => {
-            if failed > 0 {
-                s("sy-attention-symbolic", "amber", format!("Can be merged, but {}", failed_text.to_lowercase()), true)
-            } else if pending > 0 {
-                s("sy-clock-symbolic", "amber", pending_text, true)
+            if any_failed > 0 {
+                let t = if any_failed == 1 { "1 check failed".to_string() } else { format!("{any_failed} checks failed") };
+                s("sy-attention-symbolic", "amber", format!("Can be merged, but {t}"), true)
+            } else if any_pending > 0 {
+                let t = if any_pending == 1 { "1 check is still running".to_string() } else { format!("{any_pending} checks are still running") };
+                s("sy-clock-symbolic", "amber", t, true)
             } else {
                 s("sy-check-circle-symbolic", "green", "Ready to merge".into(), true)
             }
@@ -1040,14 +1057,20 @@ pub fn merge_status(pr: &PullRequestDetail) -> MergeStatus {
     }
 }
 
-pub fn merge_status_bar(model: &Rc<PrModel>, pr: &PullRequestDetail, on_merge: Rc<dyn Fn()>) -> Option<gtk::Box> {
+thread_local! {
+    static REQUIREMENTS_EXPANDED: Cell<bool> = const { Cell::new(true) };
+}
+
+pub fn merge_status_bar(model: &Rc<PrModel>, pr: &PullRequestDetail, on_merge: Rc<dyn Fn()>, on_request_review: Option<Rc<dyn Fn()>>) -> Option<gtk::Box> {
     if !pr.is_open() {
         return None;
     }
-    let st = merge_status(pr);
+    let requirements = model.requirements();
+    let st = merge_status(pr, &requirements);
+    let outer = vbox(6);
+    outer.add_css_class("banner-box");
+    outer.add_css_class(st.color);
     let b = hbox(8);
-    b.add_css_class("banner-box");
-    b.add_css_class(st.color);
     b.append(&colored_icon(st.icon, 16, st.color));
     b.append(&wrap_label(&st.text, &["sy-text"]));
     if let Some(auto) = &pr.auto_merge_request {
@@ -1098,7 +1121,192 @@ pub fn merge_status_bar(model: &Rc<PrModel>, pr: &PullRequestDetail, on_merge: R
         mbtn.connect_clicked(move |_| on_merge());
         b.append(&mbtn);
     }
-    Some(b)
+    outer.append(&b);
+    if !requirements.is_empty() {
+        let list = requirements_list(model, pr, &requirements, on_request_review);
+        let expanded = REQUIREMENTS_EXPANDED.with(Cell::get);
+        list.set_visible(expanded);
+        let toggle = gtk::Button::new();
+        toggle.add_css_class("flat");
+        let sync = {
+            let toggle = toggle.clone();
+            move |open: bool| {
+                toggle.set_icon_name(if open { "pan-down-symbolic" } else { "pan-end-symbolic" });
+                let label = if open { "Hide merge requirements" } else { "Show merge requirements" };
+                toggle.set_tooltip_text(Some(label));
+                toggle.update_property(&[gtk::accessible::Property::Label(label)]);
+            }
+        };
+        sync(expanded);
+        let l = list.clone();
+        toggle.connect_clicked(move |_| {
+            let open = !REQUIREMENTS_EXPANDED.with(Cell::get);
+            REQUIREMENTS_EXPANDED.with(|c| c.set(open));
+            l.set_visible(open);
+            sync(open);
+        });
+        b.append(&toggle);
+        outer.append(&list);
+    }
+    Some(outer)
+}
+
+fn requirements_list(model: &Rc<PrModel>, pr: &PullRequestDetail, requirements: &[MergeRequirement], on_request_review: Option<Rc<dyn Fn()>>) -> gtk::Box {
+    let list = vbox(4);
+    list.update_property(&[gtk::accessible::Property::Label("Merge requirements")]);
+    let mut ordered: Vec<&MergeRequirement> = requirements.iter().collect();
+    ordered.sort_by_key(|r| r.state);
+    for r in ordered {
+        let (icon_name, color, spoken) = match r.state {
+            RequirementState::Satisfied => ("sy-check-circle-symbolic", "green", "met"),
+            RequirementState::Missing => ("sy-x-circle-symbolic", "red", "blocking"),
+            RequirementState::Pending => ("sy-clock-symbolic", "amber", "in progress"),
+            RequirementState::Unknown => ("dialog-question-symbolic", "slate", "unknown"),
+            RequirementState::Advisory => ("dialog-information-symbolic", "slate", "doesn’t block"),
+        };
+        let row = hbox(8);
+        let ic = colored_icon(icon_name, 14, color);
+        ic.set_valign(gtk::Align::Start);
+        row.append(&ic);
+        let text = vbox(1);
+        text.set_hexpand(true);
+        let title = wrap_label(&r.title, &[if r.state == RequirementState::Satisfied { "sy-muted" } else { "sy-text" }]);
+        title.set_xalign(0.0);
+        text.append(&title);
+        if let Some(d) = &r.detail {
+            let dl = wrap_label(d, &["sy-muted", "sy-small"]);
+            dl.set_xalign(0.0);
+            text.append(&dl);
+        }
+        row.append(&text);
+        if let Some(action) = r.action.filter(|_| r.state != RequirementState::Satisfied) {
+            let allowed = match action {
+                RequirementAction::RequestReview => on_request_review.is_some() && (model.can_write() || pr.viewer_did_author),
+                RequirementAction::UpdateBranch => false,
+                RequirementAction::ReadyForReview => pr.viewer_can_update,
+                _ => true,
+            };
+            if allowed {
+                let label = match action {
+                    RequirementAction::RequestReview => "Request review",
+                    RequirementAction::ShowChecks => "Show checks",
+                    RequirementAction::ShowConversation => "Show conversation",
+                    RequirementAction::ShowConflicts => "View conflicts",
+                    RequirementAction::UpdateBranch => "Update branch",
+                    RequirementAction::ReadyForReview => "Ready for review",
+                };
+                let btn = link_button(label);
+                btn.set_valign(gtk::Align::Start);
+                let m = model.clone();
+                let review = on_request_review.clone();
+                btn.connect_clicked(move |_| match action {
+                    RequirementAction::RequestReview => {
+                        if let Some(f) = &review {
+                            f();
+                        }
+                    }
+                    RequirementAction::ShowChecks => m.set_tab(PrTab::Checks),
+                    RequirementAction::ShowConversation => m.set_tab(PrTab::Conversation),
+                    RequirementAction::ShowConflicts => {
+                        m.set_tab(PrTab::Conversation);
+                        m.emit(Change::ScrollBottom);
+                    }
+                    RequirementAction::UpdateBranch => {
+                        let m = m.clone();
+                        crate::rt::spawn_local(async move {
+                            m.simple(q::UPDATE_BRANCH).await;
+                        });
+                    }
+                    RequirementAction::ReadyForReview => {
+                        let m = m.clone();
+                        crate::rt::spawn_local(async move {
+                            m.simple(q::READY_FOR_REVIEW).await;
+                        });
+                    }
+                });
+                row.append(&btn);
+            }
+        }
+        row.update_property(&[gtk::accessible::Property::Description(spoken)]);
+        list.append(&row);
+    }
+    if let Some(ownership) = model.ownership().filter(|o| !o.groups.is_empty() || !o.unowned.is_empty()) {
+        let can_request = on_request_review.is_some() && (model.can_write() || pr.viewer_did_author);
+        list.append(&code_owners_section(&ownership, on_request_review.filter(|_| can_request)));
+    }
+    list
+}
+
+const OWNER_GROUP_LIMIT: usize = 6;
+
+fn files_count(n: usize) -> String {
+    if n == 1 {
+        "1 file".to_string()
+    } else {
+        format!("{n} files")
+    }
+}
+
+fn owner_label(o: &OwnerEntry) -> gtk::Label {
+    let class = match o.status {
+        OwnerStatus::Approved => "fg-green",
+        OwnerStatus::ChangesRequested => "fg-red",
+        OwnerStatus::Requested => "fg-amber",
+        OwnerStatus::NotRequested => "sy-text",
+    };
+    let l = label_with(&format!("@{}", o.handle), &[class]);
+    l.set_tooltip_text(Some(&format!("@{}: {}", o.handle, o.status.title())));
+    l.update_property(&[gtk::accessible::Property::Label(&format!("{}, {}", o.handle, o.status.title()))]);
+    l
+}
+
+fn code_owners_section(summary: &OwnershipSummary, on_request_review: Option<Rc<dyn Fn()>>) -> gtk::Box {
+    let section = vbox(4);
+    section.update_property(&[gtk::accessible::Property::Label("Code owners")]);
+    let head = hbox(6);
+    head.append(&label_with("Code owners", &["sy-muted", "sy-small", "sy-bold"]));
+    head.append(&ellipsized(&summary.source_path, &["sy-dim", "sy-small", "sy-mono"]));
+    head.append(&spacer());
+    if let Some(f) = on_request_review.filter(|_| !summary.suggestions(&Default::default()).is_empty()) {
+        let btn = link_button("Request owners");
+        btn.connect_clicked(move |_| f());
+        head.append(&btn);
+    }
+    section.append(&head);
+    for group in summary.groups.iter().take(OWNER_GROUP_LIMIT) {
+        let row = hbox(8);
+        let satisfied = group.satisfied();
+        let ic = if satisfied { colored_icon("sy-check-circle-symbolic", 14, "green") } else { colored_icon("sy-person-symbolic", 14, "slate") };
+        ic.set_valign(gtk::Align::Start);
+        decorative(&ic);
+        row.append(&ic);
+        let owners = hbox(6);
+        for o in &group.owners {
+            owners.append(&owner_label(o));
+        }
+        row.append(&owners);
+        let files = label_with(&files_count(group.files.len()), &["sy-muted", "sy-small"]);
+        files.set_tooltip_text(Some(&group.files.join("\n")));
+        row.append(&files);
+        section.append(&row);
+    }
+    if summary.groups.len() > OWNER_GROUP_LIMIT {
+        let more = label_with(&format!("+{} more owner groups", summary.groups.len() - OWNER_GROUP_LIMIT), &["sy-muted", "sy-small"]);
+        more.set_xalign(0.0);
+        more.set_margin_start(22);
+        section.append(&more);
+    }
+    if !summary.unowned.is_empty() {
+        let row = hbox(8);
+        let ic = colored_icon("dialog-question-symbolic", 14, "amber");
+        decorative(&ic);
+        row.append(&ic);
+        let l = label_with(&format!("{} without a code owner", files_count(summary.unowned.len())), &["sy-muted", "sy-small"]);
+        l.set_tooltip_text(Some(&summary.unowned.join("\n")));
+        row.append(&l);
+        section.append(&row);
+    }
+    section
 }
 
 pub fn rereview_banner(model: &Rc<PrModel>, pr: &PullRequestDetail, inset: bool, requested: Option<Vec<String>>, sending: bool, send: Rc<dyn Fn(Vec<String>)>) -> Option<gtk::Box> {

@@ -22,6 +22,10 @@ enum FixPrompt {
         }
     }
 
+    static func checkoutStep(_ number: Int) -> String {
+        "Make sure the working tree is on the PR branch: run `gh pr checkout \(number)` and `git pull`. If there are uncommitted local changes, stop and ask me first."
+    }
+
     static func build(pr: PullRequestDetail, repo: RepoRef, threads: [ReviewThread], general: [GeneralFeedback], options: FixOptions) -> String {
         var out = """
         Address the code review feedback on pull request #\(pr.number) "\(pr.title)" in \(repo.full).
@@ -29,7 +33,7 @@ enum FixPrompt {
         Branch: \(pr.headRefName) → \(pr.baseRefName)
 
         Steps:
-        1. Make sure the working tree is on the PR branch: run `gh pr checkout \(pr.number)` and `git pull`. If there are uncommitted local changes, stop and ask me first.
+        1. \(checkoutStep(pr.number))
         2. Go through every item below. Make the change the reviewer asked for. If a comment is unclear, already handled, or you disagree with it, do not change code for it — explain why in your summary.
         3. Keep changes minimal and in the style of the surrounding code. Run the project's analyzer/linter and the tests related to the touched code.
 

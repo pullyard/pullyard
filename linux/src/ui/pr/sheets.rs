@@ -250,7 +250,7 @@ pub fn edit(model: Rc<PrModel>) {
 pub fn reviewers(model: Rc<PrModel>) {
     let sheet = Sheet::new("Request review", 560, -1);
     let viewer = model.viewer_login.borrow().clone();
-    let candidates: Vec<super::model::ReviewerInfo> = model.reviewers().into_iter().filter(|r| r.login != viewer && !r.login.ends_with("[bot]") && !r.login.contains('/')).collect();
+    let candidates: Vec<super::model::ReviewerInfo> = model.reviewers().into_iter().filter(|r| r.login != viewer && !r.login.ends_with("[bot]") && (r.is_team || !r.login.contains('/'))).collect();
     let rerequest: HashSet<String> = model.reviewers_to_rerequest().into_iter().collect();
     let selected: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(rerequest.clone()));
     let go = suggested("Request");
@@ -262,6 +262,12 @@ pub fn reviewers(model: Rc<PrModel>) {
             let content = hbox(6);
             content.append(&super::reviewer_badge(r));
             content.append(&label_with(&r.login, &["sy-text"]));
+            if r.is_team {
+                content.append(&label_with("team", &["sy-muted", "sy-small"]));
+            }
+            if r.code_owner {
+                content.append(&label_with("code owner", &["fg-violet", "sy-small"]));
+            }
             if rerequest.contains(&r.login) {
                 content.append(&label_with("reviewed before latest push", &["fg-amber", "sy-small"]));
             } else if r.state == "PENDING" {
@@ -280,8 +286,41 @@ pub fn reviewers(model: Rc<PrModel>) {
             sheet.body.append(&check);
         }
     }
+    let owner_suggestions: Vec<String> = {
+        let mut exclude: HashSet<String> = candidates.iter().map(|c| c.login.to_lowercase()).collect();
+        exclude.insert(viewer.to_lowercase());
+        if let Some(author) = model.pr.borrow().as_ref().and_then(|p| p.author.as_ref()) {
+            exclude.insert(author.login.to_lowercase());
+        }
+        let suggestions = model.ownership().map(|o| o.suggestions(&exclude)).unwrap_or_default();
+        if !suggestions.is_empty() {
+            sheet.body.append(&label_with("Code owners of changed files", &["sy-muted", "sy-small"]));
+        }
+        for o in &suggestions {
+            let check = gtk::CheckButton::new();
+            check.set_active(selected.borrow().contains(&o.handle));
+            let content = hbox(6);
+            content.append(&label_with(&o.handle, &["sy-text"]));
+            if o.is_team {
+                content.append(&label_with("team", &["sy-muted", "sy-small"]));
+            }
+            content.append(&label_with("not requested", &["sy-muted", "sy-small"]));
+            check.set_child(Some(&content));
+            let s = selected.clone();
+            let handle = o.handle.clone();
+            check.connect_toggled(move |c| {
+                if c.is_active() {
+                    s.borrow_mut().insert(handle.clone());
+                } else {
+                    s.borrow_mut().remove(&handle);
+                }
+            });
+            sheet.body.append(&check);
+        }
+        suggestions.into_iter().map(|o| o.handle).collect()
+    };
     let entry = gtk::Entry::new();
-    entry.set_placeholder_text(Some("Other logins, comma-separated, e.g. alice, bob"));
+    entry.set_placeholder_text(Some("Other logins or teams, comma-separated, e.g. alice, org/team"));
     sheet.body.append(&entry);
     sheet.add_footer_spacer();
     sheet.cancel_button();
@@ -290,10 +329,11 @@ pub fn reviewers(model: Rc<PrModel>) {
         let selected = selected.clone();
         let entry = entry.clone();
         let candidates = candidates.clone();
+        let owner_suggestions = owner_suggestions.clone();
         Rc::new(move || -> Vec<String> {
             let typed: Vec<String> = entry.text().split([',', ' ']).map(|s| s.trim_matches(|c| c == '@' || c == ' ').to_string()).filter(|s| !s.is_empty()).collect();
             let mut seen = HashSet::new();
-            candidates.iter().map(|c| c.login.clone()).filter(|l| selected.borrow().contains(l)).chain(typed).filter(|l| seen.insert(l.clone())).collect()
+            candidates.iter().map(|c| c.login.clone()).chain(owner_suggestions.iter().cloned()).filter(|l| selected.borrow().contains(l)).chain(typed).filter(|l| seen.insert(l.clone())).collect()
         })
     };
     let update = {

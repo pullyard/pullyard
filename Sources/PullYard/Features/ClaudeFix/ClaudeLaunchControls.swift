@@ -95,3 +95,80 @@ struct ClaudeLaunchRow: View {
         }
     }
 }
+
+extension ClaudeLauncher {
+    @MainActor
+    @discardableResult
+    static func startForPR(app: AppModel, prompt: String, folder: String?, isolate: Bool, pr: PullRequestDetail, repo: RepoRef,
+                           target: ClaudeTarget, mode: ClaudePermissionMode, name: String) async throws -> ClaudeTab? {
+        guard isolate, target != .copy, let folder else {
+            return try start(app: app, prompt: prompt, folder: folder, target: target, mode: mode, name: name)
+        }
+        let number = pr.number
+        let worktree = try await Task.detached(priority: .userInitiated) { try PRWorktrees.prepare(clone: folder, repo: repo, number: number) }.value
+        let adapted = PRWorktrees.adapt(prompt, worktree: worktree, pr: pr, repo: repo)
+        return try start(app: app, prompt: adapted, folder: worktree.path, target: target, mode: mode, name: name)
+    }
+}
+
+struct ClaudeWorktreeRow: View {
+    let folder: String?
+    let number: Int
+    let target: ClaudeTarget
+    @Binding var isolate: Bool
+    @State private var existing: String?
+    @State private var removing = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Toggle("Work in an isolated git worktree", isOn: $isolate)
+                    .toggleStyle(.checkbox)
+                    .disabled(folder == nil || target == .copy)
+                    .help("PullYard checks out the pull request in a separate worktree next to your clone, so your current branch and uncommitted changes stay untouched")
+                Spacer()
+                if let existing {
+                    Button(removing ? "Removing…" : "Remove worktree") { remove(existing) }
+                        .controlSize(.small)
+                        .disabled(removing)
+                        .help("Delete \(existing) and its local branch. Refuses if it has uncommitted changes")
+                }
+            }
+            if let folder, isolate, target != .copy {
+                Text("\(existing == nil ? "Creates" : "Reuses") \(display(PRWorktrees.path(clone: folder, number: number))) on branch \(PRWorktrees.branch(number: number)) at the pull request head. The checkout step in the prompt is replaced when it starts.")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
+        }
+        .task(id: folder) { await refresh() }
+    }
+
+    private func display(_ path: String) -> String {
+        path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~")
+    }
+
+    private func refresh() async {
+        guard let folder else { existing = nil; return }
+        let n = number
+        existing = await Task.detached(priority: .utility) { PRWorktrees.existing(clone: folder, number: n) }.value
+    }
+
+    private func remove(_ path: String) {
+        guard let folder else { return }
+        removing = true
+        error = nil
+        let n = number
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) { try PRWorktrees.remove(clone: folder, number: n) }.value
+            } catch {
+                self.error = error.localizedDescription
+            }
+            removing = false
+            await refresh()
+        }
+    }
+}

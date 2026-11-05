@@ -13,6 +13,7 @@ use serde::de::{DeserializeOwned, Deserializer};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::api::merge_readiness::CapabilityState;
 use crate::api::models::{Actor, Count, Date, LabelInfo, Nodes, RepoName, SearchItem};
 use crate::api::{http_client, ApiError, ApiResult};
 use crate::app::{IssueFilter, PrFilter};
@@ -37,11 +38,20 @@ pub struct ForgeCapabilities {
     pub issue_filters: Vec<IssueFilter>,
     pub inbox_title: Option<&'static str>,
     pub repositories: bool,
+    pub pull_request_review: CapabilityState,
+    pub merge_requirements: CapabilityState,
 }
 
 impl Default for ForgeCapabilities {
     fn default() -> Self {
-        ForgeCapabilities { pull_filters: vec![PrFilter::ReviewRequested, PrFilter::Mine], issue_filters: vec![], inbox_title: None, repositories: false }
+        ForgeCapabilities {
+            pull_filters: vec![PrFilter::ReviewRequested, PrFilter::Mine],
+            issue_filters: vec![],
+            inbox_title: None,
+            repositories: false,
+            pull_request_review: CapabilityState::Unsupported,
+            merge_requirements: CapabilityState::Unsupported,
+        }
     }
 }
 

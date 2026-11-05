@@ -193,7 +193,7 @@ public static class Dialogs
     public static async Task Reviewers(XamlRoot? root, PRDetailViewModel model)
     {
         if (root is null) return;
-        var candidates = model.Reviewers.Where(r => r.Login != model.ViewerLogin && !r.Login.EndsWith("[bot]") && !r.Login.Contains('/')).ToList();
+        var candidates = model.Reviewers.Where(r => r.Login != model.ViewerLogin && !r.Login.EndsWith("[bot]") && (r.IsTeam || !r.Login.Contains('/'))).ToList();
         var stale = model.ReviewersToReRequest;
         var checks = new List<(CheckBox Box, string Login)>();
         var panel = Ui.V(8);
@@ -203,6 +203,8 @@ public static class Dialogs
             foreach (var r in candidates)
             {
                 var content = Ui.H(6, PRContent.ReviewerBadge(r), Ui.Text(r.Login, 13));
+                if (r.IsTeam) content.Children.Add(Ui.Caption(L.T("Reviewers_Team", "team")));
+                if (r.CodeOwner) content.Children.Add(Ui.Caption(L.T("Reviewers_CodeOwner", "code owner"), "violet"));
                 if (stale.Contains(r.Login)) content.Children.Add(Ui.Caption(L.T("Reviewers_Stale", "reviewed before latest push"), "amber"));
                 else if (r.State == "PENDING") content.Children.Add(Ui.Caption(L.T("Reviewers_Already", "already requested")));
                 var box = new CheckBox { Content = content, IsChecked = stale.Contains(r.Login) };
@@ -210,7 +212,24 @@ public static class Dialogs
                 panel.Children.Add(box);
             }
         }
-        var typed = new TextBox { PlaceholderText = L.T("Reviewers_Other", "Other logins, comma-separated, e.g. alice, bob") };
+        var exclude = candidates.Select(r => r.Login.ToLowerInvariant()).ToHashSet();
+        exclude.Add(model.ViewerLogin.ToLowerInvariant());
+        if (model.Pr?.Author?.Login is { } author) exclude.Add(author.ToLowerInvariant());
+        var suggestions = model.Ownership?.Suggestions(exclude) ?? new();
+        if (suggestions.Count > 0)
+        {
+            panel.Children.Add(Ui.Caption(L.T("Reviewers_CodeOwners", "Code owners of changed files")));
+            foreach (var o in suggestions)
+            {
+                var content = Ui.H(6, Ui.Text(o.Handle, 13));
+                if (o.IsTeam) content.Children.Add(Ui.Caption(L.T("Reviewers_Team", "team")));
+                content.Children.Add(Ui.Caption(L.T("Owners_NotRequested", "not requested")));
+                var box = new CheckBox { Content = content };
+                checks.Add((box, o.Handle));
+                panel.Children.Add(box);
+            }
+        }
+        var typed = new TextBox { PlaceholderText = L.T("Reviewers_Other", "Other logins or teams, comma-separated, e.g. alice, org/team") };
         panel.Children.Add(typed);
         List<string> Requested()
         {
@@ -585,6 +604,18 @@ public static class Dialogs
         var choose = Ui.Button(L.T("Fix_ChooseFolder", "Choose folder…"), () => { });
         panel.Children.Add(Ui.Card(Ui.Columns((Ui.Glyph("", 14, "teal"), Ui.Auto), (Ui.V(2, folderText, folderWarn), Ui.Star), (choose, Ui.Auto)), 8, "raised", 8));
 
+        var isolate = Settings.Shared.GetBool(Keys.AgentFixIsolatedWorktree, true);
+        string? existingWorktree = null;
+        var launching = false;
+        var isolateBox = new CheckBox { Content = L.T("Worktree_Isolate", "Work in an isolated git worktree"), IsChecked = isolate };
+        ToolTipService.SetToolTip(isolateBox, L.T("Worktree_IsolateHelp", "PullYard checks out the pull request in a separate worktree next to your clone, so your current branch and uncommitted changes stay untouched"));
+        var removeWorktree = Ui.Button(L.T("Worktree_Remove", "Remove worktree"), () => { });
+        removeWorktree.Visibility = Visibility.Collapsed;
+        var worktreeCaption = Ui.Text("", 12, "dim", wrap: true);
+        var worktreeError = Ui.Text("", 12, "red", wrap: true);
+        worktreeError.Visibility = Visibility.Collapsed;
+        panel.Children.Add(Ui.V(4, Ui.Columns((isolateBox, Ui.Star), (removeWorktree, Ui.Auto)), worktreeCaption, worktreeError));
+
         var targets = new ComboBox { Header = L.T("Fix_OpenIn", "Open in"), MinWidth = 200 };
         foreach (var t in Enum.GetValues<ClaudeTarget>().Where(ClaudeLauncher.TargetAvailable)) targets.Items.Add(new ComboBoxItem { Content = t.Title(), Tag = t });
         var savedTarget = Settings.Shared.GetString(Keys.ClaudeTarget) ?? "App";
@@ -624,13 +655,40 @@ public static class Dialogs
                 folderWarn.Text = LocalRepoStore.RemoteMatches(f, model.Ref.Repo) ? "" : L.F("Fix_RemoteMismatch", "remote doesn't match {0}", model.Ref.Repo.Full);
             }
             Validate();
+            RefreshWorktree().Forget();
+        }
+
+        void UpdateWorktree()
+        {
+            var t = Target();
+            isolateBox.IsEnabled = folder is not null && t != ClaudeTarget.Copy;
+            ToolTipService.SetToolTip(removeWorktree, existingWorktree is null ? null : L.F("Worktree_RemoveHelp", "Delete {0} and its local branch. Refuses if it has uncommitted changes", Fmt.HomeRelative(existingWorktree)));
+            removeWorktree.Visibility = existingWorktree is not null ? Visibility.Visible : Visibility.Collapsed;
+            if (folder is not null && isolate && t != ClaudeTarget.Copy)
+            {
+                var where = Fmt.HomeRelative(PRWorktrees.Path(folder, pr.Number));
+                var branch = PRWorktrees.Branch(pr.Number);
+                worktreeCaption.Text = existingWorktree is null
+                    ? L.F("Worktree_Creates", "Creates {0} on branch {1} at the pull request head. The checkout step in the prompt is replaced when it starts.", where, branch)
+                    : L.F("Worktree_Reuses", "Reuses {0} on branch {1} at the pull request head. The checkout step in the prompt is replaced when it starts.", where, branch);
+                worktreeCaption.Visibility = Visibility.Visible;
+            }
+            else worktreeCaption.Visibility = Visibility.Collapsed;
+        }
+
+        async Task RefreshWorktree()
+        {
+            var f = folder;
+            existingWorktree = f is null ? null : await PRWorktrees.Existing(f, pr.Number);
+            if (f == folder) UpdateWorktree();
         }
 
         void Validate()
         {
             var t = Target();
+            UpdateWorktree();
             d.PrimaryButtonText = t == ClaudeTarget.Copy ? L.T("Fix_Copy", "Copy") : L.T("Fix_Launch", "Launch");
-            d.IsPrimaryButtonEnabled = promptBox.Text.Trim().Length > 0 && (t == ClaudeTarget.Copy || folder is not null) && !(ci && (ciCollecting || ciSelected.Count == 0));
+            d.IsPrimaryButtonEnabled = !launching && promptBox.Text.Trim().Length > 0 && (t == ClaudeTarget.Copy || folder is not null) && !(ci && (ciCollecting || ciSelected.Count == 0));
         }
 
         string CiCaption(CheckContext c)
@@ -721,30 +779,67 @@ public static class Dialogs
             open = false;
             await ShowAsync(d);
         };
-        d.PrimaryButtonClick += (_, args) =>
+        isolateBox.Checked += (_, _) => { isolate = true; Settings.Shared.Set(Keys.AgentFixIsolatedWorktree, true); UpdateWorktree(); };
+        isolateBox.Unchecked += (_, _) => { isolate = false; Settings.Shared.Set(Keys.AgentFixIsolatedWorktree, false); UpdateWorktree(); };
+        removeWorktree.Click += async (_, _) =>
+        {
+            if (folder is not { } f) return;
+            removeWorktree.IsEnabled = false;
+            removeWorktree.Content = L.T("Worktree_Removing", "Removing…");
+            worktreeError.Visibility = Visibility.Collapsed;
+            try
+            {
+                await PRWorktrees.Remove(f, pr.Number);
+            }
+            catch (Exception e)
+            {
+                worktreeError.Text = e.Message;
+                worktreeError.Visibility = Visibility.Visible;
+            }
+            removeWorktree.Content = L.T("Worktree_Remove", "Remove worktree");
+            removeWorktree.IsEnabled = true;
+            await RefreshWorktree();
+        };
+        d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, async () =>
         {
             var prompt = promptBox.Text;
             var t = Target();
             var name = ci ? $"Fix CI on PR #{pr.Number}: {pr.Title}" : $"Fix PR #{pr.Number}: {pr.Title}";
-            if (t == ClaudeTarget.App && folder is not null)
-            {
-                var tab = app.Claude.NewSession(folder, prompt, name);
-                if (ci) model.CiFix = new CiFixLaunch(t, tab, pr.HeadRefOid, DateTimeOffset.Now);
-                app.Section = Section.Claude;
-                return;
-            }
+            var launchFolder = folder;
+            launching = true;
+            Validate();
+            error.Text = "";
             try
             {
+                if (isolate && t != ClaudeTarget.Copy && folder is { } clone)
+                {
+                    var worktree = await PRWorktrees.Prepare(clone, model.Ref.Repo, pr.Number);
+                    prompt = PRWorktrees.Adapt(prompt, worktree, pr, model.Ref.Repo);
+                    launchFolder = worktree.Path;
+                }
+                if (t == ClaudeTarget.App && launchFolder is not null)
+                {
+                    var tab = app.Claude.NewSession(launchFolder, prompt, name);
+                    if (ci) model.CiFix = new CiFixLaunch(t, tab, pr.HeadRefOid, DateTimeOffset.Now);
+                    app.Section = Section.Claude;
+                    return true;
+                }
                 var mode = (modes.SelectedItem as ComboBoxItem)?.Tag is ClaudePermissionMode m ? m : ClaudePermissionMode.Standard;
-                ClaudeLauncher.Launch(prompt, folder ?? "", t, mode, name, null, ClaudeProfiles.Shared.ActiveOverride, WindowInterop.Copy);
+                ClaudeLauncher.Launch(prompt, launchFolder ?? "", t, mode, name, null, ClaudeProfiles.Shared.ActiveOverride, WindowInterop.Copy);
                 if (ci && t is ClaudeTarget.Terminal or ClaudeTarget.Desktop) model.CiFix = new CiFixLaunch(t, null, pr.HeadRefOid, DateTimeOffset.Now);
+                return true;
             }
             catch (Exception e)
             {
                 error.Text = e.Message;
-                args.Cancel = true;
+                return false;
             }
-        };
+            finally
+            {
+                launching = false;
+                Validate();
+            }
+        }, args);
         foreach (var (cb, id) in ciBoxes)
         {
             cb.Checked += (_, _) => { ciSelected.Add(id); custom = null; CollectCi().Forget(); };

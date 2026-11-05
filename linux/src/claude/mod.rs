@@ -14,6 +14,7 @@ pub mod sessions;
 pub mod ship;
 pub mod tool_groups;
 pub mod workspace;
+pub mod worktree;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ModelOption {

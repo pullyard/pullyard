@@ -117,7 +117,7 @@ pub(super) async fn current_user(c: &ForgeClient) -> ApiResult<ForgeUser> {
 }
 
 pub(super) fn capabilities() -> ForgeCapabilities {
-    ForgeCapabilities { pull_filters: PrFilter::ALL.to_vec(), issue_filters: IssueFilter::ALL.to_vec(), inbox_title: Some("Notifications"), repositories: true }
+    ForgeCapabilities { pull_filters: PrFilter::ALL.to_vec(), issue_filters: IssueFilter::ALL.to_vec(), inbox_title: Some("Notifications"), repositories: true, ..Default::default() }
 }
 
 fn flag(filter: PrFilter) -> &'static str {
@@ -399,5 +399,7 @@ mod tests {
         assert_eq!(flag(PrFilter::Mine), "created");
         assert_eq!(issue_flag(IssueFilter::Mine), "created");
         assert_eq!(capabilities().inbox_title, Some("Notifications"));
+        assert_eq!(capabilities().pull_request_review, crate::api::merge_readiness::CapabilityState::Unsupported);
+        assert_eq!(capabilities().merge_requirements, crate::api::merge_readiness::CapabilityState::Unsupported);
     }
 }

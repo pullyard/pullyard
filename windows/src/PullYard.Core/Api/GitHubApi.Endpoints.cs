@@ -123,8 +123,73 @@ public sealed partial class GitHubApi
 
     public Task<BadgeResponse> Badges(CancellationToken ct = default) => GraphQL<BadgeResponse>(Q.Badges, ct: ct);
 
-    public Task<PRDetailResponse> PullRequest(ItemRef r, CancellationToken ct = default) =>
-        GraphQL<PRDetailResponse>(Q.PullRequest, V(("owner", r.Repo.Owner), ("name", r.Repo.Name), ("number", r.Number)), ct: ct);
+    public async Task<PRDetailResponse> PullRequest(ItemRef r, CancellationToken ct = default)
+    {
+        var vars = V(("owner", r.Repo.Owner), ("name", r.Repo.Name), ("number", r.Number));
+        try
+        {
+            return await GraphQL<PRDetailResponse>(Q.PullRequest, vars, ct: ct).ConfigureAwait(false);
+        }
+        catch (ApiException e) when (e.SchemaError)
+        {
+            return await GraphQL<PRDetailResponse>(Q.PullRequestLegacy, vars, ct: ct).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class FilesPageResponse
+    {
+        public sealed class PR { public FileViewedPage? Files { get; set; } }
+        public sealed class Repo { public PR? PullRequest { get; set; } }
+        public Repo? Repository { get; set; }
+    }
+
+    public async Task<FileViewedPage?> PullRequestFilesPage(ItemRef r, string after, CancellationToken ct = default)
+    {
+        var res = await GraphQL<FilesPageResponse>(Q.PullRequestFiles, V(("owner", r.Repo.Owner), ("name", r.Repo.Name), ("number", r.Number), ("after", after)), ct: ct).ConfigureAwait(false);
+        return res.Repository?.PullRequest?.Files;
+    }
+
+    private sealed class CodeOwnersResponse
+    {
+        public sealed class Blob { public string? Text { get; set; } public bool? IsTruncated { get; set; } }
+        public sealed class Repo { public Blob? A { get; set; } public Blob? B { get; set; } public Blob? C { get; set; } }
+        public Repo? Repository { get; set; }
+    }
+
+    public async Task<CodeOwners?> CodeOwners(RepoRef repo, string @ref, CancellationToken ct = default)
+    {
+        var paths = Api.CodeOwners.Paths;
+        var r = await GraphQL<CodeOwnersResponse>(Q.CodeOwners, V(("owner", repo.Owner), ("name", repo.Name), ("a", $"{@ref}:{paths[0]}"), ("b", $"{@ref}:{paths[1]}"), ("c", $"{@ref}:{paths[2]}")), ct: ct).ConfigureAwait(false);
+        var blobs = new[] { r.Repository?.A, r.Repository?.B, r.Repository?.C };
+        for (var i = 0; i < paths.Length; i++)
+            if (blobs[i]?.Text is { } text) return new CodeOwners(text, paths[i]);
+        return null;
+    }
+
+    public async Task<BranchRules> BranchRules(RepoRef repo, string branch, bool admin, CancellationToken ct = default)
+    {
+        var encoded = Uri.EscapeDataString(branch);
+        var rules = await OptionalRest($"/repos/{repo.Full}/rules/branches/{encoded}", ct).ConfigureAwait(false);
+        var info = await OptionalRest($"/repos/{repo.Full}/branches/{encoded}", ct).ConfigureAwait(false);
+        byte[]? protection = null;
+        if (admin && Api.BranchRules.IsClassicProtected(info))
+            protection = await OptionalRest($"/repos/{repo.Full}/branches/{encoded}/protection", ct).ConfigureAwait(false);
+        return Api.BranchRules.From(rules, info, protection);
+    }
+
+    private async Task<byte[]?> OptionalRest(string path, CancellationToken ct)
+    {
+        try
+        {
+            var (data, response) = await RestRaw("GET", path, ct: ct).ConfigureAwait(false);
+            response.Dispose();
+            return data;
+        }
+        catch (ApiException e) when (e.Status is 403 or 404)
+        {
+            return null;
+        }
+    }
 
     public async Task<PullRequestDetail?> PullRequestPulse(ItemRef r, CancellationToken ct = default)
     {
@@ -146,6 +211,9 @@ public sealed partial class GitHubApi
         }
         return all;
     }
+
+    public Task<CompareResult> Compare(RepoRef repo, string @base, string head, CancellationToken ct = default) =>
+        Rest<CompareResult>("GET", $"/repos/{repo.Full}/compare/{@base}...{head}", ct: ct);
 
     public Task<CommitDetailRest> Commit(RepoRef repo, string sha, CancellationToken ct = default) =>
         Rest<CommitDetailRest>("GET", $"/repos/{repo.Full}/commits/{sha}", ct: ct);

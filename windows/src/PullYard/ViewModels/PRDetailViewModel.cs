@@ -10,7 +10,7 @@ namespace PullYard.ViewModels;
 
 public enum PRTab { Conversation, Commits, Checks, Files, Stack, Jira }
 
-public sealed record ReviewerInfo(string Login, string? Avatar, string State);
+public sealed record ReviewerInfo(string Login, string? Avatar, string State, bool IsTeam = false, bool CodeOwner = false);
 
 public sealed record StaleReview(string Login, int? Commits);
 
@@ -43,8 +43,21 @@ public sealed partial class PRDetailViewModel : ObservableObject
     [ObservableProperty] private string? scrollTarget;
     [ObservableProperty] private int diffVersion;
     [ObservableProperty] private CiFixLaunch? ciFix;
+    [ObservableProperty] private RulesStatus rulesState = RulesStatus.Loading;
+    [ObservableProperty] private CodeOwnersStatus codeOwnersState = CodeOwnersStatus.Loading;
+    [ObservableProperty] private DiffScope diffScope = DiffScope.All;
+    [ObservableProperty] private List<DiffFile> interdiffFiles = new();
+    [ObservableProperty] private bool interdiffLoading;
+    [ObservableProperty] private string? interdiffError;
+    [ObservableProperty] private bool interdiffRebased;
+    private string? interdiffKey;
+    private string? rulesKey;
+    private string? ownersKey;
+    private DateTimeOffset? rulesFetched;
+    private CancellationTokenSource? viewedLoad;
 
     public HashSet<string> ViewedPaths { get; private set; } = new();
+    public List<string> ChangedPaths { get; private set; } = new();
     public HashSet<string> Collapsed { get; private set; } = new();
     public List<PendingComment> Pending { get; } = new();
     public bool FilesInInspector { get; set; }
@@ -83,6 +96,51 @@ public sealed partial class PRDetailViewModel : ObservableObject
 
     public int PendingCount => Pending.Count;
 
+    public ReviewedCommit? LastReviewed => Pr is { } pr ? Interdiff.LastReviewed(pr, ViewerLogin) : null;
+
+    public List<DiffFile> DisplayedFiles => DiffScope == DiffScope.SinceReview ? InterdiffFiles : Files;
+
+    partial void OnDiffScopeChanged(DiffScope value)
+    {
+        DiffVersion++;
+        if (value == DiffScope.SinceReview) LoadInterdiff().Forget();
+    }
+
+    public async Task LoadInterdiff(bool force = false)
+    {
+        if (Pr is not { } pr || LastReviewed is not { } reviewed)
+        {
+            DiffScope = DiffScope.All;
+            return;
+        }
+        var key = $"{reviewed.Oid}...{pr.HeadRefOid}";
+        if ((!force && key == interdiffKey) || InterdiffLoading) return;
+        InterdiffLoading = true;
+        try
+        {
+            var result = await Api.Compare(Ref.Repo, reviewed.Oid, pr.HeadRefOid);
+            var raw = result.Files ?? new();
+            var parsed = await Task.Run(() => raw.Select(f => new DiffFile(f)).ToList());
+            InterdiffFiles = parsed;
+            interdiffKey = key;
+            InterdiffError = null;
+            InterdiffRebased = reviewed.Rewritten || (result.BehindBy ?? 0) > 0;
+            Collapsed.ExceptWith(parsed.Select(f => f.Id));
+            DiffVersion++;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception e)
+        {
+            InterdiffError = e.Message;
+        }
+        finally
+        {
+            InterdiffLoading = false;
+        }
+    }
+
     public List<ReviewerInfo> Reviewers
     {
         get
@@ -93,11 +151,74 @@ public sealed partial class PRDetailViewModel : ObservableObject
             foreach (var req in pr.ReviewRequests.Items)
             {
                 if (req.RequestedReviewer is not { } rv || done.Contains(rv.Display)) continue;
-                result.Add(new ReviewerInfo(rv.Display, rv.AvatarUrl, "PENDING"));
+                result.Add(new ReviewerInfo(rv.Display, rv.AvatarUrl, "PENDING", rv.IsTeam, req.AsCodeOwner == true));
             }
             return result;
         }
     }
+
+    public List<MergeRequirement> Requirements => Pr is { } pr ? MergeReadiness.Requirements(pr, RulesState) : new();
+
+    public static (string glyph, string color, string text, bool ready) Headline(PullRequestDetail pr, List<MergeRequirement> requirements)
+    {
+        var checks = pr.Checks;
+        var anyFailed = checks.Count(c => c.Outcome == CheckOutcome.Failure);
+        var anyPending = checks.Count(c => c.Outcome == CheckOutcome.Pending);
+        var breakdown = MergeReadiness.Checks(checks, null);
+        var failed = breakdown.FailedRequired.Count;
+        var pending = breakdown.RunningRequired.Count;
+        var firstMissing = requirements.FirstOrDefault(r => r.State == RequirementState.Missing);
+        var firstPending = requirements.FirstOrDefault(r => r.State == RequirementState.Pending);
+        var failedText = failed == 1 ? L.T("Merge_OneCheckFailed", "1 check failed") : L.F("Merge_ChecksFailed", "{0} checks failed", failed);
+        var pendingText = pending == 1 ? L.T("Merge_OneCheckRunning", "1 check is still running") : L.F("Merge_ChecksRunning", "{0} checks are still running", pending);
+        (string glyph, string color, string text, bool ready) s;
+        if (pr.IsDraft) s = ("", "slate", L.T("Merge_Draft", "Draft — merging is unavailable"), false);
+        else if (pr.Mergeable == "CONFLICTING" || pr.MergeStateStatus == "DIRTY") s = ("", "red", L.F("Merge_Conflicts", "Has conflicts with {0}", pr.BaseRefName), false);
+        else
+        {
+            s = pr.MergeStateStatus switch
+            {
+                "BEHIND" => ("", "amber", L.F("Merge_Behind", "Branch is behind {0}", pr.BaseRefName), false),
+                "BLOCKED" => pr.ReviewDecision switch
+                {
+                    "CHANGES_REQUESTED" => ("", "red", L.T("Review_ChangesRequested", "Changes requested"), false),
+                    "REVIEW_REQUIRED" => ("", "amber", L.T("Review_Required", "Review required"), false),
+                    _ => failed > 0 ? ("", "red", failedText, false)
+                        : firstMissing is not null ? ("", "amber", firstMissing.Title, false)
+                        : pending > 0 ? ("", "amber", pendingText, false)
+                        : firstPending is not null ? ("", "amber", firstPending.Title, false)
+                        : ("", "amber", L.T("Merge_Blocked", "Blocked by branch protection"), false)
+                },
+                "UNSTABLE" => anyFailed > 0 ? ("", "amber", L.T("Merge_CanMergeBut", "Can be merged, but ") + (anyFailed == 1 ? L.T("Merge_OneCheckFailed", "1 check failed") : L.F("Merge_ChecksFailed", "{0} checks failed", anyFailed)).ToLowerInvariant(), true)
+                    : anyPending > 0 ? ("", "amber", anyPending == 1 ? L.T("Merge_OneCheckRunning", "1 check is still running") : L.F("Merge_ChecksRunning", "{0} checks are still running", anyPending), true)
+                    : ("", "green", L.T("Merge_Ready", "Ready to merge"), true),
+                "CLEAN" or "HAS_HOOKS" => ("", "green", L.T("Merge_Ready", "Ready to merge"), true),
+                _ => ("", "slate", L.T("Merge_Checking", "Checking mergeability…"), false)
+            };
+        }
+        return s;
+    }
+
+    public void PublishContext()
+    {
+        if (Pr is not { } pr) return;
+        var key = StackNotes.Key(CacheAccount, Api.Host, Ref.Repo, Ref.Number);
+        var requirements = Requirements;
+        var status = pr.IsOpen ? Headline(pr, requirements).text : pr.Merged ? "Merged" : pr.State.Length == 0 ? "" : pr.State[..1].ToUpperInvariant() + pr.State[1..].ToLowerInvariant();
+        var snapshot = PRContextPublisher.Snapshot(Ref, pr, requirements, Ownership, ChangedPaths, LastReviewed, status);
+        Task.Run(() =>
+        {
+            try
+            {
+                PRContextStore.Write(snapshot, key);
+            }
+            catch (Exception)
+            {
+            }
+        }).Forget();
+    }
+
+    public OwnershipSummary? Ownership => Pr is { } pr && CodeOwnersState.Owners is { } owners ? OwnershipSummary.Build(owners, ChangedPaths, pr) : null;
 
     public DateTimeOffset? LastCommitDate => Pr?.LastCommit.Items.FirstOrDefault()?.Commit.CommittedDate;
 
@@ -199,7 +320,11 @@ public sealed partial class PRDetailViewModel : ObservableObject
             }
             Repo = r.Repository;
             var newHtml = ConversationHtml.Render(pr);
-            ViewedPaths = (pr.Files?.Items ?? new()).Where(f => f.ViewerViewedState == "VIEWED").Select(f => f.Path).ToHashSet();
+            ViewedPaths = pr.Files?.ViewedPaths ?? new();
+            ChangedPaths = pr.Files?.Items.Select(f => f.Path).ToList() ?? new();
+            LoadMoreViewed(pr.Files?.NextCursor);
+            LoadRules(pr, forced == "refresh");
+            LoadCodeOwners(pr);
             IndexThreads(pr.ReviewThreads.Items);
             signature = PullRequestSignature.Of(pr);
             lastFullFetch = DateTimeOffset.Now;
@@ -212,6 +337,12 @@ public sealed partial class PRDetailViewModel : ObservableObject
             RefreshError = null;
             LastUpdated = DateTimeOffset.Now;
             NotifyDerived();
+            PublishContext();
+            if (DiffScope == DiffScope.SinceReview)
+            {
+                if (LastReviewed is null) DiffScope = DiffScope.All;
+                else LoadInterdiff().Forget();
+            }
             if (reloadStack)
             {
                 reloadStack = false;
@@ -265,12 +396,86 @@ public sealed partial class PRDetailViewModel : ObservableObject
         }
     }
 
+    private async void LoadMoreViewed(string? cursor)
+    {
+        viewedLoad?.Cancel();
+        if (cursor is null) return;
+        var cts = new CancellationTokenSource();
+        viewedLoad = cts;
+        try
+        {
+            for (var pages = 0; cursor is not null && pages < 30; pages++)
+            {
+                var page = await Api.PullRequestFilesPage(Ref, cursor, cts.Token);
+                if (cts.IsCancellationRequested || page is null) return;
+                ViewedPaths.UnionWith(page.ViewedPaths);
+                ChangedPaths.AddRange(page.Items.Select(f => f.Path));
+                cursor = page.NextCursor;
+            }
+            DiffVersion++;
+            if (CodeOwnersState.Owners is not null) OnPropertyChanged(nameof(Ownership));
+            PublishContext();
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private async void LoadRules(PullRequestDetail pr, bool force)
+    {
+        var key = $"{Ref.Repo.Full}|{pr.BaseRefName}";
+        var fresh = rulesFetched is { } at && DateTimeOffset.Now - at < TimeSpan.FromMinutes(5);
+        if (!force && key == rulesKey && (fresh || RulesState.Phase == RulesPhase.Loading)) return;
+        if (key != rulesKey) RulesState = RulesStatus.Loading;
+        rulesKey = key;
+        rulesFetched = DateTimeOffset.Now;
+        try
+        {
+            var rules = await Api.BranchRules(Ref.Repo, pr.BaseRefName, Repo?.ViewerPermission == "ADMIN");
+            if (rulesKey != key) return;
+            RulesState = RulesStatus.Loaded(rules);
+            PublishContext();
+        }
+        catch (Exception)
+        {
+            if (rulesKey != key) return;
+            rulesFetched = null;
+            if (RulesState.Rules is null) RulesState = RulesStatus.Failed;
+        }
+    }
+
+    private async void LoadCodeOwners(PullRequestDetail pr)
+    {
+        if (pr.BaseTipOid is not { } baseOid) return;
+        var key = $"{Ref.Repo.Full}|{baseOid}";
+        if (key == ownersKey) return;
+        ownersKey = key;
+        try
+        {
+            var owners = await Api.CodeOwners(Ref.Repo, baseOid);
+            if (ownersKey != key) return;
+            CodeOwnersState = owners is null ? CodeOwnersStatus.Missing : CodeOwnersStatus.Loaded(owners);
+            PublishContext();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception)
+        {
+            if (ownersKey != key) return;
+            ownersKey = null;
+            CodeOwnersState = CodeOwnersStatus.Failed;
+        }
+    }
+
     private void NotifyDerived()
     {
         OnPropertyChanged(nameof(CanWrite));
         OnPropertyChanged(nameof(Reviewers));
+        OnPropertyChanged(nameof(Requirements));
         OnPropertyChanged(nameof(StaleReviews));
         OnPropertyChanged(nameof(LastCommitDate));
+        OnPropertyChanged(nameof(LastReviewed));
     }
 
     private void ScheduleMergeRecheck(PullRequestDetail pr)
@@ -397,23 +602,27 @@ public sealed partial class PRDetailViewModel : ObservableObject
         outdatedByPath = outdated;
     }
 
-    public DiffRenderOptions RenderOptions(string filter, bool wrap = true, bool split = false) => new()
+    public DiffRenderOptions RenderOptions(string filter, bool wrap = true, bool split = false)
     {
-        Wrap = wrap,
-        Split = split,
-        Review = true,
-        Commentable = Pr?.IsOpen ?? false,
-        ShowViewed = true,
-        ShowBlame = Pr is not null,
-        BlameLabel = L.T("Code_Blame", "Blame"),
-        BlameTitle = L.T("PR_BlameAtHead", "Blame this file at the pull request head"),
-        Viewed = ViewedPaths,
-        Collapsed = Collapsed,
-        Threads = threadIndex,
-        Outdated = outdatedByPath,
-        Pending = Pending,
-        Filter = filter
-    };
+        var interdiff = DiffScope == DiffScope.SinceReview;
+        return new()
+        {
+            Wrap = wrap,
+            Split = split,
+            Review = true,
+            Commentable = !interdiff && (Pr?.IsOpen ?? false),
+            ShowViewed = true,
+            ShowBlame = Pr is not null,
+            BlameLabel = L.T("Code_Blame", "Blame"),
+            BlameTitle = L.T("PR_BlameAtHead", "Blame this file at the pull request head"),
+            Viewed = ViewedPaths,
+            Collapsed = Collapsed,
+            Threads = interdiff ? new Dictionary<string, List<ReviewThread>>() : threadIndex,
+            Outdated = interdiff ? new Dictionary<string, List<ReviewThread>>() : outdatedByPath,
+            Pending = interdiff ? Array.Empty<PendingComment>() : Pending,
+            Filter = filter
+        };
+    }
 
     public int ThreadCount(string path) => (Pr?.ReviewThreads.Items ?? new()).Count(t => t.Path == path);
 

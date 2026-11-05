@@ -54,7 +54,7 @@ struct PRDetailContent: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PRHeaderView(model: model, pr: pr, onMerge: { showMerge = true })
+            PRHeaderView(model: model, pr: pr, onMerge: { showMerge = true }, onRequestReview: { showReviewers = true })
             ReReviewBanner(model: model, pr: pr) { showReviewers = true }
             ClaudeFixBanner(pr: pr) { showFix = true }
             CIFailureBanner(model: model, pr: pr, onFix: { ciFix = CIFixRequest() }, onRerun: { confirm = .rerunFailed })
@@ -363,6 +363,7 @@ struct PRHeaderView: View {
     let model: PRDetailModel
     let pr: PullRequestDetail
     let onMerge: () -> Void
+    var onRequestReview: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -405,7 +406,7 @@ struct PRHeaderView: View {
                 StackStrip(tree: tree, repo: model.ref.repo) { model.tab = .stack }
                     .transition(.opacity)
             }
-            MergeStatusBar(model: model, pr: pr, onMerge: onMerge)
+            MergeStatusBar(model: model, pr: pr, onMerge: onMerge, onRequestReview: onRequestReview)
         }
         .animation(Motion.smooth, value: model.stackTree)
         .padding(.horizontal, 16)
@@ -543,58 +544,106 @@ struct MergeStatusBar: View {
     let model: PRDetailModel
     let pr: PullRequestDetail
     let onMerge: () -> Void
+    var onRequestReview: () -> Void = {}
     @Environment(AppModel.self) private var app
+    @AppStorage("pr.mergeRequirementsExpanded") private var expanded = true
 
     var body: some View {
         if pr.isOpen {
-            let s = Self.status(pr)
-            HStack(spacing: 8) {
-                Image(systemName: s.icon).foregroundStyle(s.color).accessibilityHidden(true)
-                Text(s.text).font(.syCallout).lineLimit(2)
-                if let auto = pr.autoMergeRequest {
-                    Text("· auto-merge enabled" + (auto.mergeMethod.map { " (\(MergeMethod(rawValue: $0)?.title ?? $0))" } ?? ""))
-                        .font(.syCallout).foregroundStyle(Color.ghGreen)
-                }
-                checksBadge
-                Spacer()
-                if MergeConflicts.applies(pr) {
-                    Button(conflictsTitle) {
-                        model.tab = .conversation
-                        model.scrollToBottomToken += 1
+            let requirements = model.requirements
+            let s = Self.status(pr, requirements: requirements)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: s.icon).foregroundStyle(s.color).accessibilityHidden(true)
+                    Text(s.text).font(.syCallout).lineLimit(2)
+                    if let auto = pr.autoMergeRequest {
+                        Text("· auto-merge enabled" + (auto.mergeMethod.map { " (\(MergeMethod(rawValue: $0)?.title ?? $0))" } ?? ""))
+                            .font(.syCallout).foregroundStyle(Color.ghGreen)
                     }
-                    .controlSize(.small)
-                    .help("Show the conflicting files at the end of the conversation")
-                }
-                if pr.mergeStateStatus == "BEHIND", model.canWrite || pr.viewerCanUpdate {
-                    Button("Update branch") {
-                        Task { if await model.simple(Q.updateBranch) { app.showToast("Branch updated from \(pr.baseRefName)") } }
+                    checksBadge
+                    Spacer()
+                    if MergeConflicts.applies(pr) {
+                        Button(conflictsTitle) {
+                            model.tab = .conversation
+                            model.scrollToBottomToken += 1
+                        }
+                        .controlSize(.small)
+                        .help("Show the conflicting files at the end of the conversation")
                     }
-                    .controlSize(.small)
-                }
-                if pr.isDraft, pr.viewerCanUpdate {
-                    Button("Ready for review") {
-                        Task { if await model.simple(Q.readyForReview) { app.showToast("Marked ready for review") } }
+                    if pr.mergeStateStatus == "BEHIND", model.canWrite || pr.viewerCanUpdate {
+                        Button("Update branch") {
+                            Task { if await model.simple(Q.updateBranch) { app.showToast("Branch updated from \(pr.baseRefName)") } }
+                        }
+                        .controlSize(.small)
                     }
-                    .controlSize(.small)
-                    .help("Mark this draft as ready for review")
-                }
-                if model.canWrite, !pr.isDraft {
-                    if s.ready {
-                        Button("Merge…", action: onMerge)
-                            .controlSize(.small)
-                            .buttonStyle(.borderedProminent)
-                            .tint(Color.syGreenFill)
-                    } else {
-                        Button("Merge…", action: onMerge)
-                            .controlSize(.small)
-                            .help("Not ready to merge: \(s.text)")
+                    if pr.isDraft, pr.viewerCanUpdate {
+                        Button("Ready for review") {
+                            Task { if await model.simple(Q.readyForReview) { app.showToast("Marked ready for review") } }
+                        }
+                        .controlSize(.small)
+                        .help("Mark this draft as ready for review")
                     }
+                    if model.canWrite, !pr.isDraft {
+                        if s.ready {
+                            Button("Merge…", action: onMerge)
+                                .controlSize(.small)
+                                .buttonStyle(.borderedProminent)
+                                .tint(Color.syGreenFill)
+                        } else {
+                            Button("Merge…", action: onMerge)
+                                .controlSize(.small)
+                                .help("Not ready to merge: \(s.text)")
+                        }
+                    }
+                    if !requirements.isEmpty {
+                        Button {
+                            withAnimation(Motion.smooth) { expanded.toggle() }
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .rotationEffect(.degrees(expanded ? 0 : -90))
+                                .font(.syCaption.weight(.semibold))
+                                .foregroundStyle(Color.syMuted)
+                                .frame(width: 18, height: 18)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(expanded ? "Hide merge requirements" : "Show merge requirements")
+                        .accessibilityLabel(expanded ? "Hide merge requirements" : "Show merge requirements")
+                    }
+                }
+                if expanded, !requirements.isEmpty {
+                    MergeRequirementsList(requirements: requirements, ownership: model.ownership, canPerform: canPerform, perform: perform)
+                        .transition(.opacity)
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: Radius.m).fill(s.color.opacity(Tint.banner)))
             .accessibilityElement(children: .contain)
+        }
+    }
+
+    private func canPerform(_ action: RequirementAction) -> Bool {
+        switch action {
+        case .requestReview: return model.canWrite || pr.viewerDidAuthor
+        case .updateBranch, .readyForReview: return false
+        case .showConflicts: return !MergeConflicts.applies(pr)
+        case .showChecks, .showConversation: return true
+        }
+    }
+
+    private func perform(_ action: RequirementAction) {
+        switch action {
+        case .requestReview: onRequestReview()
+        case .showChecks: model.tab = .checks
+        case .showConversation: model.tab = .conversation
+        case .showConflicts:
+            model.tab = .conversation
+            model.scrollToBottomToken += 1
+        case .updateBranch:
+            Task { if await model.simple(Q.updateBranch) { app.showToast("Branch updated from \(pr.baseRefName)") } }
+        case .readyForReview:
+            Task { if await model.simple(Q.readyForReview) { app.showToast("Marked ready for review") } }
         }
     }
 
@@ -627,11 +676,15 @@ struct MergeStatusBar: View {
         return count > 0 ? "View \(plural(count, "conflict", "conflicts"))" : "View conflicts"
     }
 
-    static func status(_ pr: PullRequestDetail) -> (icon: String, color: Color, text: String, ready: Bool) {
-        let failedChecks = pr.checks.filter { $0.outcome == .failure }.count
-        let pendingChecks = pr.checks.filter { $0.outcome == .pending }.count
-        let failedChecksText = failedChecks == 1 ? "1 check failed" : "\(failedChecks) checks failed"
-        let pendingChecksText = pendingChecks == 1 ? "1 check is still running" : "\(pendingChecks) checks are still running"
+    static func status(_ pr: PullRequestDetail, requirements: [MergeRequirement] = []) -> (icon: String, color: Color, text: String, ready: Bool) {
+        let breakdown = MergeReadiness.checks(pr.checks, rules: nil)
+        let noun = breakdown.requiredKnown ? "required check" : "check"
+        let failedChecks = breakdown.failedRequired.count
+        let pendingChecks = breakdown.runningRequired.count
+        let failedChecksText = failedChecks == 1 ? "1 \(noun) failed" : "\(failedChecks) \(noun)s failed"
+        let pendingChecksText = pendingChecks == 1 ? "1 \(noun) is still running" : "\(pendingChecks) \(noun)s are still running"
+        let unstableFailed = pr.checks.filter { $0.outcome == .failure }.count
+        let unstablePending = pr.checks.filter { $0.outcome == .pending }.count
         if pr.isDraft { return ("pencil.circle", .sySlate, "Draft — mark it ready for review to merge", false) }
         if pr.mergeable == "CONFLICTING" || pr.mergeStateStatus == "DIRTY" {
             return ("exclamationmark.triangle.fill", .ghRed, "Has conflicts with \(pr.baseRefName)", false)
@@ -644,12 +697,15 @@ struct MergeStatusBar: View {
             case "REVIEW_REQUIRED": return ("eye.circle", .ghYellow, "Review required", false)
             default:
                 if failedChecks > 0 { return ("xmark.circle.fill", .ghRed, failedChecksText, false) }
+                if let first = requirements.first(where: { $0.state == .missing }) { return ("lock.circle", .ghYellow, first.title, false) }
                 if pendingChecks > 0 { return ("clock", .ghYellow, pendingChecksText, false) }
+                if let first = requirements.first(where: { $0.state == .pending }) { return ("clock", .ghYellow, first.title, false) }
                 return ("lock.circle", .ghYellow, "Blocked by branch protection", false)
             }
         case "UNSTABLE":
-            if failedChecks > 0 { return ("exclamationmark.circle", .ghYellow, "Can be merged, but " + failedChecksText.lowercased(), true) }
-            if pendingChecks > 0 { return ("clock", .ghYellow, pendingChecksText, true) }
+            let text = unstableFailed == 1 ? "1 check failed" : "\(unstableFailed) checks failed"
+            if unstableFailed > 0 { return ("exclamationmark.circle", .ghYellow, "Can be merged, but " + text, true) }
+            if unstablePending > 0 { return ("clock", .ghYellow, unstablePending == 1 ? "1 check is still running" : "\(unstablePending) checks are still running", true) }
             return ("checkmark.circle.fill", .ghGreen, "Ready to merge", true)
         case "CLEAN", "HAS_HOOKS": return ("checkmark.circle.fill", .ghGreen, "Ready to merge", true)
         default: return ("hourglass", .sySlate, "Checking mergeability…", false)
