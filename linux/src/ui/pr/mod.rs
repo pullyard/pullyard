@@ -23,6 +23,7 @@ use super::tabstrip::{TabItem, TabStrip};
 use super::widgets::*;
 use crate::api::code_owners::{OwnerEntry, OwnerStatus, OwnershipSummary};
 use crate::api::merge_readiness::{self, MergeRequirement, RequirementAction, RequirementState};
+use crate::api::risk::RiskLabel;
 use crate::api::models::*;
 use crate::stack::{StackNode, StackTree};
 use crate::{app, util};
@@ -35,6 +36,7 @@ pub struct PrPage {
     busy: Loader,
     status: Rc<RefreshStatus>,
     header_box: gtk::Box,
+    risk_slot: RefCell<Option<gtk::Box>>,
     banners: gtk::Box,
     tabs: Rc<TabStrip>,
     tabs_area: gtk::Stack,
@@ -56,7 +58,19 @@ pub struct PrPage {
 pub struct Conversation {
     pub html: Rc<HtmlView>,
     composer: Rc<Composer>,
+    next: gtk::Button,
     pub widget: gtk::Box,
+}
+
+impl Conversation {
+    fn update_next(&self, open: usize) {
+        self.next.set_visible(open > 0);
+        if open > 0 {
+            let text = format!("{open} unresolved · Next");
+            self.next.set_child(Some(&icon_label_content("sy-down-symbolic", &text)));
+            set_label(&self.next, &text);
+        }
+    }
 }
 
 pub fn page(r: &ItemRef) -> adw::NavigationPage {
@@ -126,6 +140,7 @@ impl PrPage {
             busy,
             status,
             header_box,
+            risk_slot: RefCell::new(None),
             banners,
             tabs,
             tabs_area,
@@ -230,6 +245,11 @@ impl PrPage {
                     c.html.scroll_to_bottom_after_load();
                 }
             }
+            Change::FocusThread => {
+                if let Some(c) = self.conversation.borrow().as_ref() {
+                    c.html.focus_next_unresolved();
+                }
+            }
             Change::ActionError(e) => dialogs::error(e),
             Change::Diff => {
                 let pr = self.model.pr.borrow().clone();
@@ -238,6 +258,7 @@ impl PrPage {
                 }
             }
             Change::Files => {
+                self.render_risks();
                 if self.model.tab.get() == PrTab::Files {
                     self.model.refresh_stale_files();
                 }
@@ -363,11 +384,37 @@ impl PrPage {
         pad(&row, 10);
         row.append(&composer.widget);
         row.append(&send);
+        let next = gtk::Button::new();
+        next.add_css_class("sy-small");
+        next.set_halign(gtk::Align::End);
+        next.set_valign(gtk::Align::End);
+        pad(&next, 10);
+        next.set_tooltip_text(Some("Jump to the next unresolved thread (Ctrl+Alt+Down)"));
+        next.set_visible(false);
+        let m = self.model.clone();
+        next.connect_clicked(move |_| m.next_unresolved_thread());
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&html.view));
+        overlay.add_overlay(&next);
+        overlay.set_vexpand(true);
         let widget = vbox(0);
-        widget.append(&html.view);
+        widget.append(&overlay);
         widget.append(&line());
         widget.append(&row);
-        let c = Rc::new(Conversation { html: html.clone(), composer: composer.clone(), widget });
+        let shortcuts = gtk::ShortcutController::new();
+        shortcuts.set_scope(gtk::ShortcutScope::Managed);
+        let m = self.model.clone();
+        let action = gtk::CallbackAction::new(move |_, _| {
+            if m.unresolved_threads() == 0 {
+                return gtk::glib::Propagation::Proceed;
+            }
+            m.next_unresolved_thread();
+            gtk::glib::Propagation::Stop
+        });
+        shortcuts.add_shortcut(gtk::Shortcut::new(gtk::ShortcutTrigger::parse_string("<Control><Alt>Down"), Some(action)));
+        widget.add_controller(shortcuts);
+        let c = Rc::new(Conversation { html: html.clone(), composer: composer.clone(), next, widget });
+        c.update_next(self.model.unresolved_threads());
         let w = Rc::downgrade(self);
         let weak_comp = Rc::downgrade(&composer);
         let submit = Rc::new(move || {
@@ -514,6 +561,7 @@ impl PrPage {
         if let Some(c) = self.conversation.borrow().as_ref() {
             let h = self.model.html.borrow().clone();
             c.html.set_html(&h);
+            c.update_next(self.model.unresolved_threads());
         }
         if let Some(l) = self.commits.borrow().as_ref() {
             self.render_commits(l, &pr);
@@ -734,6 +782,10 @@ impl PrPage {
         if let Some(tree) = tree {
             self.header_box.append(&stack_strip(&self.model, &tree, true));
         }
+        let slot = vbox(0);
+        self.header_box.append(&slot);
+        *self.risk_slot.borrow_mut() = Some(slot);
+        self.render_risks();
         if let Some(bar) = merge_status_bar(&self.model, &pr, Rc::new({
             let m = self.model.clone();
             move || sheets::merge(m.clone())
@@ -742,6 +794,17 @@ impl PrPage {
             Rc::new(move || sheets::reviewers(m.clone()))
         })) {
             self.header_box.append(&bar);
+        }
+    }
+
+    fn render_risks(&self) {
+        let Some(slot) = self.risk_slot.borrow().clone() else { return };
+        clear(&slot);
+        let open = self.model.pr.borrow().as_ref().map(|p| p.is_open()).unwrap_or(false);
+        let risks = if open { self.model.risks() } else { vec![] };
+        slot.set_visible(!risks.is_empty());
+        if !risks.is_empty() {
+            slot.append(&risk_strip(&self.model, &risks));
         }
     }
 
@@ -1201,6 +1264,34 @@ pub fn merge_status_bar(model: &Rc<PrModel>, pr: &PullRequestDetail, on_merge: R
     Some(outer)
 }
 
+fn risk_strip(model: &Rc<PrModel>, risks: &[RiskLabel]) -> gtk::FlowBox {
+    let row = gtk::FlowBox::new();
+    row.set_selection_mode(gtk::SelectionMode::None);
+    row.set_max_children_per_line(40);
+    row.set_column_spacing(6);
+    row.set_row_spacing(4);
+    row.update_property(&[gtk::accessible::Property::Label("Look closer")]);
+    row.insert(&label_with("Look closer:", &["sy-muted", "sy-small"]), -1);
+    for r in risks {
+        let btn = gtk::Button::new();
+        btn.add_css_class("flat");
+        btn.set_child(Some(&chip(&r.title, if r.strong() { "amber" } else { "muted" }, Some(r.icon()), false)));
+        btn.set_valign(gtk::Align::Center);
+        btn.set_tooltip_text(Some(&r.tooltip()));
+        set_label(&btn, &r.title);
+        btn.update_property(&[gtk::accessible::Property::Description(&r.detail)]);
+        let first = r.files.first().cloned();
+        let m = model.clone();
+        btn.connect_clicked(move |_| {
+            if let Some(path) = &first {
+                m.reveal_file(path);
+            }
+        });
+        row.insert(&btn, -1);
+    }
+    row
+}
+
 fn requirements_list(model: &Rc<PrModel>, pr: &PullRequestDetail, requirements: &[MergeRequirement], on_request_review: Option<Rc<dyn Fn()>>) -> gtk::Box {
     let list = vbox(4);
     list.update_property(&[gtk::accessible::Property::Label("Merge requirements")]);
@@ -1257,7 +1348,7 @@ fn requirements_list(model: &Rc<PrModel>, pr: &PullRequestDetail, requirements: 
                         }
                     }
                     RequirementAction::ShowChecks => m.set_tab(PrTab::Checks),
-                    RequirementAction::ShowConversation => m.set_tab(PrTab::Conversation),
+                    RequirementAction::ShowConversation => m.next_unresolved_thread(),
                     RequirementAction::ShowConflicts => {
                         m.set_tab(PrTab::Conversation);
                         m.emit(Change::ScrollBottom);
