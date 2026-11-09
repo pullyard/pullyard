@@ -2,7 +2,7 @@ using PullYard.Core.Auth;
 
 namespace PullYard.Core.Api;
 
-public enum PRAction { Close, Reopen, ReadyForReview, ConvertToDraft, UpdateBranch, DisableAutoMerge }
+public enum PRAction { Close, Reopen, ReadyForReview, ConvertToDraft, UpdateBranch, DisableAutoMerge, Enqueue, Dequeue }
 
 public sealed record PRLoad(string Viewer, PRRepository? Repository, string? Signature);
 
@@ -24,15 +24,16 @@ public sealed record PRFeatures
     public bool Blame { get; init; }
     public bool DeleteBranch { get; init; }
     public bool CodeOwners { get; init; }
+    public bool MergeQueue { get; init; }
     public bool Reopen { get; init; } = true;
 
     public static PRFeatures GitHub { get; } = new()
     {
         Provider = GitProvider.GitHub, Stack = true, LocalConflicts = true, ViewedFiles = true, RequestReviewers = true, Editing = true, DraftToggle = true,
-        UpdateBranch = true, RerunChecks = true, JobLogs = true, RequestChanges = true, Agent = true, Blame = true, DeleteBranch = true, CodeOwners = true
+        UpdateBranch = true, RerunChecks = true, JobLogs = true, RequestChanges = true, Agent = true, Blame = true, DeleteBranch = true, CodeOwners = true, MergeQueue = true
     };
 
-    public static PRFeatures GitLab { get; } = new() { Provider = GitProvider.GitLab, Editing = true, DraftToggle = true, UpdateBranch = true, JobLogs = true, RevokeApproval = true, CodeOwners = true };
+    public static PRFeatures GitLab { get; } = new() { Provider = GitProvider.GitLab, Editing = true, DraftToggle = true, UpdateBranch = true, JobLogs = true, RevokeApproval = true, CodeOwners = true, MergeQueue = true };
 
     public static PRFeatures Bitbucket { get; } = new()
     {
@@ -42,6 +43,7 @@ public sealed record PRFeatures
     public bool IsGitLab => Provider == GitProvider.GitLab;
     public bool IsBitbucket => Provider == GitProvider.Bitbucket;
     public bool IsGitHub => Provider.IsGitHub();
+    public string QueueTitle => IsGitLab ? "merge train" : "merge queue";
 }
 
 public sealed class PRBackendUnsupportedException : Exception
@@ -130,6 +132,8 @@ public sealed class GitHubPRBackend : IPRBackend
 
     public Task Perform(PRAction action, ItemRef r, PullRequestDetail pr)
     {
+        if (action == PRAction.Enqueue)
+            return api.Mutate(Q.Enqueue, Vars(("id", pr.Id), ("oid", pr.HeadRefOid.Length == 0 ? null : pr.HeadRefOid)));
         var mutation = action switch
         {
             PRAction.Close => Q.ClosePR,
@@ -137,6 +141,7 @@ public sealed class GitHubPRBackend : IPRBackend
             PRAction.ReadyForReview => Q.ReadyForReview,
             PRAction.ConvertToDraft => Q.ConvertToDraft,
             PRAction.UpdateBranch => Q.UpdateBranch,
+            PRAction.Dequeue => Q.Dequeue,
             _ => Q.DisableAutoMerge
         };
         return api.Mutate(mutation, Vars(("id", pr.Id)));

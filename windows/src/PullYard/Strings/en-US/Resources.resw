@@ -694,6 +694,7 @@
   <data name="MR_MarkReady" xml:space="preserve"><value>Mark as ready</value></data>
   <data name="MR_Merge" xml:space="preserve"><value>Merge merge request</value></data>
   <data name="MR_MergeMethod" xml:space="preserve"><value>Merge</value></data>
+  <data name="MR_MergeTrain" xml:space="preserve"><value>merge train</value></data>
   <data name="MR_NoPipeline" xml:space="preserve"><value>No pipeline for the latest commit</value></data>
   <data name="MR_Rebase" xml:space="preserve"><value>Rebase</value></data>
   <data name="MR_RebaseOnto" xml:space="preserve"><value>Rebase onto {0}</value></data>
@@ -714,6 +715,8 @@
   <data name="Merge_ActShowChecks" xml:space="preserve"><value>Show checks</value></data>
   <data name="Merge_ActShowConflicts" xml:space="preserve"><value>View conflicts</value></data>
   <data name="Merge_ActShowConversation" xml:space="preserve"><value>Show conversation</value></data>
+  <data name="Merge_AddToQueue" xml:space="preserve"><value>Add to {0}</value></data>
+  <data name="Merge_AddedToQueue" xml:space="preserve"><value>Added to the {0}</value></data>
   <data name="Merge_AutoEnabled" xml:space="preserve"><value>auto-merge enabled</value></data>
   <data name="Merge_Behind" xml:space="preserve"><value>Branch is behind {0}</value></data>
   <data name="Merge_Blocked" xml:space="preserve"><value>Blocked by branch protection</value></data>
@@ -731,11 +734,11 @@
   <data name="Merge_HideRequirements" xml:space="preserve"><value>Hide merge requirements</value></data>
   <data name="Merge_Merge" xml:space="preserve"><value>Merge…</value></data>
   <data name="Merge_MergeButton" xml:space="preserve"><value>Merge</value></data>
+  <data name="Merge_MergeDirectly" xml:space="preserve"><value>Merge directly</value></data>
   <data name="Merge_Method" xml:space="preserve"><value>Method</value></data>
   <data name="Merge_OneCheckFailed" xml:space="preserve"><value>1 check failed</value></data>
   <data name="Merge_OneCheckRunning" xml:space="preserve"><value>1 check is still running</value></data>
-  <data name="Merge_OpenOnGitHub" xml:space="preserve"><value>Open on GitHub</value></data>
-  <data name="Merge_QueueNote" xml:space="preserve"><value>{0} uses a merge queue. Merging here may be rejected; add it to the queue on GitHub instead.</value></data>
+  <data name="Merge_QueueNote" xml:space="preserve"><value>{0} uses a {1}. Add the {2} to it and it merges once the required checks pass; merging directly may be rejected.</value></data>
   <data name="Merge_Ready" xml:space="preserve"><value>Ready to merge</value></data>
   <data name="Merge_Rebase" xml:space="preserve"><value>Rebase and merge</value></data>
   <data name="Merge_ReqAdvisory" xml:space="preserve"><value>doesn’t block</value></data>
@@ -833,11 +836,16 @@
   <data name="PR_FixWithAgent" xml:space="preserve"><value>Send review comments to a new agent session</value></data>
   <data name="PR_Merge" xml:space="preserve"><value>Merge pull request</value></data>
   <data name="PR_MergeButton" xml:space="preserve"><value>Merge</value></data>
+  <data name="PR_MergeQueue" xml:space="preserve"><value>merge queue</value></data>
   <data name="PR_NextThreadMany" xml:space="preserve"><value>{0} unresolved · Next</value></data>
   <data name="PR_NextThreadOne" xml:space="preserve"><value>1 unresolved · Next</value></data>
   <data name="PR_NextThreadTip" xml:space="preserve"><value>Jump to the next unresolved thread (Ctrl+Alt+Down)</value></data>
   <data name="PR_Pipeline" xml:space="preserve"><value>Pipeline</value></data>
   <data name="PR_ReadyForReview" xml:space="preserve"><value>Ready for review</value></data>
+  <data name="PR_Remove" xml:space="preserve"><value>Remove</value></data>
+  <data name="PR_RemoveFromQueue" xml:space="preserve"><value>Remove from {0}…</value></data>
+  <data name="PR_RemoveFromQueueQ" xml:space="preserve"><value>Remove from the {0}?</value></data>
+  <data name="PR_RemovedFromQueue" xml:space="preserve"><value>Removed from the {0}</value></data>
   <data name="PR_Reopen" xml:space="preserve"><value>Reopen pull request</value></data>
   <data name="PR_RequestReviewMenu" xml:space="preserve"><value>Request review…</value></data>
   <data name="PR_Review" xml:space="preserve"><value>Review</value></data>

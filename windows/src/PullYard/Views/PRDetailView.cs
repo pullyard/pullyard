@@ -918,6 +918,8 @@ public sealed class PRContent : Grid, IShortcutHost
                 menu.Items.Add(Ui.MenuItem(model.IsGitLab ? L.F("MR_RebaseOnto", "Rebase onto {0}", pr.BaseRefName) : L.F("PR_UpdateBranchFrom", "Update branch from {0}", pr.BaseRefName), () => UpdateBranch(model).Forget()));
             if (pr.AutoMergeRequest is not null)
                 menu.Items.Add(Ui.MenuItem(L.T("PR_DisableAutoMerge", "Disable auto-merge"), () => Confirm(L.T("PR_DisableAutoMergeQ", "Disable auto-merge?"), L.T("PR_Disable", "Disable"), () => model.Simple(PRAction.DisableAutoMerge)).Forget()));
+            if (model.Features.MergeQueue && pr.MergeQueueEntry is not null && pr.ViewerCanUpdate)
+                menu.Items.Add(Ui.MenuItem(L.F("PR_RemoveFromQueue", "Remove from {0}…", model.QueueTitle), () => Confirm(L.F("PR_RemoveFromQueueQ", "Remove from the {0}?", model.QueueTitle), L.T("PR_Remove", "Remove"), RemoveFromQueue).Forget()));
             menu.Items.Add(Ui.Separator());
             if (pr.ViewerCanUpdate)
             {
@@ -949,6 +951,13 @@ public sealed class PRContent : Grid, IShortcutHost
     private async Task Confirm(string title, string button, Func<Task<bool>> action, bool destructive = true)
     {
         if (await Dialogs.Confirm(XamlRoot, title, button, destructive: destructive)) await action();
+    }
+
+    private async Task<bool> RemoveFromQueue()
+    {
+        var ok = await model.Simple(PRAction.Dequeue);
+        if (ok) ShellView.Toast(L.F("PR_RemovedFromQueue", "Removed from the {0}", model.QueueTitle));
+        return ok;
     }
 
     private static async Task UpdateBranch(PRDetailViewModel model)
