@@ -935,6 +935,9 @@
   <data name="Repos_NoActive" xml:space="preserve"><value>No active repositories</value></data>
   <data name="Repos_None" xml:space="preserve"><value>No repositories</value></data>
   <data name="Repos_NoneMessage" xml:space="preserve"><value>Repositories you can access show up here.</value></data>
+  <data name="ReviewLoad_Help" xml:space="preserve"><value>Open pull requests waiting for {0}'s review, among those you can see</value></data>
+  <data name="ReviewLoad_Many" xml:space="preserve"><value>{0} open reviews</value></data>
+  <data name="ReviewLoad_One" xml:space="preserve"><value>1 open review</value></data>
   <data name="Review_Approved" xml:space="preserve"><value>Approved</value></data>
   <data name="Review_ChangesRequested" xml:space="preserve"><value>Changes requested</value></data>
   <data name="Review_CommentOnly" xml:space="preserve"><value>Comment — without approval</value></data>

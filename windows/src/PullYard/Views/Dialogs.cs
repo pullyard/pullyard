@@ -202,6 +202,14 @@ public static class Dialogs
         var candidates = model.Reviewers.Where(r => r.Login != model.ViewerLogin && !r.Login.EndsWith("[bot]") && (r.IsTeam || !r.Login.Contains('/'))).ToList();
         var stale = model.ReviewersToReRequest;
         var checks = new List<(CheckBox Box, string Login)>();
+        var loads = new List<(TextBlock Label, string Handle)>();
+        TextBlock LoadLabel(string handle)
+        {
+            var t = Ui.Caption("", "dim");
+            t.Visibility = Visibility.Collapsed;
+            loads.Add((t, handle));
+            return t;
+        }
         var panel = Ui.V(8);
         if (candidates.Count > 0)
         {
@@ -211,6 +219,7 @@ public static class Dialogs
                 var content = Ui.H(6, PRContent.ReviewerBadge(r), Ui.Text(r.Login, 13));
                 if (r.IsTeam) content.Children.Add(Ui.Caption(L.T("Reviewers_Team", "team")));
                 if (r.CodeOwner) content.Children.Add(Ui.Caption(L.T("Reviewers_CodeOwner", "code owner"), "violet"));
+                content.Children.Add(LoadLabel(r.Login));
                 if (stale.Contains(r.Login)) content.Children.Add(Ui.Caption(L.T("Reviewers_Stale", "reviewed before latest push"), "amber"));
                 else if (r.State == "PENDING") content.Children.Add(Ui.Caption(L.T("Reviewers_Already", "already requested")));
                 var box = new CheckBox { Content = content, IsChecked = stale.Contains(r.Login) };
@@ -229,6 +238,7 @@ public static class Dialogs
             {
                 var content = Ui.H(6, Ui.Text(o.Handle, 13));
                 if (o.IsTeam) content.Children.Add(Ui.Caption(L.T("Reviewers_Team", "team")));
+                content.Children.Add(LoadLabel(o.Handle));
                 content.Children.Add(Ui.Caption(L.T("Owners_NotRequested", "not requested")));
                 var box = new CheckBox { Content = content };
                 checks.Add((box, o.Handle));
@@ -259,7 +269,21 @@ public static class Dialogs
         typed.TextChanged += (_, _) => Validate();
         Validate();
         d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, () => model.RequestReviewers(Requested()), args);
+        if (model.Features.IsGitHub && model.Api is { } api && loads.Count > 0) LoadReviewLoad(api, loads).Forget();
         await ShowAsync(d);
+    }
+
+    private static async Task LoadReviewLoad(GitHubApi api, List<(TextBlock Label, string Handle)> loads)
+    {
+        var counts = await ReviewLoadStore.Shared.Load(loads.Select(l => l.Handle), api);
+        foreach (var (label, handle) in loads)
+        {
+            if (!counts.TryGetValue(handle.ToLowerInvariant(), out var n)) continue;
+            label.Text = "· " + (n == 1 ? L.T("ReviewLoad_One", "1 open review") : L.F("ReviewLoad_Many", "{0} open reviews", n));
+            label.Foreground = Palette.Brush(ReviewLoad.Busy(n) ? "amber" : "dim");
+            ToolTipService.SetToolTip(label, L.F("ReviewLoad_Help", "Open pull requests waiting for {0}'s review, among those you can see", handle));
+            label.Visibility = Visibility.Visible;
+        }
     }
 
     public static async Task Reply(XamlRoot? root, PRDetailViewModel model, ReviewThread thread)
