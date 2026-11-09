@@ -319,6 +319,10 @@ struct FixWithClaudeSheet: View {
                 if source == .ci, target != .copy {
                     app.claude.ciFixes[model.ref] = CIFixLaunch(tabID: tab?.id, target: target, headOid: pr.headRefOid, at: Date())
                 }
+                if source != .ci, target != .copy {
+                    let ids = (source == .composed ? threads.filter { selected.contains($0.id) } : threads).map(\.id)
+                    if !ids.isEmpty { app.claude.reviewFixes[model.ref] = ReviewFixLaunch(threadIDs: ids, headOid: pr.headRefOid, at: Date()) }
+                }
                 dismiss()
             } catch {
                 self.error = error.localizedDescription
