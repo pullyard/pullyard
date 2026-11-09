@@ -764,6 +764,13 @@ struct ClaudeControlBar: View {
             }
             } else if let chat = tab.chat, chat.totalCost > 0 || chat.sessionId != nil {
                 Text(chat.model.replacingOccurrences(of: "claude-", with: "")).font(.syCaption).foregroundStyle(Color.syMuted)
+                if chat.totalCost > 0, SessionCost.billedPerUse || SessionCost.budget > 0 {
+                    Text(SessionCost.format(chat.totalCost))
+                        .font(.syCaption.monospacedDigit())
+                        .foregroundStyle(chat.budgetPaused ? Color.syAmber : Color.syMuted)
+                        .help(SessionCost.budget > 0 ? "Session cost · limit \(SessionCost.format(SessionCost.budget))" : "Session cost")
+                        .accessibilityLabel("Session cost \(SessionCost.format(chat.totalCost))")
+                }
             }
             OpenInMenu(folder: tab.folder)
             Picker("", selection: Binding(get: { tab.kind }, set: { k in
