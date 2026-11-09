@@ -77,17 +77,19 @@ enum GitLabReviewMapper {
     }
 
     static func pulse(_ mr: GitLabMR.Detail, approvals: GitLabMR.Approvals?) -> String {
-        let approvers = (approvals?.approvedBy ?? []).map(\.user.username).sorted().joined(separator: ",")
-        return [
-            String(mr.updatedAt.timeIntervalSince1970),
-            mr.sha ?? "",
-            mr.state,
-            mr.headPipeline.map { "\($0.id):\($0.status)" } ?? "",
-            mr.detailedMergeStatus ?? mr.mergeStatus ?? "",
-            String(mr.userNotesCount ?? 0),
-            String(mr.blockingDiscussionsResolved ?? true),
-            approvers
-        ].joined(separator: "|")
+        let approvers: String = (approvals?.approvedBy ?? []).map { $0.user.username }.sorted().joined(separator: ",")
+        let pipeline: String = mr.headPipeline.map { "\($0.id):\($0.status)" } ?? ""
+        let status: String = mr.detailedMergeStatus ?? mr.mergeStatus ?? ""
+        var parts: [String] = []
+        parts.append(String(mr.updatedAt.timeIntervalSince1970))
+        parts.append(mr.sha ?? "")
+        parts.append(mr.state)
+        parts.append(pipeline)
+        parts.append(status)
+        parts.append(String(mr.userNotesCount ?? 0))
+        parts.append(String(mr.blockingDiscussionsResolved ?? true))
+        parts.append(approvers)
+        return parts.joined(separator: "|")
     }
 
     static func checks(_ jobs: [GitLabMR.Job]) -> [CheckContext] {
