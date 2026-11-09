@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{label, lock, FlexLabel, ForgeClient, Query};
-use crate::api::models::{CommitDetailRest, CommitInner, CommitPerson, CommitStats, Date, ItemRef, PendingComment, PrDetailResponse, PrFile, PrLight, PullRequestDetail};
+use crate::api::models::{CheckContext, CheckOutcome, CommitDetailRest, CommitInner, CommitPerson, CommitStats, Date, ItemRef, PendingComment, PrDetailResponse, PrFile, PrLight, PullRequestDetail};
 use crate::api::{ApiError, ApiResult};
 use crate::diff::{DiffFile, LineKind};
 use crate::markdown_html;
@@ -283,6 +283,24 @@ pub async fn commits(c: &ForgeClient, project: &str, iid: i64) -> ApiResult<Vec<
 
 pub async fn jobs(c: &ForgeClient, project: &str, pipeline: i64) -> ApiResult<Vec<Job>> {
     pages(c, &format!("{}/pipelines/{pipeline}/jobs", project_path(project)), vec![], 3).await
+}
+
+pub async fn job_trace(c: &ForgeClient, project: &str, job: i64) -> ApiResult<String> {
+    c.http().text(&format!("{}/jobs/{job}/trace", project_path(project)), &[]).await
+}
+
+static SECTION_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"section_(start|end):\d+:[A-Za-z0-9_.\-\[\]=,]+\r?(\x1b\[0K)?").expect("section marker"));
+
+pub fn clean_trace(raw: &str) -> String {
+    let markers = SECTION_MARKER.replace_all(raw, "");
+    let lines: Vec<&str> = markers
+        .split('\n')
+        .map(|line| {
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            line.rsplit('\r').next().unwrap_or(line)
+        })
+        .collect();
+    crate::ci_fix::clean_text(&lines.join("\n"))
 }
 
 pub async fn project(c: &ForgeClient, project: &str) -> ApiResult<Project> {
@@ -771,11 +789,12 @@ pub struct GitLabReview {
     client: ForgeClient,
     settings: Arc<Mutex<HashMap<String, Option<Project>>>>,
     refs: Arc<Mutex<HashMap<ItemRef, DiffRefs>>>,
+    job_projects: Arc<Mutex<HashMap<ItemRef, String>>>,
 }
 
 impl GitLabReview {
     pub fn new(client: ForgeClient) -> Self {
-        GitLabReview { client, settings: Arc::new(Mutex::new(HashMap::new())), refs: Arc::new(Mutex::new(HashMap::new())) }
+        GitLabReview { client, settings: Arc::new(Mutex::new(HashMap::new())), refs: Arc::new(Mutex::new(HashMap::new())), job_projects: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     pub fn host(&self) -> String {
@@ -805,7 +824,11 @@ impl GitLabReview {
         );
         let mr = mr?;
         let jobs = match &mr.head_pipeline {
-            Some(p) => jobs(c, &p.project_id.map(|id| id.to_string()).unwrap_or_else(|| name.clone()), p.id).await.unwrap_or_default(),
+            Some(p) => {
+                let owner = p.project_id.map(|id| id.to_string()).unwrap_or_else(|| name.clone());
+                lock(&self.job_projects).insert(r.clone(), owner.clone());
+                jobs(c, &owner, p.id).await.unwrap_or_default()
+            }
             None => vec![],
         };
         if let Some(refs) = mr.diff_refs.clone() {
@@ -823,6 +846,17 @@ impl GitLabReview {
 
     pub async fn files(&self, r: &ItemRef) -> ApiResult<Vec<PrFile>> {
         Ok(diffs(&self.client, &r.repo.full(), r.number).await?.iter().map(file).collect())
+    }
+
+    pub fn can_show_log(check: &CheckContext) -> bool {
+        check.typename == "GitLabJob" && check.database_id.is_some() && !matches!(check.outcome(), CheckOutcome::Pending | CheckOutcome::Skipped)
+    }
+
+    pub async fn job_log(&self, r: &ItemRef, check: &CheckContext) -> ApiResult<String> {
+        let Some(id) = check.database_id else { return Err(ApiError::new("This job has no log")) };
+        let project = lock(&self.job_projects).get(r).cloned().unwrap_or_else(|| r.repo.full());
+        let raw = job_trace(&self.client, &project, id).await?;
+        Ok(clean_trace(&raw))
     }
 
     pub async fn comment(&self, r: &ItemRef, body: &str) -> ApiResult<()> {
@@ -1171,6 +1205,16 @@ mod tests {
         assert_eq!(e.message, "GitLab 400: Discussion is not resolvable");
         stub.route("/merge_requests/7/notes", 400, r#"{"message":{"note":["can't be blank","is too short"]}}"#);
         assert_eq!(crate::rt::block_on(b.comment(&r(), "x")).unwrap_err().message, "GitLab 400: note can't be blank, is too short");
+    }
+
+    #[test]
+    fn job_log_uses_pipeline_project() {
+        let (stub, b) = setup();
+        stub.route("/projects/42/jobs/3/trace", 200, "section_start:1:build\r\u{1b}[0Kok\r\nsection_end:2:build\r\u{1b}[0K");
+        crate::rt::block_on(b.load(&r())).unwrap();
+        let check: CheckContext = serde_json::from_value(json!({ "__typename": "GitLabJob", "databaseId": 3, "status": "COMPLETED", "conclusion": "FAILURE" })).unwrap();
+        assert_eq!(crate::rt::block_on(b.job_log(&r(), &check)).unwrap(), "ok\n");
+        assert_eq!(stub.requests("GET", "/jobs/3/trace").len(), 1);
     }
 
     #[test]

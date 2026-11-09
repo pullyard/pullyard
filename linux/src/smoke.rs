@@ -355,8 +355,11 @@ pub fn run(_app: Rc<App>) {
     step(next(300), "job log sheet", move || {
         let m = pr();
         let c = m.pr.borrow().as_ref().map(|p| p.checks()[0].clone());
-        if let (Some(c), Some(api)) = (c, m.api.clone()) {
-            crate::ui::pr::sheets::job_log(api, m.r.repo.clone(), c, Some(std::rc::Rc::new(|_: Option<String>| {})));
+        if let Some(c) = c {
+            let backend = m.backend.clone();
+            let r = m.r.clone();
+            let check = c.clone();
+            crate::ui::pr::sheets::job_log(async move { backend.job_log(&r, &check).await }, c, Some(std::rc::Rc::new(|_: Option<String>| {})));
         }
     });
     step(next(300), "fix ci sheet", move || crate::ui::fix_claude::show_ci(pr(), None));

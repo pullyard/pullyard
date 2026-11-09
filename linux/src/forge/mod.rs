@@ -7,10 +7,10 @@ pub mod gitlab_review;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use reqwest::{Method, StatusCode};
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, LOCATION};
+use reqwest::{Client, Method, StatusCode};
 use serde::de::{DeserializeOwned, Deserializer};
 use serde::Deserialize;
 use serde_json::Value;
@@ -130,6 +130,16 @@ pub struct ForgeHttp {
     stub: Option<Arc<stub::Stub>>,
 }
 
+static NO_REDIRECT: std::sync::LazyLock<Client> = std::sync::LazyLock::new(|| {
+    Client::builder()
+        .user_agent(crate::brand::user_agent())
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(60))
+        .build()
+        .expect("http client")
+});
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -203,7 +213,7 @@ impl ForgeHttp {
     async fn send(&self, method: &Method, url: &url::Url, body: Option<&[u8]>, accept: &str) -> ApiResult<(StatusCode, Vec<u8>)> {
         #[cfg(test)]
         if let Some(stub) = &self.stub {
-            return Ok(stub.respond(method, url, body));
+            return Ok(stub.respond(method, url, body, accept, true));
         }
         let authorization = lock(&self.authorization).clone();
         let mut req = http_client().request(method.clone(), url.clone()).header(AUTHORIZATION, authorization).header(ACCEPT, accept);
@@ -243,6 +253,59 @@ impl ForgeHttp {
     pub async fn text(&self, path: &str, query: &[(&'static str, String)]) -> ApiResult<String> {
         let body = self.call_as(Method::GET, path, query, None, "text/plain").await?;
         Ok(String::from_utf8_lossy(&body).into_owned())
+    }
+
+    async fn fetch(&self, url: &url::Url, credentials: bool) -> ApiResult<(StatusCode, Option<String>, Vec<u8>)> {
+        #[cfg(test)]
+        if let Some(stub) = &self.stub {
+            let (status, body) = stub.respond(&Method::GET, url, None, "*/*", credentials);
+            let location = status.is_redirection().then(|| String::from_utf8_lossy(&body).into_owned());
+            return Ok((status, location, body));
+        }
+        let req = if credentials {
+            NO_REDIRECT.get(url.clone()).header(AUTHORIZATION, lock(&self.authorization).clone())
+        } else {
+            http_client().get(url.clone())
+        };
+        let resp = req.header(ACCEPT, "*/*").send().await.map_err(|e| self.network_error(e))?;
+        let status = resp.status();
+        let location = resp.headers().get(LOCATION).and_then(|v| v.to_str().ok()).map(str::to_string);
+        let bytes = resp.bytes().await.map_err(|e| self.network_error(e))?;
+        Ok((status, location, bytes.to_vec()))
+    }
+
+    pub async fn download(&self, path: &str) -> ApiResult<String> {
+        let mut target = self.url(path, &[])?;
+        let mut hops = 3;
+        loop {
+            let (status, location, body) = self.fetch(&target, true).await?;
+            if status.is_redirection() && hops > 0 {
+                if let Some(next) = location.and_then(|l| target.join(&l).ok()) {
+                    let same_host = next.host_str().map(str::to_ascii_lowercase) == target.host_str().map(str::to_ascii_lowercase);
+                    if same_host {
+                        target = next;
+                        hops -= 1;
+                        continue;
+                    }
+                    if next.scheme() != "https" {
+                        return Err(ApiError::new(format!("{} sent an insecure log address", self.service)));
+                    }
+                    let (code, _, blob) = self.fetch(&next, false).await?;
+                    if !code.is_success() {
+                        return Err(ApiError::with_status(format!("{} {}: {}", self.service, code.as_u16(), code.canonical_reason().unwrap_or("error")), code.as_u16()));
+                    }
+                    return Ok(String::from_utf8_lossy(&blob).into_owned());
+                }
+            }
+            if !status.is_success() {
+                if status == StatusCode::UNAUTHORIZED {
+                    return Err(ApiError::with_status("Token is invalid or revoked (401)", 401));
+                }
+                let reason = error_message(&body).unwrap_or_else(|| status.canonical_reason().unwrap_or("error").to_string());
+                return Err(ApiError::with_status(format!("{} {}: {reason}", self.service, status.as_u16()), status.as_u16()));
+            }
+            return Ok(String::from_utf8_lossy(&body).into_owned());
+        }
     }
 
     pub async fn post(&self, method: Method, path: &str, query: &[(&'static str, String)]) -> ApiResult<()> {
@@ -445,6 +508,8 @@ pub(crate) mod stub {
         pub url: String,
         pub path: String,
         pub body: Option<Value>,
+        pub accept: String,
+        pub authorized: bool,
     }
 
     impl Request {
@@ -484,13 +549,15 @@ pub(crate) mod stub {
             self.all().into_iter().filter(|r| r.method == method && r.path.ends_with(suffix)).collect()
         }
 
-        pub(super) fn respond(&self, method: &Method, url: &url::Url, body: Option<&[u8]>) -> (StatusCode, Vec<u8>) {
+        pub(super) fn respond(&self, method: &Method, url: &url::Url, body: Option<&[u8]>, accept: &str, authorized: bool) -> (StatusCode, Vec<u8>) {
             let path = percent_encoding::percent_decode_str(url.path()).decode_utf8_lossy().to_string();
             super::lock(&self.requests).push(Request {
                 method: method.to_string(),
                 url: url.to_string(),
                 path: path.clone(),
                 body: body.and_then(|b| serde_json::from_slice(b).ok()),
+                accept: accept.to_string(),
+                authorized,
             });
             let routes = super::lock(&self.routes);
             let hit = routes.iter().filter(|(k, _)| path.ends_with(k.as_str())).max_by_key(|(k, _)| k.len()).map(|(_, v)| v.clone());

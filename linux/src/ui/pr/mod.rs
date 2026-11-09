@@ -688,13 +688,12 @@ impl PrPage {
             }
             col.append(&ellipsized(&parts.join(" · "), &["sy-muted", "sy-small"]));
             b.append(&col);
-            let api = self.model.api.clone().filter(|_| self.model.features.job_logs);
-            if let Some(api) = api.filter(|_| c.is_actions_job() && c.outcome() != CheckOutcome::Pending && c.outcome() != CheckOutcome::Skipped) {
+            if self.model.features.job_logs && self.model.backend.can_show_log(&c) && c.outcome() != CheckOutcome::Pending && c.outcome() != CheckOutcome::Skipped {
                 let log = button("Log");
                 log.add_css_class("flat");
                 let m = self.model.clone();
                 let cc = c.clone();
-                let failed = crate::ci_fix::is_fixable(&c);
+                let failed = self.model.features.agent && crate::ci_fix::is_fixable(&c);
                 log.connect_clicked(move |_| {
                     let fix: Option<Rc<dyn Fn(Option<String>)>> = if failed {
                         let m = m.clone();
@@ -706,7 +705,10 @@ impl PrPage {
                     } else {
                         None
                     };
-                    sheets::job_log(api.clone(), m.r.repo.clone(), cc.clone(), fix);
+                    let backend = m.backend.clone();
+                    let r = m.r.clone();
+                    let check = cc.clone();
+                    sheets::job_log(async move { backend.job_log(&r, &check).await }, cc.clone(), fix);
                 });
                 b.append(&log);
             }

@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
+use regex::Regex;
 use reqwest::Method;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -7,7 +9,7 @@ use serde_json::{json, Value};
 
 use super::bitbucket::segment;
 use super::{ForgeClient, Query};
-use crate::api::models::{CommitDetailRest, CommitInner, CommitPerson, CommitStats, Date, ItemRef, PendingComment, PrDetailResponse, PrFile, PrLight, PullRequestDetail};
+use crate::api::models::{CheckContext, CheckOutcome, CommitDetailRest, CommitInner, CommitPerson, CommitStats, Date, ItemRef, PendingComment, PrDetailResponse, PrFile, PrLight, PullRequestDetail};
 use crate::api::{ApiError, ApiResult};
 use crate::markdown_html;
 
@@ -227,6 +229,36 @@ impl DiffStat {
     }
 }
 
+#[derive(Deserialize, Clone, Debug)]
+pub struct OutcomeResult {
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct Outcome {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub result: Option<OutcomeResult>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct Pipeline {
+    pub uuid: String,
+    #[serde(default)]
+    pub build_number: Option<i64>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct Step {
+    pub uuid: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub state: Option<Outcome>,
+}
+
 #[derive(Deserialize)]
 struct Page<T> {
     #[serde(default = "Vec::new")]
@@ -278,6 +310,31 @@ pub async fn statuses(c: &ForgeClient, repo: &str, id: i64) -> ApiResult<Vec<Sta
 
 pub async fn diffstat(c: &ForgeClient, repo: &str, id: i64) -> ApiResult<Vec<DiffStat>> {
     pages(c, &format!("{}/diffstat", pull_path(repo, id)), 30).await
+}
+
+static BUILD_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(pipelines/results/|#!/results/)(\d+)").expect("build link"));
+
+pub fn build_number(link: Option<&str>) -> Option<i64> {
+    BUILD_LINK.captures(link?)?.get(2)?.as_str().parse().ok()
+}
+
+pub async fn pipeline(c: &ForgeClient, repo: &str, build: i64) -> ApiResult<Pipeline> {
+    match c.http().get(&format!("{}/pipelines/{build}", repo_path(repo)), &[]).await {
+        Err(e) if e.status == 404 || e.status == 400 => {
+            let query: Query = vec![("sort", "-created_on".into()), ("pagelen", "100".into())];
+            let page: Page<Pipeline> = c.http().get(&format!("{}/pipelines/", repo_path(repo)), &query).await?;
+            page.values.into_iter().find(|p| p.build_number == Some(build)).ok_or(e)
+        }
+        other => other,
+    }
+}
+
+pub async fn pipeline_steps(c: &ForgeClient, repo: &str, pipeline: &str) -> ApiResult<Vec<Step>> {
+    pages(c, &format!("{}/pipelines/{}/steps/", repo_path(repo), segment(pipeline)), 3).await
+}
+
+pub async fn step_log(c: &ForgeClient, repo: &str, pipeline: &str, step: &str) -> ApiResult<String> {
+    c.http().download(&format!("{}/pipelines/{}/steps/{}/log", repo_path(repo), segment(pipeline), segment(step))).await
 }
 
 pub async fn diff(c: &ForgeClient, repo: &str, id: i64) -> ApiResult<String> {
@@ -794,6 +851,38 @@ impl BitbucketReview {
 
     pub fn host(&self) -> String {
         "bitbucket.org".to_string()
+    }
+
+    pub fn can_show_log(check: &CheckContext) -> bool {
+        check.outcome() != CheckOutcome::Pending && build_number(check.link().as_deref()).is_some()
+    }
+
+    pub async fn job_log(&self, r: &ItemRef, check: &CheckContext) -> ApiResult<String> {
+        let Some(build) = build_number(check.link().as_deref()) else {
+            return Err(ApiError::new("Only Bitbucket Pipelines builds have a log here. Open this build in the browser."));
+        };
+        let c = &self.client;
+        let repo = r.repo.full();
+        let run = pipeline(c, &repo, build).await?;
+        let steps = pipeline_steps(c, &repo, &run.uuid).await?;
+        if steps.is_empty() {
+            return Ok(format!("Pipeline #{build} has no steps."));
+        }
+        let mut parts = vec![];
+        for step in steps {
+            let result = step.state.as_ref().and_then(|s| s.result.as_ref().and_then(|r| r.name.clone()).or_else(|| s.name.clone())).unwrap_or_default();
+            let mut header = format!("=== {}", step.name.as_deref().unwrap_or("Step"));
+            if !result.is_empty() {
+                header.push_str(&format!(" ({})", result.to_lowercase()));
+            }
+            header.push_str(" ===");
+            let text = match step_log(c, &repo, &run.uuid, &step.uuid).await {
+                Ok(raw) => crate::ci_fix::clean_text(&raw),
+                Err(e) => format!("Log unavailable: {}", e.message),
+            };
+            parts.push(format!("{header}\n{}", text.trim_matches(['\n', '\r'])));
+        }
+        Ok(parts.join("\n\n"))
     }
 
     pub async fn load(&self, r: &ItemRef) -> ApiResult<PrDetailResponse> {
