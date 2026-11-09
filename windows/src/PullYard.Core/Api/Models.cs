@@ -440,12 +440,23 @@ public sealed class PullRequestDetail
     public FileViewedPage? Files { get; set; }
     public Nodes<TimelineItem> TimelineItems { get; set; } = new();
     public Nodes<ReviewThread> ReviewThreads { get; set; } = new();
+    public bool? ViewerCanApprove { get; set; }
+    public bool? ViewerApproved { get; set; }
+    public string? MergeBlocker { get; set; }
+    public ForgeMergeInfo? ForgeMerge { get; set; }
 
     public VisualState VisualState => VisualStates.Pr(State, IsDraft);
     public StatusRollup? Rollup => LastCommit.Items.FirstOrDefault()?.Commit.StatusCheckRollup;
     public List<CheckContext> Checks => Rollup?.Contexts?.Items ?? new();
     public bool IsOpen => State == "OPEN";
     public string? BaseTipOid => BaseRef?.Target?.Oid;
+}
+
+public sealed class ForgeMergeInfo
+{
+    public string Status { get; set; } = "";
+    public int? ApprovalsRequired { get; set; }
+    public int? ApprovalsLeft { get; set; }
 }
 
 public sealed class PRRepository

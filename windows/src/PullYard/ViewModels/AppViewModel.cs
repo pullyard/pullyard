@@ -60,6 +60,7 @@ public sealed partial class AppViewModel : ObservableObject
     private DateTimeOffset lastLiveRefresh = DateTimeOffset.Now;
     private CancellationTokenSource? pollCts;
     private readonly Dictionary<ItemRef, PRDetailViewModel> prModels = new();
+    private IPRBackend? forgeReview;
     private readonly List<ItemRef> prOrder = new();
     private string? lastClipboard;
     private bool viewsStale;
@@ -295,7 +296,9 @@ public sealed partial class AppViewModel : ObservableObject
             BindClaude(account);
         }
         GitAccount = account;
+        if (Forge is not null) DetailRoot = null;
         Forge = null;
+        forgeReview = null;
         Account = key;
         Api = api;
         User = Demo.IsOn ? Demo.User : user;
@@ -313,6 +316,7 @@ public sealed partial class AppViewModel : ObservableObject
         BindClaude(account);
         GitAccount = account;
         Forge = client;
+        forgeReview = client.ReviewBackend();
         Api = null;
         Account = account.CacheKey;
         User = account.User;
@@ -511,6 +515,7 @@ public sealed partial class AppViewModel : ObservableObject
         Account = null;
         Api = null;
         Forge = null;
+        forgeReview = null;
         GitAccount = null;
         User = null;
         Scopes = new();
@@ -687,16 +692,19 @@ public sealed partial class AppViewModel : ObservableObject
         if (Claude.AllSessions.FirstOrDefault(s => s.Id == id) is { } s) Claude.Resume(s, kind: kind);
     }
 
+    public bool ForgeReviews => Api is null && forgeReview is not null;
+
     public PRDetailViewModel? PrModel(ItemRef r)
     {
-        if (Api is null) return null;
+        IPRBackend? backend = Api is { } api ? new GitHubPRBackend(api, GitAccount?.Provider ?? GitProvider.GitHub) : forgeReview;
+        if (backend is null) return null;
         if (prModels.TryGetValue(r, out var m))
         {
             prOrder.Remove(r);
             prOrder.Add(r);
             return m;
         }
-        m = new PRDetailViewModel(r, Api, Account);
+        m = new PRDetailViewModel(r, backend, Account);
         prModels[r] = m;
         prOrder.Add(r);
         if (prOrder.Count > 15)
@@ -706,6 +714,12 @@ public sealed partial class AppViewModel : ObservableObject
             prModels.Remove(old);
         }
         return m;
+    }
+
+    public async Task<CommitDetailRest?> CommitDetail(RepoRef repo, string sha)
+    {
+        if (Api is { } api) return await api.Commit(repo, sha);
+        return forgeReview is { } backend ? await backend.Commit(repo, sha) : null;
     }
 
     public void CheckClipboard(string? text)

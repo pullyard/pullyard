@@ -119,14 +119,14 @@ public static class Dialogs
         panel.Children.Add(text);
         var radios = new RadioButtons();
         var comment = new RadioButton { Content = L.T("Review_CommentOnly", "Comment — without approval"), Tag = "COMMENT", IsChecked = true };
-        var approve = new RadioButton { Content = L.T("PR_Approve", "Approve"), Tag = "APPROVE", IsEnabled = !pr.ViewerDidAuthor };
-        var changes = new RadioButton { Content = L.T("Review_RequestChanges", "Request changes"), Tag = "REQUEST_CHANGES", IsEnabled = !pr.ViewerDidAuthor };
+        var approve = new RadioButton { Content = L.T("PR_Approve", "Approve"), Tag = "APPROVE", IsEnabled = model.CanApprove };
         radios.Items.Add(comment);
         radios.Items.Add(approve);
-        radios.Items.Add(changes);
+        if (model.Features.RequestChanges)
+            radios.Items.Add(new RadioButton { Content = L.T("Review_RequestChanges", "Request changes"), Tag = "REQUEST_CHANGES", IsEnabled = !pr.ViewerDidAuthor });
         radios.SelectedIndex = 0;
         panel.Children.Add(radios);
-        var d = Create(root, L.F("Review_Title", "Review #{0}", pr.Number), panel, L.T("Review_Submit", "Submit review"), model.PendingCount > 0 ? L.T("Review_Discard", "Discard pending comments") : null);
+        var d = Create(root, L.F("Review_Title", "Review {0}", model.NumberText), panel, L.T("Review_Submit", "Submit review"), model.PendingCount > 0 ? L.T("Review_Discard", "Discard pending comments") : null);
         string Event() => (radios.SelectedItem as RadioButton)?.Tag as string ?? "COMMENT";
         void Validate() => d.IsPrimaryButtonEnabled = Event() == "APPROVE" || text.Text.Trim().Length > 0 || model.PendingCount > 0;
         text.TextChanged += (_, _) => Validate();
@@ -148,17 +148,17 @@ public static class Dialogs
             _ => repo.RebaseMergeAllowed
         }).ToList();
         var methods = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, Header = L.T("Merge_Method", "Method") };
-        foreach (var m in allowed) methods.Items.Add(new ComboBoxItem { Content = MergeMethods.Title(m), Tag = m });
+        foreach (var m in allowed) methods.Items.Add(new ComboBoxItem { Content = m == "MERGE" && model.IsGitLab ? L.T("MR_MergeMethod", "Merge") : MergeMethods.Title(m), Tag = m });
         var def = repo?.ViewerDefaultMergeMethod ?? "MERGE";
         methods.SelectedIndex = Math.Max(0, allowed.IndexOf(allowed.Contains(def) ? def : allowed.FirstOrDefault() ?? "MERGE"));
-        var title = new TextBox { PlaceholderText = L.T("Merge_TitlePlaceholder", "Commit title (GitHub default)") };
+        var title = new TextBox { PlaceholderText = model.IsGitLab ? L.T("MR_TitlePlaceholder", "Commit title (GitLab default)") : L.T("Merge_TitlePlaceholder", "Commit title (GitHub default)") };
         var message = Editor(L.T("Merge_BodyPlaceholder", "Commit description (optional)"), minHeight: 80);
         var sameRepo = pr.HeadRepository?.NameWithOwner == model.Ref.Repo.Full;
         var deleteBox = new CheckBox { Content = L.F("Merge_DeleteBranch", "Delete branch {0} after merge", pr.HeadRefName), IsChecked = true, Visibility = !(repo?.DeleteBranchOnMerge ?? false) && sameRepo ? Visibility.Visible : Visibility.Collapsed };
         string Method() => (methods.SelectedItem as ComboBoxItem)?.Tag as string ?? "MERGE";
         void Prefill()
         {
-            title.Text = Method() == "SQUASH" ? $"{pr.Title} (#{pr.Number})" : "";
+            title.Text = Method() != "SQUASH" ? "" : model.Features.IsGitHub ? $"{pr.Title} (#{pr.Number})" : pr.Title;
             var rebase = Method() == "REBASE";
             title.Visibility = rebase ? Visibility.Collapsed : Visibility.Visible;
             message.Visibility = rebase ? Visibility.Collapsed : Visibility.Visible;
@@ -166,7 +166,7 @@ public static class Dialogs
         methods.SelectionChanged += (_, _) => Prefill();
         Prefill();
         var canAuto = repo?.AutoMergeAllowed == true && pr.AutoMergeRequest is null && pr.MergeStateStatus != "CLEAN";
-        var d = Create(root, L.F("Merge_Title", "Merge #{0} into {1}", pr.Number, pr.BaseRefName), Ui.V(10, methods, title, message, deleteBox), L.T("Merge_MergeButton", "Merge"), canAuto ? L.T("Merge_EnableAuto", "Enable auto-merge") : null);
+        var d = Create(root, L.F("Merge_Title", "Merge {0} into {1}", model.NumberText, pr.BaseRefName), Ui.V(10, methods, title, message, deleteBox), L.T("Merge_MergeButton", "Merge"), canAuto ? L.T("Merge_EnableAuto", "Enable auto-merge") : null);
         d.IsPrimaryButtonEnabled = allowed.Count > 0;
         d.PrimaryButtonClick += async (_, args) =>
         {
@@ -184,7 +184,7 @@ public static class Dialogs
         if (root is null || model.Pr is not { } pr) return;
         var title = new TextBox { Header = L.T("Edit_Title", "Title"), Text = pr.Title };
         var body = Editor(L.T("Edit_Body", "Description (Markdown)"), pr.Body, 260);
-        var d = Create(root, L.F("Edit_Header", "Edit #{0}", pr.Number), Ui.V(10, title, body), L.T("Common_Save", "Save"), maxWidth: 760);
+        var d = Create(root, L.F("Edit_Header", "Edit {0}", model.NumberText), Ui.V(10, title, body), L.T("Common_Save", "Save"), maxWidth: 760);
         title.TextChanged += (_, _) => d.IsPrimaryButtonEnabled = title.Text.Trim().Length > 0;
         d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, () => model.Edit(title.Text, body.Text), args);
         await ShowAsync(d);

@@ -325,14 +325,17 @@ public sealed class PRContent : Grid, IShortcutHost
         header.Children.Clear();
         var titleText = Ui.Text("", 20, "text", FontWeights.Bold, wrap: true, select: true);
         titleText.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = pr.Title + "  " });
-        titleText.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = $"#{pr.Number}", Foreground = Palette.Brush("dim"), FontWeight = FontWeights.Normal });
+        titleText.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = model.NumberText, Foreground = Palette.Brush("dim"), FontWeight = FontWeights.Normal });
         titleHost.Content = titleText;
         var branchBase = BranchChip(pr.BaseRefName, "sky");
         var branchHead = BranchChip(pr.HeadRefName, "violet");
         var time = Ui.Caption(Fmt.Rel(pr.CreatedAt));
         Ui.Tip(time, Fmt.Full(pr.CreatedAt));
-        header.Children.Add(new WrapPanel(8, Ui.StateBadge(pr.VisualState), Ui.Avatar(pr.Author?.AvatarUrl, 18), Ui.Text(pr.Author?.Login ?? "ghost", 13, "text", FontWeights.SemiBold),
-            branchBase, Ui.Glyph("", 11, "dim"), branchHead, Ui.DiffStat(pr.Additions, pr.Deletions), time));
+        var meta = new WrapPanel(8, Ui.StateBadge(pr.VisualState), Ui.Avatar(pr.Author?.AvatarUrl, 18), Ui.Text(pr.Author?.Login ?? "ghost", 13, "text", FontWeights.SemiBold),
+            branchBase, Ui.Glyph("", 11, "dim"), branchHead);
+        if (model.DiffStat is { } stat) meta.Children.Add(Ui.DiffStat(stat.Additions, stat.Deletions));
+        meta.Children.Add(time);
+        header.Children.Add(meta);
         var reviewers = model.Reviewers;
         if (pr.Labels.Items.Count > 0 || reviewers.Count > 0 || pr.Assignees.Items.Count > 0)
         {
@@ -407,14 +410,16 @@ public sealed class PRContent : Grid, IShortcutHost
             if (anyPending > 0) chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "amber"), Ui.Caption(anyPending.ToString(), "amber")));
             chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "green"), Ui.Caption(ok.ToString(), "green")));
             var b = new Button { Content = chips, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(4, 0, 4, 0) };
-            Ui.Tip(b, L.T("PR_Checks", "Checks"));
-            Ui.Named(b, L.T("PR_Checks", "Checks"), L.F("PR_ChecksSummary", "{0} failed, {1} pending, {2} passed", anyFailed, anyPending, ok));
+            Ui.Tip(b, model.ChecksTitle);
+            Ui.Named(b, model.ChecksTitle, L.F("PR_ChecksSummary", "{0} failed, {1} pending, {2} passed", anyFailed, anyPending, ok));
             b.Click += (_, _) => model.Tab = PRTab.Checks;
             row.Children.Add(b);
         }
         var actions = Ui.H(6);
-        if (pr.MergeStateStatus == "BEHIND" && (model.CanWrite || pr.ViewerCanUpdate))
-            actions.Children.Add(Ui.Button(L.T("Merge_UpdateBranch", "Update branch"), () => model.Simple(Q.UpdateBranch).Forget()));
+        if (model.Features.UpdateBranch && pr.MergeStateStatus == "BEHIND" && (model.CanWrite || pr.ViewerCanUpdate))
+            actions.Children.Add(Ui.Button(model.UpdateBranchTitle, () => UpdateBranch(model).Forget()));
+        if (model.IsGitLab && pr.IsDraft && pr.ViewerCanUpdate)
+            actions.Children.Add(Ui.Button(L.T("MR_MarkReady", "Mark as ready"), () => model.Simple(PRAction.ReadyForReview).Forget()));
         if (model.CanWrite && !pr.IsDraft)
         {
             var merge = Ui.Button(L.T("Merge_Merge", "Merge…"), onMerge, accent: s.ready);
@@ -456,7 +461,7 @@ public sealed class PRContent : Grid, IShortcutHost
         };
         bool CanPerform(RequirementAction a) => a switch
         {
-            RequirementAction.RequestReview => onRequestReview is not null && (model.CanWrite || pr.ViewerDidAuthor),
+            RequirementAction.RequestReview => onRequestReview is not null && model.Features.RequestReviewers && (model.CanWrite || pr.ViewerDidAuthor),
             RequirementAction.UpdateBranch => false,
             RequirementAction.ReadyForReview => pr.ViewerCanUpdate,
             _ => true
@@ -472,8 +477,8 @@ public sealed class PRContent : Grid, IShortcutHost
                     model.Tab = PRTab.Conversation;
                     model.ScrollToBottomToken++;
                     break;
-                case RequirementAction.UpdateBranch: model.Simple(Q.UpdateBranch).Forget(); break;
-                case RequirementAction.ReadyForReview: model.Simple(Q.ReadyForReview).Forget(); break;
+                case RequirementAction.UpdateBranch: model.Simple(PRAction.UpdateBranch).Forget(); break;
+                case RequirementAction.ReadyForReview: model.Simple(PRAction.ReadyForReview).Forget(); break;
             }
         }
         var panel = Ui.V(4);
@@ -496,11 +501,11 @@ public sealed class PRContent : Grid, IShortcutHost
                 var title = a switch
                 {
                     RequirementAction.RequestReview => L.T("Merge_ActRequestReview", "Request review"),
-                    RequirementAction.ShowChecks => L.T("Merge_ActShowChecks", "Show checks"),
+                    RequirementAction.ShowChecks => model.IsGitLab ? L.T("MR_ActShowPipeline", "Show pipeline") : L.T("Merge_ActShowChecks", "Show checks"),
                     RequirementAction.ShowConversation => L.T("Merge_ActShowConversation", "Show conversation"),
                     RequirementAction.ShowConflicts => L.T("Merge_ActShowConflicts", "View conflicts"),
-                    RequirementAction.UpdateBranch => L.T("Merge_UpdateBranch", "Update branch"),
-                    _ => L.T("Merge_ActReady", "Ready for review")
+                    RequirementAction.UpdateBranch => model.UpdateBranchTitle,
+                    _ => model.IsGitLab ? L.T("MR_MarkReady", "Mark as ready") : L.T("Merge_ActReady", "Ready for review")
                 };
                 action = Ui.Link(title, () => Perform(a));
             }
@@ -582,6 +587,11 @@ public sealed class PRContent : Grid, IShortcutHost
     {
         banners.Children.Clear();
         if (model.Pr is null) return;
+        if (!model.Features.Agent)
+        {
+            banners.Visibility = Visibility.Collapsed;
+            return;
+        }
         if (ReReviewBanner(model, () => Dialogs.Reviewers(XamlRoot, model).Forget()) is { } rr) banners.Children.Add(rr);
         if (FixBanner(Pr, () => Dialogs.FixWithClaude(XamlRoot, model).Forget()) is { } fix) banners.Children.Add(fix);
         var launch = model.CiFix is { } l && l.HeadOid == Pr.HeadRefOid ? l : null;
@@ -736,25 +746,32 @@ public sealed class PRContent : Grid, IShortcutHost
             };
             review.Click += (_, _) => Dialogs.Review(XamlRoot, model).Forget();
             var flyout = Ui.Menu(Ui.MenuItem(L.T("PR_WriteReview", "Write review…"), () => Dialogs.Review(XamlRoot, model).Forget()));
-            if (!pr.ViewerDidAuthor) flyout.Items.Add(Ui.MenuItem(L.T("PR_Approve", "Approve"), () => ConfirmApprove().Forget()));
-            flyout.Items.Add(Ui.Separator());
-            flyout.Items.Add(Ui.MenuItem(L.T("PR_RequestReviewMenu", "Request review…"), () => Dialogs.Reviewers(XamlRoot, model).Forget(), ""));
+            if (model.CanApprove) flyout.Items.Add(Ui.MenuItem(L.T("PR_Approve", "Approve"), () => ConfirmApprove().Forget()));
+            if (model.Features.RevokeApproval && pr.ViewerApproved == true)
+                flyout.Items.Add(Ui.MenuItem(L.T("MR_RevokeApproval", "Revoke approval"), () => Confirm(L.T("MR_RevokeApprovalQ", "Revoke your approval?"), L.T("MR_RevokeApproval", "Revoke approval"), model.RevokeApproval, destructive: false).Forget()));
+            if (model.Features.RequestReviewers)
+            {
+                flyout.Items.Add(Ui.Separator());
+                flyout.Items.Add(Ui.MenuItem(L.T("PR_RequestReviewMenu", "Request review…"), () => Dialogs.Reviewers(XamlRoot, model).Forget(), ""));
+            }
             review.Flyout = flyout;
             Ui.Tip(review, L.T("PR_SubmitReview", "Submit review"));
             Ui.Named(review, reviewText, L.T("PR_SubmitReview", "Submit review"));
             toolbar.Children.Add(review);
         }
-        var fix = Ui.Button(L.T("Fix_Button", "Fix with agent"), () => Dialogs.FixWithClaude(XamlRoot, model).Forget(), glyph: "", tooltip: L.T("PR_FixWithAgent", "Send review comments to a new agent session"));
-        toolbar.Children.Add(fix);
+        if (model.Features.Agent)
+        {
+            var fix = Ui.Button(L.T("Fix_Button", "Fix with agent"), () => Dialogs.FixWithClaude(XamlRoot, model).Forget(), glyph: "", tooltip: L.T("PR_FixWithAgent", "Send review comments to a new agent session"));
+            toolbar.Children.Add(fix);
+        }
         if (pr.IsOpen && !pr.IsDraft && model.CanWrite)
-            toolbar.Children.Add(Ui.Button(L.T("PR_MergeButton", "Merge"), () => Dialogs.Merge(XamlRoot, model).Forget(), glyph: "", tooltip: L.T("PR_Merge", "Merge pull request")));
+            toolbar.Children.Add(Ui.Button(L.T("PR_MergeButton", "Merge"), () => Dialogs.Merge(XamlRoot, model).Forget(), glyph: "", tooltip: model.IsGitLab ? L.T("MR_Merge", "Merge merge request") : L.T("PR_Merge", "Merge pull request")));
         toolbar.Children.Add(Ui.RefreshButton(() => model.Load(true)));
         var more = Ui.IconButton("", L.T("Common_MoreActions", "More actions"), () => { }, "text");
         more.Flyout = MoreMenu();
-        var group = Ui.H(0,
-            Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(pr.Url), "text"),
-            Ui.IconButton("\uE8C8", L.T("Menu_CopyShortLinkHint", "Copy short link (Ctrl+Shift+C)"), CopyShortLink, "text"),
-            more);
+        var group = Ui.H(0, Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(pr.Url), "text"));
+        if (model.Features.IsGitHub) group.Children.Add(Ui.IconButton("\uE8C8", L.T("Menu_CopyShortLinkHint", "Copy short link (Ctrl+Shift+C)"), CopyShortLink, "text"));
+        group.Children.Add(more);
         var groupHost = new Border
         {
             Child = group,
@@ -772,7 +789,7 @@ public sealed class PRContent : Grid, IShortcutHost
 
     public bool HandleShortcut(string id)
     {
-        if (id != Shortcuts.ShortLink) return false;
+        if (id != Shortcuts.ShortLink || !model.Features.IsGitHub) return false;
         CopyShortLink();
         return true;
     }
@@ -783,34 +800,44 @@ public sealed class PRContent : Grid, IShortcutHost
         var menu = Ui.Menu(
             Ui.MenuItem(L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(pr.Url), "\uE774"),
             Ui.Separator(),
-            Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => WindowInterop.Copy(pr.Url), ""),
-            Ui.MenuItem(L.T("Menu_CopyShortLink", "Copy Short Link"), CopyShortLink, "\uE8C8"),
-            Ui.MenuItem(L.F("PR_CopyCheckout", "Copy “gh pr checkout {0}”", pr.Number), () => WindowInterop.Copy($"gh pr checkout {pr.Number} -R {model.Ref.Repo.Full}"), ""),
-            Ui.MenuItem(L.T("PR_CopyBranch", "Copy branch name"), () => WindowInterop.Copy(pr.HeadRefName), ""),
-            Ui.Separator());
-        if (pr.ViewerCanUpdate) menu.Items.Add(Ui.MenuItem(L.T("PR_Edit", "Edit title and description…"), () => Dialogs.EditPR(XamlRoot, model).Forget(), ""));
+            Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => WindowInterop.Copy(pr.Url), ""));
+        if (model.Features.IsGitHub)
+        {
+            menu.Items.Add(Ui.MenuItem(L.T("Menu_CopyShortLink", "Copy Short Link"), CopyShortLink, "\uE8C8"));
+            menu.Items.Add(Ui.MenuItem(L.F("PR_CopyCheckout", "Copy “gh pr checkout {0}”", pr.Number), () => WindowInterop.Copy($"gh pr checkout {pr.Number} -R {model.Ref.Repo.Full}"), ""));
+        }
+        else if (model.IsGitLab)
+            menu.Items.Add(Ui.MenuItem(L.F("MR_CopyCheckout", "Copy “glab mr checkout {0}”", pr.Number), () => WindowInterop.Copy($"glab mr checkout {pr.Number} -R {model.Ref.Repo.Full}"), ""));
+        menu.Items.Add(Ui.MenuItem(L.T("PR_CopyBranch", "Copy branch name"), () => WindowInterop.Copy(pr.HeadRefName), ""));
+        menu.Items.Add(Ui.Separator());
+        if (pr.ViewerCanUpdate && model.Features.Editing) menu.Items.Add(Ui.MenuItem(L.T("PR_Edit", "Edit title and description…"), () => Dialogs.EditPR(XamlRoot, model).Forget(), ""));
         if (pr.IsOpen)
         {
-            menu.Items.Add(Ui.MenuItem(L.T("PR_RequestReviewMenu", "Request review…"), () => Dialogs.Reviewers(XamlRoot, model).Forget()));
-            if (pr.ViewerCanUpdate)
+            if (model.Features.RequestReviewers)
+                menu.Items.Add(Ui.MenuItem(L.T("PR_RequestReviewMenu", "Request review…"), () => Dialogs.Reviewers(XamlRoot, model).Forget()));
+            if (pr.ViewerCanUpdate && model.Features.DraftToggle)
             {
                 menu.Items.Add(pr.IsDraft
-                    ? Ui.MenuItem(L.T("PR_ReadyForReview", "Ready for review"), () => model.Simple(Q.ReadyForReview).Forget())
-                    : Ui.MenuItem(L.T("PR_ConvertToDraft", "Convert to draft"), () => model.Simple(Q.ConvertToDraft).Forget()));
+                    ? Ui.MenuItem(model.IsGitLab ? L.T("MR_MarkReady", "Mark as ready") : L.T("PR_ReadyForReview", "Ready for review"), () => model.Simple(PRAction.ReadyForReview).Forget())
+                    : Ui.MenuItem(model.IsGitLab ? L.T("MR_MarkDraft", "Mark as draft") : L.T("PR_ConvertToDraft", "Convert to draft"), () => model.Simple(PRAction.ConvertToDraft).Forget()));
             }
-            if (pr.MergeStateStatus is "BEHIND" or "BLOCKED" or "UNSTABLE")
-                menu.Items.Add(Ui.MenuItem(L.F("PR_UpdateBranchFrom", "Update branch from {0}", pr.BaseRefName), () => model.Simple(Q.UpdateBranch).Forget()));
+            if (model.Features.UpdateBranch && (model.IsGitLab ? pr.MergeStateStatus == "BEHIND" : pr.MergeStateStatus is "BEHIND" or "BLOCKED" or "UNSTABLE"))
+                menu.Items.Add(Ui.MenuItem(model.IsGitLab ? L.F("MR_RebaseOnto", "Rebase onto {0}", pr.BaseRefName) : L.F("PR_UpdateBranchFrom", "Update branch from {0}", pr.BaseRefName), () => UpdateBranch(model).Forget()));
             if (pr.AutoMergeRequest is not null)
-                menu.Items.Add(Ui.MenuItem(L.T("PR_DisableAutoMerge", "Disable auto-merge"), () => Confirm(L.T("PR_DisableAutoMergeQ", "Disable auto-merge?"), L.T("PR_Disable", "Disable"), () => model.Simple(Q.DisableAutoMerge)).Forget()));
+                menu.Items.Add(Ui.MenuItem(L.T("PR_DisableAutoMerge", "Disable auto-merge"), () => Confirm(L.T("PR_DisableAutoMergeQ", "Disable auto-merge?"), L.T("PR_Disable", "Disable"), () => model.Simple(PRAction.DisableAutoMerge)).Forget()));
             menu.Items.Add(Ui.Separator());
             if (pr.ViewerCanUpdate)
-                menu.Items.Add(Ui.MenuItem(L.T("PR_Close", "Close pull request…"), () => Confirm(L.T("PR_CloseQ", "Close pull request without merging?"), L.T("PR_CloseButton", "Close pull request"), () => model.Simple(Q.ClosePR)).Forget()));
+            {
+                menu.Items.Add(model.IsGitLab
+                    ? Ui.MenuItem(L.T("MR_Close", "Close merge request…"), () => Confirm(L.T("MR_CloseQ", "Close merge request without merging?"), L.T("MR_CloseButton", "Close merge request"), () => model.Simple(PRAction.Close)).Forget())
+                    : Ui.MenuItem(L.T("PR_Close", "Close pull request…"), () => Confirm(L.T("PR_CloseQ", "Close pull request without merging?"), L.T("PR_CloseButton", "Close pull request"), () => model.Simple(PRAction.Close)).Forget()));
+            }
         }
         else if (!pr.Merged && pr.ViewerCanUpdate)
         {
-            menu.Items.Add(Ui.MenuItem(L.T("PR_Reopen", "Reopen pull request"), () => model.Simple(Q.ReopenPR).Forget()));
+            menu.Items.Add(Ui.MenuItem(model.IsGitLab ? L.T("MR_Reopen", "Reopen merge request") : L.T("PR_Reopen", "Reopen pull request"), () => model.Simple(PRAction.Reopen).Forget()));
         }
-        if (!pr.IsOpen && pr.HeadRef is not null && model.CanWrite)
+        if (model.Features.DeleteBranch && !pr.IsOpen && pr.HeadRef is not null && model.CanWrite)
             menu.Items.Add(Ui.MenuItem(L.F("PR_DeleteBranch", "Delete branch {0}…", pr.HeadRefName), () => Confirm(L.F("PR_DeleteBranchQ", "Delete branch {0}?", pr.HeadRefName), L.T("PR_DeleteBranchButton", "Delete branch"), model.DeleteBranch).Forget()));
         return menu;
     }
@@ -820,15 +847,20 @@ public sealed class PRContent : Grid, IShortcutHost
         var pending = model.PendingCount;
         var title = pending > 0
             ? L.F("PR_ApprovePendingQ", "Approve and submit {0} pending comment(s)?", pending)
-            : L.T("PR_ApproveQ", "Approve this pull request?");
+            : model.IsGitLab ? L.T("MR_ApproveQ", "Approve this merge request?") : L.T("PR_ApproveQ", "Approve this pull request?");
         var button = pending > 0 ? L.T("PR_ApproveAndSubmit", "Approve and submit") : L.T("PR_Approve", "Approve");
         if (await Dialogs.Confirm(XamlRoot, title, button, destructive: false))
             await model.SubmitReview("APPROVE", "");
     }
 
-    private async Task Confirm(string title, string button, Func<Task<bool>> action)
+    private async Task Confirm(string title, string button, Func<Task<bool>> action, bool destructive = true)
     {
-        if (await Dialogs.Confirm(XamlRoot, title, button)) await action();
+        if (await Dialogs.Confirm(XamlRoot, title, button, destructive: destructive)) await action();
+    }
+
+    private static async Task UpdateBranch(PRDetailViewModel model)
+    {
+        if (await model.Simple(PRAction.UpdateBranch)) ShellView.Toast(model.UpdatedToast);
     }
 
     private void RenderTabs()
@@ -844,7 +876,7 @@ public sealed class PRContent : Grid, IShortcutHost
         {
             new TabSpec(nameof(PRTab.Conversation), L.T("PR_TabConversation", "Conversation"), "", unresolved > 0 ? unresolved.ToString() : null),
             new TabSpec(nameof(PRTab.Commits), L.T("PR_TabCommits", "Commits"), "", (pr.AllCommits.TotalCount ?? pr.AllCommits.Items.Count).ToString()),
-            new TabSpec(nameof(PRTab.Checks), L.T("PR_TabChecks", "Checks"), "", summary, color),
+            new TabSpec(nameof(PRTab.Checks), model.ChecksTitle, "", summary, color),
             new TabSpec(nameof(PRTab.Files), L.T("PR_TabFiles", "Files changed"), "", pr.ChangedFiles.ToString())
         }.Concat(model.StackTree is { } tree ? new[] { new TabSpec(nameof(PRTab.Stack), L.T("PR_TabStack", "Stack"), StackUi.StackGlyph, tree.Count.ToString()) } : Array.Empty<TabSpec>())
          .Concat(JiraService.Account.ShowsTab(pr) ? new[] { new TabSpec(nameof(PRTab.Jira), L.T("PR_TabJira", "Jira"), "\uE8EC", JiraService.Account.Keys(pr).FirstOrDefault()) } : Array.Empty<TabSpec>()));
@@ -1034,12 +1066,14 @@ public sealed class PRContent : Grid, IShortcutHost
             var checks = pr.Checks.OrderBy(c => (int)c.Outcome).ThenBy(c => c.Title).ToList();
             var failedRuns = model.FailedRuns;
             var items = new List<object>();
-            if (checks.Count == 0) items.Add(new TextRowItem(L.T("Checks_None", "No checks for the latest commit")));
-            if (failedRuns > 0 && model.CanWrite) items.Add(new ActionRowItem(L.F("Checks_Rerun", "Re-run failed jobs ({0} workflow)", failedRuns), () => ConfirmRerun().Forget(), ""));
+            if (checks.Count == 0) items.Add(new TextRowItem(model.IsGitLab ? L.T("MR_NoPipeline", "No pipeline for the latest commit") : L.T("Checks_None", "No checks for the latest commit")));
+            if (model.Features.RerunChecks && failedRuns > 0 && model.CanWrite) items.Add(new ActionRowItem(L.F("Checks_Rerun", "Re-run failed jobs ({0} workflow)", failedRuns), () => ConfirmRerun().Forget(), ""));
             foreach (var c in checks)
             {
                 void Fix() => Dialogs.FixCi(XamlRoot, model, c).Forget();
-                items.Add(new CheckRowItem(c, () => Dialogs.JobLog(XamlRoot, model.Api, model.Ref.Repo, c, log => Dialogs.FixCi(XamlRoot, model, c, log).Forget()).Forget(), CiFailures.IsFixable(c) ? new Action(Fix) : null));
+                var api = model.Api;
+                Action log = api is null ? () => { } : () => Dialogs.JobLog(XamlRoot, api, model.Ref.Repo, c, l => Dialogs.FixCi(XamlRoot, model, c, l).Forget()).Forget();
+                items.Add(new CheckRowItem(c, log, model.Features.Agent && CiFailures.IsFixable(c) ? new Action(Fix) : null, model.Features.JobLogs));
             }
             list.ItemsSource = items;
         }
@@ -1058,7 +1092,7 @@ public sealed class PRContent : Grid, IShortcutHost
         side.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         fileFilter = new TextBox { PlaceholderText = L.T("Files_Filter", "Filter files") };
         viewedCount = Ui.Caption("");
-        Ui.Tip(viewedCount, L.T("Files_Viewed", "Viewed"));
+        Ui.Tip(viewedCount, model.Features.ViewedFiles ? L.T("Files_Viewed", "Viewed") : L.T("Files_Count", "Files"));
         DispatcherTimer? debounce = null;
         fileFilter.TextChanged += (_, _) =>
         {
@@ -1319,7 +1353,7 @@ public sealed class PRContent : Grid, IShortcutHost
         var selected = model.ScrollTarget;
         fileList.ItemsSource = visible.Select(f => new FileListItem(f, model.ViewedPaths.Contains(f.Id), model.ThreadCount(f.Id))).ToList();
         if (selected is not null) fileList.SelectedItem = (fileList.ItemsSource as List<FileListItem>)?.FirstOrDefault(f => f.File.Id == selected);
-        if (viewedCount is not null) viewedCount.Text = $"{model.ViewedPaths.Intersect(shown.Select(f => f.Id)).Count()}/{shown.Count}";
+        if (viewedCount is not null) viewedCount.Text = model.Features.ViewedFiles ? $"{model.ViewedPaths.Intersect(shown.Select(f => f.Id)).Count()}/{shown.Count}" : shown.Count.ToString();
         var layout = $"{WrapPref}|{SplitActive}|{model.DiffScope}";
         if (renderedDiffVersion == model.DiffVersion && renderedFilter == filter && renderedLayout == layout) return;
         var first = renderedDiffVersion < 0;
@@ -1419,7 +1453,7 @@ public sealed record CommitRowItem(CommitInfo Commit) : IRowContent
     }
 }
 
-public sealed record CheckRowItem(CheckContext Check, Action ShowLog, Action? Fix = null) : IRowContent
+public sealed record CheckRowItem(CheckContext Check, Action ShowLog, Action? Fix = null, bool Logs = true) : IRowContent
 {
     public UIElement BuildRow()
     {
@@ -1440,7 +1474,7 @@ public sealed record CheckRowItem(CheckContext Check, Action ShowLog, Action? Fi
         var body = Ui.V(1, Ui.Text(c.FullTitle, 13), Ui.Caption(string.Join(" · ", parts)));
         var right = Ui.H(4);
         if (Fix is not null) right.Children.Add(Ui.Button(L.T("Fix_Button", "Fix with agent"), Fix, glyph: "\uE945", tooltip: L.T("CiFix_RowHelp", "Send this check's log and the PR context to Claude Code")));
-        if (c.IsActionsJob && c.Outcome is not CheckOutcome.Pending and not CheckOutcome.Skipped)
+        if (Logs && c.IsActionsJob && c.Outcome is not CheckOutcome.Pending and not CheckOutcome.Skipped)
             right.Children.Add(Ui.Button(L.T("Checks_Log", "Log"), ShowLog));
         if (c.Link is { } link) right.Children.Add(Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(link)));
         var grid = Ui.Columns((Ui.CheckIcon(c.Outcome, 15), Ui.Auto), (body, Ui.Star), (right, Ui.Auto));

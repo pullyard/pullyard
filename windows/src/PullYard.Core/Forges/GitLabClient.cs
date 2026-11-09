@@ -7,7 +7,7 @@ using PullYard.Core.Util;
 
 namespace PullYard.Core.Forges;
 
-public sealed class GitLabClient : IForgeClient
+public sealed partial class GitLabClient : IForgeClient
 {
     private sealed class User
     {
@@ -133,7 +133,11 @@ public sealed class GitLabClient : IForgeClient
     {
         var filters = new List<ForgeFilter> { ForgeFilter.ReviewRequested, ForgeFilter.Mine, ForgeFilter.Assigned, ForgeFilter.Mentioned };
         if (await ApprovalFilterAvailable(ct).ConfigureAwait(false)) filters.Add(ForgeFilter.Reviewed);
-        return new ForgeCapabilities(filters, Enum.GetValues<ForgeIssueFilter>(), ForgeInbox.ToDoList, true);
+        return new ForgeCapabilities(filters, Enum.GetValues<ForgeIssueFilter>(), ForgeInbox.ToDoList, true)
+        {
+            PullRequestReview = CapabilityState.Supported,
+            MergeRequirements = CapabilityState.Supported
+        };
     }
 
     private static List<(string, string)> ListQuery() => new()
@@ -268,7 +272,9 @@ public sealed class GitLabClient : IForgeClient
         }
     }
 
-    private async Task<string> Username(CancellationToken ct) => login ?? (await CurrentUser(ct).ConfigureAwait(false)).Login;
+    public IPRBackend? ReviewBackend() => new GitLabPRBackend(this);
+
+    public async Task<string> Username(CancellationToken ct = default) => login ?? (await CurrentUser(ct).ConfigureAwait(false)).Login;
 
     public static string Reason(string action) => action switch
     {
