@@ -48,7 +48,7 @@ pub fn page(url: &str) -> adw::NavigationPage {
     let item = lookup(url);
     let is_pr = item.as_ref().is_none_or(|i| i.is_pr());
     if is_pr && app::forge_reviews() {
-        if let Some(r) = crate::forge::gitlab_review::parse_url(url).or_else(|| item.as_ref().map(|i| i.item_ref())) {
+        if let Some(r) = crate::forge::gitlab_review::parse_url(url).or_else(|| crate::forge::bitbucket_review::parse_url(url)).or_else(|| item.as_ref().map(|i| i.item_ref())) {
             return super::pr::page(&r);
         }
     }

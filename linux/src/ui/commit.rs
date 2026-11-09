@@ -275,6 +275,7 @@ pub fn page(repo: &RepoRef, sha: &str) -> adw::NavigationPage {
             let res = crate::rt::run(async move {
                 match (api, forge) {
                     (Some(api), _) => api.commit(&r, &s).await,
+                    (None, Some(forge)) if forge.provider() == crate::git_accounts::GitProvider::Bitbucket => crate::forge::bitbucket_review::commit(&forge, &r.full(), &s).await,
                     (None, Some(forge)) => crate::forge::gitlab_review::commit(&forge, &r.full(), &s).await,
                     (None, None) => Err(crate::api::ApiError::new("Not signed in")),
                 }

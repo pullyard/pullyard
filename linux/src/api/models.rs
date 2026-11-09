@@ -851,7 +851,7 @@ pub struct PullRequestDetail {
     pub light: PrLight,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ForgeMergeInfo {
     pub status: String,
@@ -859,6 +859,10 @@ pub struct ForgeMergeInfo {
     pub approvals_required: Option<i64>,
     #[serde(default)]
     pub approvals_left: Option<i64>,
+    #[serde(default)]
+    pub open_tasks: Option<i64>,
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default, PartialEq)]
