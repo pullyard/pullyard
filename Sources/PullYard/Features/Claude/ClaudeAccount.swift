@@ -69,6 +69,11 @@ final class ClaudeAccountStore {
             status = .notInstalled
             return
         }
+        if let endpoint = ClaudeProfiles.shared.active.endpoint {
+            lastChecked = Date()
+            status = .loggedIn(ClaudeAccountInfo(email: nil, orgName: nil, subscription: nil, method: "endpoint", provider: endpoint.kind == .openRouter ? endpoint.kind.title : endpoint.host))
+            return
+        }
         if case .unknown = status { status = .checking }
         let env = Self.environment()
         let result = await Task.detached(priority: .userInitiated) { () -> [String: Any]? in
@@ -356,21 +361,29 @@ struct ClaudeAccountCard: View {
     @State private var confirmLogout = false
     @State private var showAdd = false
     @State private var removeTarget: ClaudeProfile?
+    @State private var editEndpoint: ClaudeProfile?
     private var store: ClaudeAccountStore { ClaudeAccountStore.shared }
 
     var body: some View {
         let profile = ClaudeProfiles.shared.active
+        let endpoint = profile.endpoint
         HStack(spacing: 10) {
             ProfileBadge(profile: profile, size: compact ? 26 : 34)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 5) {
-                    Text(info.email ?? "Signed in").font(compact ? .syCallout.weight(.medium) : .syHeadline).foregroundStyle(Color.syText).lineLimit(1)
+                    Text(endpoint.map { $0.kind == .openRouter ? $0.kind.title : $0.host } ?? info.email ?? "Signed in").font(compact ? .syCallout.weight(.medium) : .syHeadline).foregroundStyle(Color.syText).lineLimit(1)
                     if ClaudeProfiles.shared.visible.count > 1 {
                         Text(profile.label).font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syMuted)
                             .padding(.horizontal, 5).background(Capsule().fill(Color.syMuted.opacity(0.14)))
                     }
                 }
                 HStack(spacing: 5) {
+                    if let endpoint {
+                        Text(endpoint.model.flatMap { $0.isEmpty ? nil : $0 } ?? "Default models").lineLimit(1).truncationMode(.middle)
+                        if !AgentEndpoints.hasKey(profileID: profile.id) {
+                            Label("API key missing", systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.syAmber)
+                        }
+                    }
                     if let org = info.orgName { Text(org).lineLimit(1) }
                     if let plan = info.subscription {
                         Text(plan)
@@ -390,9 +403,14 @@ struct ClaudeAccountCard: View {
             Menu {
                 ClaudeProfileMenuItems(showAdd: $showAdd, removeTarget: $removeTarget)
                 Divider()
-                Button("Sign out of this account…", role: .destructive) { confirmLogout = true }
-                Divider()
-                Button("Usage page") { openInBrowser("https://claude.ai/settings/usage") }
+                if endpoint != nil {
+                    Button("Edit endpoint…") { editEndpoint = profile }
+                    if endpoint?.kind == .openRouter { Button("OpenRouter activity") { openInBrowser("https://openrouter.ai/activity") } }
+                } else {
+                    Button("Sign out of this account…", role: .destructive) { confirmLogout = true }
+                    Divider()
+                    Button("Usage page") { openInBrowser("https://claude.ai/settings/usage") }
+                }
                 Button("Refresh status") { Task { await store.refresh(force: true) } }
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -406,6 +424,7 @@ struct ClaudeAccountCard: View {
         .padding(compact ? 8 : 14)
         .card(radius: 10)
         .modifier(ProfileSheets(showAdd: $showAdd, removeTarget: $removeTarget))
+        .sheet(item: $editEndpoint) { AddClaudeProfileSheet(editing: $0) }
         .confirmationDialog("Sign out of Claude Code?", isPresented: $confirmLogout) {
             Button("Sign out", role: .destructive) { Task { await store.logout() } }
             Button("Cancel", role: .cancel) {}
