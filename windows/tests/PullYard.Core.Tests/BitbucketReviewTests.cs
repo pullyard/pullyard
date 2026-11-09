@@ -278,4 +278,12 @@ public class BitbucketReviewTests
         Assert.Equal(CapabilityState.Unavailable, caps.MergeRequirements);
         Assert.IsType<BitbucketPRBackend>(((IForgeClient)client).ReviewBackend());
     }
+
+    [Fact]
+    public void SplitDiffHandlesWindowsLineEndings()
+    {
+        var diff = "diff --git a/a.swift b/a.swift\r\n--- a/a.swift\r\n+++ b/a.swift\r\n@@ -1 +1 @@\r\n-let a = 1\r\n+let a = 2\r\n";
+        var patches = BitbucketReviewMapper.SplitDiff(diff);
+        Assert.Equal("@@ -1 +1 @@\n-let a = 1\n+let a = 2", patches["a.swift"]);
+    }
 }
