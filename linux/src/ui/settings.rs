@@ -7,6 +7,7 @@ use super::claude::auth_view;
 use super::dialogs;
 use super::widgets::*;
 use crate::claude::accounts::{self, Status};
+use crate::claude::session_cost;
 use crate::git_accounts::{self, GitAccount, GitProvider};
 use crate::{app, auth, settings, theme, updater, util};
 
@@ -246,6 +247,16 @@ fn claude_group(dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
     idle.set_subtitle("A sleeping session uses no memory: the claude process stops, the conversation stays, and the next message resumes it.");
     idle.set_subtitle_lines(3);
     g.add(&idle);
+    let budget_labels: Vec<String> = session_cost::CHOICES.iter().map(|v| session_cost::choice_label(*v)).collect();
+    let budget_refs: Vec<&str> = budget_labels.iter().map(|s| s.as_str()).collect();
+    let current_budget = session_cost::budget();
+    let budget = combo(session_cost::SETTINGS_TITLE, &budget_refs, session_cost::CHOICES.iter().position(|v| (*v - current_budget).abs() < 0.001).unwrap_or(0), move |i| {
+        session_cost::set_budget(session_cost::CHOICES[i.min(session_cost::CHOICES.len() - 1)]);
+        app::get().claude.emit(crate::claude::workspace::WsEvent::TabState);
+    });
+    budget.set_subtitle(session_cost::SETTINGS_CAPTION);
+    budget.set_subtitle_lines(4);
+    g.add(&budget);
     g
 }
 

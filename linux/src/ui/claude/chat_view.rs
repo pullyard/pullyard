@@ -12,7 +12,7 @@ use crate::claude::chat::{self, ChatImage, ChatItem, ChatSession, ChatText, Even
 use crate::claude::sessions::{self, SessionInfo};
 use crate::claude::tool_groups::{self, relative, tool_summary, tool_title, DisplayItem, ToolStep};
 use crate::claude::workspace::{Tab, WsEvent};
-use crate::claude::{accounts, payload, relogin, rewind, ship, ClaudeMode, TabKind};
+use crate::claude::{accounts, payload, relogin, rewind, session_cost, ship, ClaudeMode, TabKind};
 use crate::diff::{DiffLine, LineKind};
 use crate::ui::markdown;
 use crate::ui::menu::Menu;
@@ -38,6 +38,8 @@ pub struct ChatView {
     working_label: gtk::Label,
     working_time: gtk::Label,
     error_box: gtk::Box,
+    budget_box: gtk::Box,
+    budget_key: RefCell<String>,
     pr_card: gtk::Box,
     pr_key: RefCell<Option<String>>,
     sleeping: gtk::Box,
@@ -371,9 +373,14 @@ impl ChatView {
         let error_box = vbox(8);
         error_box.add_css_class("chat-error");
         error_box.set_visible(false);
+        let budget_box = vbox(8);
+        budget_box.add_css_class("chat-error");
+        budget_box.set_visible(false);
         column.append(&working);
+        column.append(&budget_box);
         column.append(&error_box);
         margins(&working, 0, 20, 0, 20);
+        margins(&budget_box, 0, 20, 16, 20);
         margins(&error_box, 0, 20, 16, 20);
 
         let jump_button = gtk::Button::new();
@@ -448,6 +455,8 @@ impl ChatView {
             working_label,
             working_time,
             error_box,
+            budget_box,
+            budget_key: RefCell::new(String::new()),
             pr_card,
             pr_key: RefCell::new(None),
             sleeping,
@@ -782,6 +791,7 @@ impl ChatView {
         if !c.busy.get() {
             self.working_time.set_text("");
         }
+        self.render_budget();
         self.render_error();
         self.render_created_pr();
         self.sleeping.set_visible(c.sleeping.get() && !c.running.get());
@@ -865,6 +875,35 @@ impl ChatView {
         self.set_stick(false);
         let target = (adj.value() + bounds.y() as f64 - 24.0).clamp(adj.lower(), (adj.upper() - adj.page_size()).max(adj.lower()));
         adj.set_value(target);
+    }
+
+    fn render_budget(self: &Rc<Self>) {
+        let c = &self.chat;
+        let paused = c.budget_paused.get();
+        let budget = c.budget();
+        let key = if paused { format!("{}|{}", session_cost::format(c.total_cost.get()), session_cost::format(budget)) } else { String::new() };
+        if *self.budget_key.borrow() == key {
+            return;
+        }
+        *self.budget_key.borrow_mut() = key;
+        clear(&self.budget_box);
+        self.budget_box.set_visible(paused);
+        if !paused {
+            return;
+        }
+        let row = hbox(10);
+        row.append(&colored_icon("sy-gauge-symbolic", 14, "amber"));
+        let text = vbox(2);
+        text.set_hexpand(true);
+        text.append(&wrap_label(&session_cost::banner_title(c.total_cost.get(), budget), &["sy-bold", "sy-text"]));
+        text.append(&wrap_label(session_cost::BANNER_DETAIL, &["sy-muted", "sy-small"]));
+        row.append(&text);
+        let resume = tinted(&session_cost::continue_label(budget), "amber");
+        resume.set_valign(gtk::Align::Center);
+        let cc = c.clone();
+        resume.connect_clicked(move |_| cc.continue_past_budget());
+        row.append(&resume);
+        self.budget_box.append(&row);
     }
 
     fn render_error(self: &Rc<Self>) {
@@ -2444,7 +2483,9 @@ impl ChatComposer {
             buffer.place_cursor(&buffer.end_iter());
             self.view.grab_focus();
         }
-        self.placeholder.set_text(if c.queued_count() > 0 && !c.running.get() {
+        self.placeholder.set_text(if c.budget_paused.get() {
+            "Paused at the cost limit — messages wait until you continue…"
+        } else if c.queued_count() > 0 && !c.running.get() {
             "Queued — sends when the session starts…"
         } else if c.busy.get() {
             "Message will be queued…"
