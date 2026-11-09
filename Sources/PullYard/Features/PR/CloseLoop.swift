@@ -151,6 +151,7 @@ struct CloseLoopSheet: View {
             let result = await model.closeLoop(chosen, body: body, resolve: resolve)
             working = false
             failures = result
+            selected = Set(result.keys)
             let done = chosen.count - result.count
             if done > 0 { app.showToast(resolve ? "Replied and resolved \(plural(done, "thread", "threads"))" : "Replied to \(plural(done, "thread", "threads"))") }
             if result.isEmpty {
