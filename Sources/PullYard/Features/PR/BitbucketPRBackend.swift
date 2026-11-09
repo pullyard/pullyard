@@ -408,4 +408,31 @@ final class BitbucketPRBackend: PRBackend {
     func revokeApproval(_ ref: ItemRef, pr: PullRequestDetail) async throws {
         try await client.approve(ref.repo.full, id: ref.number, on: false)
     }
+
+    func canShowLog(_ check: CheckContext) -> Bool {
+        check.outcome != .pending && BitbucketClient.buildNumber(check.link) != nil
+    }
+
+    func jobLog(_ ref: ItemRef, check: CheckContext) async throws -> String {
+        guard let build = BitbucketClient.buildNumber(check.link) else {
+            throw APIError(message: "Only Bitbucket Pipelines builds have a log here. Open this build in the browser.")
+        }
+        let repo = ref.repo.full
+        let pipeline = try await client.pipeline(repo, build: build)
+        let steps = try await client.pipelineSteps(repo, pipeline: pipeline.uuid)
+        guard !steps.isEmpty else { return "Pipeline #\(build) has no steps." }
+        var parts: [String] = []
+        for step in steps {
+            let result = step.state?.result?.name ?? step.state?.name ?? ""
+            let header = "=== \(step.name ?? "Step")" + (result.isEmpty ? "" : " (\(result.lowercased()))") + " ==="
+            let text: String
+            do {
+                text = CILogExcerpt.clean(try await client.stepLog(repo, pipeline: pipeline.uuid, step: step.uuid))
+            } catch {
+                text = "Log unavailable: \(error.localizedDescription)"
+            }
+            parts.append(header + "\n" + text.trimmingCharacters(in: .newlines))
+        }
+        return parts.joined(separator: "\n\n")
+    }
 }

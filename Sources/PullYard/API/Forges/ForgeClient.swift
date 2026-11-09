@@ -150,6 +150,36 @@ final class ForgeHTTP {
         return String(decoding: data, as: UTF8.self)
     }
 
+    private final class HoldRedirect: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest) async -> URLRequest? { nil }
+    }
+
+    func download(_ path: String, hops: Int = 3) async throws -> String {
+        let target = try url(path, [])
+        var req = URLRequest(url: target)
+        req.setValue(authorization, forHTTPHeaderField: "Authorization")
+        req.setValue("*/*", forHTTPHeaderField: "Accept")
+        req.setValue("PullYard-macOS", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: req, delegate: HoldRedirect())
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if (300..<400).contains(status), hops > 0, let location = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Location"),
+           let next = URL(string: location, relativeTo: target)?.absoluteURL {
+            if next.host?.lowercased() == target.host?.lowercased() {
+                return try await download(next.absoluteString, hops: hops - 1)
+            }
+            guard next.scheme == "https" else { throw APIError(message: "\(service) sent an insecure log address") }
+            let (blob, raw) = try await session.data(from: next)
+            let code = (raw as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(code) else { throw APIError(message: "\(service) \(code): \(HTTPURLResponse.localizedString(forStatusCode: code))", status: code) }
+            return String(decoding: blob, as: UTF8.self)
+        }
+        guard (200..<300).contains(status) else {
+            if status == 401 { throw APIError(message: "Token is invalid or revoked (401)", status: 401) }
+            throw APIError(message: "\(service) \(status): \(Self.message(data) ?? HTTPURLResponse.localizedString(forStatusCode: status))", status: status)
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     func send<T: Decodable>(_ method: String, _ path: String, _ query: [URLQueryItem] = [], json: [String: Any]? = nil) async throws -> T {
         try await call(method, path, query, json: json)
     }

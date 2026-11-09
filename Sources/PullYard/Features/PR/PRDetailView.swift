@@ -886,7 +886,7 @@ struct ChecksTab: View {
                             .controlSize(.small)
                             .tint(Color.syCoral)
                     }
-                    if model.features.jobLogs, c.isActionsJob, c.outcome != .pending, c.outcome != .skipped {
+                    if model.features.jobLogs, model.backend.canShowLog(c), c.outcome != .pending, c.outcome != .skipped {
                         Button("Log") { logTarget = c }.controlSize(.small)
                     }
                     if let link = c.link {
@@ -906,9 +906,8 @@ struct ChecksTab: View {
             fixAfterLog = nil
             onFix(request)
         }) { c in
-            if let api = model.api {
-                JobLogSheet(api: api, repo: model.ref.repo, check: c, onFix: CIFailureCollector.isFixable(c) && pr.isOpen ? { log in fixAfterLog = CIFixRequest(focus: c.id, log: log); logTarget = nil } : nil)
-            }
+            JobLogSheet(load: { try await model.backend.jobLog(model.ref, check: c) }, check: c,
+                        onFix: model.features.claude && CIFailureCollector.isFixable(c) && pr.isOpen ? { log in fixAfterLog = CIFixRequest(focus: c.id, log: log); logTarget = nil } : nil)
         }
     }
 

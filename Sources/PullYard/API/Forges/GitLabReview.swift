@@ -201,6 +201,10 @@ extension GitLabClient {
         try await pages("\(Self.projectPath(project))/pipelines/\(pipeline)/jobs", limit: 3)
     }
 
+    func jobTrace(_ project: String, job: Int) async throws -> String {
+        try await http.text("\(Self.projectPath(project))/jobs/\(job)/trace")
+    }
+
     func project(_ project: String) async throws -> GitLabMR.Project {
         try await http.get(Self.projectPath(project))
     }
