@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GitHub Desktop alternative for pull requests · PullYard</title>
+<meta name="description" content="PullYard vs GitHub Desktop: GitHub Desktop handles your commits, PullYard handles your pull requests. A free native app to review, comment, approve and merge on macOS, Windows and Linux.">
+<link rel="canonical" href="https://pullyard.app/github-desktop-alternative.html">
+<meta property="og:title" content="PullYard vs GitHub Desktop">
+<meta property="og:description" content="GitHub Desktop handles your commits. PullYard handles your pull requests: review, comment, approve and merge without the browser.">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="PullYard">
+<meta property="og:url" content="https://pullyard.app/github-desktop-alternative.html">
+<meta property="og:image" content="https://pullyard.app/img/og-card.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="PullYard: pull requests without the browser, for GitHub, GitLab, Bitbucket and Gitea">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://pullyard.app/img/og-card.jpg">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="icon-512.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Is PullYard a GitHub Desktop alternative?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "For pull requests, yes. GitHub Desktop is built for local git work: committing, branching, pushing and resolving conflicts, and it sends you to github.com to review. PullYard is built for review: reading diffs, commenting, approving, requesting changes and merging, inside a native app. Most people use both."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can PullYard commit and push like GitHub Desktop?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. PullYard does not stage, commit or push local changes. Keep GitHub Desktop, another git client or the command line for that, and use PullYard for the pull request that follows."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does PullYard run on Linux?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. PullYard has native builds for macOS, Windows and Linux. GitHub Desktop has official builds for macOS and Windows only."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is PullYard free?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. PullYard is free and open source under the MIT license, with no paid tier. GitHub Desktop is also free and open source."
+      }
+    }
+  ]
+}
+</script>
+<style>
+:root{
+  --bg:#0a0f1b;--bg2:#111a2c;--panel:#152036;--panel2:#18243c;--line:rgba(160,174,196,.10);--line2:rgba(160,174,196,.18);
+  --text:#e6ebf2;--muted:#8693a8;--dim:#7d899e;
+  --coral:#ee6f5f;--violet:#9d8cf0;--sky:#5bb8ec;--green:#5dbe8a;--amber:#e8b44c;
+  --maxw:1160px;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+code{font-family:var(--mono);font-size:.88em;background:rgba(255,255,255,.06);padding:1px 6px;border-radius:5px}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+
+nav{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:28px;height:64px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:650;letter-spacing:-.01em;font-size:17px}
+.brand img{width:30px;height:30px}
+nav .links{display:flex;gap:24px;margin-left:auto;color:var(--muted);font-size:14.5px}
+nav .links a:hover,nav .links a[aria-current]{color:var(--text)}
+.btn{display:inline-flex;align-items:center;gap:10px;border-radius:8px;padding:11px 18px;font-weight:600;font-size:15px;transition:background .15s ease;white-space:nowrap}
+.btn-primary{background:var(--coral);color:#1a0b09}
+.btn-primary:hover{background:#f27f70}
+.btn-ghost{background:rgba(255,255,255,.06);color:var(--text)}
+.btn-ghost:hover{background:rgba(255,255,255,.10)}
+.btn-sm{padding:7px 13px;font-size:14px;border-radius:7px}
+
+.head{padding:84px 0 44px;border-bottom:1px solid var(--line)}
+.head h1{font-size:clamp(36px,5.2vw,58px);line-height:1.05;letter-spacing:-.035em;margin:0 0 16px;font-weight:700;max-width:860px}
+.head p{color:var(--muted);font-size:18px;max-width:680px;margin:0}
+.head .cta{display:flex;gap:10px;flex-wrap:wrap;margin-top:28px}
+
+section{padding:64px 0;border-bottom:1px solid var(--line)}
+section h2{font-size:clamp(24px,2.8vw,32px);line-height:1.15;letter-spacing:-.022em;margin:0 0 12px;font-weight:680}
+section .lede{color:var(--muted);font-size:17px;margin:0 0 28px;max-width:720px}
+
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.card{background:var(--panel);border-radius:14px;padding:24px 26px}
+.card h3{font-size:18px;margin:0 0 6px;font-weight:650;letter-spacing:-.01em}
+.card .tag{display:inline-block;font-size:12px;font-weight:600;letter-spacing:.02em;padding:2px 9px;border-radius:999px;margin-bottom:12px}
+.card.gd .tag{background:rgba(91,184,236,.14);color:var(--sky)}
+.card.py .tag{background:rgba(238,111,95,.14);color:var(--coral)}
+.card ul{margin:12px 0 0;padding:0;list-style:none}
+.card li{position:relative;padding:5px 0 5px 18px;color:#c9d2df}
+.card li::before{content:"";position:absolute;left:2px;top:15px;width:5px;height:5px;border-radius:50%;background:var(--dim)}
+
+.table-scroll{overflow-x:auto;border:1px solid var(--line2);border-radius:14px}
+table{width:100%;border-collapse:collapse;min-width:620px;font-size:15px}
+th,td{text-align:left;padding:13px 18px;border-bottom:1px solid var(--line);vertical-align:top}
+thead th{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);font-weight:650;background:var(--bg2)}
+tbody th{font-weight:550;color:var(--text);width:34%}
+tbody td{color:#c9d2df}
+tbody tr:last-child th,tbody tr:last-child td{border-bottom:0}
+.yes{color:var(--green);font-weight:600}
+.no{color:var(--dim)}
+.part{color:var(--amber);font-weight:600}
+
+.steps{counter-reset:s;list-style:none;margin:0;padding:0;max-width:760px}
+.steps li{counter-increment:s;position:relative;padding:10px 0 10px 44px;color:#c9d2df}
+.steps li::before{content:counter(s);position:absolute;left:0;top:9px;width:28px;height:28px;border-radius:50%;background:var(--panel2);color:var(--text);font-size:14px;font-weight:650;display:grid;place-items:center}
+.steps b{color:var(--text);font-weight:600}
+
+.faq details{background:var(--panel);border-radius:12px;padding:16px 20px;margin-bottom:10px;max-width:820px}
+.faq summary{cursor:pointer;font-weight:600;list-style:none}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";float:right;color:var(--muted);font-weight:400}
+.faq details[open] summary::after{content:"−"}
+.faq p{margin:10px 0 0;color:#c9d2df}
+
+.final{padding:72px 0 90px;border-bottom:0}
+.final p{color:var(--muted);margin:0 0 22px}
+
+footer{border-top:1px solid var(--line);padding:34px 0 46px;color:var(--dim);font-size:13.5px}
+footer .wrap{display:flex;gap:20px;justify-content:space-between;flex-wrap:wrap}
+footer a:hover{color:var(--text)}
+
+@media (max-width:800px){.pair{grid-template-columns:1fr}}
+@media (max-width:680px){
+  .wrap{padding:0 16px}
+  nav .links{display:none}nav .wrap{gap:12px}nav .btn{margin-left:auto}
+  .head{padding:56px 0 32px}
+  section{padding:48px 0}
+}
+</style>
+<script defer src="site/analytics.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="./"><img src="icon.svg" alt="">PullYard</a>
+    <div class="links">
+      <a href="./#features">Features</a>
+      <a href="./#claude">Agents</a>
+      <a href="./#install">Install</a>
+      <a href="changelog.html">Changelog</a>
+      <a href="roadmap.html">Roadmap</a>
+      <a href="https://github.com/pullyard/pullyard">GitHub</a>
+    </div>
+    <a class="btn btn-primary btn-sm" href="https://github.com/pullyard/pullyard/releases/latest">Download</a>
+  </div>
+</nav>
+
+<header class="head">
+  <div class="wrap">
+    <h1>PullYard vs GitHub Desktop</h1>
+    <p>GitHub Desktop handles your commits. PullYard handles your pull requests. If you came looking for a GitHub Desktop alternative to review code without opening github.com, this is the part PullYard does.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/pullyard/pullyard/releases/latest">Download PullYard</a>
+      <a class="btn btn-ghost" href="./#tour">See screenshots</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="wrap">
+      <h2>Two apps, two jobs</h2>
+      <p class="lede">They don't overlap much. GitHub Desktop works on the code on your disk. PullYard works on the pull request once that code is on GitHub.</p>
+      <div class="pair">
+        <article class="card gd">
+          <span class="tag">GitHub Desktop</span>
+          <h3>Your local repository</h3>
+          <ul>
+            <li>Stage and commit changes</li>
+            <li>Create and switch branches</li>
+            <li>Push, pull and fetch</li>
+            <li>Resolve merge conflicts</li>
+            <li>Open a pull request, then review it on github.com</li>
+          </ul>
+        </article>
+        <article class="card py">
+          <span class="tag">PullYard</span>
+          <h3>Your pull requests</h3>
+          <ul>
+            <li>Review requests and your own PRs in one list</li>
+            <li>Read big diffs in a native, fast viewer</li>
+            <li>Comment, approve, request changes and merge</li>
+            <li>See stacked pull requests as a tree</li>
+            <li>Send review feedback to Claude Code with Fix with agent</li>
+          </ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Side by side</h2>
+      <p class="lede">What each app does today.</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th scope="col">Feature</th><th scope="col">GitHub Desktop</th><th scope="col">PullYard</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Stage, commit and push</th><td class="yes">Yes</td><td class="no">No</td></tr>
+            <tr><th scope="row">Branches and merge conflicts</th><td class="yes">Yes</td><td class="no">No</td></tr>
+            <tr><th scope="row">Review a pull request diff</th><td class="part">In the browser</td><td class="yes">Yes, native</td></tr>
+            <tr><th scope="row">Comment, approve, request changes</th><td class="part">In the browser</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">Merge a pull request</th><td class="part">In the browser</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">Stacked pull requests</th><td class="no">No</td><td class="yes">Yes, with a stack graph</td></tr>
+            <tr><th scope="row">Notifications, issues, Projects boards</th><td class="no">No</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">GitLab, Bitbucket, Gitea</th><td class="no">No</td><td class="part">Lists on macOS, full review planned</td></tr>
+            <tr><th scope="row">AI agent next to the PR</th><td class="no">No</td><td class="yes">Claude Code workspace</td></tr>
+            <tr><th scope="row">macOS and Windows</th><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">Linux</th><td class="no">No official build</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">Price and license</th><td>Free, open source (MIT)</td><td>Free, open source (MIT)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Using them together</h2>
+      <p class="lede">A typical day with both apps open.</p>
+      <ol class="steps">
+        <li><b>GitHub Desktop:</b> commit your work on a branch and push it.</li>
+        <li><b>GitHub Desktop:</b> open the pull request.</li>
+        <li><b>PullYard:</b> the new PR shows up in your list. Reviewers comment and approve from their own PullYard or from the browser.</li>
+        <li><b>PullYard:</b> read the feedback next to the diff, or hand it to Claude Code with Fix with agent.</li>
+        <li><b>PullYard:</b> re-request review after you push, then merge when it's green.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="faq">
+    <div class="wrap">
+      <h2>Questions</h2>
+      <details><summary>Is PullYard a GitHub Desktop alternative?</summary><p>For pull requests, yes. GitHub Desktop is built for local git work: committing, branching, pushing and resolving conflicts, and it sends you to github.com to review. PullYard is built for review: reading diffs, commenting, approving, requesting changes and merging, inside a native app. Most people use both.</p></details>
+      <details><summary>Can PullYard commit and push like GitHub Desktop?</summary><p>No. PullYard does not stage, commit or push local changes. Keep GitHub Desktop, another git client or the command line for that, and use PullYard for the pull request that follows.</p></details>
+      <details><summary>Does PullYard run on Linux?</summary><p>Yes. PullYard has native builds for macOS, Windows and Linux. GitHub Desktop has official builds for macOS and Windows only.</p></details>
+      <details><summary>Is PullYard free?</summary><p>Yes. PullYard is free and open source under the MIT license, with no paid tier. GitHub Desktop is also free and open source.</p></details>
+    </div>
+  </section>
+
+  <section class="final">
+    <div class="wrap">
+      <h2>Keep GitHub Desktop. Add PullYard for review.</h2>
+      <p>Free and open source, for macOS, Windows and Linux. On macOS: <code>brew install --cask pullyard/tap/pullyard</code></p>
+      <a class="btn btn-primary" href="https://github.com/pullyard/pullyard/releases/latest">Download PullYard</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 PullYard contributors · <a href="./">Home</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a></span>
+    <span>Not affiliated with GitHub, Inc. or Anthropic. GitHub, GitHub Desktop and Claude are trademarks of their respective owners.</span>
+  </div>
+</footer>
+</body>
+</html>

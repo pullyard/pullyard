@@ -6,6 +6,11 @@
     <priority>1.0</priority>
   </url>
   <url>
+    <loc>https://pullyard.app/github-desktop-alternative.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://pullyard.app/changelog.html</loc>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>

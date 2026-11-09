@@ -21,6 +21,60 @@
 <meta name="twitter:image" content="https://pullyard.app/img/og-card.jpg">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="apple-touch-icon" href="icon-512.png">
+<link rel="canonical" href="https://pullyard.app/">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "name": "PullYard",
+      "url": "https://pullyard.app/",
+      "description": "A tiny native client for GitHub, GitLab and Bitbucket pull requests on macOS, Windows and Linux, with a built-in agent workspace that runs Claude Code.",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "macOS 14+, Windows 10, Windows 11, Linux",
+      "image": "https://pullyard.app/icon-512.png",
+      "screenshot": "https://pullyard.app/img/og-card.jpg",
+      "license": "https://opensource.org/licenses/MIT",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "downloadUrl": "https://github.com/pullyard/pullyard/releases/latest",
+      "codeRepository": "https://github.com/pullyard/pullyard",
+      "sameAs": ["https://github.com/pullyard/pullyard"]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Is PullYard a GitHub Desktop alternative?",
+          "acceptedAnswer": { "@type": "Answer", "text": "For pull requests, yes. GitHub Desktop is for local git work: commits, branches and pushes. PullYard is for review: diffs, comments, approvals and merging, without the browser. Most people use both." }
+        },
+        {
+          "@type": "Question",
+          "name": "Does it work with GitLab, Bitbucket and Gitea?",
+          "acceptedAnswer": { "@type": "Answer", "text": "On macOS, yes: sign in to GitLab, Bitbucket Cloud or Gitea and Forgejo to see your review requests and your own merge or pull requests. Full review for these services is on the roadmap. GitHub and GitHub Enterprise Server get every feature." }
+        },
+        {
+          "@type": "Question",
+          "name": "Is this an official GitHub or Anthropic app?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. PullYard is an independent open-source project. It uses the public GitHub API and runs the official Claude Code CLI, which you install yourself." }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I need Claude Code?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. All the GitHub features work without it. The agent workspace and Fix with agent turn on once the CLI is installed and signed in." }
+        },
+        {
+          "@type": "Question",
+          "name": "Where does my data go?",
+          "acceptedAnswer": { "@type": "Answer", "text": "From your computer straight to api.github.com. Your token is stored in the macOS Keychain, Windows Credential Manager or the Secret Service keyring on Linux. PullYard has no backend and no analytics." }
+        }
+      ]
+    }
+  ]
+}
+</script>
 <link rel="stylesheet" href="demo.css">
 <style>
 :root{
@@ -659,6 +713,8 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
     <div class="faq">
       <div class="faq-col">
         <details class="reveal"><summary>Is this an official GitHub or Anthropic app?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>No. PullYard is an independent open-source project. It uses the public GitHub API and runs the official Claude Code CLI, which you install yourself.</p></details>
+        <details class="reveal"><summary>Is PullYard a GitHub Desktop alternative?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>For pull requests, yes. GitHub Desktop is for local git work: commits, branches and pushes. PullYard is for review: diffs, comments, approvals and merging, without the browser. Most people use both. <a href="github-desktop-alternative.html">PullYard vs GitHub Desktop</a></p></details>
+        <details class="reveal"><summary>Does it work with GitLab, Bitbucket and Gitea?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>On macOS, yes: sign in to GitLab, Bitbucket Cloud or Gitea and Forgejo to see your review requests and your own merge or pull requests. Full review for these services is on the roadmap. GitHub and GitHub Enterprise Server get every feature.</p></details>
         <details class="reveal"><summary>Do I need Claude Code?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>No. All the GitHub features work without it. The agent workspace and “Fix with agent” turn on once the CLI is installed and signed in.</p></details>
         <details class="reveal"><summary>How does sign-in to Claude work?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>PullYard never sees your Claude credentials. It runs <code>claude auth login</code>, which opens the official sign-in page in your browser.</p></details>
       </div>
@@ -697,6 +753,7 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
         <li><span>© 2026 PullYard contributors</span></li>
         <li><a href="changelog.html">Changelog</a></li>
         <li><a href="roadmap.html">Roadmap</a></li>
+        <li><a href="github-desktop-alternative.html">PullYard vs GitHub Desktop</a></li>
         <li><a href="https://github.com/pullyard/pullyard" data-repo><svg aria-hidden="true" focusable="false"><use href="#i-github"/></svg>GitHub</a></li>
         <li><a href="https://checkout.dodopayments.com/buy/pdt_0NpmyolvMAwxrA4eQBgpO?quantity=1"><svg aria-hidden="true" focusable="false"><use href="#i-pizza"/></svg>Buy me a pizza</a></li>
       </ul>
