@@ -2,22 +2,18 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://pullyard.app/</loc>
-    <changefreq>weekly</changefreq>
-    <priority>1.0</priority>
+    <lastmod>2026-11-09</lastmod>
   </url>
   <url>
     <loc>https://pullyard.app/github-desktop-alternative.html</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
+    <lastmod>2026-11-09</lastmod>
   </url>
   <url>
     <loc>https://pullyard.app/changelog.html</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
+    <lastmod>2026-11-09</lastmod>
   </url>
   <url>
     <loc>https://pullyard.app/roadmap.html</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <lastmod>2026-11-09</lastmod>
   </url>
 </urlset>

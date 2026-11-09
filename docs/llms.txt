@@ -18,7 +18,8 @@ Facts:
 - Platforms: macOS 14+ (universal), Windows 10 1809+ and Windows 11 (x64 and ARM64), Linux x86_64 (.deb, Flatpak, tarball).
 - Install on macOS: `brew install --cask pullyard/tap/pullyard`
 - Services: GitHub and GitHub Enterprise Server with full review. GitLab, Bitbucket Cloud and Gitea/Forgejo show review requests and your own pull or merge requests (macOS).
-- Privacy: no backend and no analytics. The app talks to the GitHub API directly; tokens stay in the system keychain.
+- Privacy: the app has no backend and no analytics. It talks to the GitHub API directly; tokens stay in the system keychain. This website (pullyard.app) counts page views with cookieless Umami.
+- Latest version: 2.13.6 (October 30, 2026).
 - Not affiliated with GitHub, Inc. or Anthropic.
 
 ## Pages
