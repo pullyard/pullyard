@@ -4,8 +4,8 @@ import Foundation
 final class BitbucketClient: ForgeClient {
     let provider = GitProvider.bitbucket
     let host: String
-    private let http: ForgeHTTP
-    private var uuid: String?
+    let http: ForgeHTTP
+    private(set) var uuid: String?
     private var workspaces: [String]?
     private var cache: [String: (at: Date, items: [SearchItem])] = [:]
     private var reviewCache: [StateFilter: (at: Date, pulls: [PullRequest])] = [:]
@@ -97,7 +97,7 @@ final class BitbucketClient: ForgeClient {
     }
 
     func capabilities() async -> ForgeCapabilities {
-        ForgeCapabilities(pullFilters: [.reviewRequested, .mine, .reviewed], repositories: true)
+        ForgeCapabilities(pullFilters: [.reviewRequested, .mine, .reviewed], repositories: true, pullRequestReview: .supported, mergeRequirements: .unavailable)
     }
 
     func pullRequests(_ filter: PRFilter, state: StateFilter) async throws -> [SearchItem] {
@@ -216,7 +216,7 @@ final class BitbucketClient: ForgeClient {
         return repos
     }
 
-    private func userID() async throws -> String {
+    func userID() async throws -> String {
         if let uuid { return uuid }
         return try await currentUser().id ?? ""
     }
@@ -234,7 +234,7 @@ final class BitbucketClient: ForgeClient {
         return slugs
     }
 
-    private static func segment(_ s: String) -> String {
+    static func segment(_ s: String) -> String {
         s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? s
     }
 

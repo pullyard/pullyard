@@ -31,12 +31,15 @@ struct PRFeatures {
     var claude = false
     var blame = false
     var deleteBranch = false
+    var reopen = true
 
     static let github = PRFeatures(provider: .github, stack: true, localConflicts: true, viewedFiles: true, requestReviewers: true, editing: true, draftToggle: true, updateBranch: true, rerunChecks: true, jobLogs: true, requestChanges: true, claude: true, blame: true, deleteBranch: true)
 
     static let gitlab = PRFeatures(provider: .gitlab, editing: true, draftToggle: true, updateBranch: true, revokeApproval: true)
 
-    var checksTitle: String { provider == .gitlab ? "Pipeline" : "Checks" }
+    static let bitbucket = PRFeatures(provider: .bitbucket, editing: true, draftToggle: true, requestChanges: true, revokeApproval: true, reopen: false)
+
+    var checksTitle: String { provider == .gitlab ? "Pipeline" : provider == .bitbucket ? "Builds" : "Checks" }
     var updateBranchTitle: String { provider == .gitlab ? "Rebase" : "Update branch" }
     var serviceTitle: String { provider == .githubEnterprise ? "GitHub Enterprise" : provider.title }
 }

@@ -731,6 +731,7 @@ final class AppModel {
     func commitDetail(_ repo: RepoRef, sha: String) async throws -> CommitDetailREST? {
         if let api { return try await api.commit(repo, sha: sha) }
         if let lab = forge as? GitLabClient { return try await lab.commit(repo.full, sha: sha) }
+        if let bucket = forge as? BitbucketClient { return try await bucket.commit(repo.full, sha: sha) }
         return nil
     }
 

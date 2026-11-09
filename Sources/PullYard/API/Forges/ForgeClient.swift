@@ -136,6 +136,20 @@ final class ForgeHTTP {
         let _: Empty = try await call(method, path, query, json: json, allowEmpty: true)
     }
 
+    func text(_ path: String, _ query: [URLQueryItem] = []) async throws -> String {
+        let target = try url(path, query)
+        var (data, status) = try await send(target, accept: "text/plain")
+        if status == 401, let refresh {
+            authorization = try await refresh()
+            (data, status) = try await send(target, accept: "text/plain")
+        }
+        guard (200..<300).contains(status) else {
+            if status == 401 { throw APIError(message: "Token is invalid or revoked (401)", status: 401) }
+            throw APIError(message: "\(service) \(status): \(Self.message(data) ?? HTTPURLResponse.localizedString(forStatusCode: status))", status: status)
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     func send<T: Decodable>(_ method: String, _ path: String, _ query: [URLQueryItem] = [], json: [String: Any]? = nil) async throws -> T {
         try await call(method, path, query, json: json)
     }
@@ -162,7 +176,7 @@ final class ForgeHTTP {
         }
     }
 
-    private func send(_ url: URL, method: String = "GET", body: Data? = nil) async throws -> (Data, Int) {
+    private func send(_ url: URL, method: String = "GET", body: Data? = nil, accept: String = "application/json") async throws -> (Data, Int) {
         var req = URLRequest(url: url)
         req.httpMethod = method
         if let body {
@@ -170,7 +184,7 @@ final class ForgeHTTP {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         req.setValue(authorization, forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue(accept, forHTTPHeaderField: "Accept")
         req.setValue("PullYard-macOS", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: req)
         return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
