@@ -32,11 +32,11 @@ public sealed record PRFeatures
         UpdateBranch = true, RerunChecks = true, JobLogs = true, RequestChanges = true, Agent = true, Blame = true, DeleteBranch = true, CodeOwners = true
     };
 
-    public static PRFeatures GitLab { get; } = new() { Provider = GitProvider.GitLab, Editing = true, DraftToggle = true, UpdateBranch = true, JobLogs = true, RevokeApproval = true };
+    public static PRFeatures GitLab { get; } = new() { Provider = GitProvider.GitLab, Editing = true, DraftToggle = true, UpdateBranch = true, JobLogs = true, RevokeApproval = true, CodeOwners = true };
 
     public static PRFeatures Bitbucket { get; } = new()
     {
-        Provider = GitProvider.Bitbucket, Editing = true, DraftToggle = true, JobLogs = true, RequestChanges = true, RevokeApproval = true, Reopen = false
+        Provider = GitProvider.Bitbucket, Editing = true, DraftToggle = true, JobLogs = true, RequestChanges = true, RevokeApproval = true, Reopen = false, CodeOwners = true
     };
 
     public bool IsGitLab => Provider == GitProvider.GitLab;
@@ -74,6 +74,7 @@ public interface IPRBackend
     Task RerunFailed(ItemRef r, IReadOnlyCollection<long> runs) => Task.FromException(new PRBackendUnsupportedException(Features.Provider));
     bool CanShowLog(CheckContext check) => false;
     Task<string> JobLog(ItemRef r, CheckContext check, CancellationToken ct = default) => Task.FromException<string>(new PRBackendUnsupportedException(Features.Provider));
+    Task<CodeOwners?> CodeOwners(ItemRef r, string @base, CancellationToken ct = default) => Task.FromResult<CodeOwners?>(null);
 }
 
 public sealed class GitHubPRBackend : IPRBackend
@@ -164,6 +165,8 @@ public sealed class GitHubPRBackend : IPRBackend
         check.DatabaseId is { } id
             ? api.JobLog(r.Repo, id, ct)
             : Task.FromException<string>(new ApiException("This check has no job log. Open it on GitHub to see its output."));
+
+    public Task<CodeOwners?> CodeOwners(ItemRef r, string @base, CancellationToken ct = default) => api.CodeOwners(r.Repo, @base, ct);
 
     private static Dictionary<string, object?> Vars(params (string, object?)[] pairs) => pairs.ToDictionary(p => p.Item1, p => p.Item2);
 }

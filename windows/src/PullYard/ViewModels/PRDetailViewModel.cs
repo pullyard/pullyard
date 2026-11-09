@@ -252,7 +252,9 @@ public sealed partial class PRDetailViewModel : ObservableObject
         }).Forget();
     }
 
-    public OwnershipSummary? Ownership => Pr is { } pr && CodeOwnersState.Owners is { } owners ? OwnershipSummary.Build(owners, ChangedPaths, pr) : null;
+    public OwnershipSummary? Ownership => Pr is { } pr && CodeOwnersState.Owners is { } owners
+        ? OwnershipSummary.Build(owners, ChangedPaths.Count > 0 ? ChangedPaths : Files.Select(f => f.Id), pr)
+        : null;
 
     public DateTimeOffset? LastCommitDate => Pr?.LastCommit.Items.FirstOrDefault()?.Commit.CommittedDate;
 
@@ -482,15 +484,16 @@ public sealed partial class PRDetailViewModel : ObservableObject
 
     private async void LoadCodeOwners(PullRequestDetail pr)
     {
-        if (!Features.CodeOwners || Api is not { } api || pr.BaseTipOid is not { } baseOid) return;
+        if (!Features.CodeOwners || pr.BaseTipOid is not { Length: > 0 } baseOid) return;
         var key = $"{Ref.Repo.Full}|{baseOid}";
         if (key == ownersKey) return;
         ownersKey = key;
         try
         {
-            var owners = await api.CodeOwners(Ref.Repo, baseOid);
+            var owners = await Backend.CodeOwners(Ref, baseOid);
             if (ownersKey != key) return;
             CodeOwnersState = owners is null ? CodeOwnersStatus.Missing : CodeOwnersStatus.Loaded(owners);
+            if (FilesLoaded && owners is not null) DiffVersion++;
             PublishContext();
         }
         catch (OperationCanceledException)
@@ -606,6 +609,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
             DiffVersion++;
             OnPropertyChanged(nameof(DiffStat));
             OnPropertyChanged(nameof(Risks));
+            if (CodeOwnersState.Owners is not null) OnPropertyChanged(nameof(Ownership));
         }
         catch (OperationCanceledException)
         {
@@ -656,6 +660,9 @@ public sealed partial class PRDetailViewModel : ObservableObject
             ShowBlame = Pr is not null && Features.Blame,
             BlameLabel = L.T("Code_Blame", "Blame"),
             BlameTitle = L.T("PR_BlameAtHead", "Blame this file at the pull request head"),
+            Owners = FileOwners(),
+            OwnersLabel = L.T("Files_CodeOwners", "Code owners"),
+            OwnersApproved = L.T("Files_CodeOwnersApproved", "approved"),
             Viewed = ViewedPaths,
             Collapsed = Collapsed,
             Threads = interdiff ? new Dictionary<string, List<ReviewThread>>() : threadIndex,
@@ -663,6 +670,16 @@ public sealed partial class PRDetailViewModel : ObservableObject
             Pending = interdiff ? Array.Empty<PendingComment>() : Pending,
             Filter = filter
         };
+    }
+
+    private Dictionary<string, List<OwnerEntry>> FileOwners()
+    {
+        var map = new Dictionary<string, List<OwnerEntry>>();
+        if (Ownership is not { } ownership) return map;
+        foreach (var group in ownership.Groups)
+            foreach (var file in group.Files)
+                map.TryAdd(file, group.Owners);
+        return map;
     }
 
     public int ThreadCount(string path) => (Pr?.ReviewThreads.Items ?? new()).Count(t => t.Path == path);

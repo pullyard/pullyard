@@ -234,6 +234,18 @@ public sealed partial class GitLabClient
     public Task<string> JobTrace(string project, long job, CancellationToken ct = default) =>
         http.Text($"{ProjectApiPath(project)}/jobs/{job}/trace", ct: ct);
 
+    public async Task<string?> RawFile(string project, string path, string @ref, CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.Text($"{ProjectApiPath(project)}/repository/files/{Uri.EscapeDataString(path)}/raw", new[] { ("ref", @ref) }, ct).ConfigureAwait(false);
+        }
+        catch (ApiException e) when (e.Status == (int)HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
     public Task<GitLabMR.TrainCar> TrainCar(string project, int iid, CancellationToken ct = default) =>
         http.Get<GitLabMR.TrainCar>($"{ProjectApiPath(project)}/merge_trains/merge_requests/{iid}", ct: ct);
 

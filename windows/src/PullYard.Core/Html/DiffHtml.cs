@@ -12,6 +12,9 @@ public sealed class DiffRenderOptions
     public bool ShowBlame { get; init; }
     public string BlameLabel { get; init; } = "Blame";
     public string BlameTitle { get; init; } = "Blame this file at the pull request head";
+    public IReadOnlyDictionary<string, List<OwnerEntry>> Owners { get; init; } = new Dictionary<string, List<OwnerEntry>>();
+    public string OwnersLabel { get; init; } = "Code owners";
+    public string OwnersApproved { get; init; } = "approved";
     public IReadOnlySet<string> Viewed { get; init; } = new HashSet<string>();
     public IReadOnlySet<string> Collapsed { get; init; } = new HashSet<string>();
     public IReadOnlyDictionary<string, List<ReviewThread>> Threads { get; init; } = new Dictionary<string, List<ReviewThread>>();
@@ -77,6 +80,7 @@ public static class DiffHtml
         sb.Append($"<span class=\"st\" style=\"color:{StatusColor(f.Status)}\">{f.StatusLetter}</span>");
         sb.Append($"<span class=\"fp\" title=\"{path}\">{name}</span>");
         sb.Append($"<span class=\"stat\"><span class=\"plus\">+{f.Additions}</span> <span class=\"minus\">−{f.Deletions}</span></span>");
+        if (o.Owners.TryGetValue(f.Id, out var owners) && owners.Count > 0) sb.Append(OwnersLabel(owners, o));
         sb.Append("<span class=\"sp\"></span>");
         if (o.ShowViewed)
         {
@@ -88,6 +92,15 @@ public static class DiffHtml
         sb.Append($"<button class=\"ghost\" onclick=\"postFile(this,'copy')\" title=\"Copy path\" aria-label=\"Copy path\">⧉</button>");
         sb.Append("</div>");
         return sb.ToString();
+    }
+
+    public static string OwnersLabel(IReadOnlyList<OwnerEntry> owners, DiffRenderOptions o)
+    {
+        var approved = owners.Any(e => e.Status == OwnerStatus.Approved);
+        var text = string.Join(", ", owners.Take(2).Select(e => "@" + e.Handle)) + (owners.Count > 2 ? $" +{owners.Count - 2}" : "");
+        var title = $"{o.OwnersLabel}: {string.Join(", ", owners.Select(e => "@" + e.Handle))}" + (approved ? $" · {o.OwnersApproved}" : "");
+        var icon = approved ? "\uE930" : "\uE716";
+        return $"<span class=\"own{(approved ? " ok" : "")}\" title=\"{Esc(title)}\" aria-label=\"{Esc(title)}\"><span class=\"ic\" aria-hidden=\"true\">{icon}</span>{Esc(text)}</span>";
     }
 
     public static string Body(DiffFile f, DiffRenderOptions o)
@@ -241,6 +254,9 @@ public static class DiffHtml
     .fh .fp{font:600 12.5px "Cascadia Mono",Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;min-width:0}
     .fh .stat{font-size:12px;white-space:nowrap}.plus{color:var(--green)}.minus{color:var(--red)}
     .fh .sp{flex:1}
+    .fh .own{display:flex;align-items:center;gap:4px;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+    .fh .own.ok{color:var(--green)}
+    .fh .own .ic{font:11px "Segoe Fluent Icons","Segoe MDL2 Assets"}
     .fh .viewed{display:flex;align-items:center;gap:4px;color:var(--muted);font-size:12px;cursor:pointer;white-space:nowrap}
     .dt{border-collapse:collapse;width:100%;font:12px/1.55 "Cascadia Mono","Cascadia Code",Consolas,monospace;table-layout:fixed}
     .dt td{padding:0;vertical-align:top}
