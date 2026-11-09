@@ -56,6 +56,8 @@ pub struct ChatView {
     stick: Cell<bool>,
     scrolling: Cell<bool>,
     last_value: Cell<f64>,
+    read_anchor: RefCell<Option<(glib::WeakRef<gtk::Widget>, f64)>>,
+    last_width: Cell<i32>,
     dirty_texts: RefCell<Vec<String>>,
     flush_scheduled: Cell<bool>,
     markdowns: RefCell<std::collections::HashMap<String, Rc<markdown::MarkdownView>>>,
@@ -466,6 +468,8 @@ impl ChatView {
             stick: Cell::new(true),
             scrolling: Cell::new(false),
             last_value: Cell::new(0.0),
+            read_anchor: RefCell::new(None),
+            last_width: Cell::new(0),
             dirty_texts: RefCell::new(vec![]),
             flush_scheduled: Cell::new(false),
             markdowns: RefCell::new(std::collections::HashMap::new()),
@@ -489,6 +493,7 @@ impl ChatView {
         let w = Rc::downgrade(&me);
         me.scroller.vadjustment().connect_changed(move |_| {
             if let Some(me) = w.upgrade() {
+                me.keep_reading_position();
                 me.scroll_down();
                 me.sync_permission_bar();
             }
@@ -699,9 +704,60 @@ impl ChatView {
             self.set_stick(true);
         } else if value < previous {
             self.set_stick(false);
+            if let Some(anim) = self.scroll_anim.borrow_mut().take() {
+                anim.pause();
+            }
         } else if distance <= 40.0 {
             self.set_stick(true);
         }
+        self.capture_anchor();
+    }
+
+    fn capture_anchor(&self) {
+        if self.stick.get() {
+            self.read_anchor.replace(None);
+            return;
+        }
+        let mut kids = vec![];
+        let mut next = self.items_box.first_child();
+        while let Some(w) = next {
+            next = w.next_sibling();
+            kids.push(w);
+        }
+        let bounds = |w: &gtk::Widget| w.compute_bounds(&self.scroller);
+        let (mut lo, mut hi) = (0, kids.len());
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if bounds(&kids[mid]).is_some_and(|b| b.y() + b.height() > 0.0) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        let anchor = kids.get(lo).and_then(|w| bounds(w).map(|b| (w.downgrade(), b.y() as f64)));
+        self.read_anchor.replace(anchor);
+    }
+
+    fn keep_reading_position(self: &Rc<Self>) {
+        let width = self.scroller.width();
+        if self.last_width.replace(width) == width || self.stick.get() || self.read_anchor.borrow().is_none() {
+            return;
+        }
+        let w = Rc::downgrade(self);
+        glib::idle_add_local_once(move || {
+            let Some(me) = w.upgrade().filter(|me| !me.stick.get()) else { return };
+            let Some((widget, top)) = me.read_anchor.borrow().as_ref().and_then(|(r, top)| r.upgrade().map(|w| (w, *top))) else { return };
+            let Some(now) = widget.compute_bounds(&me.scroller) else { return };
+            let delta = now.y() as f64 - top;
+            if delta.abs() < 0.5 {
+                return;
+            }
+            let adj = me.scroller.vadjustment();
+            me.scrolling.set(true);
+            adj.set_value(adj.value() + delta);
+            me.last_value.set(adj.value());
+            me.scrolling.set(false);
+        });
     }
 
     fn scroll_to_end(&self) {
