@@ -305,7 +305,7 @@ public static class BitbucketReviewMapper
             if ((path ?? oldPath) is { } key && hunk.Count > 0) output[key] = string.Join("\n", hunk).Trim('\r', '\n');
             hunk.Clear();
         }
-        foreach (var line in diff.Split('\n'))
+        foreach (var line in diff.Replace("\r\n", "\n").Split('\n'))
         {
             if (line.StartsWith("diff --git ", StringComparison.Ordinal))
             {
