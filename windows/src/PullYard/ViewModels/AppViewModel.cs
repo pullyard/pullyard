@@ -19,6 +19,8 @@ public sealed partial class AppViewModel : ObservableObject
 {
     public static AppViewModel Shared { get; } = new();
 
+    static AppViewModel() => AgentEndpoints.Vault = new CredentialVault();
+
     [ObservableProperty] private Phase phase = Phase.Checking;
     [ObservableProperty] private GitHubApi? api;
     [ObservableProperty] private RestUser? user;

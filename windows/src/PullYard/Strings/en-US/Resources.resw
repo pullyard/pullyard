@@ -186,10 +186,12 @@
   <data name="Ci_Failed" xml:space="preserve"><value>Checks failed</value></data>
   <data name="Ci_Passed" xml:space="preserve"><value>Checks passed</value></data>
   <data name="Ci_Running" xml:space="preserve"><value>Checks running</value></data>
+  <data name="Claude_AccessSignIn" xml:space="preserve"><value>Claude sign-in</value></data>
   <data name="Claude_Account" xml:space="preserve"><value>Account</value></data>
   <data name="Claude_Accounts" xml:space="preserve"><value>Claude accounts</value></data>
   <data name="Claude_AddAccount" xml:space="preserve"><value>Add…</value></data>
   <data name="Claude_AddAccountMenu" xml:space="preserve"><value>Add account…</value></data>
+  <data name="Claude_ApiKeyMissing" xml:space="preserve"><value>API key missing</value></data>
   <data name="Claude_AppliesToNew" xml:space="preserve"><value>applies to new and restarted sessions</value></data>
   <data name="Claude_ApplyModel" xml:space="preserve"><value>Apply to current session (/model)</value></data>
   <data name="Claude_BrowserDidntOpen" xml:space="preserve"><value>Browser didn't open, or the page shows a code?</value></data>
@@ -203,15 +205,31 @@
   <data name="Claude_CopyCommand" xml:space="preserve"><value>Copy command</value></data>
   <data name="Claude_CopyId" xml:space="preserve"><value>Copy session ID</value></data>
   <data name="Claude_CopyResume" xml:space="preserve"><value>Copy resume command</value></data>
+  <data name="Claude_Create" xml:space="preserve"><value>Create</value></data>
   <data name="Claude_CreateAndSignIn" xml:space="preserve"><value>Create and sign in</value></data>
+  <data name="Claude_CustomEndpoint" xml:space="preserve"><value>Custom endpoint</value></data>
   <data name="Claude_Default" xml:space="preserve"><value>Default</value></data>
+  <data name="Claude_DefaultModels" xml:space="preserve"><value>Default models</value></data>
   <data name="Claude_Docs" xml:space="preserve"><value>Docs</value></data>
+  <data name="Claude_EditEndpoint" xml:space="preserve"><value>Edit endpoint</value></data>
+  <data name="Claude_EditEndpointMenu" xml:space="preserve"><value>Edit endpoint…</value></data>
   <data name="Claude_Effort" xml:space="preserve"><value>Effort</value></data>
   <data name="Claude_EmailOptional" xml:space="preserve"><value>Email (optional)</value></data>
   <data name="Claude_EmptyHelp" xml:space="preserve"><value>Start a new session in a project or resume one from the history on the left.</value></data>
+  <data name="Claude_EndpointBaseUrl" xml:space="preserve"><value>Base URL, e.g. https://gateway.example.com</value></data>
+  <data name="Claude_EndpointHelp" xml:space="preserve"><value>Claude Code sends requests to this endpoint with your API key. Usage is billed by the endpoint, not your Claude plan.</value></data>
+  <data name="Claude_EndpointInsecure" xml:space="preserve"><value>Use https. Plain http is allowed only for localhost.</value></data>
+  <data name="Claude_EndpointKey" xml:space="preserve"><value>API key</value></data>
+  <data name="Claude_EndpointKeyKeep" xml:space="preserve"><value>API key (leave empty to keep the saved key)</value></data>
+  <data name="Claude_EndpointKeyNote" xml:space="preserve"><value>The key is stored in Windows Credential Manager and passed only to Claude Code for this account. Your Claude sign-in is not used here; Remote Control and plan usage limits are not available.</value></data>
+  <data name="Claude_EndpointKeyRequired" xml:space="preserve"><value>Enter the API key.</value></data>
+  <data name="Claude_EndpointMissingAddress" xml:space="preserve"><value>Enter the full address, e.g. https://openrouter.ai/api</value></data>
+  <data name="Claude_EndpointModel" xml:space="preserve"><value>Model (optional)</value></data>
+  <data name="Claude_EndpointModelOpenRouter" xml:space="preserve"><value>Model (optional), e.g. anthropic/claude-sonnet-4.5</value></data>
   <data name="Claude_Fork" xml:space="preserve"><value>Fork session</value></data>
   <data name="Claude_FreeMemory" xml:space="preserve"><value>Free memory (sleep)</value></data>
   <data name="Claude_FreeMemoryNow" xml:space="preserve"><value>Free memory now</value></data>
+  <data name="Claude_GetOpenRouterKey" xml:space="preserve"><value>Get an OpenRouter key</value></data>
   <data name="Claude_HideInspector" xml:space="preserve"><value>Hide changes panel</value></data>
   <data name="Claude_HistoryAfterSignIn" xml:space="preserve"><value>Session history and projects appear after you sign in to Claude.</value></data>
   <data name="Claude_InstallHelp" xml:space="preserve"><value>Install the CLI from PowerShell, then press “Check again”.</value></data>
@@ -229,11 +247,14 @@
   <data name="Claude_OpenFolder" xml:space="preserve"><value>New session in folder…</value></data>
   <data name="Claude_OpenNewAs" xml:space="preserve"><value>Open new sessions as</value></data>
   <data name="Claude_OpenPR" xml:space="preserve"><value>Open PR</value></data>
+  <data name="Claude_OpenRouterActivity" xml:space="preserve"><value>OpenRouter activity</value></data>
+  <data name="Claude_OpenRouterKey" xml:space="preserve"><value>OpenRouter API key (sk-or-…)</value></data>
   <data name="Claude_OpenSignInLink" xml:space="preserve"><value>Open sign-in link</value></data>
   <data name="Claude_PasteCode" xml:space="preserve"><value>Paste the code from the page</value></data>
   <data name="Claude_PermissionMode" xml:space="preserve"><value>Permission mode</value></data>
   <data name="Claude_ProfileHelp" xml:space="preserve"><value>The account gets its own sign-in, session history and limits. Sign-in opens right after.</value></data>
   <data name="Claude_ProfileName" xml:space="preserve"><value>Name, e.g. “Personal” or “Work”</value></data>
+  <data name="Claude_ProfileNameOpenRouter" xml:space="preserve"><value>Name, e.g. “OpenRouter”</value></data>
   <data name="Claude_RefreshStatus" xml:space="preserve"><value>Refresh status</value></data>
   <data name="Claude_RemoveAccount" xml:space="preserve"><value>Remove “{0}”…</value></data>
   <data name="Claude_RemoveButton" xml:space="preserve"><value>Sign out and remove “{0}”</value></data>
