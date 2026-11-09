@@ -814,6 +814,8 @@ public sealed class PRContent : Grid, IShortcutHost
             };
             review.Click += (_, _) => Dialogs.Review(XamlRoot, model).Forget();
             var flyout = Ui.Menu(Ui.MenuItem(L.T("PR_WriteReview", "Write review…"), () => Dialogs.Review(XamlRoot, model).Forget()));
+            if (ClaudeLauncher.Available)
+                flyout.Items.Add(Ui.MenuItem(L.T("Drafts_Menu", "Draft comments with agent…"), () => Dialogs.DraftComments(XamlRoot, model).Forget()));
             if (model.CanApprove) flyout.Items.Add(Ui.MenuItem(L.T("PR_Approve", "Approve"), () => ConfirmApprove().Forget()));
             if (CloseLoop.Replyable(pr).Count > 0)
                 flyout.Items.Add(Ui.MenuItem(L.T("CloseLoop_Menu", "Reply and resolve threads…"), () => Dialogs.CloseLoopThreads(XamlRoot, model, model.ReviewFix?.ThreadIds ?? Array.Empty<string>()).Forget()));
