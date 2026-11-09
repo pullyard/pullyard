@@ -439,6 +439,15 @@ struct FileHeader: View {
             .truncationMode(.head)
             .textSelection(.enabled)
             DiffStat(additions: file.additions, deletions: file.deletions)
+            if let owners = model.ownership?.owners(of: file.id), !owners.isEmpty {
+                let approved = owners.contains { $0.status == .approved }
+                Label(owners.prefix(2).map { "@" + $0.handle }.joined(separator: ", ") + (owners.count > 2 ? " +\(owners.count - 2)" : ""), systemImage: approved ? "checkmark.seal.fill" : "person.2")
+                    .font(.syCaption)
+                    .foregroundStyle(approved ? Color.ghGreen : Color.syMuted)
+                    .lineLimit(1)
+                    .help("Code owners: " + owners.map { "@" + $0.handle }.joined(separator: ", ") + (approved ? " · approved" : ""))
+                    .accessibilityLabel("Code owners " + owners.map(\.handle).joined(separator: ", "))
+            }
             Spacer()
             if model.features.viewedFiles {
                 Toggle("Viewed", isOn: Binding(get: { viewed }, set: { _ in Task { await model.toggleViewed(file.id) } }))

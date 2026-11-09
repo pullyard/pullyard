@@ -207,6 +207,15 @@ extension GitLabClient {
         try await pages("\(Self.projectPath(project))/pipelines/\(pipeline)/jobs", limit: 3)
     }
 
+    func rawFile(_ project: String, path: String, ref: String) async throws -> String? {
+        let encoded = path.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._~"))) ?? path
+        do {
+            return try await http.text("\(Self.projectPath(project))/repository/files/\(encoded)/raw", [URLQueryItem(name: "ref", value: ref)])
+        } catch let e as APIError where e.status == 404 {
+            return nil
+        }
+    }
+
     func trainCar(_ project: String, iid: Int) async throws -> GitLabMR.TrainCar {
         try await http.get("\(Self.projectPath(project))/merge_trains/merge_requests/\(iid)")
     }

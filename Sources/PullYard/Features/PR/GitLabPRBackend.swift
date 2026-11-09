@@ -464,6 +464,15 @@ final class GitLabPRBackend: PRBackend {
         try await client.unapprove(ref.repo.full, iid: ref.number)
     }
 
+    func codeOwners(_ ref: ItemRef, base: String) async throws -> CodeOwners? {
+        for path in CodeOwners.gitlabPaths {
+            if let text = try await client.rawFile(ref.repo.full, path: path, ref: base) {
+                return CodeOwners(text: text, path: path, flavor: .gitlab)
+            }
+        }
+        return nil
+    }
+
     func canShowLog(_ check: CheckContext) -> Bool {
         check.typename == "GitLabJob" && check.databaseId != nil && check.outcome != .pending && check.outcome != .skipped
     }

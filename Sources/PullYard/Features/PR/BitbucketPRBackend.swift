@@ -409,6 +409,15 @@ final class BitbucketPRBackend: PRBackend {
         try await client.approve(ref.repo.full, id: ref.number, on: false)
     }
 
+    func codeOwners(_ ref: ItemRef, base: String) async throws -> CodeOwners? {
+        for path in CodeOwners.bitbucketPaths {
+            if let text = try await client.sourceFile(ref.repo.full, commit: base, path: path) {
+                return CodeOwners(text: text, path: path)
+            }
+        }
+        return nil
+    }
+
     func canShowLog(_ check: CheckContext) -> Bool {
         check.outcome != .pending && BitbucketClient.buildNumber(check.link) != nil
     }
