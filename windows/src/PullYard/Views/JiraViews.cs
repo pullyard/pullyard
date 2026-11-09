@@ -713,3 +713,131 @@ public sealed class JiraIssueCard : Grid
         RenderStatus();
     }
 }
+
+public sealed class JiraMergeFollowUp : Grid
+{
+    private readonly PullRequestDetail pr;
+    private readonly JiraAccount account = JiraService.Account;
+    private readonly StackPanel body = Ui.V(6);
+    private List<JiraIssue> issues = new();
+    private readonly Dictionary<string, JiraTransition> moves = new();
+    private string? working;
+    private string? error;
+    private bool dismissed;
+
+    public JiraMergeFollowUp(PullRequestDetail pr)
+    {
+        this.pr = pr;
+        Children.Add(new Border
+        {
+            Background = Palette.Brush("sky", 0.07),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(10, 6, 10, 6),
+            Child = body
+        });
+        Visibility = Visibility.Collapsed;
+        Load().Forget();
+    }
+
+    private async Task Load()
+    {
+        dismissed = JiraFollowUp.IsDismissed(Settings.Shared, pr.Url);
+        if (!pr.Merged || dismissed || !account.IsConfigured || account.Client() is not { } client) return;
+        var found = new List<JiraIssue>();
+        foreach (var key in account.Keys(pr).Take(5))
+        {
+            if (account.CachedIssue(key) is { } hit)
+            {
+                found.Add(hit);
+                continue;
+            }
+            try
+            {
+                var fresh = await client.Issue(key);
+                account.Remember(fresh);
+                found.Add(fresh);
+            }
+            catch (Exception)
+            {
+            }
+        }
+        foreach (var issue in JiraFollowUp.Open(found))
+        {
+            try
+            {
+                if (JiraFollowUp.DoneTransition(await client.Transitions(issue.Key)) is { } t) moves[issue.Key] = t;
+            }
+            catch (Exception)
+            {
+            }
+        }
+        issues = found;
+        Render();
+    }
+
+    private void Render()
+    {
+        var pending = JiraFollowUp.Open(issues);
+        body.Children.Clear();
+        if (!pr.Merged || dismissed || pending.Count == 0)
+        {
+            Visibility = Visibility.Collapsed;
+            return;
+        }
+        Visibility = Visibility.Visible;
+        foreach (var issue in pending)
+        {
+            var buttons = Ui.H(8);
+            if (moves.TryGetValue(issue.Key, out var t))
+            {
+                var move = Ui.Button(working == issue.Key ? L.T("Jira_FollowUpMoving", "Moving…") : L.F("Jira_FollowUpMove", "Move to {0}", t.To), () => Move(issue, t).Forget(), accent: true);
+                move.Padding = new Thickness(10, 4, 10, 5);
+                move.IsEnabled = working is null;
+                buttons.Children.Add(move);
+            }
+            buttons.Children.Add(JiraUi.Small(L.T("Jira_Open", "Open in Jira"), "", () => LinkBrowser.Open(issue.Url)));
+            var status = Ui.Text(L.F("Jira_FollowUpStill", "is still {0}", issue.Status), 13, "muted", maxLines: 1);
+            var row = Ui.Columns((Ui.Glyph("", 13, "sky"), Ui.Auto), (Ui.Text(issue.Key, 13, "text", FontWeights.SemiBold, mono: true), Ui.Auto), (status, Ui.Star), (buttons, Ui.Auto));
+            row.ColumnSpacing = 8;
+            body.Children.Add(row);
+        }
+        var errorText = error is null ? null : Ui.Text(error, 12, "red", wrap: true, select: true);
+        var notNow = Ui.Link(L.T("Jira_FollowUpNotNow", "Not now"), Dismiss);
+        body.Children.Add(Ui.Columns((errorText, Ui.Star), (notNow, Ui.Auto)));
+    }
+
+    private void Dismiss()
+    {
+        JiraFollowUp.Dismiss(Settings.Shared, pr.Url);
+        dismissed = true;
+        Render();
+    }
+
+    private async Task Move(JiraIssue issue, JiraTransition t)
+    {
+        if (working is not null || account.Client() is not { } client) return;
+        working = issue.Key;
+        error = null;
+        Render();
+        try
+        {
+            await client.Transition(issue.Key, t.Id);
+            try
+            {
+                var fresh = await client.Issue(issue.Key);
+                account.Remember(fresh);
+                issues = issues.Select(i => i.Key == fresh.Key ? fresh : i).ToList();
+            }
+            catch (Exception)
+            {
+            }
+            ShellView.Toast(L.F("Jira_FollowUpMoved", "{0} moved to {1}", issue.Key, t.To));
+        }
+        catch (Exception e)
+        {
+            error = e.Message;
+        }
+        working = null;
+        Render();
+    }
+}

@@ -104,6 +104,7 @@ public sealed class PRContent : Grid, IShortcutHost
     private readonly AppViewModel app = AppViewModel.Shared;
     private readonly PRDetailViewModel model;
     private readonly StackPanel header = Ui.V(8);
+    private (string Key, JiraMergeFollowUp View)? jiraFollowUp;
     private readonly ContentControl titleHost = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, IsTabStop = false };
     private readonly StackPanel banners = Ui.V(6);
     private readonly TabStrip tabs = new(nameof(PRTab.Conversation));
@@ -370,7 +371,21 @@ public sealed class PRContent : Grid, IShortcutHost
         }
         if (model.StackTree is { } tree) header.Children.Add(StackUi.Strip(tree, model.Ref.Repo, () => model.Tab = PRTab.Stack));
         if (pr.IsOpen && RiskStrip(model) is { } risks) header.Children.Add(risks);
+        if (JiraFollowUpView(pr) is { } followUp) header.Children.Add(followUp);
         if (MergeStatusBar(model, app, () => Dialogs.Merge(XamlRoot, model).Forget(), () => Dialogs.Reviewers(XamlRoot, model).Forget()) is { } bar) header.Children.Add(bar);
+    }
+
+    private JiraMergeFollowUp? JiraFollowUpView(PullRequestDetail pr)
+    {
+        if (!pr.Merged) return null;
+        var key = $"{pr.Url}|{pr.Merged}";
+        if (jiraFollowUp is not { } cached || cached.Key != key)
+        {
+            cached = (key, new JiraMergeFollowUp(pr));
+            jiraFollowUp = cached;
+        }
+        if (cached.View.Parent is Panel old) old.Children.Remove(cached.View);
+        return cached.View;
     }
 
     private static string RiskGlyph(RiskKind kind) => kind switch
