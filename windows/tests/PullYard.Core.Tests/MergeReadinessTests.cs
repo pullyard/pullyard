@@ -263,4 +263,64 @@ public class MergeReadinessTests
         Assert.Equal("Title or description must reference a Jira issue", other.Title);
         Assert.Equal(RequirementState.Missing, other.State);
     }
+
+    [Fact]
+    public void MergeQueueStatus()
+    {
+        Assert.Equal("Queued to merge · #3 in line · about 5 min", new MergeQueueEntry { Position = 3, State = "QUEUED", EstimatedTimeToMerge = 290 }.Summary);
+        Assert.Equal("Queued to merge · next in line", new MergeQueueEntry { Position = 1, State = "QUEUED" }.Summary);
+        Assert.Equal("Merge queue: waiting for checks · #2 in line", new MergeQueueEntry { Position = 2, State = "AWAITING_CHECKS" }.Summary);
+        Assert.True(new MergeQueueEntry { Position = 1, State = "UNMERGEABLE" }.Failing);
+
+        var enabled = Pr(new JsonObject { ["isMergeQueueEnabled"] = true, ["mergeStateStatus"] = "CLEAN" });
+        var note = MergeReadiness.Requirements(enabled, RulesStatus.Loading).First(r => r.Kind == RequirementKind.MergeQueue);
+        Assert.Equal(RequirementState.Advisory, note.State);
+        Assert.Equal("Merges through a merge queue", note.Title);
+
+        var queued = Pr(new JsonObject
+        {
+            ["isMergeQueueEnabled"] = true, ["isInMergeQueue"] = true,
+            ["mergeQueueEntry"] = new JsonObject { ["position"] = 2, ["state"] = "QUEUED", ["enqueuedAt"] = "2026-01-01T00:00:00Z", ["estimatedTimeToMerge"] = 600 }
+        });
+        var entry = MergeReadiness.Requirements(queued, RulesStatus.Loading).First(r => r.Kind == RequirementKind.MergeQueue);
+        Assert.Equal(RequirementState.Pending, entry.State);
+        Assert.Equal("Queued to merge · #2 in line · about 10 min", entry.Title);
+
+        var removed = Pr(new JsonObject { ["mergeQueueEntry"] = new JsonObject { ["position"] = 1, ["state"] = "UNMERGEABLE" } });
+        var failing = MergeReadiness.Requirements(removed, RulesStatus.Loading).First(r => r.Kind == RequirementKind.MergeQueue);
+        Assert.Equal(RequirementState.Missing, failing.State);
+        Assert.Equal("Fix the failing checks or conflicts and add it again", failing.Detail);
+        Assert.DoesNotContain(MergeReadiness.Requirements(Pr(), RulesStatus.Loading), r => r.Kind == RequirementKind.MergeQueue);
+    }
+
+    [Fact]
+    public void LegacyQueryDropsMergeQueueFields()
+    {
+        Assert.Contains("mergeQueueEntry { position state enqueuedAt estimatedTimeToMerge }", Q.PullRequest);
+        Assert.DoesNotContain("mergeQueue", Q.PullRequestLegacy);
+        Assert.DoesNotContain("isInMergeQueue", Q.PullRequestLegacy);
+        Assert.Contains("mergeQueueEntry { position state }", Q.PullRequestPulse);
+        Assert.DoesNotContain("mergeQueue", Q.PullRequestPulseLegacy);
+    }
+
+    [Fact]
+    public void GitLabMergeTrain()
+    {
+        Assert.Null(GitLabReviewMapper.TrainEntry(null));
+        GitLabMR.TrainCar Car(string json) => JsonSerializer.Deserialize<GitLabMR.TrainCar>(json, Json.Rest)!;
+        Assert.Equal("AWAITING_CHECKS", GitLabReviewMapper.TrainEntry(Car("""{"status":"fresh","pipeline":{"id":1,"status":"running"}}"""))?.State);
+        Assert.Equal("QUEUED", GitLabReviewMapper.TrainEntry(Car("""{"status":"idle","pipeline":{"id":1,"status":"success"}}"""))?.State);
+        Assert.Equal("MERGEABLE", GitLabReviewMapper.TrainEntry(Car("""{"status":"merging"}"""))?.State);
+        Assert.Null(GitLabReviewMapper.TrainEntry(Car("""{"status":"merged"}""")));
+        Assert.True(JsonSerializer.Deserialize<GitLabMR.Project>("""{"id":1,"merge_trains_enabled":true}""", Json.Rest)!.MergeTrainsEnabled);
+
+        var p = Pr();
+        p.ForgeMerge = new ForgeMergeInfo { Status = "mergeable" };
+        p.IsMergeQueueEnabled = true;
+        Assert.Equal("Merges through a merge train", MergeReadiness.Requirements(p, RulesStatus.Loading).First(r => r.Kind == RequirementKind.MergeQueue).Title);
+        p.MergeQueueEntry = new MergeQueueEntry { State = "QUEUED" };
+        Assert.Equal("In the merge train", MergeReadiness.Requirements(p, RulesStatus.Loading).First(r => r.Kind == RequirementKind.MergeQueue).Title);
+        p.MergeQueueEntry = new MergeQueueEntry { State = "AWAITING_CHECKS" };
+        Assert.Equal("Merge train: waiting for checks", MergeReadiness.Requirements(p, RulesStatus.Loading).First(r => r.Kind == RequirementKind.MergeQueue).Title);
+    }
 }

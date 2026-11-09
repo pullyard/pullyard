@@ -188,6 +188,13 @@ public static class GitLabMR
         public string? MergeMethod { get; set; }
         public string? SquashOption { get; set; }
         public bool? RemoveSourceBranchAfterMerge { get; set; }
+        public bool? MergeTrainsEnabled { get; set; }
+    }
+
+    public sealed class TrainCar
+    {
+        public string Status { get; set; } = "";
+        public Pipeline? Pipeline { get; set; }
     }
 }
 
@@ -226,6 +233,9 @@ public sealed partial class GitLabClient
 
     public Task<string> JobTrace(string project, long job, CancellationToken ct = default) =>
         http.Text($"{ProjectApiPath(project)}/jobs/{job}/trace", ct: ct);
+
+    public Task<GitLabMR.TrainCar> TrainCar(string project, int iid, CancellationToken ct = default) =>
+        http.Get<GitLabMR.TrainCar>($"{ProjectApiPath(project)}/merge_trains/merge_requests/{iid}", ct: ct);
 
     public Task<GitLabMR.Project> Project(string project, CancellationToken ct = default) =>
         http.Get<GitLabMR.Project>(ProjectApiPath(project), ct: ct);

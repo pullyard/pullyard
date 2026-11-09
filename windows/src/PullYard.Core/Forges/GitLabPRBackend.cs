@@ -14,7 +14,8 @@ public sealed record GitLabMRSnapshot(
     List<GitLabMR.Commit> Commits,
     List<GitLabMR.Job> Jobs,
     GitLabMR.Project? Settings,
-    string Viewer);
+    string Viewer,
+    GitLabMR.TrainCar? Train = null);
 
 public sealed record GitLabMergeStatus(string Mergeable, string Status, string? Blocker);
 
@@ -251,7 +252,24 @@ public static class GitLabReviewMapper
             ViewerCanApprove = s.Approvals?.UserCanApprove,
             ViewerApproved = s.Approvals?.UserHasApproved,
             MergeBlocker = merge.Blocker,
-            ForgeMerge = new ForgeMergeInfo { Status = RawMergeStatus(mr), ApprovalsRequired = s.Approvals?.ApprovalsRequired, ApprovalsLeft = s.Approvals?.ApprovalsLeft }
+            ForgeMerge = new ForgeMergeInfo { Status = RawMergeStatus(mr), ApprovalsRequired = s.Approvals?.ApprovalsRequired, ApprovalsLeft = s.Approvals?.ApprovalsLeft },
+            IsMergeQueueEnabled = s.Settings?.MergeTrainsEnabled,
+            MergeQueueEntry = TrainEntry(s.Train)
+        };
+    }
+
+    private static readonly HashSet<string> TrainRunning = new() { "created", "pending", "running", "waiting_for_resource", "preparing" };
+
+    public static MergeQueueEntry? TrainEntry(GitLabMR.TrainCar? car)
+    {
+        if (car is null) return null;
+        var running = TrainRunning.Contains(car.Pipeline?.Status ?? "");
+        return car.Status switch
+        {
+            "merging" => new MergeQueueEntry { State = "MERGEABLE" },
+            "stale" => new MergeQueueEntry { State = "AWAITING_CHECKS" },
+            "idle" or "fresh" => new MergeQueueEntry { State = running ? "AWAITING_CHECKS" : "QUEUED" },
+            _ => null
         };
     }
 
@@ -424,6 +442,10 @@ public sealed class GitLabPRBackend : IPRBackend
             jobs = await Optional(client.Jobs(owner, pipeline.Id, ct)).ConfigureAwait(false) ?? new();
         }
         var approvals = await approvalsTask.ConfigureAwait(false);
+        var projectSettings = await settingsTask.ConfigureAwait(false);
+        var train = projectSettings?.MergeTrainsEnabled == true && mr.State == "opened"
+            ? await Optional(client.TrainCar(project, r.Number, ct)).ConfigureAwait(false)
+            : null;
         var snapshot = new GitLabMRSnapshot(
             project,
             mr,
@@ -431,8 +453,9 @@ public sealed class GitLabPRBackend : IPRBackend
             await discussionsTask.ConfigureAwait(false),
             await commitsTask.ConfigureAwait(false),
             jobs,
-            await settingsTask.ConfigureAwait(false),
-            await viewerTask.ConfigureAwait(false) ?? "");
+            projectSettings,
+            await viewerTask.ConfigureAwait(false) ?? "",
+            train);
         lock (refs) refs[r] = mr.DiffRefs;
         return new PRLoad(snapshot.Viewer, GitLabReviewMapper.Repository(snapshot), GitLabReviewMapper.Pulse(mr, approvals));
     }
