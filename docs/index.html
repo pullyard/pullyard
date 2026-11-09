@@ -27,18 +27,41 @@
   "@context": "https://schema.org",
   "@graph": [
     {
+      "@type": "Organization",
+      "@id": "https://pullyard.app/#organization",
+      "name": "PullYard",
+      "url": "https://pullyard.app/",
+      "logo": { "@type": "ImageObject", "url": "https://pullyard.app/icon-512.png", "width": 512, "height": 512 },
+      "sameAs": ["https://github.com/pullyard"]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://pullyard.app/#website",
+      "url": "https://pullyard.app/",
+      "name": "PullYard",
+      "inLanguage": "en",
+      "publisher": { "@id": "https://pullyard.app/#organization" }
+    },
+    {
       "@type": "SoftwareApplication",
+      "@id": "https://pullyard.app/#software",
       "name": "PullYard",
       "url": "https://pullyard.app/",
       "description": "A tiny native client for GitHub, GitLab and Bitbucket pull requests on macOS, Windows and Linux, with a built-in agent workspace that runs Claude Code.",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS 14+, Windows 10, Windows 11, Linux",
+      "softwareVersion": "2.13.6",
+      "datePublished": "2026-10-13",
+      "dateModified": "2026-10-30",
       "image": "https://pullyard.app/icon-512.png",
       "screenshot": "https://pullyard.app/img/og-card.jpg",
       "license": "https://opensource.org/licenses/MIT",
       "isAccessibleForFree": true,
-      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "author": { "@id": "https://pullyard.app/#organization" },
+      "publisher": { "@id": "https://pullyard.app/#organization" },
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD", "availability": "https://schema.org/InStock" },
       "downloadUrl": "https://github.com/pullyard/pullyard/releases/latest",
+      "releaseNotes": "https://pullyard.app/changelog.html",
       "codeRepository": "https://github.com/pullyard/pullyard",
       "sameAs": ["https://github.com/pullyard/pullyard"]
     },
@@ -68,7 +91,7 @@
         {
           "@type": "Question",
           "name": "Where does my data go?",
-          "acceptedAnswer": { "@type": "Answer", "text": "From your computer straight to api.github.com. Your token is stored in the macOS Keychain, Windows Credential Manager or the Secret Service keyring on Linux. PullYard has no backend and no analytics." }
+          "acceptedAnswer": { "@type": "Answer", "text": "From your computer straight to api.github.com. Your token is stored in the macOS Keychain, Windows Credential Manager or the Secret Service keyring on Linux. The PullYard app has no backend and no analytics. This website counts page views with cookieless Umami." }
         }
       ]
     }
@@ -430,7 +453,7 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
     <div class="hero-logo" data-hero-logo role="img" aria-label="PullYard app icon"><img src="icon.svg" width="156" height="156" alt="" fetchpriority="high" decoding="async"></div>
     <div class="pill intro" style="--d:0ms"><span class="dot" aria-hidden="true"></span><b>Free &amp; open source</b> · native on macOS, Windows &amp; Linux</div>
     <h1 id="hero-title">Pull requests,<br><span class="grad">without the browser.</span></h1>
-    <p class="lead intro" style="--d:70ms">PullYard is a small native GitHub client for macOS, Windows and Linux that also signs in to GitLab, Bitbucket, Gitea and GitHub Enterprise. You can review PRs, read big diffs and pass review comments to Claude Code, all in an app that opens right away.</p>
+    <p class="lead intro" style="--d:70ms">PullYard is a free, MIT-licensed desktop app for reviewing GitHub pull requests outside the browser, with native builds for macOS, Windows and Linux. It also signs in to GitLab, Bitbucket, Gitea and GitHub Enterprise, reads big diffs instantly and sends review comments to Claude Code with one click.</p>
     <div class="cta intro" style="--d:130ms">
       <a class="btn btn-primary btn-lg os-only" href="https://github.com/pullyard/pullyard/releases/latest/download/PullYard.dmg" data-download>
         <span class="dl-ic" data-download-icon><svg aria-hidden="true" focusable="false"><use href="#i-apple"/></svg></span>
@@ -719,7 +742,7 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
         <details class="reveal"><summary>How does sign-in to Claude work?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>PullYard never sees your Claude credentials. It runs <code>claude auth login</code>, which opens the official sign-in page in your browser.</p></details>
       </div>
       <div class="faq-col">
-        <details class="reveal"><summary>Where does my data go?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>From your computer straight to api.github.com. Your token is stored in the macOS Keychain, Windows Credential Manager or the Secret Service keyring on Linux. PullYard has no backend and no analytics.</p></details>
+        <details class="reveal"><summary>Where does my data go?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>From your computer straight to api.github.com. Your token is stored in the macOS Keychain, Windows Credential Manager or the Secret Service keyring on Linux. The PullYard app has no backend and no analytics. This website counts page views with cookieless Umami.</p></details>
         <details class="reveal"><summary>How do I update?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>PullYard checks GitHub for a new release every 6 hours; you can turn that off in Settings. On macOS, choose <b>PullYard → Check for Updates…</b> any time: it downloads the release, replaces itself and restarts, so there's no disk image to open. The Windows installer build and the Linux tarball update themselves the same way. The Windows portable build, the .deb and the Flatpak open the release page so you can grab the new file.</p></details>
         <details class="reveal"><summary>What do I get for a pizza?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>Just my thanks. Nothing is locked: PullYard is free and open source, and every feature is there for everyone. A pizza helps keep the project going. You choose the price, from $3. The link is also in <b>Settings → Support PullYard</b> in the app. <a class="pizza-link" href="https://checkout.dodopayments.com/buy/pdt_0NpmyolvMAwxrA4eQBgpO?quantity=1"><svg aria-hidden="true" focusable="false"><use href="#i-pizza"/></svg>Buy me a pizza</a></p></details>
         <details class="reveal"><summary>How fresh is what I see?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>Pull request lists, the open pull request and notifications refresh every 30 seconds while PullYard is in front, and again as soon as you switch back to it. The footer shows when the list was last updated. Pull down on a list or press <b>⌘R</b> (<b>Ctrl+R</b> on Windows and Linux) to refresh now. You can change the interval in Settings.</p></details>
