@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use serde_json::json;
 
+use crate::api::code_owners::CodeOwners;
 use crate::api::models::{CheckContext, ItemRef, PendingComment, PrDetailResponse, PrFile, PrLight, PullRequestDetail};
 use crate::api::queries as q;
 use crate::api::{ApiError, ApiResult, GitHubApi};
@@ -333,6 +334,14 @@ impl PrBackend {
         }
     }
 
+    pub async fn code_owners(&self, r: &ItemRef, base: &str) -> ApiResult<Option<CodeOwners>> {
+        match self {
+            PrBackend::GitHub(api, _) => api.code_owners(&r.repo, base).await,
+            PrBackend::GitLab(lab) => lab.code_owners(r, base).await,
+            PrBackend::Bitbucket(bb) => bb.code_owners(r, base).await,
+        }
+    }
+
     pub async fn job_log(&self, r: &ItemRef, check: &CheckContext) -> ApiResult<String> {
         match self {
             PrBackend::GitHub(api, _) => {
@@ -363,6 +372,7 @@ mod job_log_tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::api::code_owners::CodeOwnersFlavor;
     use crate::api::models::RepoRef;
     use crate::forge::bitbucket_review::build_number;
     use crate::forge::gitlab_review::clean_trace;
@@ -469,5 +479,48 @@ mod job_log_tests {
         job.check_suite = serde_json::from_value(json!({ "workflowRun": { "databaseId": 9, "workflow": { "name": "CI" } } })).unwrap();
         assert!(backend.can_show_log(&job));
         assert!(!backend.can_show_log(&check("StatusContext", None, None, None)));
+    }
+
+    #[test]
+    fn gitlab_code_owners_read_first_existing_file() {
+        let stub = Arc::new(Stub::default());
+        stub.route("/repository/files/docs/CODEOWNERS/raw", 200, "[Docs] @writers\n*.md\n");
+        let backend = PrBackend::GitLab(GitLabReview::new(ForgeClient::stubbed(GitProvider::Gitlab, "gitlab.example.com", "s", stub.clone())));
+        let r = ItemRef { repo: RepoRef::new("group", "app"), number: 1 };
+        let owners = crate::rt::block_on(backend.code_owners(&r, "base1")).unwrap().unwrap();
+        assert_eq!(owners.path, "docs/CODEOWNERS");
+        assert_eq!(owners.flavor, CodeOwnersFlavor::GitLab);
+        assert_eq!(owners.owners_for("README.md"), vec!["@writers".to_string()]);
+        let urls: Vec<String> = stub.all().into_iter().map(|q| q.url).collect();
+        assert!(urls.iter().any(|u| u.contains("files/CODEOWNERS/raw?ref=base1")));
+        assert!(urls.iter().any(|u| u.contains("files/docs%2FCODEOWNERS/raw?ref=base1")));
+        assert!(!urls.iter().any(|u| u.contains(".gitlab")));
+    }
+
+    #[test]
+    fn bitbucket_code_owners_and_missing_file() {
+        let stub = Arc::new(Stub::default());
+        stub.route("/src/base9/.bitbucket/CODEOWNERS", 200, "src/ @acme/core\n");
+        let backend = bitbucket(stub.clone());
+        let r = ItemRef { repo: RepoRef::new("acme", "api"), number: 5 };
+        let owners = crate::rt::block_on(backend.code_owners(&r, "base9")).unwrap().unwrap();
+        assert_eq!(owners.path, ".bitbucket/CODEOWNERS");
+        assert_eq!(owners.flavor, CodeOwnersFlavor::GitHub);
+        assert_eq!(owners.owners_for("src/a.rs"), vec!["@acme/core".to_string()]);
+        assert!(stub.all()[0].path.ends_with("/repositories/acme/api/src/base9/.bitbucket/CODEOWNERS"));
+        stub.remove("/src/base9/.bitbucket/CODEOWNERS");
+        stub.clear_requests();
+        assert!(crate::rt::block_on(backend.code_owners(&r, "base9")).unwrap().is_none());
+        assert_eq!(stub.all().len(), 2);
+        assert!(stub.all()[1].path.ends_with("/src/base9/CODEOWNERS"));
+    }
+
+    #[test]
+    fn code_owners_errors_other_than_missing_propagate() {
+        let stub = Arc::new(Stub::default());
+        stub.route("/repository/files/CODEOWNERS/raw", 500, r#"{"message":"boom"}"#);
+        let backend = PrBackend::GitLab(GitLabReview::new(ForgeClient::stubbed(GitProvider::Gitlab, "gitlab.example.com", "s", stub)));
+        let r = ItemRef { repo: RepoRef::new("group", "app"), number: 1 };
+        assert!(crate::rt::block_on(backend.code_owners(&r, "base1")).is_err());
     }
 }

@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 
 use super::bitbucket::segment;
 use super::{ForgeClient, Query};
+use crate::api::code_owners::{CodeOwners, BITBUCKET_CODE_OWNERS_PATHS};
 use crate::api::models::{CheckContext, CheckOutcome, CommitDetailRest, CommitInner, CommitPerson, CommitStats, Date, ItemRef, PendingComment, PrDetailResponse, PrFile, PrLight, PullRequestDetail};
 use crate::api::{ApiError, ApiResult};
 use crate::markdown_html;
@@ -335,6 +336,15 @@ pub async fn pipeline_steps(c: &ForgeClient, repo: &str, pipeline: &str) -> ApiR
 
 pub async fn step_log(c: &ForgeClient, repo: &str, pipeline: &str, step: &str) -> ApiResult<String> {
     c.http().download(&format!("{}/pipelines/{}/steps/{}/log", repo_path(repo), segment(pipeline), segment(step))).await
+}
+
+pub async fn source_file(c: &ForgeClient, repo: &str, commit: &str, path: &str) -> ApiResult<Option<String>> {
+    let encoded = path.split('/').map(segment).collect::<Vec<_>>().join("/");
+    match c.http().text(&format!("{}/src/{}/{encoded}", repo_path(repo), segment(commit)), &[]).await {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.status == 404 => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 pub async fn diff(c: &ForgeClient, repo: &str, id: i64) -> ApiResult<String> {
@@ -855,6 +865,16 @@ impl BitbucketReview {
 
     pub fn can_show_log(check: &CheckContext) -> bool {
         check.outcome() != CheckOutcome::Pending && build_number(check.link().as_deref()).is_some()
+    }
+
+    pub async fn code_owners(&self, r: &ItemRef, base: &str) -> ApiResult<Option<CodeOwners>> {
+        let repo = r.repo.full();
+        for path in BITBUCKET_CODE_OWNERS_PATHS {
+            if let Some(text) = source_file(&self.client, &repo, base, path).await? {
+                return Ok(Some(CodeOwners::parse(&text, path)));
+            }
+        }
+        Ok(None)
     }
 
     pub async fn job_log(&self, r: &ItemRef, check: &CheckContext) -> ApiResult<String> {

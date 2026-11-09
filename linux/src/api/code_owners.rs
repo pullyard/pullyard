@@ -1,14 +1,24 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use regex::Regex;
 
 use super::models::PullRequestDetail;
 
 pub const CODE_OWNERS_PATHS: [&str; 3] = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"];
+pub const GITLAB_CODE_OWNERS_PATHS: [&str; 3] = ["CODEOWNERS", "docs/CODEOWNERS", ".gitlab/CODEOWNERS"];
+pub const BITBUCKET_CODE_OWNERS_PATHS: [&str; 2] = [".bitbucket/CODEOWNERS", "CODEOWNERS"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CodeOwnersFlavor {
+    #[default]
+    GitHub,
+    GitLab,
+}
 
 #[derive(Debug, Clone)]
 pub struct CodeOwnersRule {
     pub owners: Vec<String>,
+    pub section: usize,
     regex: Regex,
 }
 
@@ -17,23 +27,62 @@ pub struct CodeOwners {
     pub path: String,
     pub rules: Vec<CodeOwnersRule>,
     pub invalid_lines: Vec<usize>,
+    pub flavor: CodeOwnersFlavor,
 }
 
 impl CodeOwners {
     pub fn parse(text: &str, path: &str) -> Self {
+        Self::parse_flavored(text, path, CodeOwnersFlavor::GitHub)
+    }
+
+    pub fn parse_flavored(text: &str, path: &str, flavor: CodeOwnersFlavor) -> Self {
         let mut rules = Vec::new();
         let mut invalid = Vec::new();
+        let mut section = 0;
+        let mut defaults: Vec<String> = Vec::new();
         for (index, raw) in text.split(['\n', '\r']).enumerate() {
+            if flavor == CodeOwnersFlavor::GitLab {
+                if let Some(header) = Self::section_header(raw) {
+                    section += 1;
+                    defaults = header;
+                    continue;
+                }
+            }
             let tokens = Self::tokens(raw);
             let Some(pattern) = tokens.first() else { continue };
-            let owners: Vec<String> = tokens[1..].to_vec();
+            let mut owners: Vec<String> = tokens[1..].to_vec();
             let regex = if owners.iter().all(|o| Self::is_owner(o)) { Self::regex_for(pattern) } else { None };
             match regex {
-                Some(regex) => rules.push(CodeOwnersRule { owners, regex }),
+                Some(regex) => {
+                    if owners.is_empty() && flavor == CodeOwnersFlavor::GitLab {
+                        owners = defaults.clone();
+                    }
+                    rules.push(CodeOwnersRule { owners, section, regex })
+                }
                 None => invalid.push(index + 1),
             }
         }
-        CodeOwners { path: path.to_string(), rules, invalid_lines: invalid }
+        CodeOwners { path: path.to_string(), rules, invalid_lines: invalid, flavor }
+    }
+
+    pub fn section_header(line: &str) -> Option<Vec<String>> {
+        let mut s = line.trim_matches([' ', '\t']);
+        if let Some(rest) = s.strip_prefix('^') {
+            s = rest;
+        }
+        let inner = s.strip_prefix('[')?;
+        let close = inner.find(']')?;
+        if close == 0 {
+            return None;
+        }
+        let mut rest = &inner[close + 1..];
+        if let Some(after) = rest.strip_prefix('[') {
+            if let Some(count) = after.find(']') {
+                rest = &after[count + 1..];
+            }
+        }
+        let owners = Self::tokens(rest);
+        owners.iter().all(|o| Self::is_owner(o)).then_some(owners)
     }
 
     pub fn rule_for(&self, file: &str) -> Option<&CodeOwnersRule> {
@@ -41,7 +90,15 @@ impl CodeOwners {
     }
 
     pub fn owners_for(&self, file: &str) -> Vec<String> {
-        self.rule_for(file).map(|r| r.owners.clone()).unwrap_or_default()
+        if self.flavor != CodeOwnersFlavor::GitLab {
+            return self.rule_for(file).map(|r| r.owners.clone()).unwrap_or_default();
+        }
+        let mut last_by_section: BTreeMap<usize, &CodeOwnersRule> = BTreeMap::new();
+        for rule in self.rules.iter().filter(|r| r.regex.is_match(file)) {
+            last_by_section.insert(rule.section, rule);
+        }
+        let mut seen = HashSet::new();
+        last_by_section.values().flat_map(|r| r.owners.iter()).filter(|o| seen.insert(o.to_lowercase())).cloned().collect()
     }
 
     pub fn is_owner(token: &str) -> bool {
@@ -232,6 +289,10 @@ impl OwnershipSummary {
         OwnershipSummary { groups, unowned, source_path: owners.path.clone() }
     }
 
+    pub fn owners_of(&self, file: &str) -> Option<&[OwnerEntry]> {
+        self.groups.iter().find(|g| g.files.iter().any(|f| f == file)).map(|g| g.owners.as_slice())
+    }
+
     pub fn suggestions(&self, excluding: &HashSet<String>) -> Vec<OwnerEntry> {
         let mut seen = HashSet::new();
         self.groups
@@ -349,5 +410,61 @@ bad-owner notanowner";
         let handles = |ex: &HashSet<String>| s.suggestions(ex).into_iter().map(|o| o.handle).collect::<Vec<_>>();
         assert_eq!(handles(&HashSet::new()), list(&["doctocat"]));
         assert!(handles(&HashSet::from(["doctocat".to_string()])).is_empty());
+    }
+
+    const GITLAB: &str = "* @everyone
+[Backend] @backend-team
+app/
+app/billing/ @billing @alice
+^[Docs][2] @docs/writers
+*.md
+[Security]
+app/auth/ @security
+";
+
+    #[test]
+    fn gitlab_sections_union_owners() {
+        let o = CodeOwners::parse_flavored(GITLAB, "CODEOWNERS", CodeOwnersFlavor::GitLab);
+        assert!(o.invalid_lines.is_empty());
+        assert_eq!(o.flavor, CodeOwnersFlavor::GitLab);
+        assert_eq!(o.owners_for("app/billing/pay.rb"), list(&["@everyone", "@billing", "@alice"]));
+        assert_eq!(o.owners_for("app/models/user.rb"), list(&["@everyone", "@backend-team"]));
+        assert_eq!(o.owners_for("app/README.md"), list(&["@everyone", "@backend-team", "@docs/writers"]));
+        assert_eq!(o.owners_for("app/auth/login.rb"), list(&["@everyone", "@backend-team", "@security"]));
+        assert_eq!(o.owners_for("Gemfile"), list(&["@everyone"]));
+        let deduped = CodeOwners::parse_flavored("* @Alice\n[Extra]\n* @alice @bob\n", "CODEOWNERS", CodeOwnersFlavor::GitLab);
+        assert_eq!(deduped.owners_for("x"), list(&["@Alice", "@bob"]));
+        let github = CodeOwners::parse(GITLAB, "CODEOWNERS");
+        assert!(!github.invalid_lines.is_empty());
+        assert_eq!(github.flavor, CodeOwnersFlavor::GitHub);
+    }
+
+    #[test]
+    fn gitlab_section_headers() {
+        assert_eq!(CodeOwners::section_header("^[Docs][2] @docs/writers"), Some(list(&["@docs/writers"])));
+        assert_eq!(CodeOwners::section_header("[Security]"), Some(vec![]));
+        assert_eq!(CodeOwners::section_header("  [Ops] @ops ops@example.com"), Some(list(&["@ops", "ops@example.com"])));
+        assert_eq!(CodeOwners::section_header("app/ @x"), None);
+        assert_eq!(CodeOwners::section_header("[]"), None);
+        assert_eq!(CodeOwners::section_header("[abc].md @nobody"), None);
+    }
+
+    #[test]
+    fn owners_of_file() {
+        let pr: PullRequestDetail = serde_json::from_value(json!({
+            "id": "PR_1", "number": 7, "title": "T", "url": "u", "state": "OPEN", "isDraft": false, "merged": false, "mergeable": "MERGEABLE",
+            "body": "", "bodyHTML": "", "createdAt": "2026-01-01T00:00:00Z", "headRefName": "f", "baseRefName": "main", "headRefOid": "h",
+            "additions": 1, "deletions": 1, "changedFiles": 2, "viewerCanUpdate": true, "viewerDidAuthor": false,
+            "labels": { "nodes": [] }, "assignees": { "nodes": [] }, "reviewRequests": { "nodes": [] },
+            "latestOpinionatedReviews": { "nodes": [{ "state": "APPROVED", "author": { "login": "alice", "avatarUrl": "" } }] },
+            "lastCommit": { "nodes": [] }, "allCommits": { "nodes": [] }, "timelineItems": { "nodes": [] }, "reviewThreads": { "nodes": [] }
+        }))
+        .unwrap();
+        let s = OwnershipSummary::build(&CodeOwners::parse("app/ @alice @bob", "CODEOWNERS"), &list(&["app/a.rb", "README.md"]), &pr);
+        let owners = s.owners_of("app/a.rb").unwrap();
+        assert_eq!(owners.iter().map(|o| o.handle.as_str()).collect::<Vec<_>>(), vec!["alice", "bob"]);
+        assert_eq!(owners[0].status, OwnerStatus::Approved);
+        assert!(s.owners_of("README.md").is_none());
+        assert_eq!(s.unowned, list(&["README.md"]));
     }
 }

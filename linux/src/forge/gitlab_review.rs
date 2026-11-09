@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{label, lock, FlexLabel, ForgeClient, Query};
+use crate::api::code_owners::{CodeOwners, CodeOwnersFlavor, GITLAB_CODE_OWNERS_PATHS};
 use crate::api::models::{CheckContext, CheckOutcome, CommitDetailRest, CommitInner, CommitPerson, CommitStats, Date, ItemRef, MergeQueueEntry, PendingComment, PrDetailResponse, PrFile, PrLight, PullRequestDetail};
 use crate::api::{ApiError, ApiResult};
 use crate::diff::{DiffFile, LineKind};
@@ -323,6 +324,15 @@ pub fn clean_trace(raw: &str) -> String {
         })
         .collect();
     crate::ci_fix::clean_text(&lines.join("\n"))
+}
+
+pub async fn raw_file(c: &ForgeClient, project: &str, path: &str, rev: &str) -> ApiResult<Option<String>> {
+    let target = format!("{}/repository/files/{}/raw", project_path(project), utf8_percent_encode(path, PATH_SEGMENT));
+    match c.http().text(&target, &[("ref", rev.to_string())]).await {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.status == 404 => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 pub async fn train_car(c: &ForgeClient, project: &str, iid: i64) -> ApiResult<TrainCar> {
@@ -880,6 +890,16 @@ impl GitLabReview {
 
     pub fn can_show_log(check: &CheckContext) -> bool {
         check.typename == "GitLabJob" && check.database_id.is_some() && !matches!(check.outcome(), CheckOutcome::Pending | CheckOutcome::Skipped)
+    }
+
+    pub async fn code_owners(&self, r: &ItemRef, base: &str) -> ApiResult<Option<CodeOwners>> {
+        let project = r.repo.full();
+        for path in GITLAB_CODE_OWNERS_PATHS {
+            if let Some(text) = raw_file(&self.client, &project, path, base).await? {
+                return Ok(Some(CodeOwners::parse_flavored(&text, path, CodeOwnersFlavor::GitLab)));
+            }
+        }
+        Ok(None)
     }
 
     pub async fn job_log(&self, r: &ItemRef, check: &CheckContext) -> ApiResult<String> {

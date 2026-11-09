@@ -286,7 +286,11 @@ impl PrModel {
         let pr = self.pr.borrow();
         let owners = self.code_owners.borrow();
         match (pr.as_ref(), &*owners) {
-            (Some(pr), CodeOwnersStatus::Loaded(o)) => Some(OwnershipSummary::build(o, &self.changed_paths.borrow(), pr)),
+            (Some(pr), CodeOwnersStatus::Loaded(o)) => {
+                let changed = self.changed_paths.borrow();
+                let paths: Vec<String> = if changed.is_empty() { self.files.borrow().iter().map(|f| f.id.clone()).collect() } else { changed.clone() };
+                Some(OwnershipSummary::build(o, &paths, pr))
+            }
             _ => None,
         }
     }
@@ -361,8 +365,7 @@ impl PrModel {
     }
 
     fn load_code_owners(self: &Rc<Self>, base_oid: Option<String>) {
-        let Some(base) = base_oid else { return };
-        let Some(api) = self.api.clone() else { return };
+        let Some(base) = base_oid.filter(|b| !b.is_empty()) else { return };
         let key = format!("{}|{base}", self.r.repo.full());
         if self.owners_key.borrow().as_deref() == Some(key.as_str()) {
             return;
@@ -370,8 +373,9 @@ impl PrModel {
         *self.owners_key.borrow_mut() = Some(key.clone());
         let me = self.clone();
         crate::rt::spawn_local(async move {
-            let repo = me.r.repo.clone();
-            let res = crate::rt::run(async move { api.code_owners(&repo, &base).await }).await;
+            let backend = me.backend.clone();
+            let r = me.r.clone();
+            let res = crate::rt::run(async move { backend.code_owners(&r, &base).await }).await;
             if me.owners_key.borrow().as_deref() != Some(key.as_str()) {
                 return;
             }
@@ -759,6 +763,9 @@ impl PrModel {
             Err(e) => *self.files_error.borrow_mut() = Some(e.message),
         }
         self.emit(Change::Files);
+        if self.changed_paths.borrow().is_empty() && matches!(*self.code_owners.borrow(), CodeOwnersStatus::Loaded(_)) {
+            self.emit(Change::Rules);
+        }
     }
 
     pub fn last_reviewed(&self) -> Option<ReviewedCommit> {
