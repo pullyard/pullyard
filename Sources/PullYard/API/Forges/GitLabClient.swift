@@ -118,7 +118,8 @@ final class GitLabClient: ForgeClient {
     func capabilities() async -> ForgeCapabilities {
         var filters: [PRFilter] = [.reviewRequested, .mine, .assigned, .mentioned]
         if await approvalFilterAvailable() { filters.append(.reviewed) }
-        return ForgeCapabilities(pullFilters: filters, issueFilters: IssueFilter.allCases, inboxTitle: "To-Do List", repositories: true)
+        return ForgeCapabilities(pullFilters: filters, issueFilters: IssueFilter.allCases, inboxTitle: "To-Do List", repositories: true,
+                                 pullRequestReview: .supported, mergeRequirements: .supported)
     }
 
     private var listQuery: [URLQueryItem] {

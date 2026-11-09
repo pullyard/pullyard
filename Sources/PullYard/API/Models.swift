@@ -463,6 +463,7 @@ struct PullRequestDetail: Decodable {
     var viewerCanApprove: Bool?
     var viewerApproved: Bool?
     var mergeBlocker: String?
+    var forgeMerge: ForgeMergeInfo?
 
     var visualState: VisualState { .pr(state: state, draft: isDraft) }
     var rollup: StatusRollup? { lastCommit.nodes.first?.commit.statusCheckRollup }
@@ -852,4 +853,10 @@ struct NotificationThread: Codable, Identifiable {
         default: return "https://github.com/\(repository.fullName)"
         }
     }
+}
+
+struct ForgeMergeInfo: Decodable, Equatable {
+    let status: String
+    let approvalsRequired: Int?
+    let approvalsLeft: Int?
 }

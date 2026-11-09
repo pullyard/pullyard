@@ -60,7 +60,7 @@ enum GitLabReviewMapper {
         }
     }
 
-    private static func legacyStatus(_ status: String?) -> String {
+    static func legacyStatus(_ status: String?) -> String {
         switch status {
         case "can_be_merged": return "mergeable"
         case "cannot_be_merged": return "conflict"
@@ -207,7 +207,8 @@ enum GitLabReviewMapper {
             reviewThreads: Nodes(nodes: threads),
             viewerCanApprove: s.approvals?.userCanApprove,
             viewerApproved: s.approvals?.userHasApproved,
-            mergeBlocker: merge.blocker
+            mergeBlocker: merge.blocker,
+            forgeMerge: ForgeMergeInfo(status: mr.detailedMergeStatus ?? legacyStatus(mr.mergeStatus), approvalsRequired: s.approvals?.approvalsRequired, approvalsLeft: s.approvals?.approvalsLeft)
         )
     }
 
