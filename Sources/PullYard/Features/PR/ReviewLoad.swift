@@ -22,10 +22,10 @@ enum ReviewLoad {
 
     struct Hit: Decodable { let issueCount: Int }
 
-    static func parse(_ data: [String: Hit], aliases: [String: String]) -> [String: Int] {
+    static func parse(_ data: [String: Hit?], aliases: [String: String]) -> [String: Int] {
         var out: [String: Int] = [:]
         for (alias, handle) in aliases {
-            if let n = data[alias]?.issueCount { out[handle.lowercased()] = n }
+            if let hit = data[alias], let n = hit?.issueCount { out[handle.lowercased()] = n }
         }
         return out
     }
@@ -58,7 +58,7 @@ final class ReviewLoadStore {
             let chunk = Array(missing[start..<min(start + ReviewLoad.maxPerQuery, missing.count)])
             start += ReviewLoad.maxPerQuery
             let (query, aliases) = ReviewLoad.query(chunk)
-            guard let data: [String: ReviewLoad.Hit] = try? await api.graphQL(query) else { continue }
+            guard let data: [String: ReviewLoad.Hit?] = try? await api.graphQL(query) else { continue }
             for (handle, n) in ReviewLoad.parse(data, aliases: aliases) {
                 cache[handle] = (n, Date())
                 result[handle] = n
