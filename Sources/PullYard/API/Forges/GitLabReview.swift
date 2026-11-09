@@ -274,6 +274,12 @@ extension GitLabClient {
         try await http.post(mrPath(project, iid) + "/merge", method: "PUT", json: json)
     }
 
+    func addToTrain(_ project: String, iid: Int, sha: String?) async throws {
+        var json: [String: Any] = ["when_pipeline_succeeds": true]
+        if let sha { json["sha"] = sha }
+        try await http.post("\(Self.projectPath(project))/merge_trains/merge_requests/\(iid)", json: json)
+    }
+
     func cancelAutoMerge(_ project: String, iid: Int) async throws {
         try await http.post(mrPath(project, iid) + "/cancel_merge_when_pipeline_succeeds")
     }
