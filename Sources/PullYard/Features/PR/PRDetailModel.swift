@@ -118,6 +118,7 @@ final class PRDetailModel {
     @ObservationIgnored private var interdiffKey: String?
     var html = ""
     var scrollToBottomToken = 0
+    var threadFocusToken = 0
     var conflicts: ConflictState?
     var showResolveConflicts = false
     @ObservationIgnored private var conflictsKey: String?
@@ -222,6 +223,19 @@ final class PRDetailModel {
         let key = StackNotesFile.key(account: cacheAccount, host: api.host, repo: ref.repo.full, number: ref.number)
         let snapshot = PRContextPublisher.snapshot(ref: ref, pr: pr, requirements: requirements, ownership: ownership, files: changedPaths, reviewed: lastReviewed)
         Task.detached(priority: .utility) { try? PRContextStore.write(snapshot, key: key) }
+    }
+
+    func nextUnresolvedThread() {
+        tab = .conversation
+        threadFocusToken += 1
+    }
+
+    var risks: [RiskLabel] {
+        guard let pr else { return [] }
+        let list: [RiskFile] = filesLoaded && !files.isEmpty
+            ? files.map { RiskFile(path: $0.id, additions: $0.additions, deletions: $0.deletions) }
+            : changedPaths.map { RiskFile(path: $0, additions: 0, deletions: 0) }
+        return PRRisk.labels(files: list, additions: pr.additions, deletions: pr.deletions, changedFiles: pr.changedFiles, unowned: ownership?.unowned)
     }
 
     var requirements: [MergeRequirement] {

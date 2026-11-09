@@ -82,7 +82,7 @@ enum ConversationHTML {
         if !t.path.isEmpty { actions += "<button class=\"ghost\" data-n=\"\(nonce)\" data-act=\"file\" data-id=\"\(esc(t.path))\">\("View in files")</button>" }
         let title = t.path.isEmpty ? "Thread" : esc(t.path) + (line.map { "<span class=\"ln\">:\($0)</span>" } ?? "")
         return """
-        <details class="thread"\(t.isResolved ? "" : " open")><summary class="th">\(title)\(tags)</summary>
+        <details class="thread"\(t.isResolved ? "" : " open data-unresolved")><summary class="th">\(title)\(tags)</summary>
         \(hunk(t.comments.nodes.first?.diffHunk))\(comments)<div class="actions">\(actions)</div></details>
         """
     }
@@ -314,7 +314,8 @@ enum ConversationHTML {
     .event .ic.ok{background:var(--green);color:#fff;border-color:transparent}.event .ic.bad{background:var(--red);color:#fff;border-color:transparent}.event .ic.merged{background:var(--purple);color:#fff;border-color:transparent}
     .event .t{margin-left:2px}
     .label{display:inline-block;padding:0 7px;border-radius:10px;border:1px solid;font-size:11px;font-weight:500;color:var(--fg)}
-    .thread{margin:10px 12px;border:1px solid var(--border);border-radius:9px;overflow:hidden;background:var(--sub)}
+    .thread{margin:10px 12px;border:1px solid var(--border);border-radius:9px;overflow:hidden;background:var(--sub);scroll-margin-top:12px;transition:box-shadow .3s}
+    .thread.focus{box-shadow:0 0 0 2px var(--link)}
     .thread>summary{padding:6px 10px;font:12px ui-monospace,monospace;cursor:pointer;display:flex;gap:8px;align-items:center;list-style:none}
     .thread>summary::-webkit-details-marker{display:none}
     .thread .ln{color:var(--muted);margin-left:-6px}
