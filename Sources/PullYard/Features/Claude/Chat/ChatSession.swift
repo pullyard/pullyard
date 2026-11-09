@@ -651,7 +651,7 @@ final class ChatSession {
                 tool.backgrounded = true
             }
             if !tool.backgrounded { tool.finishedAt = Date() }
-            if tool.name == "Bash", (tool.input["command"] as? String)?.contains("gh pr create") == true,
+            if tool.name == "Bash", let command = tool.input["command"] as? String, AgentShip.createCommands.contains(where: { command.contains($0) }),
                let url = tool.resultText.flatMap(AgentShip.pullRequestURL) {
                 createdPR = url
             }

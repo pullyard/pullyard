@@ -1062,6 +1062,8 @@ struct BranchPRPanel: View {
         Group {
             if let selected {
                 InspectorPRDetail(tab: tab, ref: selected) { self.selected = nil }
+            } else if repo == nil, let remote = tab.git.remote, remote.kind != .github {
+                ForgeShipPanel(tab: tab, remote: remote)
             } else if repo == nil {
                 VStack(spacing: 8) {
                     Image(systemName: "link.badge.plus").font(.syTitle2).foregroundStyle(Color.syDim)
@@ -1092,7 +1094,7 @@ struct BranchPRPanel: View {
                         if let repo, let b = tab.git.branch, b != "HEAD" {
                             HStack(spacing: 8) {
                                 Button("Open PR with Agent") {
-                                    app.claude.send(AgentShip.openPRPrompt(branch: b, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead), to: tab)
+                                    app.claude.send(AgentShip.openPRPrompt(branch: b, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead, remote: tab.git.remote), to: tab)
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .tint(.syAgentAccent)
@@ -1430,9 +1432,9 @@ struct AgentBranchMenu: View {
                         Button("Commit and Push with Agent") { app.claude.send(AgentShip.commitPrompt(pr: pr.number), to: tab) }
                             .disabled(tab.state == .working)
                     }
-                } else if branch != "HEAD", git.repo != nil {
-                    Button("Open Pull Request with Agent") {
-                        app.claude.send(AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: !git.changes.isEmpty, ahead: git.ahead), to: tab)
+                } else if branch != "HEAD", let remote = git.remote {
+                    Button(remote.kind == .gitlab ? "Open Merge Request with Agent" : "Open Pull Request with Agent") {
+                        app.claude.send(AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: !git.changes.isEmpty, ahead: git.ahead, remote: remote), to: tab)
                     }
                     .disabled(tab.state == .working)
                 }
