@@ -1126,6 +1126,10 @@ pub fn merge_status(pr: &PullRequestDetail, requirements: &[MergeRequirement]) -
     if pr.is_draft {
         return s("sy-pr-draft-symbolic", "slate", "Draft — merging is unavailable".into(), false);
     }
+    if let Some(entry) = &pr.merge_queue_entry {
+        let text = if pr.forge_merge.is_none() { entry.summary() } else { merge_readiness::train_wording(&entry.summary()) };
+        return if entry.failing() { s("sy-attention-symbolic", "red", text, false) } else { s("sy-archive-symbolic", "green", text, false) };
+    }
     if pr.mergeable == "CONFLICTING" || pr.merge_state_status.as_deref() == Some("DIRTY") {
         return s("sy-attention-symbolic", "red", format!("Has conflicts with {}", pr.base_ref_name), false);
     }

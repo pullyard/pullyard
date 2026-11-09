@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{label, lock, FlexLabel, ForgeClient, Query};
-use crate::api::models::{CheckContext, CheckOutcome, CommitDetailRest, CommitInner, CommitPerson, CommitStats, Date, ItemRef, PendingComment, PrDetailResponse, PrFile, PrLight, PullRequestDetail};
+use crate::api::models::{CheckContext, CheckOutcome, CommitDetailRest, CommitInner, CommitPerson, CommitStats, Date, ItemRef, MergeQueueEntry, PendingComment, PrDetailResponse, PrFile, PrLight, PullRequestDetail};
 use crate::api::{ApiError, ApiResult};
 use crate::diff::{DiffFile, LineKind};
 use crate::markdown_html;
@@ -236,6 +236,28 @@ struct Changes {
 pub struct Project {
     #[serde(default)]
     pub squash_option: Option<String>,
+    #[serde(default)]
+    pub merge_trains_enabled: Option<bool>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct TrainCar {
+    pub status: String,
+    #[serde(default)]
+    pub pipeline: Option<Pipeline>,
+}
+
+pub fn train_entry(car: Option<&TrainCar>) -> Option<MergeQueueEntry> {
+    let car = car?;
+    let running = matches!(car.pipeline.as_ref().map(|p| p.status.as_str()), Some("created" | "pending" | "running" | "waiting_for_resource" | "preparing"));
+    let state = match car.status.as_str() {
+        "merging" => "MERGEABLE",
+        "stale" => "AWAITING_CHECKS",
+        "idle" | "fresh" if running => "AWAITING_CHECKS",
+        "idle" | "fresh" => "QUEUED",
+        _ => return None,
+    };
+    Some(MergeQueueEntry { state: Some(state.into()), ..Default::default() })
 }
 
 const PATH_SEGMENT: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'.').remove(b'_').remove(b'~');
@@ -301,6 +323,10 @@ pub fn clean_trace(raw: &str) -> String {
         })
         .collect();
     crate::ci_fix::clean_text(&lines.join("\n"))
+}
+
+pub async fn train_car(c: &ForgeClient, project: &str, iid: i64) -> ApiResult<TrainCar> {
+    c.http().get(&format!("{}/merge_trains/merge_requests/{iid}", project_path(project)), &[]).await
 }
 
 pub async fn project(c: &ForgeClient, project: &str) -> ApiResult<Project> {
@@ -370,6 +396,7 @@ pub struct Snapshot {
     pub jobs: Vec<Job>,
     pub settings: Option<Project>,
     pub viewer: String,
+    pub train: Option<TrainCar>,
 }
 
 pub struct MergeState {
@@ -691,6 +718,8 @@ pub fn detail_json(s: &Snapshot) -> Value {
             "approvalsLeft": s.approvals.as_ref().and_then(|a| a.approvals_left),
         },
     });
+    v["isMergeQueueEnabled"] = json!(s.settings.as_ref().and_then(|p| p.merge_trains_enabled));
+    v["mergeQueueEntry"] = json!(train_entry(s.train.as_ref()).map(|e| json!({ "position": e.position, "state": e.state })));
     if let (Some(obj), Value::Object(light)) = (v.as_object_mut(), light_json(mr, s.approvals.as_ref())) {
         obj.extend(light);
     }
@@ -834,7 +863,8 @@ impl GitLabReview {
         if let Some(refs) = mr.diff_refs.clone() {
             lock(&self.refs).insert(r.clone(), refs);
         }
-        let snapshot = Snapshot { project: name, mr, approvals: approvals.ok(), discussions: discussions?, commits: commits?, jobs, settings, viewer: viewer.unwrap_or_default() };
+        let train = if settings.as_ref().and_then(|p| p.merge_trains_enabled) == Some(true) && mr.state == "opened" { train_car(c, &name, r.number).await.ok() } else { None };
+        let snapshot = Snapshot { project: name, mr, approvals: approvals.ok(), discussions: discussions?, commits: commits?, jobs, settings, viewer: viewer.unwrap_or_default(), train };
         response(&snapshot)
     }
 

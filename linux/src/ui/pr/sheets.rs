@@ -146,6 +146,20 @@ pub fn merge(model: Rc<PrModel>) {
     let default = MergeMethod::from_key(repo.as_ref().map(|r| r.viewer_default_merge_method.as_str()).unwrap_or("MERGE")).unwrap_or(MergeMethod::Merge);
     let initial = allowed.iter().position(|m| *m == default).unwrap_or(0);
     method.set_selected(initial as u32);
+    if f.provider.is_github() && pr.is_merge_queue_enabled == Some(true) && pr.merge_queue_entry.is_none() && pr.is_in_merge_queue != Some(true) {
+        let note = hbox(6);
+        note.append(&icon("sy-archive-symbolic", 14));
+        let text = wrap_label(&format!("{} uses a merge queue. Merging here may be rejected; add it to the queue on GitHub instead.", pr.base_ref_name), &["caption", "sy-muted"]);
+        text.set_hexpand(true);
+        text.set_xalign(0.0);
+        note.append(&text);
+        let open = button("Open on GitHub");
+        open.set_valign(gtk::Align::Center);
+        let url = pr.url.clone();
+        open.connect_clicked(move |_| util::open_url(&url));
+        note.append(&open);
+        sheet.body.append(&note);
+    }
     let row = hbox(8);
     row.append(&label_with("Method", &["sy-muted"]));
     row.append(&method);

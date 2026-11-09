@@ -778,6 +778,37 @@ pub struct AutoMergeRequest {
     pub merge_method: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeQueueEntry {
+    #[serde(default)]
+    pub position: Option<i64>,
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub enqueued_at: Option<Date>,
+    #[serde(default)]
+    pub estimated_time_to_merge: Option<i64>,
+}
+
+impl MergeQueueEntry {
+    pub fn summary(&self) -> String {
+        let place = self.position.map(|p| if p <= 1 { "next in line".to_string() } else { format!("#{p} in line") });
+        let eta = self.estimated_time_to_merge.filter(|s| *s > 0).map(|s| format!("about {} min", ((s as f64) / 60.0).round().max(1.0) as i64));
+        match self.state.as_deref() {
+            Some("AWAITING_CHECKS") => format!("Merge queue: waiting for checks{}", place.map(|p| format!(" · {p}")).unwrap_or_default()),
+            Some("MERGEABLE") => "Merge queue: merging next".into(),
+            Some("UNMERGEABLE") => "Merge queue: can’t be merged and will be removed".into(),
+            Some("LOCKED") => "Merge queue: locked".into(),
+            _ => format!("Queued to merge{}", [place, eta].into_iter().flatten().map(|p| format!(" · {p}")).collect::<String>()),
+        }
+    }
+
+    pub fn failing(&self) -> bool {
+        self.state.as_deref() == Some("UNMERGEABLE")
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct BaseRef {
     #[serde(default)]
@@ -847,6 +878,12 @@ pub struct PullRequestDetail {
     pub merge_blocker: Option<String>,
     #[serde(default)]
     pub forge_merge: Option<ForgeMergeInfo>,
+    #[serde(default)]
+    pub is_merge_queue_enabled: Option<bool>,
+    #[serde(default)]
+    pub is_in_merge_queue: Option<bool>,
+    #[serde(default)]
+    pub merge_queue_entry: Option<MergeQueueEntry>,
     #[serde(flatten)]
     pub light: PrLight,
 }
@@ -964,9 +1001,19 @@ pub struct PrLight {
     #[serde(default)]
     pub light_threads: Option<LightThreads>,
     #[serde(default)]
+    pub light_queue: Option<LightQueue>,
+    #[serde(default)]
     pub light_commits: Option<Nodes<LightCommitNode>>,
     #[serde(default)]
     pub light_fingerprint: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
+pub struct LightQueue {
+    #[serde(default)]
+    pub position: Option<i64>,
+    #[serde(default)]
+    pub state: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default, PartialEq)]

@@ -154,6 +154,7 @@ pub enum RequirementKind {
     Checks,
     OptionalChecks,
     Conversations,
+    MergeQueue,
     Rules,
     OtherRules,
 }
@@ -265,6 +266,13 @@ pub fn requirements(pr: &PullRequestDetail, status: &RulesStatus) -> Vec<MergeRe
     check_requirements(pr, rules, &mut out);
     conversation_requirement(pr, rules, loading, &mut out);
 
+    if let Some(entry) = &pr.merge_queue_entry {
+        let failing = entry.failing();
+        out.push(req(K::MergeQueue, if failing { S::Missing } else { S::Pending }, entry.summary(), failing.then(|| "Fix the failing checks or conflicts and add it again".into()), None));
+    } else if pr.is_merge_queue_enabled == Some(true) {
+        out.push(req(K::MergeQueue, S::Advisory, "Merges through a merge queue", Some("Add it to the queue on GitHub with “Merge when ready”".into()), None));
+    }
+
     if *status == RulesStatus::Failed {
         out.push(req(K::Rules, S::Unknown, "Branch rules couldn’t be read", Some("Showing what GitHub reports for this pull request".into()), None));
     }
@@ -272,6 +280,10 @@ pub fn requirements(pr: &PullRequestDetail, status: &RulesStatus) -> Vec<MergeRe
         out.push(req(K::OtherRules, S::Unknown, "Blocked by a rule PullYard can’t see", Some("For example deployments, signed commits or a merge queue. Check the pull request on GitHub".into()), None));
     }
     out
+}
+
+pub fn train_wording(summary: &str) -> String {
+    summary.replace("Merge queue", "Merge train").replace("Queued to merge", "In the merge train")
 }
 
 fn more_approvals(left: i64) -> String {
@@ -404,6 +416,12 @@ pub fn gitlab(pr: &PullRequestDetail, merge: &ForgeMergeInfo) -> Vec<MergeRequir
         out.push(req(K::Conversations, S::Missing, title, Some("The project requires resolving them".into()), Some(A::ShowConversation)));
     } else if open > 0 {
         out.push(req(K::Conversations, S::Advisory, threads, Some("Not required to merge".into()), Some(A::ShowConversation)));
+    }
+
+    if let Some(entry) = &pr.merge_queue_entry {
+        out.push(req(K::MergeQueue, S::Pending, train_wording(&entry.summary()), None, None));
+    } else if pr.is_merge_queue_enabled == Some(true) {
+        out.push(req(K::MergeQueue, S::Advisory, "Merges through a merge train", Some("Merging starts or joins the train".into()), None));
     }
 
     const COVERED: [&str; 15] = [
@@ -765,5 +783,62 @@ mod tests {
         let legacy = super::super::queries::pull_request_legacy();
         assert!(q.contains("isRequired(pullRequestNumber: $number)"));
         assert!(!legacy.contains("isRequired") && !legacy.contains("asCodeOwner") && !legacy.contains("combinedSlug"));
+    }
+
+    #[test]
+    fn merge_queue_status() {
+        use super::super::models::MergeQueueEntry;
+        use crate::ui::pr::merge_status;
+        let entry = |position: i64, state: &str, eta: Option<i64>| MergeQueueEntry { position: Some(position), state: Some(state.into()), estimated_time_to_merge: eta, ..Default::default() };
+        assert_eq!(entry(3, "QUEUED", Some(290)).summary(), "Queued to merge · #3 in line · about 5 min");
+        assert_eq!(entry(1, "QUEUED", None).summary(), "Queued to merge · next in line");
+        assert_eq!(entry(2, "AWAITING_CHECKS", None).summary(), "Merge queue: waiting for checks · #2 in line");
+        assert!(entry(1, "UNMERGEABLE", None).failing());
+
+        let enabled = pr(json!({ "isMergeQueueEnabled": true, "mergeStateStatus": "CLEAN" }));
+        let note = find(&requirements(&enabled, &RulesStatus::Loading), RequirementKind::MergeQueue).clone();
+        assert_eq!(note.state, RequirementState::Advisory);
+        assert_eq!(note.title, "Merges through a merge queue");
+
+        let queued = pr(json!({ "isMergeQueueEnabled": true, "isInMergeQueue": true, "mergeQueueEntry": { "position": 2, "state": "QUEUED", "estimatedTimeToMerge": 600 } }));
+        let list = requirements(&queued, &RulesStatus::Loading);
+        assert_eq!(find(&list, RequirementKind::MergeQueue).state, RequirementState::Pending);
+        let status = merge_status(&queued, &list);
+        assert_eq!(status.text, "Queued to merge · #2 in line · about 10 min");
+        assert!(!status.ready);
+
+        let removed = pr(json!({ "mergeQueueEntry": { "position": 1, "state": "UNMERGEABLE" } }));
+        let list = requirements(&removed, &RulesStatus::Loading);
+        assert_eq!(find(&list, RequirementKind::MergeQueue).state, RequirementState::Missing);
+        assert_eq!(merge_status(&removed, &list).color, "red");
+        assert!(!requirements(&pr(json!({})), &RulesStatus::Loading).iter().any(|r| r.kind == RequirementKind::MergeQueue));
+    }
+
+    #[test]
+    fn legacy_query_drops_merge_queue_fields() {
+        assert!(super::super::queries::pull_request().contains("mergeQueueEntry { position state enqueuedAt estimatedTimeToMerge }"));
+        let legacy = super::super::queries::pull_request_legacy();
+        assert!(!legacy.contains("mergeQueue"));
+        assert!(!legacy.contains("isInMergeQueue"));
+        assert!(super::super::queries::pull_request_light().contains("mergeQueueEntry { position state }"));
+        assert!(!super::super::queries::pull_request_light_legacy().contains("mergeQueue"));
+    }
+
+    #[test]
+    fn gitlab_merge_train() {
+        use super::super::models::MergeQueueEntry;
+        use crate::forge::gitlab_review::{train_entry, TrainCar};
+        assert_eq!(train_entry(None), None);
+        let car = |raw: &str| serde_json::from_str::<TrainCar>(raw).unwrap();
+        assert_eq!(train_entry(Some(&car(r#"{"status":"fresh","pipeline":{"id":1,"status":"running"}}"#))).and_then(|e| e.state).as_deref(), Some("AWAITING_CHECKS"));
+        assert_eq!(train_entry(Some(&car(r#"{"status":"merging"}"#))).and_then(|e| e.state).as_deref(), Some("MERGEABLE"));
+        assert_eq!(train_entry(Some(&car(r#"{"status":"merged"}"#))), None);
+
+        let mut p = pr(json!({}));
+        p.forge_merge = Some(ForgeMergeInfo { status: "mergeable".into(), ..Default::default() });
+        p.is_merge_queue_enabled = Some(true);
+        assert_eq!(find(&requirements(&p, &RulesStatus::Loading), RequirementKind::MergeQueue).title, "Merges through a merge train");
+        p.merge_queue_entry = Some(MergeQueueEntry { state: Some("QUEUED".into()), ..Default::default() });
+        assert_eq!(find(&requirements(&p, &RulesStatus::Loading), RequirementKind::MergeQueue).title, "In the merge train");
     }
 }

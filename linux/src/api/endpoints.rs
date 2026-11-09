@@ -260,7 +260,11 @@ impl GitHubApi {
         struct R {
             repository: Option<Repo>,
         }
-        let r: R = self.graphql("pullRequestLight", &q::pull_request_light(), json!({ "owner": r.repo.owner, "name": r.repo.name, "number": r.number }), false).await?;
+        let vars = json!({ "owner": r.repo.owner, "name": r.repo.name, "number": r.number });
+        let r: R = match self.graphql("pullRequestLight", &q::pull_request_light(), vars.clone(), false).await {
+            Err(e) if e.kind == super::ErrorKind::Schema => self.graphql("pullRequestLight", &q::pull_request_light_legacy(), vars, false).await?,
+            other => other?,
+        };
         Ok(r.repository.and_then(|r| r.pull_request))
     }
 
