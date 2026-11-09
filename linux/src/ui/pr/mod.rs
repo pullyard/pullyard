@@ -864,6 +864,16 @@ impl PrPage {
             return;
         }
         self.ci_session.set(fix_claude::ci_session(&self.model.r).map(|(_, s)| s));
+        let w = Rc::downgrade(self);
+        if let Some(b) = sheets::close_loop_banner(&self.model, pr, move || {
+            let Some(me) = w.upgrade() else { return };
+            let pr = me.model.pr.borrow().clone();
+            if let Some(pr) = pr {
+                me.render_banners(&pr);
+            }
+        }) {
+            self.banners.append(&b);
+        }
         let m = self.model.clone();
         if let Some(b) = fix_claude::ci_banner(pr, &self.model.r, move || fix_claude::show_ci(m.clone(), None)) {
             self.banners.append(&b);
@@ -913,7 +923,7 @@ impl PrPage {
             pr.head_ref.is_some(),
             m.pending.borrow().len(),
             pr.head_ref_name
-        ) + &format!("|{:?}|{:?}", pr.viewer_can_approve, pr.viewer_approved);
+        ) + &format!("|{}", pr.review_threads.nodes.iter().any(|t| !t.is_resolved && t.viewer_can_reply)) + &format!("|{:?}|{:?}", pr.viewer_can_approve, pr.viewer_approved);
         if *self.actions_key.borrow() == key {
             return;
         }
@@ -945,6 +955,13 @@ impl PrPage {
                             mm.submit_review("APPROVE".into(), String::new()).await;
                         });
                     });
+                });
+            }
+            if pr.review_threads.nodes.iter().any(|t| !t.is_resolved && t.viewer_can_reply) {
+                let mm = m.clone();
+                menu.item("Reply and resolve threads…", move || {
+                    let pre = app::try_get().and_then(|a| a.claude.review_fixes.borrow().get(&mm.r).map(|l| l.thread_ids.clone())).unwrap_or_default();
+                    sheets::close_loop(mm.clone(), pre);
                 });
             }
             if features.revoke_approval && pr.viewer_approved == Some(true) {

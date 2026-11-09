@@ -1001,6 +1001,35 @@ impl PrModel {
         self.run(true, move |b| async move { b.set_resolved(&r, &thread_id, resolved).await }).await
     }
 
+    pub async fn close_loop(self: Rc<Self>, threads: Vec<ReviewThread>, body: String, resolve: bool) -> HashMap<String, String> {
+        self.busy.set(true);
+        self.emit(Change::Busy);
+        let backend = self.backend.clone();
+        let r = self.r.clone();
+        let failures = crate::rt::run(async move {
+            let mut failures = HashMap::new();
+            for t in threads {
+                let res = async {
+                    backend.reply(&r, &t.id, &body).await?;
+                    if resolve && t.viewer_can_resolve {
+                        backend.set_resolved(&r, &t.id, true).await?;
+                    }
+                    Ok::<(), ApiError>(())
+                }
+                .await;
+                if let Err(e) = res {
+                    failures.insert(t.id.clone(), e.message);
+                }
+            }
+            failures
+        })
+        .await;
+        self.busy.set(false);
+        self.emit(Change::Busy);
+        self.force_full("mutation");
+        failures
+    }
+
     fn invalidate_stack(&self) {
         if let Some(api) = &self.api {
             stack::store::invalidate(api, &self.r.repo);
