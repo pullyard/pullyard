@@ -53,7 +53,7 @@ struct ChatView: View {
                     .frame(maxWidth: .infinity)
                     .background(ChatScrollObserver(follow: follow))
                 }
-                .scrollPosition(id: topAnchor)
+                .modifier(VisibleTopTracker(follow: follow))
                 .background {
                     GeometryReader { g in
                         Color.clear.preference(key: ChatViewportKey.self, value: g.size.height)
@@ -114,13 +114,6 @@ struct ChatView: View {
         .background(Theme.isBrand ? Color.syPanel : Color(nsColor: .textBackgroundColor).opacity(0.35))
     }
 
-    private var topAnchor: Binding<String?> {
-        Binding(get: { follow.stick ? nil : follow.topID }, set: { id in
-            follow.topID = id
-            if !follow.resizing { follow.keptTopID = id }
-        })
-    }
-
     private func unlessPinned(_ animation: Animation?) -> Animation? {
         follow.stick ? nil : animation
     }
@@ -151,6 +144,21 @@ struct ChatView: View {
     private func scrollDown(_ proxy: ScrollViewProxy) {
         guard follow.stick else { return }
         proxy.scrollTo("bottom", anchor: .bottom)
+    }
+}
+
+private struct VisibleTopTracker: ViewModifier {
+    let follow: ChatFollow
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.onScrollTargetVisibilityChange(idType: String.self, threshold: 0.01) { ids in
+                follow.topID = ids.first
+                if !follow.resizing { follow.keptTopID = ids.first }
+            }
+        } else {
+            content
+        }
     }
 }
 
