@@ -116,6 +116,10 @@
       e.preventDefault();
       send({ type: "key", id: "blame" });
     }
+    if (e.ctrlKey && e.altKey && !e.shiftKey && !altGraph && !typing && e.key === "ArrowDown") {
+      e.preventDefault();
+      send({ type: "key", id: "nextThread" });
+    }
     if (e.ctrlKey && !e.altKey && !e.metaKey && !altGraph && e.code === "KeyK") {
       e.preventDefault();
       send({ type: "app", id: e.shiftKey ? "quickopen" : "palette" });
@@ -268,6 +272,18 @@
     syncBar();
   }
 
+  function focusThread() {
+    var threads = [].slice.call(document.querySelectorAll("details.thread[data-unresolved]"));
+    if (!threads.length) return;
+    var y = window.scrollY + 20;
+    var next = threads.find(function (t) { return t.getBoundingClientRect().top + window.scrollY > y; }) || threads[0];
+    next.open = true;
+    next.scrollIntoView({ block: "start", behavior: "smooth" });
+    threads.forEach(function (t) { t.classList.remove("focus"); });
+    next.classList.add("focus");
+    setTimeout(function () { next.classList.remove("focus"); }, 1600);
+  }
+
   function onMessage(e) {
     var msg = e.data;
     if (typeof msg === "string") {
@@ -304,6 +320,9 @@
         break;
       case "scrollBottom":
         window.scrollTo(0, document.body.scrollHeight);
+        break;
+      case "focusThread":
+        focusThread();
         break;
       case "find":
         if (window.find) window.find(msg.text || "");

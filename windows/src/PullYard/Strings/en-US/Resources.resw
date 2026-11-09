@@ -769,6 +769,9 @@
   <data name="PR_FixWithAgent" xml:space="preserve"><value>Send review comments to a new agent session</value></data>
   <data name="PR_Merge" xml:space="preserve"><value>Merge pull request</value></data>
   <data name="PR_MergeButton" xml:space="preserve"><value>Merge</value></data>
+  <data name="PR_NextThreadMany" xml:space="preserve"><value>{0} unresolved · Next</value></data>
+  <data name="PR_NextThreadOne" xml:space="preserve"><value>1 unresolved · Next</value></data>
+  <data name="PR_NextThreadTip" xml:space="preserve"><value>Jump to the next unresolved thread (Ctrl+Alt+Down)</value></data>
   <data name="PR_Pipeline" xml:space="preserve"><value>Pipeline</value></data>
   <data name="PR_ReadyForReview" xml:space="preserve"><value>Ready for review</value></data>
   <data name="PR_Reopen" xml:space="preserve"><value>Reopen pull request</value></data>
@@ -888,6 +891,8 @@
   <data name="Reviewers_Stale" xml:space="preserve"><value>reviewed before latest push</value></data>
   <data name="Reviewers_Team" xml:space="preserve"><value>team</value></data>
   <data name="Reviewers_Title" xml:space="preserve"><value>Request review</value></data>
+  <data name="Risk_LookCloser" xml:space="preserve"><value>Look closer:</value></data>
+  <data name="Risk_MoreFiles" xml:space="preserve"><value>…and {0} more</value></data>
   <data name="Search_Placeholder" xml:space="preserve"><value>Filter: text, repo:org/name, label:bug</value></data>
   <data name="Section_Claude" xml:space="preserve"><value>Agents</value></data>
   <data name="Section_IssuesTitle" xml:space="preserve"><value>Issues: {0}</value></data>

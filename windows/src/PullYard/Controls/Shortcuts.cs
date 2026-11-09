@@ -17,6 +17,7 @@ public static class Shortcuts
 {
     public const string ShortLink = "shortLink";
     public const string Blame = "blame";
+    public const string NextThread = "nextThread";
 
     private static DateTimeOffset last;
     private static string lastId = "";
@@ -52,6 +53,8 @@ public static class Shortcuts
     private static bool IsDown(VirtualKey key) => InputKeyboardSource.GetKeyStateForCurrentThread(key).HasFlag(CoreVirtualKeyStates.Down);
 
     public static void ShortLinkKey(UIElement element) => Register(element, ShortLink, VirtualKey.C, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift);
+
+    public static void NextThreadKey(UIElement element) => Register(element, NextThread, VirtualKey.Down, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, skipInText: true);
 
     public static void BlameKey(UIElement element) => Register(element, Blame, VirtualKey.B, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, skipInText: true);
 }

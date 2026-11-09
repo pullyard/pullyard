@@ -40,6 +40,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
     [ObservableProperty] private StackNode? preview;
     [ObservableProperty] private string html = "";
     [ObservableProperty] private int scrollToBottomToken;
+    [ObservableProperty] private int threadFocusToken;
     [ObservableProperty] private List<DiffFile> files = new();
     [ObservableProperty] private bool filesLoaded;
     [ObservableProperty] private bool filesLoading;
@@ -445,6 +446,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
             }
             DiffVersion++;
             if (CodeOwnersState.Owners is not null) OnPropertyChanged(nameof(Ownership));
+            OnPropertyChanged(nameof(Risks));
             PublishContext();
         }
         catch (Exception)
@@ -601,6 +603,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
             FilesError = null;
             DiffVersion++;
             OnPropertyChanged(nameof(DiffStat));
+            OnPropertyChanged(nameof(Risks));
         }
         catch (OperationCanceledException)
         {
@@ -661,6 +664,26 @@ public sealed partial class PRDetailViewModel : ObservableObject
     }
 
     public int ThreadCount(string path) => (Pr?.ReviewThreads.Items ?? new()).Count(t => t.Path == path);
+
+    public int UnresolvedThreads => Pr?.ReviewThreads.Items.Count(t => !t.IsResolved) ?? 0;
+
+    public void NextUnresolvedThread()
+    {
+        Tab = PRTab.Conversation;
+        ThreadFocusToken++;
+    }
+
+    public List<RiskLabel> Risks
+    {
+        get
+        {
+            if (Pr is not { } pr) return new();
+            var list = FilesLoaded && Files.Count > 0
+                ? Files.Select(f => new RiskFile(f.Id, f.Additions, f.Deletions)).ToList()
+                : ChangedPaths.Select(p => new RiskFile(p, 0, 0)).ToList();
+            return PRRisk.Labels(list, pr.Additions, pr.Deletions, pr.ChangedFiles, Ownership?.Unowned);
+        }
+    }
 
     public void RevealFile(string path)
     {
