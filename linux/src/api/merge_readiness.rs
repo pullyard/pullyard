@@ -270,7 +270,7 @@ pub fn requirements(pr: &PullRequestDetail, status: &RulesStatus) -> Vec<MergeRe
         let failing = entry.failing();
         out.push(req(K::MergeQueue, if failing { S::Missing } else { S::Pending }, entry.summary(), failing.then(|| "Fix the failing checks or conflicts and add it again".into()), None));
     } else if pr.is_merge_queue_enabled == Some(true) {
-        out.push(req(K::MergeQueue, S::Advisory, "Merges through a merge queue", Some("Add it to the queue on GitHub with “Merge when ready”".into()), None));
+        out.push(req(K::MergeQueue, S::Advisory, "Merges through a merge queue", Some("Add it from the merge sheet with “Add to merge queue”".into()), None));
     }
 
     if *status == RulesStatus::Failed {

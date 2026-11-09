@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 
+use super::backend::PrAction;
 use super::model::{Change, PrModel};
 use crate::api::models::{CheckContext, ReviewThread};
 use crate::ui::composer::Composer;
@@ -146,18 +147,17 @@ pub fn merge(model: Rc<PrModel>) {
     let default = MergeMethod::from_key(repo.as_ref().map(|r| r.viewer_default_merge_method.as_str()).unwrap_or("MERGE")).unwrap_or(MergeMethod::Merge);
     let initial = allowed.iter().position(|m| *m == default).unwrap_or(0);
     method.set_selected(initial as u32);
-    if f.provider.is_github() && pr.is_merge_queue_enabled == Some(true) && pr.merge_queue_entry.is_none() && pr.is_in_merge_queue != Some(true) {
+    let uses_queue = f.merge_queue && pr.is_merge_queue_enabled == Some(true) && pr.merge_queue_entry.is_none() && pr.is_in_merge_queue != Some(true);
+    if uses_queue {
         let note = hbox(6);
         note.append(&icon("sy-archive-symbolic", 14));
-        let text = wrap_label(&format!("{} uses a merge queue. Merging here may be rejected; add it to the queue on GitHub instead.", pr.base_ref_name), &["caption", "sy-muted"]);
+        let text = wrap_label(
+            &format!("{} uses a {}. Add the {} to it and it merges once the required checks pass; merging directly may be rejected.", pr.base_ref_name, f.queue_title(), f.request_title()),
+            &["caption", "sy-muted"],
+        );
         text.set_hexpand(true);
         text.set_xalign(0.0);
         note.append(&text);
-        let open = button("Open on GitHub");
-        open.set_valign(gtk::Align::Center);
-        let url = pr.url.clone();
-        open.connect_clicked(move |_| util::open_url(&url));
-        note.append(&open);
         sheet.body.append(&note);
     }
     let row = hbox(8);
@@ -212,7 +212,27 @@ pub fn merge(model: Rc<PrModel>) {
     }
     sheet.add_footer_spacer();
     sheet.cancel_button();
-    let go = tinted("Merge", "green");
+    if uses_queue {
+        let enqueue = tinted(&format!("Add to {}", f.queue_title()), "green");
+        let m = model.clone();
+        let d = sheet.dialog.clone();
+        enqueue.connect_clicked(move |_| {
+            if m.busy.get() {
+                return;
+            }
+            let m = m.clone();
+            let d = d.clone();
+            crate::rt::spawn_local(async move {
+                let title = m.features.queue_title();
+                if m.simple(PrAction::Enqueue).await {
+                    crate::app::toast(&format!("Added to the {title}"));
+                    d.close();
+                }
+            });
+        });
+        sheet.footer.append(&enqueue);
+    }
+    let go = if uses_queue { button("Merge directly") } else { tinted("Merge", "green") };
     go.set_sensitive(!allowed.is_empty());
     sheet.footer.append(&go);
     let m = model.clone();
