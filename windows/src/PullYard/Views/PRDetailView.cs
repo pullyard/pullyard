@@ -307,6 +307,7 @@ public sealed class PRContent : Grid, IShortcutHost
                 RenderToolbar();
                 break;
             case nameof(PRDetailViewModel.CiFix):
+            case nameof(PRDetailViewModel.ReviewFix):
                 RenderBanners();
                 break;
         }
@@ -643,6 +644,7 @@ public sealed class PRContent : Grid, IShortcutHost
         }
         if (ReReviewBanner(model, () => Dialogs.Reviewers(XamlRoot, model).Forget()) is { } rr) banners.Children.Add(rr);
         if (FixBanner(Pr, () => Dialogs.FixWithClaude(XamlRoot, model).Forget()) is { } fix) banners.Children.Add(fix);
+        if (CloseLoopBanner(model, ids => Dialogs.CloseLoopThreads(XamlRoot, model, ids).Forget()) is { } loop) banners.Children.Add(loop);
         var launch = model.CiFix is { } l && l.HeadOid == Pr.HeadRefOid ? l : null;
         var fixTab = launch?.Tab is { } t && app.Claude.Tabs.Contains(t) ? t : null;
         WatchFixTab(fixTab);
@@ -751,6 +753,23 @@ public sealed class PRContent : Grid, IShortcutHost
         return new Border { Background = Palette.Brush("sky", 0.08), CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 6, 8, 6), Child = grid };
     }
 
+    public static FrameworkElement? CloseLoopBanner(PRDetailViewModel model, Action<IReadOnlyList<string>> open)
+    {
+        if (model.Pr is not { } pr || CloseLoop.Pending(model.ReviewFix, pr) is not { } pending) return null;
+        var commits = pending.NewCommits == 1 ? L.T("CloseLoop_OneCommit", "1 new commit") : L.F("CloseLoop_Commits", "{0} new commits", pending.NewCommits);
+        var threads = pending.Threads.Count == 1 ? L.T("CloseLoop_OneOpen", "1 thread still open") : L.F("CloseLoop_OpenN", "{0} threads still open", pending.Threads.Count);
+        var message = Ui.Text(L.F("CloseLoop_Banner", "{0} since Fix with agent · {1}", commits, threads), 13);
+        message.TextTrimming = TextTrimming.CharacterEllipsis;
+        var row = Ui.H(8, Ui.IconTile("\uE8BD", "green", 18), message);
+        var button = Ui.Button(L.T("CloseLoop_Button", "Reply and resolve…"), () => open(pending.Threads), accent: true);
+        var (fill, text) = Palette.Filled("green");
+        button.Background = fill;
+        button.Foreground = text;
+        var dismiss = Ui.IconButton("\uE711", L.T("Common_Dismiss", "Dismiss"), () => model.ReviewFix = null);
+        var grid = Ui.Columns((row, Ui.Star), (Ui.H(6, button, dismiss), Ui.Auto));
+        return new Border { Background = Palette.Brush("green", 0.07), CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 6, 8, 6), Child = grid };
+    }
+
     public static FrameworkElement? FixBanner(PullRequestDetail pr, Action action)
     {
         var open = pr.ReviewThreads.Items.Where(t => !t.IsResolved).ToList();
@@ -796,6 +815,8 @@ public sealed class PRContent : Grid, IShortcutHost
             review.Click += (_, _) => Dialogs.Review(XamlRoot, model).Forget();
             var flyout = Ui.Menu(Ui.MenuItem(L.T("PR_WriteReview", "Write review…"), () => Dialogs.Review(XamlRoot, model).Forget()));
             if (model.CanApprove) flyout.Items.Add(Ui.MenuItem(L.T("PR_Approve", "Approve"), () => ConfirmApprove().Forget()));
+            if (CloseLoop.Replyable(pr).Count > 0)
+                flyout.Items.Add(Ui.MenuItem(L.T("CloseLoop_Menu", "Reply and resolve threads…"), () => Dialogs.CloseLoopThreads(XamlRoot, model, model.ReviewFix?.ThreadIds ?? Array.Empty<string>()).Forget()));
             if (model.Features.RevokeApproval && pr.ViewerApproved == true)
                 flyout.Items.Add(Ui.MenuItem(L.T("MR_RevokeApproval", "Revoke approval"), () => Confirm(L.T("MR_RevokeApprovalQ", "Revoke your approval?"), L.T("MR_RevokeApproval", "Revoke approval"), model.RevokeApproval, destructive: false).Forget()));
             if (model.Features.RequestReviewers)
