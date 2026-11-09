@@ -17,7 +17,7 @@
   ·
   <a href="#linux"><b>Linux</b></a>
   ·
-  <a href="https://pullyard.github.io/pullyard/">Website</a>
+  <a href="https://pullyard.app/">Website</a>
   ·
   <a href="https://github.com/pullyard/pullyard/releases">Releases</a>
   ·

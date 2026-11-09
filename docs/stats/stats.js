@@ -717,7 +717,7 @@
     autoUpdates: ["Auto-updates", "Updates the app installed by itself. Each one downloads a signature file (.sig) from the release, which is what's counted here."],
     latest: ["Latest release", "Downloads of the newest version's files since it was published."],
     releases: ["Releases", "Number of published versions that have downloadable files."],
-    siteVisitors: ["Website visitors", "Unique people who opened pullyard.github.io, counted by Umami without cookies. Your own local test visits aren't counted."],
+    siteVisitors: ["Website visitors", "Unique people who opened pullyard.app, counted by Umami without cookies. Your own local test visits aren't counted."],
     visits: ["Visits", "Sessions on the site. One visitor can come back several times."],
     pageviews: ["Page views", "Every page opened, including repeat views."],
     bounce: ["Bounce rate", "Share of visits that opened one page and left without another tracked action. Lower is better."],
@@ -779,7 +779,7 @@
     document.querySelectorAll("#ws-range button").forEach(b => { b.disabled = !cfg; });
     if (!cfg) {
       body.hidden = true;
-      return showEmpty(emptyBox, { icon: "↗", title: "Connect Umami to see website visitors", text: "See who visits pullyard.github.io, where they come from, their countries and how many click Download. Free Umami plan works through a share link.", action: ["Connect Umami", () => openSettings("umami")] });
+      return showEmpty(emptyBox, { icon: "↗", title: "Connect Umami to see website visitors", text: "See who visits pullyard.app, where they come from, their countries and how many click Download. Free Umami plan works through a share link.", action: ["Connect Umami", () => openSettings("umami")] });
     }
     if (state.ws.error && !d) {
       body.hidden = true;
@@ -792,7 +792,7 @@
     const sum = siteSummary();
     if (!sum.pageviews) {
       body.hidden = true;
-      return showEmpty(emptyBox, { icon: "0", title: `No visits in the last ${d.range} days`, text: "Umami is connected. Visits show up after the site with docs/site/analytics.js is live on pullyard.github.io. Visits from localhost aren't counted." });
+      return showEmpty(emptyBox, { icon: "0", title: `No visits in the last ${d.range} days`, text: "Umami is connected. Visits show up after the site with docs/site/analytics.js is live on pullyard.app. Visits from localhost aren't counted." });
     }
     emptyBox.hidden = true;
     body.hidden = false;
