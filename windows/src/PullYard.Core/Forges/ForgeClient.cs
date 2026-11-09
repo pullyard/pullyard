@@ -72,7 +72,17 @@ public sealed class ForgeHttp
     })
     { Timeout = TimeSpan.FromSeconds(40) };
 
+    private static readonly HttpClient SharedNoRedirectHttp = new(new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        AutomaticDecompression = DecompressionMethods.All,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        ConnectTimeout = TimeSpan.FromSeconds(10)
+    })
+    { Timeout = TimeSpan.FromSeconds(40) };
+
     private readonly HttpClient http;
+    private readonly HttpClient noRedirectHttp;
     private readonly SemaphoreSlim refreshGate = new(1, 1);
 
     public string Base { get; }
@@ -86,6 +96,7 @@ public sealed class ForgeHttp
         Service = service;
         Authorization = authorization;
         this.http = http ?? SharedHttp;
+        noRedirectHttp = http ?? SharedNoRedirectHttp;
     }
 
     public static string Query(IEnumerable<(string Key, string Value)> query) =>
@@ -122,6 +133,37 @@ public sealed class ForgeHttp
 
     public async Task<string> Text(string path, IEnumerable<(string Key, string Value)>? query = null, CancellationToken ct = default) =>
         Encoding.UTF8.GetString(await Call(HttpMethod.Get, path, query, null, ct, "text/plain").ConfigureAwait(false));
+
+    public async Task<string> Download(string path, int hops = 3, CancellationToken ct = default)
+    {
+        var target = Url(path);
+        using var req = new HttpRequestMessage(HttpMethod.Get, target);
+        req.Headers.TryAddWithoutValidation("Authorization", Authorization);
+        req.Headers.Accept.ParseAdd("*/*");
+        req.Headers.UserAgent.ParseAdd(AppInfo.UserAgent);
+        using var response = await noRedirectHttp.SendAsync(req, ct).ConfigureAwait(false);
+        var status = (int)response.StatusCode;
+        if (status is >= 300 and < 400 && hops > 0 && response.Headers.Location is { } location)
+        {
+            var next = location.IsAbsoluteUri ? location : new Uri(target, location);
+            if (string.Equals(next.Host, target.Host, StringComparison.OrdinalIgnoreCase)) return await Download(next.AbsoluteUri, hops - 1, ct).ConfigureAwait(false);
+            if (next.Scheme != Uri.UriSchemeHttps) throw new ApiException($"{Service} sent an insecure log address");
+            using var plain = new HttpRequestMessage(HttpMethod.Get, next);
+            plain.Headers.UserAgent.ParseAdd(AppInfo.UserAgent);
+            using var blob = await http.SendAsync(plain, ct).ConfigureAwait(false);
+            var code = (int)blob.StatusCode;
+            var bytes = await blob.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+            if (code is < 200 or >= 300) throw new ApiException($"{Service} {code}: {(HttpStatusCode)code}", code);
+            return Encoding.UTF8.GetString(bytes);
+        }
+        var data = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        if (status is < 200 or >= 300)
+        {
+            if (status == 401) throw new ApiException("Token is invalid or revoked (401)", 401);
+            throw new ApiException($"{Service} {status}: {Message(data) ?? ((HttpStatusCode)status).ToString()}", status);
+        }
+        return Encoding.UTF8.GetString(data);
+    }
 
     private Task<byte[]> Call(HttpMethod method, string path, IEnumerable<(string Key, string Value)>? query, CancellationToken ct) =>
         Call(method, path, query, null, ct);

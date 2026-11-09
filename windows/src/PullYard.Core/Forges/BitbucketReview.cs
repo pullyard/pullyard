@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using PullYard.Core.Api;
 
 namespace PullYard.Core.Forges;
@@ -158,6 +160,31 @@ public static class BitbucketPR
         public string Path => New?.Path ?? Old?.Path ?? "";
     }
 
+    public sealed class PipelineResult
+    {
+        public string? Name { get; set; }
+    }
+
+    public sealed class Outcome
+    {
+        public string? Name { get; set; }
+        public PipelineResult? Result { get; set; }
+    }
+
+    public sealed class Pipeline
+    {
+        public string Uuid { get; set; } = "";
+        public int? BuildNumber { get; set; }
+        public Outcome? State { get; set; }
+    }
+
+    public sealed class Step
+    {
+        public string Uuid { get; set; } = "";
+        public string? Name { get; set; }
+        public Outcome? State { get; set; }
+    }
+
     public sealed class Page<T>
     {
         public List<T>? Values { get; set; }
@@ -249,6 +276,31 @@ public sealed partial class BitbucketClient
             Files = files
         };
     }
+
+    private static readonly Regex BuildLink = new(@"(?:pipelines/results/|#!/results/)(\d+)", RegexOptions.Compiled);
+
+    public static int? BuildNumber(string? link) =>
+        link is not null && BuildLink.Match(link) is { Success: true } m && int.TryParse(m.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var n) ? n : null;
+
+    public async Task<BitbucketPR.Pipeline> Pipeline(string repo, int build, CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.Get<BitbucketPR.Pipeline>($"{RepoPath(repo)}/pipelines/{build}", ct: ct).ConfigureAwait(false);
+        }
+        catch (ApiException e) when (e.Status is 404 or 400)
+        {
+            var page = await http.Get<BitbucketPR.Page<BitbucketPR.Pipeline>>($"{RepoPath(repo)}/pipelines/", new[] { ("sort", "-created_on"), ("pagelen", "100") }, ct).ConfigureAwait(false);
+            if (page.Values?.FirstOrDefault(p => p.BuildNumber == build) is { } hit) return hit;
+            throw;
+        }
+    }
+
+    public Task<List<BitbucketPR.Step>> PipelineSteps(string repo, string pipeline, CancellationToken ct = default) =>
+        Pages<BitbucketPR.Step>($"{RepoPath(repo)}/pipelines/{Uri.EscapeDataString(pipeline)}/steps/", 3, ct);
+
+    public Task<string> StepLog(string repo, string pipeline, string step, CancellationToken ct = default) =>
+        http.Download($"{RepoPath(repo)}/pipelines/{Uri.EscapeDataString(pipeline)}/steps/{Uri.EscapeDataString(step)}/log", ct: ct);
 
     public IPRBackend? ReviewBackend() => new BitbucketPRBackend(this);
 }

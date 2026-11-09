@@ -308,9 +308,9 @@ public static class Dialogs
         await ShowAsync(d);
     }
 
-    public static async Task JobLog(XamlRoot? root, GitHubApi api, RepoRef repo, CheckContext check, Action<string?>? fix = null)
+    public static async Task JobLog(XamlRoot? root, Func<Task<string>> load, CheckContext check, Action<string?>? fix = null)
     {
-        if (root is null || check.DatabaseId is not { } id) return;
+        if (root is null) return;
         var html = new HtmlView { Height = 560 };
         var errorsOnly = new CheckBox { Content = L.T("Log_ErrorsOnly", "Errors only") };
         string? log = null;
@@ -359,7 +359,7 @@ public static class Dialogs
         {
             try
             {
-                var raw = await api.JobLog(repo, id);
+                var raw = await load();
                 return CiLog.Clean(raw);
             }
             catch (Exception e)

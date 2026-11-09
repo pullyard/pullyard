@@ -224,6 +224,9 @@ public sealed partial class GitLabClient
     public Task<List<GitLabMR.Job>> Jobs(string project, long pipeline, CancellationToken ct = default) =>
         Pages<GitLabMR.Job>($"{ProjectApiPath(project)}/pipelines/{pipeline}/jobs", 3, ct);
 
+    public Task<string> JobTrace(string project, long job, CancellationToken ct = default) =>
+        http.Text($"{ProjectApiPath(project)}/jobs/{job}/trace", ct: ct);
+
     public Task<GitLabMR.Project> Project(string project, CancellationToken ct = default) =>
         http.Get<GitLabMR.Project>(ProjectApiPath(project), ct: ct);
 

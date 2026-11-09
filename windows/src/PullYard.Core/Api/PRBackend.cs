@@ -32,11 +32,11 @@ public sealed record PRFeatures
         UpdateBranch = true, RerunChecks = true, JobLogs = true, RequestChanges = true, Agent = true, Blame = true, DeleteBranch = true, CodeOwners = true
     };
 
-    public static PRFeatures GitLab { get; } = new() { Provider = GitProvider.GitLab, Editing = true, DraftToggle = true, UpdateBranch = true, RevokeApproval = true };
+    public static PRFeatures GitLab { get; } = new() { Provider = GitProvider.GitLab, Editing = true, DraftToggle = true, UpdateBranch = true, JobLogs = true, RevokeApproval = true };
 
     public static PRFeatures Bitbucket { get; } = new()
     {
-        Provider = GitProvider.Bitbucket, Editing = true, DraftToggle = true, RequestChanges = true, RevokeApproval = true, Reopen = false
+        Provider = GitProvider.Bitbucket, Editing = true, DraftToggle = true, JobLogs = true, RequestChanges = true, RevokeApproval = true, Reopen = false
     };
 
     public bool IsGitLab => Provider == GitProvider.GitLab;
@@ -72,6 +72,8 @@ public interface IPRBackend
     Task DeleteBranch(ItemRef r, PullRequestDetail pr) => Task.FromException(new PRBackendUnsupportedException(Features.Provider));
     Task SetViewed(ItemRef r, PullRequestDetail pr, string path, bool viewed) => Task.FromException(new PRBackendUnsupportedException(Features.Provider));
     Task RerunFailed(ItemRef r, IReadOnlyCollection<long> runs) => Task.FromException(new PRBackendUnsupportedException(Features.Provider));
+    bool CanShowLog(CheckContext check) => false;
+    Task<string> JobLog(ItemRef r, CheckContext check, CancellationToken ct = default) => Task.FromException<string>(new PRBackendUnsupportedException(Features.Provider));
 }
 
 public sealed class GitHubPRBackend : IPRBackend
@@ -155,6 +157,13 @@ public sealed class GitHubPRBackend : IPRBackend
     {
         foreach (var id in runs) await api.RerunFailedJobs(r.Repo, id).ConfigureAwait(false);
     }
+
+    public bool CanShowLog(CheckContext check) => check.IsActionsJob;
+
+    public Task<string> JobLog(ItemRef r, CheckContext check, CancellationToken ct = default) =>
+        check.DatabaseId is { } id
+            ? api.JobLog(r.Repo, id, ct)
+            : Task.FromException<string>(new ApiException("This check has no job log. Open it on GitHub to see its output."));
 
     private static Dictionary<string, object?> Vars(params (string, object?)[] pairs) => pairs.ToDictionary(p => p.Item1, p => p.Item2);
 }
