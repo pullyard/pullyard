@@ -103,7 +103,7 @@ public sealed class ChatView : Grid
 
     private void OnContext(object? sender, PropertyChangedEventArgs e)
     {
-        if (chat.Items.Count > 0 || e.PropertyName is not (nameof(GitWorkingCopy.Branch) or nameof(GitWorkingCopy.Changes) or nameof(GitWorkingCopy.Ahead) or nameof(GitWorkingCopy.Repo) or nameof(ClaudeWorkspace.Projects))) return;
+        if (chat.Items.Count > 0 || e.PropertyName is not (nameof(GitWorkingCopy.Branch) or nameof(GitWorkingCopy.Changes) or nameof(GitWorkingCopy.Ahead) or nameof(GitWorkingCopy.Remote) or nameof(ClaudeWorkspace.Projects))) return;
         DispatcherQueue.TryEnqueue(SendMeta);
     }
 
@@ -148,6 +148,7 @@ public sealed class ChatView : Grid
             ["ChatWeb_WaitingSignIn"] = L.T("ChatWeb_WaitingSignIn", "Waiting for sign-in…"),
             ["ChatWeb_RestartSession"] = L.T("ChatWeb_RestartSession", "Restart session"),
             ["ChatWeb_PROpen"] = L.T("ChatWeb_PROpen", "Pull request #{0} is open"),
+            ["ChatWeb_MROpen"] = L.T("ChatWeb_MROpen", "Merge request !{0} is open"),
             ["ChatWeb_OpenInApp"] = L.T("ChatWeb_OpenInApp", "Open in PullYard"),
             ["ChatWeb_CopyLink"] = L.T("ChatWeb_CopyLink", "Copy link"),
             ["ChatWeb_WelcomeIntro"] = L.T("ChatWeb_WelcomeIntro", "Describe a task. The agent reads the code, proposes changes and asks before acting."),
@@ -277,7 +278,7 @@ public sealed class ChatView : Grid
         ["turnStartedAt"] = chat.TurnStartedAt?.ToUnixTimeMilliseconds(),
         ["authExpired"] = chat.AuthExpired,
         ["reauthWaiting"] = reauthWaiting && chat.AuthExpired,
-        ["createdPR"] = chat.CreatedPR is { } url && AgentShip.ParsePullRequestUrl(url) is { } pr ? new JsonObject { ["url"] = url, ["number"] = pr.Number, ["repo"] = pr.Repo } : null,
+        ["createdPR"] = chat.CreatedPR is { } url && AgentShip.Describe(url) is { Number.Length: > 0 } pr ? new JsonObject { ["url"] = url, ["number"] = pr.Number, ["repo"] = pr.Repo, ["mergeRequest"] = pr.MergeRequest } : null,
         ["todos"] = TodoProgress.Latest(chat.Items) is { Finished: false } todos ? todos.ToJson() : null,
         ["welcome"] = Welcome()
     };
@@ -292,12 +293,12 @@ public sealed class ChatView : Grid
         var sid = string.IsNullOrEmpty(chat.SessionId) ? tab.SessionId : chat.SessionId;
         var linked = sessions.FirstOrDefault(s => s.PrNumber is not null && (s.Id == sid || (git.Branch is { Length: > 0 } b && b != "HEAD" && s.Branch == b)));
         var suggestions = new JsonArray();
-        foreach (var s in AgentWelcome.Suggestions(git.Changes.Count, git.Branch, git.Repo is not null, git.Ahead, linked?.PrNumber, linked?.PrUrl))
+        foreach (var s in AgentWelcome.Suggestions(git.Changes.Count, git.Branch, git.Remote, git.Ahead, linked?.PrNumber, linked?.PrUrl))
         {
             var (icon, title) = s.Kind switch
             {
                 WelcomeSuggestionKind.ReviewChanges => ("review", L.T("ChatWeb_SugReview", "Review my uncommitted changes")),
-                WelcomeSuggestionKind.OpenPR => ("pr", L.T("ChatWeb_SugOpenPR", "Open a pull request")),
+                WelcomeSuggestionKind.OpenPR => ("pr", git.Remote?.Kind == GitRemoteKind.GitLab ? L.T("ChatWeb_SugOpenMR", "Open a merge request") : L.T("ChatWeb_SugOpenPR", "Open a pull request")),
                 WelcomeSuggestionKind.AddressReview => ("chat", L.F("ChatWeb_SugAddress", "Address review on #{0}", s.PullRequest ?? 0)),
                 WelcomeSuggestionKind.ExplainStructure => ("map", L.T("ChatWeb_SugExplain", "Explain the project structure")),
                 WelcomeSuggestionKind.FindBugs => ("bug", L.T("ChatWeb_SugBugs", "Find bugs in recent changes")),

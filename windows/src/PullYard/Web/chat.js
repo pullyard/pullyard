@@ -946,7 +946,7 @@
     var card = el("div", "prcard");
     card.appendChild(el("div", "prtile", icon("pr")));
     var text = el("div", "prtext");
-    text.appendChild(el("div", "prtitle", esc(t("ChatWeb_PROpen", "Pull request #{0} is open", pr.number))));
+    text.appendChild(el("div", "prtitle", esc(pr.mergeRequest ? t("ChatWeb_MROpen", "Merge request !{0} is open", pr.number) : t("ChatWeb_PROpen", "Pull request #{0} is open", pr.number))));
     if (pr.repo) text.appendChild(el("div", "prrepo", esc(pr.repo)));
     card.appendChild(text);
     var copy = button(t("ChatWeb_CopyLink", "Copy link"), "small", function () {
