@@ -336,6 +336,16 @@ public static class SettingsDialog
         };
         panel.Children.Add(Row(L.T("Claude_SleepAfter", "Sleep idle sessions after"), idle));
         panel.Children.Add(Ui.Text(L.T("Claude_SleepHelp", "A sleeping session uses no memory: the claude process stops, the conversation stays, and the next message resumes it."), 12, "muted", wrap: true));
+        var budget = new ComboBox { MinWidth = 160 };
+        foreach (var v in SessionCost.Choices)
+            budget.Items.Add(new ComboBoxItem { Content = v == 0 ? L.T("Claude_NoLimit", "No limit") : SessionCost.Format(v), Tag = v });
+        budget.SelectedItem = budget.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (double)i.Tag! == SessionCost.Budget) ?? budget.Items[0];
+        budget.SelectionChanged += (_, _) =>
+        {
+            if ((budget.SelectedItem as ComboBoxItem)?.Tag is double v) SessionCost.Budget = v;
+        };
+        panel.Children.Add(Row(L.T("Claude_PauseAt", "Pause a session at"), budget));
+        panel.Children.Add(Ui.Text(L.T("Claude_PauseAtHelp", "When an agent session's reported cost reaches the limit, new messages wait until you continue. Useful with API keys, OpenRouter or another endpoint; with a subscription plan the cost is an estimate."), 12, "muted", wrap: true));
         store.Refresh().Forget();
         return panel;
     }

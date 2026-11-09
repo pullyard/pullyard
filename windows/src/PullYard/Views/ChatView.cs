@@ -29,6 +29,7 @@ public sealed class ChatView : Grid
     private readonly ChatSession chat;
     private readonly HtmlView web = new("chat.html");
     private readonly Border sleepBanner = new();
+    private readonly Border budgetBanner = new();
     private readonly Border permissionStrip = new();
     private readonly TextBox input = new()
     {
@@ -69,13 +70,16 @@ public sealed class ChatView : Grid
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Children.Add(web);
         SetRow(sleepBanner, 1);
         Children.Add(sleepBanner);
-        SetRow(permissionStrip, 2);
+        SetRow(budgetBanner, 2);
+        Children.Add(budgetBanner);
+        SetRow(permissionStrip, 3);
         Children.Add(permissionStrip);
         var composer = BuildComposer();
-        SetRow(composer, 3);
+        SetRow(composer, 4);
         Children.Add(composer);
 
         web.MessageReceived += OnWebMessage;
@@ -346,6 +350,7 @@ public sealed class ChatView : Grid
             case nameof(ChatSession.Running):
             case nameof(ChatSession.TurnStartedAt):
             case nameof(ChatSession.CreatedPR):
+            case nameof(ChatSession.BudgetPaused):
                 SendMeta();
                 UpdateChrome();
                 break;
@@ -379,6 +384,22 @@ public sealed class ChatView : Grid
         else
         {
             sleepBanner.Visibility = Visibility.Collapsed;
+        }
+        if (chat.BudgetPaused)
+        {
+            var limit = SessionCost.Format(SessionCost.Budget);
+            var text = Ui.V(2,
+                Ui.Text(L.F("Chat_BudgetReached", "Session cost {0} reached your {1} limit", SessionCost.Format(chat.TotalCost), limit), 13, "text", FontWeights.Medium, wrap: true),
+                Ui.Text(L.T("Chat_BudgetHint", "New messages wait until you continue. Change the limit in Settings › Agents."), 12, "muted", wrap: true));
+            budgetBanner.Child = Ui.Columns((Ui.H(8, Ui.Glyph("\uE8C7", 13, "amber"), text), Ui.Star),
+                (Ui.Button(L.F("Chat_BudgetContinue", "Continue (+{0})", limit), chat.ContinuePastBudget, accent: true), Ui.Auto));
+            budgetBanner.Padding = new Thickness(14, 6, 14, 6);
+            budgetBanner.Background = Palette.Brush("amber", 0.08);
+            budgetBanner.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            budgetBanner.Visibility = Visibility.Collapsed;
         }
         if (chat.PendingPermissions.FirstOrDefault(p => !p.Resolved) is { } pending)
         {
