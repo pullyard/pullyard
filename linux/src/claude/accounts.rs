@@ -2,6 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use super::endpoint::AgentEndpoint;
 use crate::host::{self, HostCmd};
 use crate::settings::{self, ClaudeProfile};
 use crate::signal::Signal;
@@ -13,7 +14,7 @@ const SHARED_ITEMS: &[&str] = &["settings.json", "CLAUDE.md", "RTK.md", "skills"
 pub fn profiles() -> Vec<ClaudeProfile> {
     let mut list = settings::read(|s| s.claude_profiles.clone());
     if !list.iter().any(|p| p.id == DEFAULT_ID) {
-        list.insert(0, ClaudeProfile { id: DEFAULT_ID.into(), label: "Main".into(), config_dir: None, email: None, plan: None, owner: None });
+        list.insert(0, ClaudeProfile { id: DEFAULT_ID.into(), label: "Main".into(), config_dir: None, email: None, plan: None, owner: None, endpoint: None });
     }
     list
 }
@@ -157,7 +158,31 @@ pub fn add(label: &str, share: bool) -> Result<ClaudeProfile, String> {
 }
 
 pub fn add_owned(label: &str, share: bool, owner: Option<String>) -> Result<ClaudeProfile, String> {
+    add_profile(uuid::Uuid::new_v4().to_string().to_lowercase(), label, share, owner, None)
+}
+
+pub async fn add_endpoint(label: &str, share: bool, endpoint: AgentEndpoint, key: &str) -> Result<ClaudeProfile, String> {
     let id = uuid::Uuid::new_v4().to_string().to_lowercase();
+    super::endpoint::store_key(&id, key).await?;
+    add_profile(id, label, share, scope(), Some(endpoint))
+}
+
+pub async fn update_endpoint(id: &str, endpoint: AgentEndpoint, key: &str) -> Result<(), String> {
+    if !profiles().iter().any(|p| p.id == id && !p.is_default()) {
+        return Ok(());
+    }
+    if !key.is_empty() {
+        super::endpoint::store_key(id, key).await?;
+    }
+    let mut list = profiles();
+    if let Some(p) = list.iter_mut().find(|p| p.id == id) {
+        p.endpoint = Some(endpoint);
+    }
+    save(list, active_id());
+    Ok(())
+}
+
+fn add_profile(id: String, label: &str, share: bool, owner: Option<String>, endpoint: Option<AgentEndpoint>) -> Result<ClaudeProfile, String> {
     let dir = base_dir().join(&id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     if share {
@@ -178,6 +203,7 @@ pub fn add_owned(label: &str, share: bool, owner: Option<String>) -> Result<Clau
         email: None,
         plan: None,
         owner,
+        endpoint,
     };
     list.push(p.clone());
     save(list, active_id());
@@ -188,6 +214,7 @@ pub fn remove(id: &str) {
     if id == DEFAULT_ID {
         return;
     }
+    super::endpoint::delete_key(id);
     let list: Vec<ClaudeProfile> = profiles().into_iter().filter(|p| p.id != id).collect();
     let active = if active_id() == id { DEFAULT_ID.to_string() } else { active_id() };
     save(list, active);
@@ -231,6 +258,9 @@ pub fn env(config_dir: Option<&str>, bin: &str) -> Env {
     let mut set = vec![("PATH".to_string(), host::path_with(bin)), ("BROWSER".to_string(), browser_command())];
     if let Some(d) = config_dir {
         set.push(("CLAUDE_CONFIG_DIR".into(), d.to_string()));
+    }
+    if let Some(endpoint) = super::endpoint::environment(config_dir) {
+        set.extend(endpoint);
     }
     let mut unset = super::clean_env_keys();
     if config_dir.is_none() && util::is_flatpak() {
@@ -367,6 +397,11 @@ impl AccountStore {
             self.set_status(Status::NotInstalled);
             return;
         };
+        super::endpoint::preload().await;
+        if let Some(endpoint) = active().endpoint {
+            self.set_status(Status::LoggedIn(AccountInfo { email: None, org_name: None, subscription: None, method: Some("endpoint".into()), provider: Some(endpoint.display_name()) }));
+            return;
+        }
         if matches!(*self.status.borrow(), Status::Unknown) {
             self.set_status(Status::Checking);
         }
@@ -485,6 +520,9 @@ impl AccountStore {
 }
 
 fn spawn_terminal_login(method: LoginMethod, email: &str) -> Result<(), String> {
+    if active().endpoint.is_some() {
+        return Err("This account uses an API endpoint and has no Claude sign-in.".into());
+    }
     let bin = host::claude_binary().ok_or_else(|| "Claude Code isn't installed".to_string())?;
     let (term, term_args) = super::launcher::terminal_emulator().ok_or_else(|| "No terminal emulator found".to_string())?;
     let dir = format!("{}/.cache/{}/claude", host::home(), crate::brand::BIN_NAME);
@@ -540,7 +578,7 @@ mod tests {
     }
 
     fn profile(id: &str, owner: Option<&str>) -> ClaudeProfile {
-        ClaudeProfile { id: id.into(), label: id.into(), config_dir: if id == DEFAULT_ID { None } else { Some(format!("/p/{id}")) }, email: None, plan: None, owner: owner.map(|o| o.into()) }
+        ClaudeProfile { id: id.into(), label: id.into(), config_dir: if id == DEFAULT_ID { None } else { Some(format!("/p/{id}")) }, email: None, plan: None, owner: owner.map(|o| o.into()), endpoint: None }
     }
 
     #[test]

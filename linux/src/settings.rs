@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::brand;
+use crate::claude::endpoint::AgentEndpoint;
 use crate::git_accounts::GitAccount;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -19,6 +20,8 @@ pub struct ClaudeProfile {
     pub plan: Option<String>,
     #[serde(default)]
     pub owner: Option<String>,
+    #[serde(default)]
+    pub endpoint: Option<AgentEndpoint>,
 }
 
 impl ClaudeProfile {

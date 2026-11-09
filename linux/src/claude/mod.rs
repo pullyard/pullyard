@@ -1,6 +1,7 @@
 pub mod accounts;
 pub mod chat;
 pub mod desktop;
+pub mod endpoint;
 pub mod git;
 pub mod launcher;
 pub mod memory;
