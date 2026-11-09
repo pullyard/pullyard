@@ -179,6 +179,11 @@ pub fn open_request_prompt(branch: &str, default_branch: Option<&str>, has_chang
     } else if ahead == 0 && !on_default {
         steps.push("There are no local changes or unpushed commits. If there is nothing to open a pull request for, say so and stop.".into());
     }
+    if !on_default {
+        if let Some(jira) = crate::jira::ship_step(branch) {
+            steps.push(jira);
+        }
+    }
     let target = default_branch.unwrap_or("the default branch");
     steps.push("Push the branch to origin and set the upstream.".into());
     match remote.map(|r| r.kind).unwrap_or(RemoteKind::Github) {
@@ -240,6 +245,17 @@ mod tests {
         assert!(p.contains("2. Commit the current changes"));
         assert!(p.contains("gh pr create"));
         assert!(p.ends_with("Reply with the pull request URL on its own line."));
+    }
+
+    #[test]
+    fn open_pr_prompt_mentions_jira_key_from_branch() {
+        let p = open_pr_prompt("fix/SOC-1235-search", Some("main"), true, 0);
+        assert!(p.contains("2. The branch refers to Jira issue SOC-1235. Start the title with SOC-1235"));
+        assert!(p.contains("3. Push the branch"));
+        let gitlab = open_request_prompt("fix/soc-1235-search", Some("main"), true, 0, Some(&GitRemote::new("gitlab.com", "g/a", RemoteKind::Gitlab)));
+        assert!(gitlab.contains("Start the title with SOC-1235"));
+        assert!(!open_pr_prompt("main", Some("main"), true, 0).contains("Jira"));
+        assert!(!open_pr_prompt("feature/login", Some("main"), true, 0).contains("Jira"));
     }
 
     #[test]
