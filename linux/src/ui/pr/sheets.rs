@@ -872,3 +872,272 @@ pub fn close_loop(model: Rc<PrModel>, preselected: Vec<String>) {
     update();
     sheet.present();
 }
+
+#[derive(Clone, PartialEq, Eq)]
+enum DraftPhase {
+    Idle,
+    LoadingFiles,
+    Running,
+    Ready,
+    Failed(String),
+}
+
+struct DraftsSheet {
+    model: Rc<PrModel>,
+    pr: crate::api::models::PullRequestDetail,
+    bin: Option<String>,
+    dialog: adw::Dialog,
+    content: gtk::Box,
+    all: gtk::Button,
+    none: gtk::Button,
+    cancel: gtk::Button,
+    go: gtk::Button,
+    phase: RefCell<DraftPhase>,
+    summary: RefCell<Option<String>>,
+    note: RefCell<Option<String>>,
+    drafts: RefCell<Vec<crate::review_drafts::ReviewDraft>>,
+    rows: RefCell<Vec<(crate::review_drafts::ReviewDraft, gtk::CheckButton, Rc<Composer>)>>,
+    run: RefCell<crate::review_drafts::DraftRun>,
+}
+
+pub fn review_drafts(model: Rc<PrModel>) {
+    let Some(pr) = model.pr.borrow().clone() else { return };
+    let sheet = Sheet::new("Draft review comments", 720, -1);
+    sheet.body.append(&wrap_label(
+        "The agent reads the diff and suggests inline comments. Nothing is posted: comments you keep are added to your pending review, and you submit them yourself.",
+        &["sy-muted"],
+    ));
+    let content = vbox(8);
+    sheet.body.append(&content);
+    let all = link_button("All");
+    let none = link_button("None");
+    sheet.footer.append(&all);
+    sheet.footer.append(&none);
+    sheet.add_footer_spacer();
+    let cancel = sheet.cancel_button();
+    let go = tinted("Draft comments", "coral");
+    sheet.footer.append(&go);
+    let me = Rc::new(DraftsSheet {
+        model,
+        pr,
+        bin: crate::host::claude_binary(),
+        dialog: sheet.dialog.clone(),
+        content,
+        all: all.clone(),
+        none: none.clone(),
+        cancel,
+        go: go.clone(),
+        phase: RefCell::new(DraftPhase::Idle),
+        summary: RefCell::new(None),
+        note: RefCell::new(None),
+        drafts: RefCell::new(vec![]),
+        rows: RefCell::new(vec![]),
+        run: RefCell::new(crate::review_drafts::DraftRun::default()),
+    });
+    let weak = Rc::downgrade(&me);
+    all.connect_clicked(move |_| {
+        if let Some(me) = weak.upgrade() {
+            me.rows.borrow().iter().for_each(|(_, c, _)| c.set_active(true));
+        }
+    });
+    let weak = Rc::downgrade(&me);
+    none.connect_clicked(move |_| {
+        if let Some(me) = weak.upgrade() {
+            me.rows.borrow().iter().for_each(|(_, c, _)| c.set_active(false));
+        }
+    });
+    let weak = Rc::downgrade(&me);
+    go.connect_clicked(move |_| {
+        let Some(me) = weak.upgrade() else { return };
+        let phase = me.phase.borrow().clone();
+        match phase {
+            DraftPhase::Idle | DraftPhase::Failed(_) => me.start(),
+            DraftPhase::Ready => me.accept(),
+            _ => {}
+        }
+    });
+    let held = RefCell::new(Some(me.clone()));
+    sheet.dialog.connect_closed(move |_| {
+        if let Some(me) = held.borrow_mut().take() {
+            me.run.borrow().cancel();
+        }
+    });
+    me.set_phase(DraftPhase::Idle);
+    sheet.present();
+}
+
+impl DraftsSheet {
+    fn set_phase(self: &Rc<Self>, phase: DraftPhase) {
+        *self.phase.borrow_mut() = phase.clone();
+        clear(&self.content);
+        self.rows.borrow_mut().clear();
+        match phase {
+            DraftPhase::Idle => {
+                if self.bin.is_none() {
+                    self.content.append(&wrap_label("Install and sign in to the agent CLI first.", &["fg-amber"]));
+                }
+            }
+            DraftPhase::LoadingFiles | DraftPhase::Running => {
+                let row = hbox(8);
+                row.append(&spinner(16));
+                row.append(&wrap_label(if phase == DraftPhase::Running { "The agent is reading the diff. This can take a minute." } else { "Loading the diff…" }, &["sy-muted"]));
+                self.content.append(&row);
+            }
+            DraftPhase::Failed(message) => self.content.append(&wrap_label(&message, &["fg-red"])),
+            DraftPhase::Ready => self.render_drafts(),
+        }
+        self.update();
+    }
+
+    fn render_drafts(self: &Rc<Self>) {
+        if let Some(s) = self.summary.borrow().as_deref() {
+            self.content.append(&wrap_label(s, &["sy-text"]));
+        }
+        if let Some(n) = self.note.borrow().as_deref() {
+            self.content.append(&wrap_label(n, &["sy-muted", "sy-small"]));
+        }
+        let drafts = self.drafts.borrow().clone();
+        if drafts.is_empty() {
+            self.content.append(&label_with("No comments suggested.", &["sy-dim"]));
+            return;
+        }
+        let list = vbox(10);
+        pad(&list, 8);
+        let mut rows = vec![];
+        for d in drafts {
+            let cell = vbox(4);
+            let check = gtk::CheckButton::new();
+            check.set_active(true);
+            let head = hbox(6);
+            let color = match d.severity.as_str() {
+                "bug" => "red",
+                "risk" => "amber",
+                _ => "slate",
+            };
+            head.append(&chip(&d.severity, color, None, false));
+            let loc = label_with(&format!("{}:{}{}", d.path, d.line, if d.side == "LEFT" { " (old)" } else { "" }), &["sy-mono", "fg-sky", "sy-small"]);
+            loc.set_ellipsize(gtk::pango::EllipsizeMode::Start);
+            loc.set_max_width_chars(60);
+            head.append(&loc);
+            check.set_child(Some(&head));
+            cell.append(&check);
+            let body = Composer::new("Comment", 44);
+            body.set_text(&d.body);
+            body.widget.set_margin_start(28);
+            cell.append(&body.widget);
+            list.append(&cell);
+            let weak = Rc::downgrade(self);
+            check.connect_toggled(move |_| {
+                if let Some(me) = weak.upgrade() {
+                    me.update();
+                }
+            });
+            let weak = Rc::downgrade(self);
+            body.on_changed(move || {
+                if let Some(me) = weak.upgrade() {
+                    me.update();
+                }
+            });
+            rows.push((d, check, body));
+        }
+        let scroll = gtk::ScrolledWindow::new();
+        scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
+        scroll.set_child(Some(&list));
+        scroll.set_max_content_height(380);
+        scroll.set_propagate_natural_height(true);
+        self.content.append(&frame(&scroll, "sy-card-flat"));
+        *self.rows.borrow_mut() = rows;
+    }
+
+    fn chosen(&self) -> usize {
+        self.rows.borrow().iter().filter(|(_, c, _)| c.is_active()).count()
+    }
+
+    fn update(&self) {
+        let phase = self.phase.borrow().clone();
+        let has_rows = !self.rows.borrow().is_empty();
+        let ready = phase == DraftPhase::Ready;
+        self.all.set_visible(ready && has_rows);
+        self.none.set_visible(ready && has_rows);
+        let busy = matches!(phase, DraftPhase::LoadingFiles | DraftPhase::Running);
+        self.cancel.set_label(if busy { "Stop" } else { "Cancel" });
+        match phase {
+            DraftPhase::Idle | DraftPhase::Failed(_) => {
+                self.go.set_visible(true);
+                self.go.set_label("Draft comments");
+                self.go.set_sensitive(self.bin.is_some());
+            }
+            DraftPhase::Ready => {
+                let n = self.chosen();
+                self.go.set_visible(true);
+                self.go.set_label(&format!("Add {n} to review"));
+                self.go.set_sensitive(n > 0);
+            }
+            _ => self.go.set_visible(false),
+        }
+    }
+
+    fn start(self: &Rc<Self>) {
+        let Some(bin) = self.bin.clone() else { return };
+        let run = crate::review_drafts::DraftRun::default();
+        *self.run.borrow_mut() = run.clone();
+        self.set_phase(DraftPhase::LoadingFiles);
+        let me = self.clone();
+        crate::rt::spawn_local(async move {
+            while me.model.files_loading.get() {
+                crate::rt::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            if !me.model.files_loaded.get() {
+                me.model.clone().load_files(false).await;
+            }
+            if run.cancelled() {
+                return;
+            }
+            let files = me.model.files.borrow().clone();
+            if files.is_empty() {
+                let message = me.model.files_error.borrow().clone().unwrap_or_else(|| "The diff couldn’t be loaded".to_string());
+                me.set_phase(DraftPhase::Failed(message));
+                return;
+            }
+            let prompt = crate::review_drafts::prompt(&me.pr, &me.model.r.repo, &files, &crate::ci_fix::nonce(), crate::review_drafts::BUDGET);
+            me.set_phase(DraftPhase::Running);
+            let config_dir = crate::claude::accounts::active_override();
+            let text = prompt.text;
+            let worker = run.clone();
+            let res = crate::rt::blocking(move || worker.run_blocking(&bin, config_dir.as_deref(), text)).await;
+            let parsed = res.and_then(|t| crate::review_drafts::parse(&t, &files).map_err(crate::review_drafts::RunError::Failed));
+            match parsed {
+                Ok(parsed) => {
+                    let mut notes = vec![];
+                    if parsed.dropped > 0 {
+                        notes.push(format!("{} skipped because the line isn’t in the diff", util::plural(parsed.dropped as i64, "suggestion", "suggestions")));
+                    }
+                    if !prompt.skipped.is_empty() {
+                        notes.push(format!("{} not sent (no text diff or too large)", util::plural(prompt.skipped.len() as i64, "file", "files")));
+                    }
+                    *me.summary.borrow_mut() = parsed.summary;
+                    *me.note.borrow_mut() = if notes.is_empty() { None } else { Some(notes.join(" · ")) };
+                    *me.drafts.borrow_mut() = parsed.drafts;
+                    me.set_phase(DraftPhase::Ready);
+                }
+                Err(crate::review_drafts::RunError::Cancelled) => me.set_phase(DraftPhase::Idle),
+                Err(crate::review_drafts::RunError::Failed(message)) => me.set_phase(DraftPhase::Failed(message)),
+            }
+        });
+    }
+
+    fn accept(&self) {
+        let keep: Vec<crate::api::models::PendingComment> = self
+            .rows
+            .borrow()
+            .iter()
+            .filter(|(_, c, body)| c.is_active() && !body.is_blank())
+            .map(|(d, _, body)| crate::api::models::PendingComment { id: uuid::Uuid::new_v4().to_string(), path: d.path.clone(), line: d.line, side: d.side.clone(), body: body.text() })
+            .collect();
+        let n = keep.len();
+        self.model.pending.borrow_mut().extend(keep);
+        self.model.emit(Change::Diff);
+        crate::app::toast(&format!("Added {} to your pending review", util::plural(n as i64, "comment", "comments")));
+        self.dialog.close();
+    }
+}

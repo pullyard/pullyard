@@ -909,6 +909,7 @@ impl PrPage {
 
     fn render_actions(self: &Rc<Self>, pr: &PullRequestDetail) {
         let m = self.model.clone();
+        let agent = crate::host::claude_binary().is_some();
         let key = format!(
             "{}|{}|{}|{}|{}|{}|{}|{:?}|{}|{}|{}|{}",
             pr.number,
@@ -923,7 +924,7 @@ impl PrPage {
             pr.head_ref.is_some(),
             m.pending.borrow().len(),
             pr.head_ref_name
-        ) + &format!("|{}", pr.review_threads.nodes.iter().any(|t| !t.is_resolved && t.viewer_can_reply)) + &format!("|{:?}|{:?}", pr.viewer_can_approve, pr.viewer_approved);
+        ) + &format!("|{}", pr.review_threads.nodes.iter().any(|t| !t.is_resolved && t.viewer_can_reply)) + &format!("|{:?}|{:?}", pr.viewer_can_approve, pr.viewer_approved) + &format!("|{}", agent);
         if *self.actions_key.borrow() == key {
             return;
         }
@@ -956,6 +957,10 @@ impl PrPage {
                         });
                     });
                 });
+            }
+            if agent {
+                let mm = m.clone();
+                menu.item("Draft comments with agent…", move || sheets::review_drafts(mm.clone()));
             }
             if pr.review_threads.nodes.iter().any(|t| !t.is_resolved && t.viewer_can_reply) {
                 let mm = m.clone();

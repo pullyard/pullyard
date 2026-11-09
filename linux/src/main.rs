@@ -24,6 +24,7 @@ mod list_cache;
 mod local_repo;
 mod markdown_html;
 mod notify;
+mod review_drafts;
 mod rt;
 mod secret;
 mod selftest;
