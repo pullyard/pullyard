@@ -24,6 +24,7 @@ public sealed record PRFeatures
     public bool Blame { get; init; }
     public bool DeleteBranch { get; init; }
     public bool CodeOwners { get; init; }
+    public bool Reopen { get; init; } = true;
 
     public static PRFeatures GitHub { get; } = new()
     {
@@ -33,7 +34,13 @@ public sealed record PRFeatures
 
     public static PRFeatures GitLab { get; } = new() { Provider = GitProvider.GitLab, Editing = true, DraftToggle = true, UpdateBranch = true, RevokeApproval = true };
 
+    public static PRFeatures Bitbucket { get; } = new()
+    {
+        Provider = GitProvider.Bitbucket, Editing = true, DraftToggle = true, RequestChanges = true, RevokeApproval = true, Reopen = false
+    };
+
     public bool IsGitLab => Provider == GitProvider.GitLab;
+    public bool IsBitbucket => Provider == GitProvider.Bitbucket;
     public bool IsGitHub => Provider.IsGitHub();
 }
 

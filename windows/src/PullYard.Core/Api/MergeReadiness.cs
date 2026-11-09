@@ -179,7 +179,7 @@ public static class MergeReadiness
     {
         var list = new List<MergeRequirement>();
         if (!pr.IsOpen) return list;
-        if (pr.ForgeMerge is { } merge) return GitLab(pr, merge);
+        if (pr.ForgeMerge is { } merge) return merge.Provider == "bitbucket" ? Bitbucket(pr, merge) : GitLab(pr, merge);
         var rules = status.Rules;
         var loading = status.Phase == RulesPhase.Loading;
 
@@ -366,6 +366,36 @@ public static class MergeReadiness
 
         if (!GitLabCovered.Contains(merge.Status))
             list.Add(new(RequirementKind.OtherRules, RequirementState.Missing, pr.MergeBlocker ?? "Blocked by a project rule", "Reported by GitLab"));
+        return list;
+    }
+
+    public static List<MergeRequirement> Bitbucket(PullRequestDetail pr, ForgeMergeInfo merge)
+    {
+        var list = new List<MergeRequirement>();
+        if (pr.IsDraft)
+            list.Add(new(RequirementKind.Draft, RequirementState.Missing, "Draft pull request", "Mark it ready for review before merging", RequirementAction.ReadyForReview));
+        list.Add(pr.Mergeable == "CONFLICTING"
+            ? new(RequirementKind.Conflicts, RequirementState.Missing, $"Conflicts with {pr.BaseRefName}", "Resolve them before merging")
+            : new(RequirementKind.Conflicts, RequirementState.Satisfied, $"No conflicts with {pr.BaseRefName}"));
+        var reviews = pr.LatestOpinionatedReviews.Items;
+        var blockers = reviews.Where(r => r.State == "CHANGES_REQUESTED").Select(r => r.Author?.Login).OfType<string>().ToList();
+        var approvals = reviews.Count(r => r.State == "APPROVED");
+        if (blockers.Count > 0)
+            list.Add(new(RequirementKind.ChangesRequested, RequirementState.Advisory, "Changes requested", "By " + string.Join(", ", blockers)));
+        list.Add(approvals > 0
+            ? new(RequirementKind.Approvals, RequirementState.Satisfied, approvals == 1 ? "Approved" : $"Approved by {approvals} reviewers")
+            : new(RequirementKind.Approvals, RequirementState.Advisory, "No approvals yet", "Branch restrictions may require them"));
+        var failed = pr.Checks.Where(c => c.Outcome == CheckOutcome.Failure).ToList();
+        var running = pr.Checks.Where(c => c.Outcome == CheckOutcome.Pending).ToList();
+        if (failed.Count > 0)
+            list.Add(new(RequirementKind.Checks, RequirementState.Advisory, Count(failed.Count, "build") + " failed", Names(failed.Select(c => c.Title)), RequirementAction.ShowChecks));
+        else if (running.Count > 0)
+            list.Add(new(RequirementKind.Checks, RequirementState.Pending, "Waiting for " + Count(running.Count, "build"), Names(running.Select(c => c.Title)), RequirementAction.ShowChecks));
+        else if (pr.Checks.Count > 0)
+            list.Add(new(RequirementKind.Checks, RequirementState.Satisfied, pr.Checks.Count == 1 ? "1 build passed" : $"All {pr.Checks.Count} builds passed", null, RequirementAction.ShowChecks));
+        if (merge.OpenTasks is { } tasks && tasks > 0)
+            list.Add(new(RequirementKind.Conversations, RequirementState.Advisory, Count(tasks, "open task"), "Merge checks may require resolving them", RequirementAction.ShowConversation));
+        list.Add(new(RequirementKind.OtherRules, RequirementState.Unknown, "Merge checks aren’t visible", "Bitbucket rejects the merge if a required check fails"));
         return list;
     }
 

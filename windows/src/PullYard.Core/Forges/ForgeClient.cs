@@ -120,14 +120,17 @@ public sealed class ForgeHttp
     public async Task Post(string path, JsonObject json, string method = "POST", CancellationToken ct = default) =>
         await Call(new HttpMethod(method), path, null, Encoding.UTF8.GetBytes(json.ToJsonString()), ct).ConfigureAwait(false);
 
+    public async Task<string> Text(string path, IEnumerable<(string Key, string Value)>? query = null, CancellationToken ct = default) =>
+        Encoding.UTF8.GetString(await Call(HttpMethod.Get, path, query, null, ct, "text/plain").ConfigureAwait(false));
+
     private Task<byte[]> Call(HttpMethod method, string path, IEnumerable<(string Key, string Value)>? query, CancellationToken ct) =>
         Call(method, path, query, null, ct);
 
-    private async Task<byte[]> Call(HttpMethod method, string path, IEnumerable<(string Key, string Value)>? query, byte[]? body, CancellationToken ct)
+    private async Task<byte[]> Call(HttpMethod method, string path, IEnumerable<(string Key, string Value)>? query, byte[]? body, CancellationToken ct, string accept = "application/json")
     {
         var target = Url(path, query);
         var used = Authorization;
-        var (status, data) = await Send(method, target, used, body, ct).ConfigureAwait(false);
+        var (status, data) = await Send(method, target, used, body, accept, ct).ConfigureAwait(false);
         if (status == 401 && Refresh is { } refresh)
         {
             await refreshGate.WaitAsync(ct).ConfigureAwait(false);
@@ -139,7 +142,7 @@ public sealed class ForgeHttp
             {
                 refreshGate.Release();
             }
-            (status, data) = await Send(method, target, Authorization, body, ct).ConfigureAwait(false);
+            (status, data) = await Send(method, target, Authorization, body, accept, ct).ConfigureAwait(false);
         }
         if (status is < 200 or >= 300)
         {
@@ -149,7 +152,7 @@ public sealed class ForgeHttp
         return data;
     }
 
-    private async Task<(int Status, byte[] Data)> Send(HttpMethod method, Uri url, string authorization, byte[]? body, CancellationToken ct)
+    private async Task<(int Status, byte[] Data)> Send(HttpMethod method, Uri url, string authorization, byte[]? body, string accept, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(method, url);
         if (body is not null)
@@ -158,7 +161,7 @@ public sealed class ForgeHttp
             req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         }
         req.Headers.TryAddWithoutValidation("Authorization", authorization);
-        req.Headers.Accept.ParseAdd("application/json");
+        req.Headers.Accept.ParseAdd(accept);
         req.Headers.UserAgent.ParseAdd(AppInfo.UserAgent);
         req.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
         using var response = await http.SendAsync(req, ct).ConfigureAwait(false);
