@@ -152,7 +152,7 @@ enum RequirementAction: Equatable {
 }
 
 enum RequirementKind: String {
-    case draft, conflicts, behind, changesRequested, approvals, codeOwners, lastPush, checks, optionalChecks, conversations, rules, otherRules
+    case draft, conflicts, behind, changesRequested, approvals, codeOwners, lastPush, checks, optionalChecks, conversations, mergeQueue, rules, otherRules
 }
 
 struct MergeRequirement: Identifiable, Equatable {
@@ -229,6 +229,14 @@ enum MergeReadiness {
         out += reviewRequirements(pr, rules: rules, access: status.reviewRules, loading: status == .loading)
         out += checkRequirements(pr, rules: rules)
         if let c = conversationRequirement(pr, rules: rules, loading: status == .loading) { out.append(c) }
+
+        if let entry = pr.mergeQueueEntry {
+            out.append(MergeRequirement(kind: .mergeQueue, state: entry.failing ? .missing : .pending, title: entry.summary,
+                                        detail: entry.failing ? "Fix the failing checks or conflicts and add it again" : nil))
+        } else if pr.isMergeQueueEnabled == true {
+            out.append(MergeRequirement(kind: .mergeQueue, state: .advisory, title: "Merges through a merge queue",
+                                        detail: "Add it to the queue on GitHub with “Merge when ready”"))
+        }
 
         if status == .failed {
             out.append(MergeRequirement(kind: .rules, state: .unknown, title: "Branch rules couldn’t be read", detail: "Showing what GitHub reports for this pull request"))
@@ -436,6 +444,12 @@ enum MergeReadiness {
             out.append(MergeRequirement(kind: .conversations, state: .missing, title: open > 0 ? threads : "All threads must be resolved", detail: "The project requires resolving them", action: .showConversation))
         } else if open > 0 {
             out.append(MergeRequirement(kind: .conversations, state: .advisory, title: threads, detail: "Not required to merge", action: .showConversation))
+        }
+
+        if let entry = pr.mergeQueueEntry {
+            out.append(MergeRequirement(kind: .mergeQueue, state: .pending, title: entry.summary.replacingOccurrences(of: "Merge queue", with: "Merge train").replacingOccurrences(of: "Queued to merge", with: "In the merge train")))
+        } else if pr.isMergeQueueEnabled == true {
+            out.append(MergeRequirement(kind: .mergeQueue, state: .advisory, title: "Merges through a merge train", detail: "Merging starts or joins the train"))
         }
 
         let covered: Set<String> = ["mergeable", "conflict", "broken_status", "need_rebase", "checking", "unchecked", "preparing", "approvals_syncing",

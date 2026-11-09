@@ -9,6 +9,7 @@ struct GitLabMRSnapshot {
     let jobs: [GitLabMR.Job]
     let settings: GitLabMR.Project?
     let viewer: String
+    var train: GitLabMR.TrainCar? = nil
 }
 
 enum GitLabReviewMapper {
@@ -132,6 +133,17 @@ enum GitLabReviewMapper {
         }
     }
 
+    static func trainEntry(_ car: GitLabMR.TrainCar?) -> MergeQueueEntry? {
+        guard let car else { return nil }
+        let running = ["created", "pending", "running", "waiting_for_resource", "preparing"].contains(car.pipeline?.status ?? "")
+        switch car.status {
+        case "merging": return MergeQueueEntry(position: nil, state: "MERGEABLE")
+        case "stale": return MergeQueueEntry(position: nil, state: "AWAITING_CHECKS")
+        case "idle", "fresh": return MergeQueueEntry(position: nil, state: running ? "AWAITING_CHECKS" : "QUEUED")
+        default: return nil
+        }
+    }
+
     static func cleanTrace(_ raw: String) -> String {
         let markers = raw.replacingOccurrences(of: #"section_(start|end):\d+:[A-Za-z0-9_.\-\[\]=,]+\r?(\u{1B}\[0K)?"#, with: "", options: .regularExpression)
         let lines = markers.components(separatedBy: "\n").map { line -> String in
@@ -219,7 +231,9 @@ enum GitLabReviewMapper {
             viewerCanApprove: s.approvals?.userCanApprove,
             viewerApproved: s.approvals?.userHasApproved,
             mergeBlocker: merge.blocker,
-            forgeMerge: ForgeMergeInfo(status: mr.detailedMergeStatus ?? legacyStatus(mr.mergeStatus), approvalsRequired: s.approvals?.approvalsRequired, approvalsLeft: s.approvals?.approvalsLeft)
+            forgeMerge: ForgeMergeInfo(status: mr.detailedMergeStatus ?? legacyStatus(mr.mergeStatus), approvalsRequired: s.approvals?.approvalsRequired, approvalsLeft: s.approvals?.approvalsLeft),
+            isMergeQueueEnabled: s.settings?.mergeTrainsEnabled,
+            mergeQueueEntry: trainEntry(s.train)
         )
     }
 
@@ -335,6 +349,15 @@ final class GitLabPRBackend: PRBackend {
     }
 
     func load(_ ref: ItemRef) async throws -> PRLoad {
+        var snapshot = try await fetch(ref)
+        if snapshot.settings?.mergeTrainsEnabled == true, snapshot.mr.state == "opened" {
+            snapshot.train = try? await client.trainCar(snapshot.project, iid: ref.number)
+        }
+        refs[ref] = snapshot.mr.diffRefs
+        return PRLoad(viewer: snapshot.viewer, repository: GitLabReviewMapper.repository(snapshot), pulse: .fingerprint(GitLabReviewMapper.pulse(snapshot.mr, approvals: snapshot.approvals)))
+    }
+
+    private func fetch(_ ref: ItemRef) async throws -> GitLabMRSnapshot {
         let project = ref.repo.full
         async let mrTask = client.mergeRequest(project, iid: ref.number)
         async let approvalsTask = try? client.approvals(project, iid: ref.number)
@@ -350,7 +373,7 @@ final class GitLabPRBackend: PRBackend {
             jobs = (try? await client.jobs(owner, pipeline: pipeline.id)) ?? []
         }
         let approvals = await approvalsTask
-        let snapshot = GitLabMRSnapshot(
+        return GitLabMRSnapshot(
             project: project,
             mr: mr,
             approvals: approvals,
@@ -360,8 +383,6 @@ final class GitLabPRBackend: PRBackend {
             settings: await settingsTask,
             viewer: await viewerTask ?? ""
         )
-        refs[ref] = mr.diffRefs
-        return PRLoad(viewer: snapshot.viewer, repository: GitLabReviewMapper.repository(snapshot), pulse: .fingerprint(GitLabReviewMapper.pulse(mr, approvals: approvals)))
     }
 
     func pulse(_ ref: ItemRef) async throws -> PRPulseToken? {

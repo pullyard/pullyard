@@ -408,6 +408,27 @@ struct ReviewThread: Decodable, Identifiable {
     let comments: Nodes<ThreadComment>
 }
 
+struct MergeQueueEntry: Decodable, Equatable {
+    let position: Int?
+    let state: String?
+    var enqueuedAt: Date? = nil
+    var estimatedTimeToMerge: Int? = nil
+
+    var summary: String {
+        let place = position.map { $0 <= 1 ? "next in line" : "#\($0) in line" }
+        let eta = estimatedTimeToMerge.flatMap { $0 > 0 ? "about \(max(1, Int((Double($0) / 60).rounded()))) min" : nil }
+        switch state {
+        case "AWAITING_CHECKS": return "Merge queue: waiting for checks" + (place.map { " · \($0)" } ?? "")
+        case "MERGEABLE": return "Merge queue: merging next"
+        case "UNMERGEABLE": return "Merge queue: can’t be merged and will be removed"
+        case "LOCKED": return "Merge queue: locked"
+        default: return "Queued to merge" + [place, eta].compactMap { $0 }.map { " · \($0)" }.joined()
+        }
+    }
+
+    var failing: Bool { state == "UNMERGEABLE" }
+}
+
 struct AutoMergeRequest: Decodable {
     let enabledAt: Date?
     let mergeMethod: String?
@@ -464,6 +485,9 @@ struct PullRequestDetail: Decodable {
     var viewerApproved: Bool?
     var mergeBlocker: String?
     var forgeMerge: ForgeMergeInfo?
+    var isMergeQueueEnabled: Bool?
+    var isInMergeQueue: Bool?
+    var mergeQueueEntry: MergeQueueEntry?
 
     var visualState: VisualState { .pr(state: state, draft: isDraft) }
     var rollup: StatusRollup? { lastCommit.nodes.first?.commit.statusCheckRollup }
@@ -489,6 +513,10 @@ struct PRPulse: Decodable, Equatable {
     struct Target: Decodable, Equatable { let oid: String? }
     struct BaseRef: Decodable, Equatable { let target: Target? }
     struct AutoMerge: Decodable, Equatable { let enabledAt: Date? }
+    struct QueueEntry: Decodable, Equatable {
+        let position: Int?
+        let state: String?
+    }
     struct Context: Decodable, Equatable {
         let typename: String
         let databaseId: Int?
@@ -538,6 +566,7 @@ struct PRPulse: Decodable, Equatable {
     let reviewDecision: String?
     let baseRef: BaseRef?
     let autoMergeRequest: AutoMerge?
+    var mergeQueueEntry: QueueEntry? = nil
     let pulseComments: Count
     let pulseReviews: Count
     let pulseRequests: Requests

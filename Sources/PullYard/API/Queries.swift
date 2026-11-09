@@ -60,7 +60,7 @@ enum Q {
     """
 
     static let prPulseFragment = """
-    fragment PRPulse on PullRequest { updatedAt headRefOid state isDraft merged mergeable mergeStateStatus reviewDecision baseRef { target { oid } } autoMergeRequest { enabledAt } pulseComments: comments { totalCount } pulseReviews: reviews { totalCount } pulseRequests: reviewRequests(first: 20) { totalCount nodes { requestedReviewer { __typename ... on User { login } ... on Team { name } ... on Mannequin { login } } } } pulseThreads: reviewThreads(first: 100) { totalCount nodes { isResolved } } pulseCommit: commits(last: 1) { totalCount nodes { commit { oid statusCheckRollup { state contexts(first: 100) { totalCount nodes { __typename ... on CheckRun { databaseId name status conclusion completedAt } ... on StatusContext { context state } } } } } } } }
+    fragment PRPulse on PullRequest { updatedAt headRefOid state isDraft merged mergeable mergeStateStatus reviewDecision baseRef { target { oid } } autoMergeRequest { enabledAt } mergeQueueEntry { position state } pulseComments: comments { totalCount } pulseReviews: reviews { totalCount } pulseRequests: reviewRequests(first: 20) { totalCount nodes { requestedReviewer { __typename ... on User { login } ... on Team { name } ... on Mannequin { login } } } } pulseThreads: reviewThreads(first: 100) { totalCount nodes { isResolved } } pulseCommit: commits(last: 1) { totalCount nodes { commit { oid statusCheckRollup { state contexts(first: 100) { totalCount nodes { __typename ... on CheckRun { databaseId name status conclusion completedAt } ... on StatusContext { context state } } } } } } } }
     """
 
     static let prPulse = """
@@ -83,6 +83,7 @@ enum Q {
           additions deletions changedFiles
           reviewDecision viewerCanUpdate viewerDidAuthor
           autoMergeRequest { enabledAt mergeMethod }
+          isMergeQueueEnabled isInMergeQueue mergeQueueEntry { position state enqueuedAt estimatedTimeToMerge }
           labels(first: 20) { nodes { name color } }
           assignees(first: 10) { nodes { login avatarUrl } }
           reviewRequests(first: 20) { nodes { asCodeOwner requestedReviewer { __typename ... on User { login avatarUrl } ... on Team { name combinedSlug avatarUrl } ... on Mannequin { login avatarUrl } } } }
@@ -107,6 +108,8 @@ enum Q {
         .replacingOccurrences(of: " isRequired(pullRequestNumber: $number)", with: "")
         .replacingOccurrences(of: "asCodeOwner ", with: "")
         .replacingOccurrences(of: " combinedSlug avatarUrl", with: "")
+        .replacingOccurrences(of: "isMergeQueueEnabled isInMergeQueue mergeQueueEntry { position state enqueuedAt estimatedTimeToMerge }", with: "")
+        .replacingOccurrences(of: " mergeQueueEntry { position state }", with: "")
 
     static let codeOwners = """
     query CodeOwners($owner: String!, $name: String!, $a: String!, $b: String!, $c: String!) { repository(owner: $owner, name: $name) { a: object(expression: $a) { ... on Blob { text isTruncated } } b: object(expression: $b) { ... on Blob { text isTruncated } } c: object(expression: $c) { ... on Blob { text isTruncated } } } }
