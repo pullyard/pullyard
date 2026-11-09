@@ -444,6 +444,7 @@ struct PRHeaderView: View {
             if pr.isOpen {
                 RiskStrip(model: model, risks: model.risks)
             }
+            JiraMergeFollowUp(pr: pr)
             MergeStatusBar(model: model, pr: pr, onMerge: onMerge, onRequestReview: onRequestReview)
         }
         .animation(Motion.smooth, value: model.stackTree)
