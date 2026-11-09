@@ -530,9 +530,22 @@ pub fn has_project_scope() -> bool {
     s.scopes.is_empty() || s.scopes.iter().any(|x| x == "read:project" || x == "project")
 }
 
+pub fn forge_reviews() -> bool {
+    try_get().is_some_and(|a| {
+        let s = a.state.borrow();
+        s.api.is_none() && s.forge.as_ref().is_some_and(|f| f.reviews())
+    })
+}
+
 pub fn pr_model(r: &ItemRef) -> Option<Rc<PrModel>> {
     let a = get();
-    let api = a.state.borrow().api.clone()?;
+    let (api, forge) = {
+        let s = a.state.borrow();
+        (s.api.clone(), s.forge.clone().filter(|f| f.reviews()))
+    };
+    if api.is_none() && forge.is_none() {
+        return None;
+    }
     let mut models = a.pr_models.borrow_mut();
     if let Some(pos) = models.iter().position(|(k, _)| k == r) {
         let entry = models.remove(pos);
@@ -540,7 +553,11 @@ pub fn pr_model(r: &ItemRef) -> Option<Rc<PrModel>> {
         models.push(entry);
         return Some(m);
     }
-    let m = PrModel::new(r.clone(), api);
+    let m = match (api, forge) {
+        (Some(api), _) => PrModel::new(r.clone(), api),
+        (None, Some(forge)) => PrModel::with_backend(r.clone(), crate::ui::pr::backend::PrBackend::GitLab(crate::forge::gitlab_review::GitLabReview::new(forge))),
+        (None, None) => return None,
+    };
     models.push((r.clone(), m.clone()));
     if models.len() > 15 {
         models.remove(0);

@@ -260,7 +260,11 @@ pub fn page(repo: &RepoRef, sha: &str) -> adw::NavigationPage {
     let browser_w = browser.clone();
     let load_holder = load.clone();
     let f: Rc<dyn Fn()> = Rc::new(move || {
-        let Some(api) = app::api() else { return };
+        let api = app::api();
+        let forge = app::forge().filter(|f| f.reviews());
+        if api.is_none() && forge.is_none() {
+            return;
+        }
         let (r, s) = (r.clone(), s.clone());
         let d = d.clone();
         let body = body_w.clone();
@@ -268,7 +272,14 @@ pub fn page(repo: &RepoRef, sha: &str) -> adw::NavigationPage {
         let browser = browser_w.clone();
         let reload = load_holder.clone();
         crate::rt::spawn_local(async move {
-            let res = crate::rt::run(async move { api.commit(&r, &s).await }).await;
+            let res = crate::rt::run(async move {
+                match (api, forge) {
+                    (Some(api), _) => api.commit(&r, &s).await,
+                    (None, Some(forge)) => crate::forge::gitlab_review::commit(&forge, &r.full(), &s).await,
+                    (None, None) => Err(crate::api::ApiError::new("Not signed in")),
+                }
+            })
+            .await;
             match res {
                 Ok(c) => {
                     clear(&header);

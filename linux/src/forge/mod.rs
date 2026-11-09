@@ -1,13 +1,14 @@
 mod bitbucket;
 mod gitea;
 mod gitlab;
+pub mod gitlab_review;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
-use reqwest::header::{ACCEPT, AUTHORIZATION};
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Method, StatusCode};
 use serde::de::{DeserializeOwned, Deserializer};
 use serde::Deserialize;
@@ -124,6 +125,8 @@ pub struct ForgeHttp {
     service: String,
     authorization: Mutex<String>,
     refresher: Mutex<Option<Refresher>>,
+    #[cfg(test)]
+    stub: Option<Arc<stub::Stub>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -134,14 +137,54 @@ fn error_message(body: &[u8]) -> Option<String> {
     let obj: Value = serde_json::from_slice(body).ok()?;
     let s = |v: Option<&Value>| v.and_then(|v| v.as_str()).map(|s| s.to_string());
     s(obj.get("message"))
+        .or_else(|| structured_message(obj.get("message")?))
         .or_else(|| s(obj.get("error").and_then(|e| e.get("message"))))
         .or_else(|| s(obj.get("error_description")))
         .or_else(|| s(obj.get("error")))
 }
 
+fn joined(v: &Value) -> String {
+    match v {
+        Value::Array(items) => items.iter().map(joined).collect::<Vec<_>>().join(", "),
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn structured_message(m: &Value) -> Option<String> {
+    match m {
+        Value::Array(items) if !items.is_empty() => Some(items.iter().map(joined).collect::<Vec<_>>().join("; ")),
+        Value::Object(map) if !map.is_empty() => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            Some(
+                keys.into_iter()
+                    .map(|k| {
+                        let value = joined(&map[k]);
+                        if k == "base" {
+                            value
+                        } else {
+                            format!("{k} {value}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            )
+        }
+        _ => None,
+    }
+}
+
 impl ForgeHttp {
     fn new(base: String, service: String, authorization: String) -> Self {
-        ForgeHttp { base, service, authorization: Mutex::new(authorization), refresher: Mutex::new(None) }
+        ForgeHttp {
+            base,
+            service,
+            authorization: Mutex::new(authorization),
+            refresher: Mutex::new(None),
+            #[cfg(test)]
+            stub: None,
+        }
     }
 
     pub fn url(&self, path: &str, query: &[(&'static str, String)]) -> ApiResult<url::Url> {
@@ -156,9 +199,17 @@ impl ForgeHttp {
         Ok(u)
     }
 
-    async fn send(&self, method: &Method, url: &url::Url) -> ApiResult<(StatusCode, Vec<u8>)> {
+    async fn send(&self, method: &Method, url: &url::Url, body: Option<&[u8]>) -> ApiResult<(StatusCode, Vec<u8>)> {
+        #[cfg(test)]
+        if let Some(stub) = &self.stub {
+            return Ok(stub.respond(method, url, body));
+        }
         let authorization = lock(&self.authorization).clone();
-        let resp = http_client().request(method.clone(), url.clone()).header(AUTHORIZATION, authorization).header(ACCEPT, "application/json").send().await.map_err(|e| self.network_error(e))?;
+        let mut req = http_client().request(method.clone(), url.clone()).header(AUTHORIZATION, authorization).header(ACCEPT, "application/json");
+        if let Some(body) = body {
+            req = req.header(CONTENT_TYPE, "application/json").body(body.to_vec());
+        }
+        let resp = req.send().await.map_err(|e| self.network_error(e))?;
         let status = resp.status();
         let bytes = resp.bytes().await.map_err(|e| self.network_error(e))?;
         Ok((status, bytes.to_vec()))
@@ -184,19 +235,24 @@ impl ForgeHttp {
     }
 
     pub async fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&'static str, String)]) -> ApiResult<T> {
-        let body = self.call(Method::GET, path, query).await?;
+        let body = self.call(Method::GET, path, query, None).await?;
         serde_json::from_slice(&body).map_err(|e| ApiError::new(format!("Failed to parse response from {}: {e}", self.service)))
     }
 
     pub async fn post(&self, method: Method, path: &str, query: &[(&'static str, String)]) -> ApiResult<()> {
-        self.call(method, path, query).await.map(|_| ())
+        self.call(method, path, query, None).await.map(|_| ())
     }
 
-    async fn call(&self, method: Method, path: &str, query: &[(&'static str, String)]) -> ApiResult<Vec<u8>> {
+    pub async fn send_json(&self, method: Method, path: &str, json: Value) -> ApiResult<()> {
+        self.call(method, path, &[], Some(&json)).await.map(|_| ())
+    }
+
+    async fn call(&self, method: Method, path: &str, query: &[(&'static str, String)], json: Option<&Value>) -> ApiResult<Vec<u8>> {
         let target = self.url(path, query)?;
-        let (mut status, mut body) = self.send(&method, &target).await?;
+        let payload = json.map(|j| serde_json::to_vec(j).unwrap_or_default());
+        let (mut status, mut body) = self.send(&method, &target, payload.as_deref()).await?;
         if status == StatusCode::UNAUTHORIZED && self.refresh().await? {
-            (status, body) = self.send(&method, &target).await?;
+            (status, body) = self.send(&method, &target, payload.as_deref()).await?;
         }
         if !status.is_success() {
             if status == StatusCode::UNAUTHORIZED {
@@ -252,6 +308,22 @@ impl ForgeClient {
 
     pub fn provider(&self) -> GitProvider {
         self.inner.provider
+    }
+
+    pub fn reviews(&self) -> bool {
+        self.inner.provider == GitProvider::Gitlab
+    }
+
+    pub fn host(&self) -> String {
+        url::Url::parse(&self.inner.http.base).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn stubbed(provider: GitProvider, host: &str, login: &str, stub: Arc<stub::Stub>) -> ForgeClient {
+        let mut http = ForgeHttp::new(format!("https://{host}/api/v4"), provider.title().to_string(), "Bearer test".into());
+        http.stub = Some(stub);
+        let state = ClientState { login: Some(login.to_string()).filter(|l| !l.is_empty()), ..Default::default() };
+        ForgeClient { inner: Arc::new(Inner { provider, http, state: Mutex::new(state) }) }
     }
 
     pub fn same(&self, other: &ForgeClient) -> bool {
@@ -345,6 +417,77 @@ impl ForgeClient {
             GitProvider::Bitbucket => bitbucket::pull_requests(self, filter, state).await,
             GitProvider::Gitea => gitea::pull_requests(self, filter, state).await,
             GitProvider::Github | GitProvider::GithubEnterprise => Ok(vec![]),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod stub {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    use reqwest::{Method, StatusCode};
+    use serde_json::Value;
+
+    #[derive(Debug, Clone)]
+    pub struct Request {
+        pub method: String,
+        pub url: String,
+        pub path: String,
+        pub body: Option<Value>,
+    }
+
+    impl Request {
+        pub fn json(&self) -> Value {
+            self.body.clone().unwrap_or(Value::Null)
+        }
+
+        pub fn last_segment(&self) -> String {
+            self.path.rsplit('/').next().unwrap_or("").to_string()
+        }
+    }
+
+    #[derive(Default)]
+    pub struct Stub {
+        routes: Mutex<HashMap<String, (u16, String)>>,
+        requests: Mutex<Vec<Request>>,
+    }
+
+    impl Stub {
+        pub fn route(&self, suffix: &str, status: u16, body: &str) {
+            super::lock(&self.routes).insert(suffix.to_string(), (status, body.to_string()));
+        }
+
+        pub fn remove(&self, suffix: &str) {
+            super::lock(&self.routes).remove(suffix);
+        }
+
+        pub fn clear_requests(&self) {
+            super::lock(&self.requests).clear();
+        }
+
+        pub fn all(&self) -> Vec<Request> {
+            super::lock(&self.requests).clone()
+        }
+
+        pub fn requests(&self, method: &str, suffix: &str) -> Vec<Request> {
+            self.all().into_iter().filter(|r| r.method == method && r.path.ends_with(suffix)).collect()
+        }
+
+        pub(super) fn respond(&self, method: &Method, url: &url::Url, body: Option<&[u8]>) -> (StatusCode, Vec<u8>) {
+            let path = percent_encoding::percent_decode_str(url.path()).decode_utf8_lossy().to_string();
+            super::lock(&self.requests).push(Request {
+                method: method.to_string(),
+                url: url.to_string(),
+                path: path.clone(),
+                body: body.and_then(|b| serde_json::from_slice(b).ok()),
+            });
+            let routes = super::lock(&self.routes);
+            let hit = routes.iter().filter(|(k, _)| path.ends_with(k.as_str())).max_by_key(|(k, _)| k.len()).map(|(_, v)| v.clone());
+            match hit {
+                Some((status, body)) => (StatusCode::from_u16(status).unwrap_or(StatusCode::OK), body.into_bytes()),
+                None => (StatusCode::NOT_FOUND, br#"{"message":"404 Not Found"}"#.to_vec()),
+            }
         }
     }
 }

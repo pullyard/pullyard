@@ -114,12 +114,13 @@ pub fn thread(t: &ReviewThread) -> String {
     if !t.is_resolved && t.viewer_can_resolve {
         actions.push_str(&format!("<button data-a=\"resolve\" data-id=\"{id}\">Resolve</button>"));
     }
-    actions.push_str(&format!("<button class=\"ghost\" data-a=\"file\" data-id=\"{}\">View in files</button>", esc(&t.path)));
+    if !t.path.is_empty() {
+        actions.push_str(&format!("<button class=\"ghost\" data-a=\"file\" data-id=\"{}\">View in files</button>", esc(&t.path)));
+    }
+    let title = if t.path.is_empty() { "Thread".to_string() } else { format!("{}{}", esc(&t.path), line.map(|l| format!("<span class=\"ln\">:{l}</span>")).unwrap_or_default()) };
     format!(
-        "<details class=\"thread\"{}><summary class=\"th\">{}{}{tags}</summary>\n{}{comments}<div class=\"actions\">{actions}</div></details>",
+        "<details class=\"thread\"{}><summary class=\"th\">{title}{tags}</summary>\n{}{comments}<div class=\"actions\">{actions}</div></details>",
         if t.is_resolved { "" } else { " open" },
-        esc(&t.path),
-        line.map(|l| format!("<span class=\"ln\">:{l}</span>")).unwrap_or_default(),
         hunk(t.comments.nodes.first().and_then(|c| c.diff_hunk.as_deref()))
     )
 }
@@ -180,6 +181,7 @@ fn review(item: &TimelineItem, threads: &[&ReviewThread], highlight: bool) -> St
         Some("CHANGES_REQUESTED") => ("±", "bad", "requested changes"),
         Some("DISMISSED") => ("✕", "", "review dismissed"),
         Some("PENDING") => ("…", "", "pending review"),
+        Some("DISCUSSION") => ("💬", "", "started a thread"),
         _ => ("💬", "", "reviewed"),
     };
     if !has_body && threads.is_empty() {
@@ -249,6 +251,7 @@ fn common(item: &TimelineItem, author_login: Option<&str>, base: &str) -> String
             &format!("title: <s>{}</s> → {}", esc(item.previous_title.as_deref().unwrap_or("")), esc(item.current_title.as_deref().unwrap_or(""))),
             item.created_at,
         ),
+        "SystemNote" => system_note(item),
         "CrossReferencedEvent" => {
             let Some(s) = &item.source else { return String::new() };
             let Some(url) = &s.url else { return String::new() };
@@ -257,6 +260,30 @@ fn common(item: &TimelineItem, author_login: Option<&str>, base: &str) -> String
         }
         _ => String::new(),
     }
+}
+
+fn system_note(item: &TimelineItem) -> String {
+    let body = item.body.as_deref().unwrap_or("");
+    let Some(text) = body.lines().find(|l| !l.trim().is_empty()) else { return String::new() };
+    let lower = text.to_lowercase();
+    let (icon, cls) = if lower.starts_with("unapproved") || lower.starts_with("closed") {
+        ("✕", "bad")
+    } else if lower.starts_with("approved") || lower.starts_with("reopened") || lower.contains("as **ready**") {
+        ("✓", "ok")
+    } else if lower.starts_with("merged") {
+        ("⇢", "merged")
+    } else if lower.starts_with("added") && lower.contains("commit") {
+        ("●", "")
+    } else if lower.contains("label") {
+        ("🏷", "")
+    } else if lower.contains("review") {
+        ("👁", "")
+    } else if lower.starts_with("mentioned") {
+        ("↗", "")
+    } else {
+        ("•", "")
+    };
+    event(icon, cls, item.actor.as_ref(), &crate::markdown_html::inline(text, None), item.created_at)
 }
 
 pub const POST_SCRIPT: &str = "function post(t,id){try{window.webkit.messageHandlers.app.postMessage(JSON.stringify({type:t,id:id}))}catch(e){}}document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('button[data-a]');if(b){post(b.getAttribute('data-a'),b.getAttribute('data-id'))}});";

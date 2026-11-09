@@ -248,6 +248,7 @@ impl State {
 
     fn ci_fetch(self: &Rc<Self>, id: &str) {
         let Some(ci) = &self.ci else { return };
+        let Some(api) = self.model.api.clone() else { return };
         let Some(check) = ci.checks.get(id).cloned() else { return };
         if !ci.requested.borrow_mut().insert(id.to_string()) {
             return;
@@ -267,7 +268,7 @@ impl State {
             }
             ci.render_status(f);
         }
-        let handle = crate::rt::spawn(ci_fix::collect(self.model.api.clone(), self.model.r.repo.clone(), check, ci.limit.clone(), log));
+        let handle = crate::rt::spawn(ci_fix::collect(api, self.model.r.repo.clone(), check, ci.limit.clone(), log));
         ci.tasks.borrow_mut().push(handle.abort_handle());
         let w = Rc::downgrade(self);
         crate::rt::spawn_local(async move {

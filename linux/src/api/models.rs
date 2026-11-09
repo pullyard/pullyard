@@ -839,8 +839,26 @@ pub struct PullRequestDetail {
     pub timeline_items: Nodes<TimelineItem>,
     #[serde(default)]
     pub review_threads: Nodes<ReviewThread>,
+    #[serde(default)]
+    pub viewer_can_approve: Option<bool>,
+    #[serde(default)]
+    pub viewer_approved: Option<bool>,
+    #[serde(default)]
+    pub merge_blocker: Option<String>,
+    #[serde(default)]
+    pub forge_merge: Option<ForgeMergeInfo>,
     #[serde(flatten)]
     pub light: PrLight,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ForgeMergeInfo {
+    pub status: String,
+    #[serde(default)]
+    pub approvals_required: Option<i64>,
+    #[serde(default)]
+    pub approvals_left: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default, PartialEq)]
@@ -943,6 +961,8 @@ pub struct PrLight {
     pub light_threads: Option<LightThreads>,
     #[serde(default)]
     pub light_commits: Option<Nodes<LightCommitNode>>,
+    #[serde(default)]
+    pub light_fingerprint: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default, PartialEq)]

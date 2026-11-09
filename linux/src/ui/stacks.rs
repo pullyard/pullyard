@@ -34,7 +34,7 @@ fn open_entry(e: &StackEntry) {
     if let Some(m) = app::pr_model(&r) {
         match e.tree.nodes.get(&e.tree.current) {
             Some(node) => {
-                let nodes = stack::store::memory_nodes(&m.api, &e.repo).unwrap_or_else(|| e.tree.nodes.values().cloned().collect());
+                let nodes = m.api.as_ref().and_then(|api| stack::store::memory_nodes(api, &e.repo)).unwrap_or_else(|| e.tree.nodes.values().cloned().collect());
                 m.seed_stack(node, &nodes);
             }
             None => m.set_tab(PrTab::Stack),
