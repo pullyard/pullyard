@@ -67,6 +67,8 @@ enum Q {
     query PullRequestPulse($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { ...PRPulse } } }
     """ + prPulseFragment
 
+    static let prPulseLegacy = prPulse.replacingOccurrences(of: " mergeQueueEntry { position state }", with: "")
+
     static let pullRequest = """
     query PullRequest($owner: String!, $name: String!, $number: Int!) {
       viewer { login }

@@ -306,6 +306,8 @@ final class MergeReadinessTests: XCTestCase {
         XCTAssertTrue(Q.pullRequest.contains("mergeQueueEntry { position state enqueuedAt estimatedTimeToMerge }"))
         XCTAssertFalse(Q.pullRequestLegacy.contains("mergeQueue"))
         XCTAssertFalse(Q.pullRequestLegacy.contains("isInMergeQueue"))
+        XCTAssertTrue(Q.prPulse.contains("mergeQueueEntry { position state }"))
+        XCTAssertFalse(Q.prPulseLegacy.contains("mergeQueue"))
     }
 
     func testGitLabMergeTrain() throws {
