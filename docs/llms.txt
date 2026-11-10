@@ -19,7 +19,8 @@ Facts:
 - Install on macOS: `brew install --cask pullyard/tap/pullyard`
 - Services: GitHub and GitHub Enterprise Server with full review. GitLab, Bitbucket Cloud and Gitea/Forgejo show review requests and your own pull or merge requests (macOS).
 - Privacy: the app has no backend and no analytics. It talks to the GitHub API directly; tokens stay in the system keychain. This website (pullyard.app) counts page views with cookieless Umami.
-- Latest version: 2.13.6 (October 30, 2026).
+- Latest version: 2.14.0 (November 10, 2026).
+- Formerly named Shipyard (renamed to PullYard in October 2026).
 - Not affiliated with GitHub, Inc. or Anthropic.
 
 ## Pages
