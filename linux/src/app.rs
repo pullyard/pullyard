@@ -555,6 +555,7 @@ pub fn pr_model(r: &ItemRef) -> Option<Rc<PrModel>> {
     }
     let m = match (api, forge) {
         (Some(api), _) => PrModel::new(r.clone(), api),
+        (None, Some(forge)) if forge.provider() == crate::git_accounts::GitProvider::Bitbucket => PrModel::with_backend(r.clone(), crate::ui::pr::backend::PrBackend::Bitbucket(crate::forge::bitbucket_review::BitbucketReview::new(forge))),
         (None, Some(forge)) => PrModel::with_backend(r.clone(), crate::ui::pr::backend::PrBackend::GitLab(crate::forge::gitlab_review::GitLabReview::new(forge))),
         (None, None) => return None,
     };

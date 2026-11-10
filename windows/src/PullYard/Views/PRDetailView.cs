@@ -501,7 +501,7 @@ public sealed class PRContent : Grid, IShortcutHost
                 var title = a switch
                 {
                     RequirementAction.RequestReview => L.T("Merge_ActRequestReview", "Request review"),
-                    RequirementAction.ShowChecks => model.IsGitLab ? L.T("MR_ActShowPipeline", "Show pipeline") : L.T("Merge_ActShowChecks", "Show checks"),
+                    RequirementAction.ShowChecks => model.IsGitLab ? L.T("MR_ActShowPipeline", "Show pipeline") : model.Features.IsBitbucket ? L.T("BB_ActShowBuilds", "Show builds") : L.T("Merge_ActShowChecks", "Show checks"),
                     RequirementAction.ShowConversation => L.T("Merge_ActShowConversation", "Show conversation"),
                     RequirementAction.ShowConflicts => L.T("Merge_ActShowConflicts", "View conflicts"),
                     RequirementAction.UpdateBranch => model.UpdateBranchTitle,
@@ -833,7 +833,7 @@ public sealed class PRContent : Grid, IShortcutHost
                     : Ui.MenuItem(L.T("PR_Close", "Close pull request…"), () => Confirm(L.T("PR_CloseQ", "Close pull request without merging?"), L.T("PR_CloseButton", "Close pull request"), () => model.Simple(PRAction.Close)).Forget()));
             }
         }
-        else if (!pr.Merged && pr.ViewerCanUpdate)
+        else if (!pr.Merged && pr.ViewerCanUpdate && model.Features.Reopen)
         {
             menu.Items.Add(Ui.MenuItem(model.IsGitLab ? L.T("MR_Reopen", "Reopen merge request") : L.T("PR_Reopen", "Reopen pull request"), () => model.Simple(PRAction.Reopen).Forget()));
         }
@@ -1066,7 +1066,7 @@ public sealed class PRContent : Grid, IShortcutHost
             var checks = pr.Checks.OrderBy(c => (int)c.Outcome).ThenBy(c => c.Title).ToList();
             var failedRuns = model.FailedRuns;
             var items = new List<object>();
-            if (checks.Count == 0) items.Add(new TextRowItem(model.IsGitLab ? L.T("MR_NoPipeline", "No pipeline for the latest commit") : L.T("Checks_None", "No checks for the latest commit")));
+            if (checks.Count == 0) items.Add(new TextRowItem(model.IsGitLab ? L.T("MR_NoPipeline", "No pipeline for the latest commit") : model.Features.IsBitbucket ? L.T("BB_NoBuilds", "No builds for the latest commit") : L.T("Checks_None", "No checks for the latest commit")));
             if (model.Features.RerunChecks && failedRuns > 0 && model.CanWrite) items.Add(new ActionRowItem(L.F("Checks_Rerun", "Re-run failed jobs ({0} workflow)", failedRuns), () => ConfirmRerun().Forget(), ""));
             foreach (var c in checks)
             {

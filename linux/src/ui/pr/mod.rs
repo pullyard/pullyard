@@ -1004,7 +1004,7 @@ impl PrPage {
                     dialogs::confirm(&format!("Close {request} without merging?"), None, &format!("Close {request}"), true, f);
                 });
             }
-        } else if !pr.merged && pr.viewer_can_update {
+        } else if !pr.merged && pr.viewer_can_update && f.reopen {
             menu.item(&format!("Reopen {request}"), simple(m.clone(), PrAction::Reopen));
         }
         if f.delete_branch && !pr.is_open() && pr.head_ref.is_some() && m.can_write() {

@@ -105,7 +105,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
 
     public string NumberText => Provider.NumberPrefix() + (Pr?.Number ?? Ref.Number);
 
-    public string ChecksTitle => IsGitLab ? L.T("PR_Pipeline", "Pipeline") : L.T("PR_TabChecks", "Checks");
+    public string ChecksTitle => IsGitLab ? L.T("PR_Pipeline", "Pipeline") : Features.IsBitbucket ? L.T("BB_Builds", "Builds") : L.T("PR_TabChecks", "Checks");
 
     public string UpdateBranchTitle => IsGitLab ? L.T("MR_Rebase", "Rebase") : L.T("Merge_UpdateBranch", "Update branch");
 

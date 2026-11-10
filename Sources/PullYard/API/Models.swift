@@ -859,4 +859,6 @@ struct ForgeMergeInfo: Decodable, Equatable {
     let status: String
     let approvalsRequired: Int?
     let approvalsLeft: Int?
+    var openTasks: Int? = nil
+    var provider: String? = nil
 }

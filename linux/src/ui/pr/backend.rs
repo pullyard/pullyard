@@ -6,6 +6,7 @@ use crate::api::models::{ItemRef, PendingComment, PrDetailResponse, PrFile, PrLi
 use crate::api::queries as q;
 use crate::api::{ApiError, ApiResult, GitHubApi};
 use crate::diff::DiffFile;
+use crate::forge::bitbucket_review::BitbucketReview;
 use crate::forge::gitlab_review::GitLabReview;
 use crate::git_accounts::GitProvider;
 
@@ -36,6 +37,7 @@ pub struct PrFeatures {
     pub blame: bool,
     pub delete_branch: bool,
     pub branch_rules: bool,
+    pub reopen: bool,
 }
 
 impl PrFeatures {
@@ -56,6 +58,7 @@ impl PrFeatures {
             blame: true,
             delete_branch: true,
             branch_rules: true,
+            reopen: true,
         }
     }
 
@@ -76,6 +79,28 @@ impl PrFeatures {
             blame: false,
             delete_branch: false,
             branch_rules: false,
+            reopen: true,
+        }
+    }
+
+    pub fn bitbucket() -> Self {
+        PrFeatures {
+            provider: GitProvider::Bitbucket,
+            stack: false,
+            viewed_files: false,
+            request_reviewers: false,
+            editing: true,
+            draft_toggle: true,
+            update_branch: false,
+            rerun_checks: false,
+            job_logs: false,
+            request_changes: true,
+            revoke_approval: true,
+            agent: false,
+            blame: false,
+            delete_branch: false,
+            branch_rules: false,
+            reopen: false,
         }
     }
 
@@ -84,10 +109,10 @@ impl PrFeatures {
     }
 
     pub fn checks_title(&self) -> &'static str {
-        if self.is_gitlab() {
-            "Pipeline"
-        } else {
-            "Checks"
+        match self.provider {
+            GitProvider::Gitlab => "Pipeline",
+            GitProvider::Bitbucket => "Builds",
+            _ => "Checks",
         }
     }
 
@@ -116,6 +141,7 @@ impl PrFeatures {
 pub enum PrBackend {
     GitHub(GitHubApi, GitProvider),
     GitLab(GitLabReview),
+    Bitbucket(BitbucketReview),
 }
 
 fn unsupported(provider: GitProvider) -> ApiError {
@@ -127,13 +153,14 @@ impl PrBackend {
         match self {
             PrBackend::GitHub(_, provider) => PrFeatures::github(*provider),
             PrBackend::GitLab(_) => PrFeatures::gitlab(),
+            PrBackend::Bitbucket(_) => PrFeatures::bitbucket(),
         }
     }
 
     pub fn github(&self) -> Option<&GitHubApi> {
         match self {
             PrBackend::GitHub(api, _) => Some(api),
-            PrBackend::GitLab(_) => None,
+            PrBackend::GitLab(_) | PrBackend::Bitbucket(_) => None,
         }
     }
 
@@ -141,6 +168,7 @@ impl PrBackend {
         match self {
             PrBackend::GitHub(api, _) => api.host().to_string(),
             PrBackend::GitLab(lab) => lab.host(),
+            PrBackend::Bitbucket(bb) => bb.host(),
         }
     }
 
@@ -148,6 +176,7 @@ impl PrBackend {
         match self {
             PrBackend::GitHub(api, _) => api.pull_request(r).await,
             PrBackend::GitLab(lab) => lab.load(r).await,
+            PrBackend::Bitbucket(bb) => bb.load(r).await,
         }
     }
 
@@ -155,6 +184,7 @@ impl PrBackend {
         match self {
             PrBackend::GitHub(api, _) => api.pull_request_light(r).await,
             PrBackend::GitLab(lab) => lab.pulse(r).await,
+            PrBackend::Bitbucket(bb) => bb.pulse(r).await,
         }
     }
 
@@ -162,6 +192,7 @@ impl PrBackend {
         match self {
             PrBackend::GitHub(api, _) => api.pull_request_files(r).await,
             PrBackend::GitLab(lab) => lab.files(r).await,
+            PrBackend::Bitbucket(bb) => bb.files(r).await,
         }
     }
 
@@ -169,6 +200,7 @@ impl PrBackend {
         match self {
             PrBackend::GitHub(api, _) => api.add_comment(&pr.id, body).await,
             PrBackend::GitLab(lab) => lab.comment(r, body).await,
+            PrBackend::Bitbucket(bb) => bb.comment(r, body).await,
         }
     }
 
@@ -176,6 +208,7 @@ impl PrBackend {
         match self {
             PrBackend::GitHub(api, _) => api.add_review(&pr.id, event, body, comments).await,
             PrBackend::GitLab(lab) => lab.submit_review(r, pr, event, body.as_deref().unwrap_or(""), comments, files).await,
+            PrBackend::Bitbucket(bb) => bb.submit_review(r, event, body.as_deref().unwrap_or(""), comments).await,
         }
     }
 
@@ -183,6 +216,7 @@ impl PrBackend {
         match self {
             PrBackend::GitHub(api, _) => api.mutate(q::REPLY_THREAD, json!({ "id": thread, "b": body })).await,
             PrBackend::GitLab(lab) => lab.reply(r, thread, body).await,
+            PrBackend::Bitbucket(bb) => bb.reply(r, thread, body).await,
         }
     }
 
@@ -190,6 +224,7 @@ impl PrBackend {
         match self {
             PrBackend::GitHub(api, _) => api.mutate(if resolved { q::RESOLVE_THREAD } else { q::UNRESOLVE_THREAD }, json!({ "id": thread })).await,
             PrBackend::GitLab(lab) => lab.set_resolved(r, thread, resolved).await,
+            PrBackend::Bitbucket(bb) => bb.set_resolved(r, thread, resolved).await,
         }
     }
 
@@ -205,6 +240,7 @@ impl PrBackend {
                 Ok(())
             }
             PrBackend::GitLab(lab) => lab.merge(r, pr, method, title, body, delete_branch).await,
+            PrBackend::Bitbucket(bb) => bb.merge(r, pr, method, title, body, delete_branch).await,
         }
     }
 
@@ -212,6 +248,7 @@ impl PrBackend {
         match self {
             PrBackend::GitHub(api, _) => api.mutate(q::ENABLE_AUTO_MERGE, json!({ "id": pr.id, "m": method })).await,
             PrBackend::GitLab(lab) => lab.enable_auto_merge(r, pr, method).await,
+            PrBackend::Bitbucket(_) => Err(unsupported(GitProvider::Bitbucket)),
         }
     }
 
@@ -236,6 +273,12 @@ impl PrBackend {
                 PrAction::UpdateBranch => lab.rebase(r).await,
                 PrAction::DisableAutoMerge => lab.cancel_auto_merge(r).await,
             },
+            PrBackend::Bitbucket(bb) => match action {
+                PrAction::Close => bb.decline(r).await,
+                PrAction::ReadyForReview => bb.set_draft(r, false).await,
+                PrAction::ConvertToDraft => bb.set_draft(r, true).await,
+                PrAction::Reopen | PrAction::UpdateBranch | PrAction::DisableAutoMerge => Err(unsupported(GitProvider::Bitbucket)),
+            },
         }
     }
 
@@ -243,6 +286,7 @@ impl PrBackend {
         match self {
             PrBackend::GitHub(api, _) => api.mutate(q::EDIT_PR, json!({ "id": pr.id, "t": title, "b": body })).await,
             PrBackend::GitLab(lab) => lab.edit(r, title, body).await,
+            PrBackend::Bitbucket(bb) => bb.edit(r, title, body).await,
         }
     }
 
@@ -250,6 +294,7 @@ impl PrBackend {
         match self {
             PrBackend::GitHub(_, provider) => Err(unsupported(*provider)),
             PrBackend::GitLab(lab) => lab.revoke_approval(r).await,
+            PrBackend::Bitbucket(bb) => bb.approve(r, false).await,
         }
     }
 
@@ -257,6 +302,7 @@ impl PrBackend {
         match self {
             PrBackend::GitHub(api, _) => api.request_reviewers(r, logins).await,
             PrBackend::GitLab(_) => Err(unsupported(GitProvider::Gitlab)),
+            PrBackend::Bitbucket(_) => Err(unsupported(GitProvider::Bitbucket)),
         }
     }
 
@@ -267,6 +313,7 @@ impl PrBackend {
                 None => Ok(()),
             },
             PrBackend::GitLab(_) => Err(unsupported(GitProvider::Gitlab)),
+            PrBackend::Bitbucket(_) => Err(unsupported(GitProvider::Bitbucket)),
         }
     }
 
@@ -274,6 +321,7 @@ impl PrBackend {
         match self {
             PrBackend::GitHub(api, _) => api.mutate(if viewed { q::MARK_VIEWED } else { q::UNMARK_VIEWED }, json!({ "id": pr.id, "p": path })).await,
             PrBackend::GitLab(_) => Err(unsupported(GitProvider::Gitlab)),
+            PrBackend::Bitbucket(_) => Err(unsupported(GitProvider::Bitbucket)),
         }
     }
 
@@ -286,6 +334,7 @@ impl PrBackend {
                 Ok(())
             }
             PrBackend::GitLab(_) => Err(unsupported(GitProvider::Gitlab)),
+            PrBackend::Bitbucket(_) => Err(unsupported(GitProvider::Bitbucket)),
         }
     }
 }

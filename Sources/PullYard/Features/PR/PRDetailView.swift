@@ -322,7 +322,7 @@ struct PRDetailContent: View {
             if pr.viewerCanUpdate {
                 Button("Close \(model.provider.requestTitle)…") { confirm = .close }
             }
-        } else if !pr.merged, pr.viewerCanUpdate {
+        } else if !pr.merged, pr.viewerCanUpdate, model.features.reopen {
             Button("Reopen \(model.provider.requestTitle)") { Task { if await model.simple(.reopen) { app.showToast(model.provider == .gitlab ? "Merge request reopened" : "Pull request reopened") } } }
         }
         if model.features.deleteBranch, !pr.isOpen, pr.headRef != nil, model.canWrite {

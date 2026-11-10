@@ -151,7 +151,7 @@ public static class Dialogs
         foreach (var m in allowed) methods.Items.Add(new ComboBoxItem { Content = m == "MERGE" && model.IsGitLab ? L.T("MR_MergeMethod", "Merge") : MergeMethods.Title(m), Tag = m });
         var def = repo?.ViewerDefaultMergeMethod ?? "MERGE";
         methods.SelectedIndex = Math.Max(0, allowed.IndexOf(allowed.Contains(def) ? def : allowed.FirstOrDefault() ?? "MERGE"));
-        var title = new TextBox { PlaceholderText = model.IsGitLab ? L.T("MR_TitlePlaceholder", "Commit title (GitLab default)") : L.T("Merge_TitlePlaceholder", "Commit title (GitHub default)") };
+        var title = new TextBox { PlaceholderText = model.IsGitLab ? L.T("MR_TitlePlaceholder", "Commit title (GitLab default)") : model.Features.IsBitbucket ? L.T("BB_TitlePlaceholder", "Commit title (Bitbucket default)") : L.T("Merge_TitlePlaceholder", "Commit title (GitHub default)") };
         var message = Editor(L.T("Merge_BodyPlaceholder", "Commit description (optional)"), minHeight: 80);
         var sameRepo = pr.HeadRepository?.NameWithOwner == model.Ref.Repo.Full;
         var deleteBox = new CheckBox { Content = L.F("Merge_DeleteBranch", "Delete branch {0} after merge", pr.HeadRefName), IsChecked = true, Visibility = !(repo?.DeleteBranchOnMerge ?? false) && sameRepo ? Visibility.Visible : Visibility.Collapsed };

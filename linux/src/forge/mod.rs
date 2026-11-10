@@ -1,4 +1,5 @@
 mod bitbucket;
+pub mod bitbucket_review;
 mod gitea;
 mod gitlab;
 pub mod gitlab_review;
@@ -199,13 +200,13 @@ impl ForgeHttp {
         Ok(u)
     }
 
-    async fn send(&self, method: &Method, url: &url::Url, body: Option<&[u8]>) -> ApiResult<(StatusCode, Vec<u8>)> {
+    async fn send(&self, method: &Method, url: &url::Url, body: Option<&[u8]>, accept: &str) -> ApiResult<(StatusCode, Vec<u8>)> {
         #[cfg(test)]
         if let Some(stub) = &self.stub {
             return Ok(stub.respond(method, url, body));
         }
         let authorization = lock(&self.authorization).clone();
-        let mut req = http_client().request(method.clone(), url.clone()).header(AUTHORIZATION, authorization).header(ACCEPT, "application/json");
+        let mut req = http_client().request(method.clone(), url.clone()).header(AUTHORIZATION, authorization).header(ACCEPT, accept);
         if let Some(body) = body {
             req = req.header(CONTENT_TYPE, "application/json").body(body.to_vec());
         }
@@ -239,6 +240,11 @@ impl ForgeHttp {
         serde_json::from_slice(&body).map_err(|e| ApiError::new(format!("Failed to parse response from {}: {e}", self.service)))
     }
 
+    pub async fn text(&self, path: &str, query: &[(&'static str, String)]) -> ApiResult<String> {
+        let body = self.call_as(Method::GET, path, query, None, "text/plain").await?;
+        Ok(String::from_utf8_lossy(&body).into_owned())
+    }
+
     pub async fn post(&self, method: Method, path: &str, query: &[(&'static str, String)]) -> ApiResult<()> {
         self.call(method, path, query, None).await.map(|_| ())
     }
@@ -248,11 +254,15 @@ impl ForgeHttp {
     }
 
     async fn call(&self, method: Method, path: &str, query: &[(&'static str, String)], json: Option<&Value>) -> ApiResult<Vec<u8>> {
+        self.call_as(method, path, query, json, "application/json").await
+    }
+
+    async fn call_as(&self, method: Method, path: &str, query: &[(&'static str, String)], json: Option<&Value>, accept: &str) -> ApiResult<Vec<u8>> {
         let target = self.url(path, query)?;
         let payload = json.map(|j| serde_json::to_vec(j).unwrap_or_default());
-        let (mut status, mut body) = self.send(&method, &target, payload.as_deref()).await?;
+        let (mut status, mut body) = self.send(&method, &target, payload.as_deref(), accept).await?;
         if status == StatusCode::UNAUTHORIZED && self.refresh().await? {
-            (status, body) = self.send(&method, &target, payload.as_deref()).await?;
+            (status, body) = self.send(&method, &target, payload.as_deref(), accept).await?;
         }
         if !status.is_success() {
             if status == StatusCode::UNAUTHORIZED {
@@ -311,7 +321,7 @@ impl ForgeClient {
     }
 
     pub fn reviews(&self) -> bool {
-        self.inner.provider == GitProvider::Gitlab
+        matches!(self.inner.provider, GitProvider::Gitlab | GitProvider::Bitbucket)
     }
 
     pub fn host(&self) -> String {

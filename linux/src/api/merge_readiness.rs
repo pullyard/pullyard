@@ -241,7 +241,7 @@ pub fn requirements(pr: &PullRequestDetail, status: &RulesStatus) -> Vec<MergeRe
         return out;
     }
     if let Some(merge) = &pr.forge_merge {
-        return gitlab(pr, merge);
+        return if merge.provider.as_deref() == Some("bitbucket") { bitbucket(pr, merge) } else { gitlab(pr, merge) };
     }
     let rules = status.rules();
     let loading = *status == RulesStatus::Loading;
@@ -280,6 +280,50 @@ fn more_approvals(left: i64) -> String {
     } else {
         format!("Needs {left} more approvals")
     }
+}
+
+pub fn bitbucket(pr: &PullRequestDetail, merge: &ForgeMergeInfo) -> Vec<MergeRequirement> {
+    use RequirementAction as A;
+    use RequirementKind as K;
+    use RequirementState as S;
+    let mut out = vec![];
+    let base = &pr.base_ref_name;
+    if pr.is_draft {
+        out.push(req(K::Draft, S::Missing, "Draft pull request", Some("Mark it ready for review before merging".into()), Some(A::ReadyForReview)));
+    }
+    if pr.mergeable == "CONFLICTING" {
+        out.push(req(K::Conflicts, S::Missing, format!("Conflicts with {base}"), Some("Resolve them before merging".into()), None));
+    } else {
+        out.push(req(K::Conflicts, S::Satisfied, format!("No conflicts with {base}"), None, None));
+    }
+    let reviews = &pr.latest_opinionated_reviews.nodes;
+    let blockers: Vec<String> = reviews.iter().filter(|r| r.state == "CHANGES_REQUESTED").filter_map(|r| r.author.as_ref().map(|a| a.login.clone())).collect();
+    let approvals = reviews.iter().filter(|r| r.state == "APPROVED").count();
+    if !blockers.is_empty() {
+        out.push(req(K::ChangesRequested, S::Advisory, "Changes requested", Some(format!("By {}", blockers.join(", "))), None));
+    }
+    if approvals > 0 {
+        let title = if approvals == 1 { "Approved".to_string() } else { format!("Approved by {approvals} reviewers") };
+        out.push(req(K::Approvals, S::Satisfied, title, None, None));
+    } else {
+        out.push(req(K::Approvals, S::Advisory, "No approvals yet", Some("Branch restrictions may require them".into()), None));
+    }
+    let checks = pr.checks();
+    let failed: Vec<String> = checks.iter().filter(|c| c.outcome() == CheckOutcome::Failure).map(|c| c.title()).collect();
+    let running: Vec<String> = checks.iter().filter(|c| c.outcome() == CheckOutcome::Pending).map(|c| c.title()).collect();
+    if !failed.is_empty() {
+        out.push(req(K::Checks, S::Advisory, format!("{} failed", count(failed.len(), "build")), Some(names(&failed)), Some(A::ShowChecks)));
+    } else if !running.is_empty() {
+        out.push(req(K::Checks, S::Pending, format!("Waiting for {}", count(running.len(), "build")), Some(names(&running)), Some(A::ShowChecks)));
+    } else if !checks.is_empty() {
+        let title = if checks.len() == 1 { "1 build passed".to_string() } else { format!("All {} builds passed", checks.len()) };
+        out.push(req(K::Checks, S::Satisfied, title, None, Some(A::ShowChecks)));
+    }
+    if let Some(tasks) = merge.open_tasks.filter(|t| *t > 0) {
+        out.push(req(K::Conversations, S::Advisory, count(tasks as usize, "open task"), Some("Merge checks may require resolving them".into()), Some(A::ShowConversation)));
+    }
+    out.push(req(K::OtherRules, S::Unknown, "Merge checks aren’t visible", Some("Bitbucket rejects the merge if a required check fails".into()), None));
+    out
 }
 
 pub fn gitlab(pr: &PullRequestDetail, merge: &ForgeMergeInfo) -> Vec<MergeRequirement> {
@@ -655,7 +699,7 @@ mod tests {
 
     fn gitlab_reqs(status: &str, required: Option<i64>, left: Option<i64>, overrides: Value) -> Vec<MergeRequirement> {
         let mut p = pr(overrides);
-        p.forge_merge = Some(ForgeMergeInfo { status: status.into(), approvals_required: required, approvals_left: left });
+        p.forge_merge = Some(ForgeMergeInfo { status: status.into(), approvals_required: required, approvals_left: left, ..Default::default() });
         requirements(&p, &RulesStatus::Loading)
     }
 
@@ -705,7 +749,7 @@ mod tests {
     fn gitlab_unknown_blocker_is_shown() {
         let mut p = pr(json!({ "mergeStateStatus": "BLOCKED" }));
         p.merge_blocker = Some("Title or description must reference a Jira issue".into());
-        p.forge_merge = Some(ForgeMergeInfo { status: "jira_association_missing".into(), approvals_required: None, approvals_left: None });
+        p.forge_merge = Some(ForgeMergeInfo { status: "jira_association_missing".into(), approvals_required: None, approvals_left: None, ..Default::default() });
         let list = requirements(&p, &RulesStatus::Loading);
         let other = find(&list, RequirementKind::OtherRules);
         assert_eq!(other.title, "Title or description must reference a Jira issue");

@@ -206,7 +206,7 @@ enum MergeReadiness {
 
     static func requirements(_ pr: PullRequestDetail, rules status: RulesStatus) -> [MergeRequirement] {
         guard pr.isOpen else { return [] }
-        if let merge = pr.forgeMerge { return gitlab(pr, merge: merge) }
+        if let merge = pr.forgeMerge { return merge.provider == "bitbucket" ? bitbucket(pr, merge: merge) : gitlab(pr, merge: merge) }
         let rules = status.rules
         var out: [MergeRequirement] = []
 
@@ -333,6 +333,43 @@ enum MergeReadiness {
         guard open > 0 else { return nil }
         let detail = rules?.reviewRulesKnown == true ? "Not required to merge" : loading ? nil : "May not block merging"
         return MergeRequirement(kind: .conversations, state: .advisory, title: title, detail: detail, action: .showConversation)
+    }
+
+    static func bitbucket(_ pr: PullRequestDetail, merge: ForgeMergeInfo) -> [MergeRequirement] {
+        var out: [MergeRequirement] = []
+        if pr.isDraft {
+            out.append(MergeRequirement(kind: .draft, state: .missing, title: "Draft pull request", detail: "Mark it ready for review before merging", action: .readyForReview))
+        }
+        if pr.mergeable == "CONFLICTING" {
+            out.append(MergeRequirement(kind: .conflicts, state: .missing, title: "Conflicts with \(pr.baseRefName)", detail: "Resolve them before merging"))
+        } else {
+            out.append(MergeRequirement(kind: .conflicts, state: .satisfied, title: "No conflicts with \(pr.baseRefName)"))
+        }
+        let reviews = pr.latestOpinionatedReviews.nodes
+        let blockers = reviews.filter { $0.state == "CHANGES_REQUESTED" }.compactMap { $0.author?.login }
+        let approvals = reviews.filter { $0.state == "APPROVED" }.count
+        if !blockers.isEmpty {
+            out.append(MergeRequirement(kind: .changesRequested, state: .advisory, title: "Changes requested", detail: "By " + blockers.joined(separator: ", ")))
+        }
+        if approvals > 0 {
+            out.append(MergeRequirement(kind: .approvals, state: .satisfied, title: approvals == 1 ? "Approved" : "Approved by \(approvals) reviewers"))
+        } else {
+            out.append(MergeRequirement(kind: .approvals, state: .advisory, title: "No approvals yet", detail: "Branch restrictions may require them"))
+        }
+        let failed = pr.checks.filter { $0.outcome == .failure }
+        let running = pr.checks.filter { $0.outcome == .pending }
+        if !failed.isEmpty {
+            out.append(MergeRequirement(kind: .checks, state: .advisory, title: count(failed.count, "build") + " failed", detail: names(failed.map(\.title)), action: .showChecks))
+        } else if !running.isEmpty {
+            out.append(MergeRequirement(kind: .checks, state: .pending, title: "Waiting for " + count(running.count, "build"), detail: names(running.map(\.title)), action: .showChecks))
+        } else if !pr.checks.isEmpty {
+            out.append(MergeRequirement(kind: .checks, state: .satisfied, title: pr.checks.count == 1 ? "1 build passed" : "All \(pr.checks.count) builds passed", action: .showChecks))
+        }
+        if let tasks = merge.openTasks, tasks > 0 {
+            out.append(MergeRequirement(kind: .conversations, state: .advisory, title: count(tasks, "open task"), detail: "Merge checks may require resolving them", action: .showConversation))
+        }
+        out.append(MergeRequirement(kind: .otherRules, state: .unknown, title: "Merge checks aren’t visible", detail: "Bitbucket rejects the merge if a required check fails"))
+        return out
     }
 
     static func gitlab(_ pr: PullRequestDetail, merge: ForgeMergeInfo) -> [MergeRequirement] {

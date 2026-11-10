@@ -457,6 +457,8 @@ public sealed class ForgeMergeInfo
     public string Status { get; set; } = "";
     public int? ApprovalsRequired { get; set; }
     public int? ApprovalsLeft { get; set; }
+    public int? OpenTasks { get; set; }
+    public string? Provider { get; set; }
 }
 
 public sealed class PRRepository

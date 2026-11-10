@@ -84,6 +84,10 @@
   <data name="Agents_Updated" xml:space="preserve"><value>Updated {0}</value></data>
   <data name="Agents_WorktreeDetail" xml:space="preserve"><value>Worktree: {0}</value></data>
   <data name="App_Tagline" xml:space="preserve"><value>Pull requests, without the browser</value></data>
+  <data name="BB_ActShowBuilds" xml:space="preserve"><value>Show builds</value></data>
+  <data name="BB_Builds" xml:space="preserve"><value>Builds</value></data>
+  <data name="BB_NoBuilds" xml:space="preserve"><value>No builds for the latest commit</value></data>
+  <data name="BB_TitlePlaceholder" xml:space="preserve"><value>Commit title (Bitbucket default)</value></data>
   <data name="Badge_Description" xml:space="preserve"><value>{0} items need your attention</value></data>
   <data name="Board_All" xml:space="preserve"><value>All</value></data>
   <data name="Board_Draft" xml:space="preserve"><value>Draft</value></data>
