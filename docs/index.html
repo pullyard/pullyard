@@ -94,7 +94,7 @@
         {
           "@type": "Question",
           "name": "Does it work with GitLab, Bitbucket and Gitea?",
-          "acceptedAnswer": { "@type": "Answer", "text": "On macOS, yes: sign in to GitLab, Bitbucket Cloud or Gitea and Forgejo to see your review requests and your own merge or pull requests. Full review for these services is on the roadmap. GitHub and GitHub Enterprise Server get every feature." }
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. GitLab merge requests and Bitbucket Cloud pull requests open in the full review view: conversation, inline comments, approvals, pipelines and files. Gitea and Forgejo show your review requests and your own pull requests, and open in the browser for review. GitHub and GitHub Enterprise Server get every feature." }
         },
         {
           "@type": "Question",
@@ -852,7 +852,7 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
       <div class="faq-col">
         <details class="reveal"><summary>Is this an official GitHub or Anthropic app?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>No. PullYard is an independent open-source project. It uses the public GitHub API and runs the official Claude Code CLI, which you install yourself.</p></details>
         <details class="reveal"><summary>Is PullYard a GitHub Desktop alternative?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>For pull requests, yes. GitHub Desktop is for local git work: commits, branches and pushes. PullYard is for review: diffs, comments, approvals and merging, without the browser. Most people use both. <a href="github-desktop-alternative.html">PullYard vs GitHub Desktop</a></p></details>
-        <details class="reveal"><summary>Does it work with GitLab, Bitbucket and Gitea?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>On macOS, yes: sign in to GitLab, Bitbucket Cloud or Gitea and Forgejo to see your review requests and your own merge or pull requests. Full review for these services is on the roadmap. GitHub and GitHub Enterprise Server get every feature.</p></details>
+        <details class="reveal"><summary>Does it work with GitLab, Bitbucket and Gitea?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>Yes. GitLab merge requests and Bitbucket Cloud pull requests open in the full review view: conversation, inline comments, approvals, pipelines and files. Gitea and Forgejo show your review requests and your own pull requests, and open in the browser for review. GitHub and GitHub Enterprise Server get every feature.</p></details>
         <details class="reveal"><summary>Do I need Claude Code?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>No. All the GitHub features work without it. The agent workspace and “Fix with agent” turn on once the CLI is installed and signed in.</p></details>
         <details class="reveal"><summary>How does sign-in to Claude work?<svg class="chev" aria-hidden="true" focusable="false"><use href="#i-chevron"/></svg></summary><p>PullYard never sees your Claude credentials. It runs <code>claude auth login</code>, which opens the official sign-in page in your browser.</p></details>
       </div>
