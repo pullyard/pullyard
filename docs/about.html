@@ -84,31 +84,31 @@
       "name": "Who makes PullYard?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "PullYard is an independent open-source project started and maintained by @Vaache, with contributions through GitHub. It is not made by GitHub, Inc. or Anthropic."
+        "text": "One developer, @Vaache, plus anyone who sends a pull request. It's an independent open-source project, not a GitHub or Anthropic product."
       }
     },
     {
       "@type": "Question",
-      "name": "Is PullYard free?",
+      "name": "Is it really free?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Yes. PullYard is free and open source under the MIT license, with no paid tier and no account. There is an optional \"Buy me a pizza\" donation."
+        "text": "Yes. MIT license, no paid tier, no account, no trial that runs out. If it saves you time you can buy me a pizza, and that's the whole business model."
       }
     },
     {
       "@type": "Question",
-      "name": "Was PullYard called something else before?",
+      "name": "Wasn't this called Shipyard?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Yes. The app was named Shipyard until version 2.6.0 (October 15, 2026), when it became PullYard and gained Windows and Linux builds."
+        "text": "It was. The app shipped as Shipyard until version 2.6.0 on October 15, 2026. That release added Windows and Linux, and the name changed to PullYard with it."
       }
     },
     {
       "@type": "Question",
-      "name": "How do I report a bug or ask for a feature?",
+      "name": "How do I report a bug or ask for something?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Open an issue on GitHub. For a security problem, please don't post the details in a public issue: open an issue that only asks for a private channel and the maintainer will follow up."
+        "text": "Open an issue on GitHub. If it's a security problem, don't post the details in public: open an issue that just asks for a private channel and I'll get back to you."
       }
     }
   ]
@@ -210,6 +210,32 @@ footer a:hover{color:var(--text)}
 .updated{color:var(--dim);font-size:14px;margin-top:18px}
 pre{background:var(--panel);border-radius:12px;padding:16px 18px;overflow-x:auto;max-width:760px;margin:0 0 14px}
 pre code{background:none;padding:0;font-size:14px}
+.facts{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:34px}
+.fact{background:var(--panel);border-radius:14px;padding:18px 20px}
+.fact b{display:block;font-size:22px;letter-spacing:-.02em;font-weight:680}
+.fact span{color:var(--muted);font-size:14px}
+.story{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:40px;align-items:start}
+.story .prose p{font-size:17px;line-height:1.7}
+.maker{background:var(--panel);border-radius:14px;padding:24px 26px;position:sticky;top:88px}
+.maker .who{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.maker .avatar{width:48px;height:48px;border-radius:50%;background:rgba(238,111,95,.14);color:var(--coral);display:grid;place-items:center;font-weight:700;font-size:20px}
+.maker h3{margin:0;font-size:17px;font-weight:650}
+.maker .role{color:var(--muted);font-size:14px}
+.maker p{color:#c9d2df;margin:0 0 16px;font-size:15px}
+.timeline{list-style:none;margin:0;padding:0;max-width:760px;border-left:2px solid var(--line2)}
+.timeline li{position:relative;padding:0 0 26px 26px}
+.timeline li:last-child{padding-bottom:0}
+.timeline li::before{content:"";position:absolute;left:-7px;top:6px;width:12px;height:12px;border-radius:50%;background:var(--coral);box-shadow:0 0 0 4px var(--bg)}
+.timeline time{display:block;color:var(--dim);font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.timeline b{display:block;font-size:17px;font-weight:650;margin:2px 0 4px}
+.timeline span{color:#c9d2df}
+.timeline a{color:var(--sky)}
+.contact{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.contact a.card{display:block;transition:background .15s ease}
+.contact a.card:hover{background:var(--panel2)}
+.contact .card p{color:var(--muted);margin:0;font-size:15px}
+.contact .card h3::after{content:" \2192";color:var(--dim)}
+@media (max-width:900px){.facts{grid-template-columns:1fr 1fr}.story{grid-template-columns:1fr}.maker{position:static}.contact{grid-template-columns:1fr}}
 </style>
 <script defer src="site/analytics.js"></script>
 </head>
@@ -233,71 +259,76 @@ pre code{background:none;padding:0;font-size:14px}
 <header class="head">
   <div class="wrap">
     <p class="crumbs"><a href="./">PullYard</a> / About</p>
-    <h1>About PullYard</h1>
-    <p>PullYard is a free, open-source desktop app for reviewing, fixing and merging pull requests, with native builds for macOS, Windows and Linux. It is an independent project maintained in the open on GitHub.</p>
+    <h1>A small app for a daily chore.</h1>
+    <p>PullYard is a free, open-source desktop app for reviewing, fixing and merging pull requests. It runs natively on macOS, Windows and Linux, and it's built in the open by one developer and whoever feels like helping.</p>
+    <div class="facts">
+      <div class="fact"><b>Free</b><span>MIT license, no paid tier</span></div>
+      <div class="fact"><b>3</b><span>native apps, no web wrapper</span></div>
+      <div class="fact"><b>0</b><span>servers between you and GitHub</span></div>
+      <div class="fact"><b>2.14.0</b><span>latest release, Nov 10, 2026</span></div>
+    </div>
   </div>
 </header>
 
 <main>
   <section>
     <div class="wrap">
-      <h2>What PullYard is</h2>
-      <div class="prose">
-        <p>PullYard is a free, MIT-licensed desktop app for pull requests. It shows your review requests and your own pull requests in one list, opens big diffs in a native viewer, and lets you comment, approve, request changes and merge without a browser tab. A built-in agent workspace runs the Claude Code CLI, so review feedback can go to an AI agent with one click.</p>
-        <p>It is three native apps, not one web app in a wrapper: SwiftUI on macOS 14 and later, WinUI 3 on Windows 10 and 11, GTK 4 and libadwaita on Linux. GitHub and GitHub Enterprise Server get every feature. GitLab, Bitbucket Cloud and Gitea or Forgejo show your review requests and your own pull or merge requests on macOS.</p>
+      <h2>Why I built it</h2>
+      <div class="story">
+        <div class="prose">
+          <p>I review pull requests every day, and for years that meant a pile of github.com tabs. A big diff would make the fan spin. I'd lose my place when the page reloaded. And when a reviewer asked for a change, I'd copy the comment into my editor, fix it, push, and go back to find the thread again.</p>
+          <p>So I wrote the app I wanted. PullYard puts review requests and my own PRs in one list, opens large diffs without stutter, and lets me comment, approve and merge from the keyboard. When there's feedback to fix, one click hands it to Claude Code, right next to the diff.</p>
+          <p>It does one job. PullYard doesn't stage, commit or push, so it sits beside your git client or terminal and stays out of the way.</p>
+          <p>It's three real native apps: SwiftUI on macOS, WinUI 3 on Windows, GTK 4 and libadwaita on Linux. That's more work than one web app in a wrapper, and it's the reason the app starts fast and stays light.</p>
+        </div>
+        <aside class="maker">
+          <div class="who"><span class="avatar" aria-hidden="true">V</span><div><h3>@Vaache</h3><span class="role">Maintainer</span></div></div>
+          <p>I started PullYard and still write most of it. Issues and pull requests are welcome; I read all of them.</p>
+          <a class="btn btn-ghost btn-sm" href="https://github.com/Vaache">GitHub profile</a>
+        </aside>
       </div>
     </div>
   </section>
+
   <section>
     <div class="wrap">
-      <h2>Who makes it</h2>
-      <div class="prose">
-        <p>PullYard was started and is maintained by <a href="https://github.com/Vaache">@Vaache</a>. The source code, the issue tracker and every release live in the open at <a href="https://github.com/pullyard/pullyard">github.com/pullyard/pullyard</a>.</p>
-        <p>The project is independent. It is not affiliated with GitHub, Inc. or Anthropic; it uses the public GitHub API and runs the official Claude Code CLI that you install yourself.</p>
-      </div>
+      <h2>How it got here</h2>
+      <p class="lede">The short history. The long one is in the <a href="changelog.html">changelog</a>.</p>
+      <ol class="timeline">
+        <li><time datetime="2026-10">October 2026</time><b>First release, as Shipyard</b><span>A macOS app for my own review queue, put on GitHub in case it helped someone else.</span></li>
+        <li><time datetime="2026-10-15">October 15, 2026 · 2.6.0</time><b>Shipyard becomes PullYard</b><span>Native Windows and Linux apps arrive, and the name changes with them.</span></li>
+        <li><time datetime="2026-11-10">November 10, 2026 · 2.14.0</time><b>Today</b><span>Stacked pull requests, Fix with agent and a merge-readiness view are in. What's next is on the <a href="roadmap.html">roadmap</a>.</span></li>
+      </ol>
     </div>
   </section>
+
   <section>
     <div class="wrap">
-      <h2>Why it exists</h2>
-      <div class="prose">
-        <p>Reviewing code in a browser tab is slow on big diffs, and the fix for a review comment usually happens somewhere else. PullYard keeps the whole loop in one native window: read the diff, leave the review, hand the feedback to an agent, re-request review, merge.</p>
-        <p>It only does the review side. PullYard does not stage, commit or push, so it sits next to your git client or the command line.</p>
+      <h2>Get in touch</h2>
+      <p class="lede">Everything happens on GitHub. There's no support desk, just the issue tracker and me.</p>
+      <div class="contact">
+        <a class="card" href="https://github.com/pullyard/pullyard/issues"><h3>Report a bug or ask for a feature</h3><p>Open an issue. For security problems, ask for a private channel first and leave the details out.</p></a>
+        <a class="card" href="https://github.com/pullyard/pullyard"><h3>Read the source</h3><p>The code, every release and the full history are public under the MIT license.</p></a>
+        <a class="card" href="privacy.html"><h3>See what's collected</h3><p>The app has no backend and no analytics. The privacy page spells out the rest.</p></a>
       </div>
     </div>
   </section>
-  <section>
-    <div class="wrap">
-      <h2>History</h2>
-      <div class="prose">
-        <ul>
-          <li><b>October 2026:</b> first public release, for macOS, under the name Shipyard.</li>
-          <li><b>October 15, 2026 (2.6.0):</b> renamed to PullYard, with native Windows and Linux apps.</li>
-          <li><b>November 10, 2026 (2.14.0):</b> the latest release. Every release is in the <a href="changelog.html">changelog</a>; what comes next is on the <a href="roadmap.html">roadmap</a>.</li>
-        </ul>
-      </div>
-    </div>
-  </section>
-  <section>
-    <div class="wrap">
-      <h2>Contact</h2>
-      <div class="prose">
-        <ul>
-          <li>Bugs and feature requests: <a href="https://github.com/pullyard/pullyard/issues">GitHub issues</a></li>
-          <li>Source code and releases: <a href="https://github.com/pullyard/pullyard">github.com/pullyard/pullyard</a></li>
-          <li>Security problems: open an issue that only asks for a private channel, without the details</li>
-          <li>How the app and this website handle data: <a href="privacy.html">Privacy</a></li>
-        </ul>
-      </div>
-    </div>
-  </section>
+
   <section class="faq">
     <div class="wrap">
       <h2>Questions</h2>
-      <details><summary>Who makes PullYard?</summary><p>PullYard is an independent open-source project started and maintained by <a href="https://github.com/Vaache">@Vaache</a>, with contributions through GitHub. It is not made by GitHub, Inc. or Anthropic.</p></details>
-      <details><summary>Is PullYard free?</summary><p>Yes. PullYard is free and open source under the MIT license, with no paid tier and no account. There is an optional "Buy me a pizza" donation.</p></details>
-      <details><summary>Was PullYard called something else before?</summary><p>Yes. The app was named Shipyard until version 2.6.0 (October 15, 2026), when it became PullYard and gained Windows and Linux builds.</p></details>
-      <details><summary>How do I report a bug or ask for a feature?</summary><p>Open an issue on <a href="https://github.com/pullyard/pullyard/issues">GitHub</a>. For a security problem, please don't post the details in a public issue: open an issue that only asks for a private channel and the maintainer will follow up.</p></details>
+      <details><summary>Who makes PullYard?</summary><p>One developer, <a href="https://github.com/Vaache">@Vaache</a>, plus anyone who sends a pull request. It's an independent open-source project, not a GitHub or Anthropic product.</p></details>
+      <details><summary>Is it really free?</summary><p>Yes. MIT license, no paid tier, no account, no trial that runs out. If it saves you time you can buy me a pizza, and that's the whole business model.</p></details>
+      <details><summary>Wasn't this called Shipyard?</summary><p>It was. The app shipped as Shipyard until version 2.6.0 on October 15, 2026. That release added Windows and Linux, and the name changed to PullYard with it.</p></details>
+      <details><summary>How do I report a bug or ask for something?</summary><p>Open an issue on <a href="https://github.com/pullyard/pullyard/issues">GitHub</a>. If it's a security problem, don't post the details in public: open an issue that just asks for a private channel and I'll get back to you.</p></details>
+    </div>
+  </section>
+
+  <section class="final">
+    <div class="wrap">
+      <h2>Try it on your next review.</h2>
+      <p>Free and open source, for macOS, Windows and Linux. On macOS: <code>brew install --cask pullyard/tap/pullyard</code></p>
+      <a class="btn btn-primary" href="https://github.com/pullyard/pullyard/releases/latest">Download PullYard</a>
     </div>
   </section>
 </main>
