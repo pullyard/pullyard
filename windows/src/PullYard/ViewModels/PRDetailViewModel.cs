@@ -759,6 +759,22 @@ public sealed partial class PRDetailViewModel : ObservableObject
         return true;
     }
 
+    public void AddPending(IEnumerable<PendingComment> comments)
+    {
+        var before = Pending.Count;
+        Pending.AddRange(comments);
+        if (Pending.Count == before) return;
+        OnPropertyChanged(nameof(PendingCount));
+        DiffVersion++;
+    }
+
+    public async Task<IReadOnlyList<DiffFile>> EnsureFiles()
+    {
+        await LoadFiles();
+        while (FilesLoading) await Task.Delay(100);
+        return Files;
+    }
+
     public void RemovePending(Guid id)
     {
         if (Pending.RemoveAll(p => p.Id == id) > 0)

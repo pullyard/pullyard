@@ -51,6 +51,7 @@ struct PRDetailContent: View {
     @State private var confirm: PRConfirm?
     @State private var showFix = false
     @State private var closeLoop: CloseLoopRequest?
+    @State private var showDrafts = false
     @State private var ciFix: CIFixRequest?
 
     var body: some View {
@@ -91,6 +92,7 @@ struct PRDetailContent: View {
         .sheet(isPresented: $showReviewers) { ReviewersSheet(model: model) }
         .sheet(isPresented: $showFix) { FixWithClaudeSheet(model: model, pr: pr) }
         .sheet(item: $closeLoop) { CloseLoopSheet(model: model, pr: pr, preselected: $0.preselected) }
+        .sheet(isPresented: $showDrafts) { ReviewDraftsSheet(model: model, pr: pr) }
         .sheet(item: $ciFix) { FixWithClaudeSheet(model: model, pr: pr, ci: $0) }
         .sheet(isPresented: $model.showResolveConflicts) { ResolveConflictsSheet(model: model, pr: pr) }
         .sheet(item: $model.replyThread) { ReplySheet(model: model, thread: $0) }
@@ -235,6 +237,9 @@ struct PRDetailContent: View {
             ToolbarItem(id: "pr.review", placement: .primaryAction) {
                 Menu {
                     Button("Write review…") { showReview = true }
+                    if ClaudeLauncher.claudeBinary != nil {
+                        Button("Draft comments with agent…") { showDrafts = true }
+                    }
                     if pr.reviewThreads.nodes.contains(where: { !$0.isResolved && $0.viewerCanReply }) {
                         Button("Reply and resolve threads…") {
                             closeLoop = CloseLoopRequest(preselected: app.claude.reviewFixes[model.ref]?.threadIDs ?? [])

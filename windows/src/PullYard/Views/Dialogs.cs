@@ -385,6 +385,190 @@ public static class Dialogs
         await ShowAsync(d);
     }
 
+    private enum DraftPhase { Idle, LoadingFiles, Running, Ready, Failed }
+
+    public static async Task DraftComments(XamlRoot? root, PRDetailViewModel model)
+    {
+        if (root is null || model.Pr is not { } pr) return;
+        var run = new ReviewDraftRun();
+        var phase = DraftPhase.Idle;
+        var drafts = new List<ReviewDraft>();
+        var chosen = new HashSet<Guid>();
+        var boxes = new List<CheckBox>();
+        string? summary = null;
+        string? note = null;
+        string? failure = null;
+        var closed = false;
+        var panel = Ui.V(10);
+        var d = Create(root, L.T("Drafts_Title", "Draft review comments"), panel, L.T("Drafts_Run", "Draft comments"), maxWidth: 760);
+        d.PrimaryButtonStyle = (Style)Application.Current.Resources["AccentButtonStyle"];
+        panel.Children.Add(Ui.Text(L.T("Drafts_Intro", "The agent reads the diff and suggests inline comments. Nothing is posted: comments you keep are added to your pending review, and you submit them yourself."), 13, "muted", wrap: true));
+        var content = Ui.V(8);
+        panel.Children.Add(content);
+        var picker = Ui.H(8, Ui.Link(L.T("Fix_All", "All"), () => SetAll(true)), Ui.Link(L.T("Fix_None", "None"), () => SetAll(false)));
+        panel.Children.Add(picker);
+
+        void SetAll(bool on)
+        {
+            foreach (var cb in boxes) cb.IsChecked = on;
+        }
+
+        void Validate()
+        {
+            var busy = phase is DraftPhase.LoadingFiles or DraftPhase.Running;
+            d.CloseButtonText = busy ? L.T("Drafts_Stop", "Stop") : L.T("Common_Cancel", "Cancel");
+            picker.Visibility = phase == DraftPhase.Ready && drafts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            switch (phase)
+            {
+                case DraftPhase.Idle:
+                case DraftPhase.Failed:
+                    d.PrimaryButtonText = L.T("Drafts_Run", "Draft comments");
+                    d.IsPrimaryButtonEnabled = ClaudeLauncher.Available;
+                    break;
+                case DraftPhase.Ready:
+                    d.PrimaryButtonText = L.F("Drafts_Add", "Add {0} to review", chosen.Count);
+                    d.IsPrimaryButtonEnabled = chosen.Count > 0;
+                    break;
+                default:
+                    d.PrimaryButtonText = "";
+                    break;
+            }
+        }
+
+        FrameworkElement Row(ReviewDraft draft)
+        {
+            var color = draft.Severity == "bug" ? "red" : draft.Severity == "risk" ? "amber" : "slate";
+            var location = Ui.Text($"{draft.Path}:{draft.Line}{(draft.Side == "LEFT" ? L.T("Drafts_Old", " (old)") : "")}", 12, "sky", mono: true);
+            location.TextTrimming = TextTrimming.CharacterEllipsis;
+            var cb = new CheckBox { Content = Ui.H(6, Ui.Chip(draft.Severity, color), location), IsChecked = chosen.Contains(draft.Id) };
+            cb.Checked += (_, _) => { chosen.Add(draft.Id); Validate(); };
+            cb.Unchecked += (_, _) => { chosen.Remove(draft.Id); Validate(); };
+            boxes.Add(cb);
+            var editor = new TextBox
+            {
+                PlaceholderText = L.T("Drafts_Comment", "Comment"),
+                Text = draft.Body,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                MinHeight = 56,
+                MaxHeight = 180,
+                FontSize = 13,
+                Margin = new Thickness(28, 0, 0, 0)
+            };
+            ScrollViewer.SetVerticalScrollBarVisibility(editor, ScrollBarVisibility.Auto);
+            editor.TextChanged += (_, _) => draft.Body = editor.Text;
+            return Ui.V(4, cb, editor);
+        }
+
+        void Render()
+        {
+            content.Children.Clear();
+            boxes.Clear();
+            switch (phase)
+            {
+                case DraftPhase.Idle:
+                    if (!ClaudeLauncher.Available)
+                        content.Children.Add(Ui.Text(L.T("Drafts_NoCli", "Install and sign in to the agent CLI first."), 13, "amber", wrap: true));
+                    break;
+                case DraftPhase.LoadingFiles:
+                    content.Children.Add(Ui.H(8, Ui.Spinner(14), Ui.Text(L.T("Drafts_LoadingDiff", "Loading the diff…"), 13, "muted")));
+                    break;
+                case DraftPhase.Running:
+                    content.Children.Add(Ui.H(8, Ui.Spinner(14), Ui.Text(L.T("Drafts_Running", "The agent is reading the diff. This can take a minute."), 13, "muted", wrap: true)));
+                    break;
+                case DraftPhase.Failed:
+                    content.Children.Add(Ui.Text(failure, 13, "red", wrap: true, select: true));
+                    break;
+                case DraftPhase.Ready:
+                    if (summary is not null) content.Children.Add(Ui.Text(summary, 13, "text", wrap: true, select: true));
+                    if (note is not null) content.Children.Add(Ui.Text(note, 12, "muted", wrap: true));
+                    if (drafts.Count == 0)
+                    {
+                        content.Children.Add(Ui.Text(L.T("Drafts_None", "No comments suggested."), 13, "dim"));
+                        break;
+                    }
+                    var list = Ui.V(10);
+                    foreach (var draft in drafts) list.Children.Add(Row(draft));
+                    content.Children.Add(new ScrollViewer { Content = list, MaxHeight = 380 });
+                    break;
+            }
+            Validate();
+        }
+
+        async Task Start()
+        {
+            if (ClaudeLauncher.Command is not { } command) return;
+            var current = new ReviewDraftRun();
+            run = current;
+            failure = null;
+            phase = DraftPhase.LoadingFiles;
+            Render();
+            var files = await model.EnsureFiles();
+            if (closed || current.Cancelled) return;
+            if (files.Count == 0)
+            {
+                failure = model.FilesError ?? L.T("Drafts_NoDiff", "The diff couldn’t be loaded");
+                phase = DraftPhase.Failed;
+                Render();
+                return;
+            }
+            var prompt = Core.Claude.ReviewDrafts.Build(pr, model.Ref.Repo, files, CiFixPrompt.NewNonce());
+            phase = DraftPhase.Running;
+            Render();
+            try
+            {
+                var text = await current.Run(command, prompt.Text, ReviewDraftRun.Environment());
+                var parsed = Core.Claude.ReviewDrafts.Parse(text, files);
+                drafts = parsed.Drafts.ToList();
+                chosen = drafts.Select(x => x.Id).ToHashSet();
+                summary = parsed.Summary;
+                var notes = new List<string>();
+                if (parsed.Dropped > 0)
+                    notes.Add(parsed.Dropped == 1
+                        ? L.T("Drafts_DroppedOne", "1 suggestion skipped because the line isn’t in the diff")
+                        : L.F("Drafts_DroppedMany", "{0} suggestions skipped because the line isn’t in the diff", parsed.Dropped));
+                if (prompt.Skipped.Count > 0)
+                    notes.Add(prompt.Skipped.Count == 1
+                        ? L.T("Drafts_SkippedOne", "1 file not sent (no text diff or too large)")
+                        : L.F("Drafts_SkippedMany", "{0} files not sent (no text diff or too large)", prompt.Skipped.Count));
+                note = notes.Count == 0 ? null : string.Join(" · ", notes);
+                phase = DraftPhase.Ready;
+            }
+            catch (OperationCanceledException)
+            {
+                phase = DraftPhase.Idle;
+            }
+            catch (Exception e)
+            {
+                failure = e.Message;
+                phase = DraftPhase.Failed;
+            }
+            if (!closed) Render();
+        }
+
+        d.PrimaryButtonClick += (_, args) =>
+        {
+            if (phase != DraftPhase.Ready)
+            {
+                args.Cancel = true;
+                if (phase is DraftPhase.Idle or DraftPhase.Failed) Start().Forget();
+                return;
+            }
+            var keep = drafts.Where(x => chosen.Contains(x.Id) && x.Body.Trim().Length > 0).ToList();
+            model.AddPending(keep.Select(x => new PendingComment { Path = x.Path, Line = x.Line, Side = x.Side, Body = x.Body }));
+            ShellView.Toast(keep.Count == 1
+                ? L.T("Drafts_AddedOne", "Added 1 comment to your pending review")
+                : L.F("Drafts_AddedMany", "Added {0} comments to your pending review", keep.Count));
+        };
+        d.Closed += (_, _) =>
+        {
+            closed = true;
+            run.Cancel();
+        };
+        Render();
+        await ShowAsync(d);
+    }
+
     public static async Task InlineComment(XamlRoot? root, PRDetailViewModel model, DiffAnchor anchor)
     {
         if (root is null) return;

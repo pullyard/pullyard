@@ -388,6 +388,25 @@
   <data name="Diagnostics_TicksSummary" xml:space="preserve"><value>Live ticks with requests: {0}</value></data>
   <data name="Diagnostics_Totals" xml:space="preserve"><value>{0} requests · {1} · avg {2} ms · p95 {3} ms</value></data>
   <data name="Diagnostics_WindowTitle" xml:space="preserve"><value>{0} Diagnostics</value></data>
+  <data name="Drafts_Add" xml:space="preserve"><value>Add {0} to review</value></data>
+  <data name="Drafts_AddedMany" xml:space="preserve"><value>Added {0} comments to your pending review</value></data>
+  <data name="Drafts_AddedOne" xml:space="preserve"><value>Added 1 comment to your pending review</value></data>
+  <data name="Drafts_Comment" xml:space="preserve"><value>Comment</value></data>
+  <data name="Drafts_DroppedMany" xml:space="preserve"><value>{0} suggestions skipped because the line isn’t in the diff</value></data>
+  <data name="Drafts_DroppedOne" xml:space="preserve"><value>1 suggestion skipped because the line isn’t in the diff</value></data>
+  <data name="Drafts_Intro" xml:space="preserve"><value>The agent reads the diff and suggests inline comments. Nothing is posted: comments you keep are added to your pending review, and you submit them yourself.</value></data>
+  <data name="Drafts_LoadingDiff" xml:space="preserve"><value>Loading the diff…</value></data>
+  <data name="Drafts_Menu" xml:space="preserve"><value>Draft comments with agent…</value></data>
+  <data name="Drafts_NoCli" xml:space="preserve"><value>Install and sign in to the agent CLI first.</value></data>
+  <data name="Drafts_NoDiff" xml:space="preserve"><value>The diff couldn’t be loaded</value></data>
+  <data name="Drafts_None" xml:space="preserve"><value>No comments suggested.</value></data>
+  <data name="Drafts_Old" xml:space="preserve"><value> (old)</value></data>
+  <data name="Drafts_Run" xml:space="preserve"><value>Draft comments</value></data>
+  <data name="Drafts_Running" xml:space="preserve"><value>The agent is reading the diff. This can take a minute.</value></data>
+  <data name="Drafts_SkippedMany" xml:space="preserve"><value>{0} files not sent (no text diff or too large)</value></data>
+  <data name="Drafts_SkippedOne" xml:space="preserve"><value>1 file not sent (no text diff or too large)</value></data>
+  <data name="Drafts_Stop" xml:space="preserve"><value>Stop</value></data>
+  <data name="Drafts_Title" xml:space="preserve"><value>Draft review comments</value></data>
   <data name="Edit_Body" xml:space="preserve"><value>Description (Markdown)</value></data>
   <data name="Edit_Header" xml:space="preserve"><value>Edit {0}</value></data>
   <data name="Edit_Title" xml:space="preserve"><value>Title</value></data>
