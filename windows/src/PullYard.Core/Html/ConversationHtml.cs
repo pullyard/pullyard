@@ -108,7 +108,7 @@ public static class ConversationHtml
         if (includeFileLink) actions += $"<button class=\"ghost\" onclick=\"post('file','{Esc(t.Path)}')\">View in files</button>";
         var ln = line is { } l ? $"<span class=\"ln\">:{l}</span>" : "";
         var title = t.Path.Length == 0 ? "Thread" : Esc(t.Path) + ln;
-        return $"<details class=\"thread\"{(t.IsResolved ? "" : " open")}><summary class=\"th\">{title}{tags}</summary>\n{Hunk(t.Comments.Items.FirstOrDefault()?.DiffHunk)}{comments}<div class=\"actions\">{actions}</div></details>";
+        return $"<details class=\"thread\"{(t.IsResolved ? "" : " open data-unresolved")}><summary class=\"th\">{title}{tags}</summary>\n{Hunk(t.Comments.Items.FirstOrDefault()?.DiffHunk)}{comments}<div class=\"actions\">{actions}</div></details>";
     }
 
     public static string Render(PullRequestDetail pr)
@@ -308,7 +308,8 @@ public static class ConversationHtml
     .event .ic.ok{background:var(--green);color:#fff;border-color:transparent}.event .ic.bad{background:var(--red);color:#fff;border-color:transparent}.event .ic.merged{background:var(--purple);color:#fff;border-color:transparent}
     .event .t{margin-left:2px}
     .label{display:inline-block;padding:0 7px;border-radius:10px;border:1px solid;font-size:11px;font-weight:500;color:var(--fg)}
-    .thread{margin:10px 12px;border:1px solid var(--border);border-radius:9px;overflow:hidden;background:var(--sub)}
+    .thread{margin:10px 12px;border:1px solid var(--border);border-radius:9px;overflow:hidden;background:var(--sub);scroll-margin-top:12px;transition:box-shadow .3s}
+    .thread.focus{box-shadow:0 0 0 2px var(--link)}
     .thread>summary{padding:6px 10px;font:12px "Cascadia Mono",Consolas,monospace;cursor:pointer;display:flex;gap:8px;align-items:center;list-style:none}
     .thread>summary::-webkit-details-marker{display:none}
     .thread .ln{color:var(--muted);margin-left:-6px}

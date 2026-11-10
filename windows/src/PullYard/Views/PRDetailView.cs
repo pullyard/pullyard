@@ -118,6 +118,8 @@ public sealed class PRContent : Grid, IShortcutHost
     private TextBox? fileFilter;
     private TextBlock? viewedCount;
     private int lastScrollToken;
+    private int lastFocusToken;
+    private Button? nextThread;
     private int renderedDiffVersion = -1;
     private string renderedFilter = "";
     private string renderedLayout = "";
@@ -132,6 +134,7 @@ public sealed class PRContent : Grid, IShortcutHost
     public PRContent(PRDetailViewModel model)
     {
         this.model = model;
+        lastFocusToken = model.ThreadFocusToken;
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -161,6 +164,7 @@ public sealed class PRContent : Grid, IShortcutHost
         SetRow(tabArea, 3);
         Children.Add(tabArea);
         Shortcuts.ShortLinkKey(this);
+        Shortcuts.NextThreadKey(this);
 
         tabs.SelectionChanged += id => model.Tab = Enum.Parse<PRTab>(id);
         status.Retry = () => model.Load(true).Forget();
@@ -242,6 +246,7 @@ public sealed class PRContent : Grid, IShortcutHost
             case nameof(PRDetailViewModel.RulesState):
             case nameof(PRDetailViewModel.CodeOwnersState):
             case nameof(PRDetailViewModel.Ownership):
+            case nameof(PRDetailViewModel.Risks):
                 RenderHeader();
                 break;
             case nameof(PRDetailViewModel.Tab):
@@ -256,6 +261,9 @@ public sealed class PRContent : Grid, IShortcutHost
                     lastScrollToken = model.ScrollToBottomToken;
                     conversation?.ScrollToBottom();
                 }
+                break;
+            case nameof(PRDetailViewModel.ThreadFocusToken):
+                FocusThread();
                 break;
             case nameof(PRDetailViewModel.Loading):
             case nameof(PRDetailViewModel.LastUpdated):
@@ -313,6 +321,7 @@ public sealed class PRContent : Grid, IShortcutHost
         RenderTabs();
         ShowTab();
         RenderConversation();
+        SyncNextThread();
         if (tabViews.ContainsKey(PRTab.Commits)) tabViews[PRTab.Commits] = BuildCommits(tabViews[PRTab.Commits]);
         if (tabViews.ContainsKey(PRTab.Checks)) tabViews[PRTab.Checks] = BuildChecks(tabViews[PRTab.Checks]);
         status.Update(model.LastUpdated, model.Loading, model.RefreshError);
@@ -359,7 +368,47 @@ public sealed class PRContent : Grid, IShortcutHost
             header.Children.Add(row);
         }
         if (model.StackTree is { } tree) header.Children.Add(StackUi.Strip(tree, model.Ref.Repo, () => model.Tab = PRTab.Stack));
+        if (pr.IsOpen && RiskStrip(model) is { } risks) header.Children.Add(risks);
         if (MergeStatusBar(model, app, () => Dialogs.Merge(XamlRoot, model).Forget(), () => Dialogs.Reviewers(XamlRoot, model).Forget()) is { } bar) header.Children.Add(bar);
+    }
+
+    private static string RiskGlyph(RiskKind kind) => kind switch
+    {
+        RiskKind.Migrations => "\uE81E",
+        RiskKind.Ci => "\uE713",
+        RiskKind.Infrastructure => "\uE770",
+        RiskKind.Dependencies => "\uE7B8",
+        RiskKind.Secrets => "\uE192",
+        RiskKind.Access => "\uE8D7",
+        RiskKind.LargeDeletion => "\uE738",
+        RiskKind.LargeChange => "\uE8FD",
+        _ => "\uE897"
+    };
+
+    private static FrameworkElement? RiskStrip(PRDetailViewModel model)
+    {
+        var risks = model.Risks;
+        if (risks.Count == 0) return null;
+        var row = new WrapPanel(6, Ui.Caption(L.T("Risk_LookCloser", "Look closer:")));
+        foreach (var r in risks)
+        {
+            var chip = Ui.Chip(r.Title, r.Strong ? "amber" : "muted", RiskGlyph(r.Kind));
+            var b = new Button { Content = chip, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(0) };
+            var tip = r.Detail;
+            if (r.Files.Count > 0) tip += "\n\n" + string.Join("\n", r.Files.Take(12));
+            if (r.Files.Count > 12) tip += "\n" + L.F("Risk_MoreFiles", "…and {0} more", r.Files.Count - 12);
+            Ui.Tip(b, tip);
+            Ui.Named(b, r.Title, r.Detail);
+            var first = r.Files.FirstOrDefault();
+            b.Click += (_, _) =>
+            {
+                if (first is null) return;
+                model.RevealFile(first);
+                model.LoadFiles().Forget();
+            };
+            row.Children.Add(b);
+        }
+        return row;
     }
 
     public static Border BranchChip(string name, string color)
@@ -472,7 +521,7 @@ public sealed class PRContent : Grid, IShortcutHost
             {
                 case RequirementAction.RequestReview: onRequestReview?.Invoke(); break;
                 case RequirementAction.ShowChecks: model.Tab = PRTab.Checks; break;
-                case RequirementAction.ShowConversation: model.Tab = PRTab.Conversation; break;
+                case RequirementAction.ShowConversation: model.NextUnresolvedThread(); break;
                 case RequirementAction.ShowConflicts:
                     model.Tab = PRTab.Conversation;
                     model.ScrollToBottomToken++;
@@ -789,6 +838,12 @@ public sealed class PRContent : Grid, IShortcutHost
 
     public bool HandleShortcut(string id)
     {
+        if (id == Shortcuts.NextThread)
+        {
+            if (model.Pr is null || model.UnresolvedThreads == 0) return false;
+            model.NextUnresolvedThread();
+            return true;
+        }
         if (id != Shortcuts.ShortLink || !model.Features.IsGitHub) return false;
         CopyShortLink();
         return true;
@@ -914,6 +969,12 @@ public sealed class PRContent : Grid, IShortcutHost
         conversation.LinkClicked += url => HtmlView.OpenLink(url);
         conversation.ActionInvoked += OnConversationAction;
         grid.Children.Add(conversation);
+        nextThread = Ui.Button("", model.NextUnresolvedThread, glyph: "\uE74B", tooltip: L.T("PR_NextThreadTip", "Jump to the next unresolved thread (Ctrl+Alt+Down)"));
+        nextThread.HorizontalAlignment = HorizontalAlignment.Right;
+        nextThread.VerticalAlignment = VerticalAlignment.Bottom;
+        nextThread.Margin = new Thickness(10);
+        grid.Children.Add(nextThread);
+        SyncNextThread();
         var composer = Composer(L.T("PR_CommentPlaceholder", "Comment (Markdown) — Ctrl+Enter to send"), L.T("PR_Comment", "Comment"), model.Comment);
         SetRow(composer, 1);
         grid.Children.Add(composer);
@@ -1000,6 +1061,24 @@ public sealed class PRContent : Grid, IShortcutHost
             lastScrollToken = model.ScrollToBottomToken;
             conversation.ScrollToBottom();
         }
+        FocusThread();
+    }
+
+    private void FocusThread()
+    {
+        if (conversation is null || lastHtml.Length == 0 || model.ThreadFocusToken == lastFocusToken) return;
+        lastFocusToken = model.ThreadFocusToken;
+        conversation.Send(new JsonObject { ["op"] = "focusThread" });
+    }
+
+    private void SyncNextThread()
+    {
+        if (nextThread is null) return;
+        var open = model.UnresolvedThreads;
+        nextThread.Visibility = open > 0 ? Visibility.Visible : Visibility.Collapsed;
+        var label = open == 1 ? L.T("PR_NextThreadOne", "1 unresolved · Next") : L.F("PR_NextThreadMany", "{0} unresolved · Next", open);
+        if (nextThread.Content is StackPanel panel && panel.Children.LastOrDefault() is TextBlock text) text.Text = label;
+        AutomationProperties.SetName(nextThread, label);
     }
 
     private void OnConversationAction(string type, string id)

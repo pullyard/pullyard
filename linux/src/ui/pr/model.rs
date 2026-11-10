@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use crate::api::code_owners::{CodeOwnersStatus, OwnershipSummary};
 use crate::api::interdiff::{self, DiffScope, ReviewedCommit};
 use crate::api::merge_readiness::{self, MergeRequirement, RequirementState, RulesStatus};
+use crate::api::risk::{self, RiskFile, RiskLabel};
 use crate::api::models::*;
 use crate::api::{ApiError, ErrorKind, GitHubApi};
 use crate::conversation_html::{self, Look};
@@ -62,6 +63,7 @@ pub enum Change {
     Tab,
     Diff,
     ScrollBottom,
+    FocusThread,
     Rules,
     Reveal(String),
     ActionError(String),
@@ -287,6 +289,28 @@ impl PrModel {
             (Some(pr), CodeOwnersStatus::Loaded(o)) => Some(OwnershipSummary::build(o, &self.changed_paths.borrow(), pr)),
             _ => None,
         }
+    }
+
+    pub fn next_unresolved_thread(&self) {
+        self.set_tab(PrTab::Conversation);
+        self.emit(Change::FocusThread);
+    }
+
+    pub fn unresolved_threads(&self) -> usize {
+        self.pr.borrow().as_ref().map(|pr| pr.review_threads.nodes.iter().filter(|t| !t.is_resolved).count()).unwrap_or(0)
+    }
+
+    pub fn risks(&self) -> Vec<RiskLabel> {
+        let pr = self.pr.borrow();
+        let Some(pr) = pr.as_ref() else { return vec![] };
+        let files = self.files.borrow();
+        let list: Vec<RiskFile> = if self.files_loaded.get() && !files.is_empty() {
+            files.iter().map(|f| RiskFile { path: f.id.clone(), additions: f.additions, deletions: f.deletions }).collect()
+        } else {
+            self.changed_paths.borrow().iter().map(|p| RiskFile { path: p.clone(), additions: 0, deletions: 0 }).collect()
+        };
+        let unowned = self.ownership().map(|o| o.unowned);
+        risk::labels(&list, pr.additions, pr.deletions, pr.changed_files, unowned.as_deref())
     }
 
     pub fn publish_context(&self) {

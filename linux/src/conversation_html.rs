@@ -120,7 +120,7 @@ pub fn thread(t: &ReviewThread) -> String {
     let title = if t.path.is_empty() { "Thread".to_string() } else { format!("{}{}", esc(&t.path), line.map(|l| format!("<span class=\"ln\">:{l}</span>")).unwrap_or_default()) };
     format!(
         "<details class=\"thread\"{}><summary class=\"th\">{title}{tags}</summary>\n{}{comments}<div class=\"actions\">{actions}</div></details>",
-        if t.is_resolved { "" } else { " open" },
+        if t.is_resolved { "" } else { " open data-unresolved" },
         hunk(t.comments.nodes.first().and_then(|c| c.diff_hunk.as_deref()))
     )
 }
@@ -379,7 +379,8 @@ code,pre,kbd{font-family:ui-monospace,\"JetBrains Mono\",\"DejaVu Sans Mono\",\"
 .event .ic.ok{background:var(--green);color:#fff;border-color:transparent}.event .ic.bad{background:var(--red);color:#fff;border-color:transparent}.event .ic.merged{background:var(--purple);color:#fff;border-color:transparent}
 .event .t{margin-left:2px}
 .label{display:inline-block;padding:0 7px;border-radius:10px;border:1px solid;font-size:11px;font-weight:500;color:var(--fg)}
-.thread{margin:10px 12px;border:1px solid var(--border);border-radius:9px;overflow:hidden;background:var(--sub)}
+.thread{margin:10px 12px;border:1px solid var(--border);border-radius:9px;overflow:hidden;background:var(--sub);scroll-margin-top:12px;transition:box-shadow .3s}
+.thread.focus{box-shadow:0 0 0 2px var(--link)}
 .thread>summary{padding:6px 10px;font:12px ui-monospace,monospace;cursor:pointer;display:flex;gap:8px;align-items:center;list-style:none}
 .thread>summary::-webkit-details-marker{display:none}
 .thread .ln{color:var(--muted);margin-left:-6px}

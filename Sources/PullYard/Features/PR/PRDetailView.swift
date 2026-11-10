@@ -428,6 +428,9 @@ struct PRHeaderView: View {
                 StackStrip(tree: tree, repo: model.ref.repo) { model.tab = .stack }
                     .transition(.opacity)
             }
+            if pr.isOpen {
+                RiskStrip(model: model, risks: model.risks)
+            }
             MergeStatusBar(model: model, pr: pr, onMerge: onMerge, onRequestReview: onRequestReview)
         }
         .animation(Motion.smooth, value: model.stackTree)
@@ -658,7 +661,7 @@ struct MergeStatusBar: View {
         switch action {
         case .requestReview: onRequestReview()
         case .showChecks: model.tab = .checks
-        case .showConversation: model.tab = .conversation
+        case .showConversation: model.nextUnresolvedThread()
         case .showConflicts:
             model.tab = .conversation
             model.scrollToBottomToken += 1
@@ -747,8 +750,22 @@ struct ConversationTab: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HTMLView(html: model.html, scrollToBottomToken: model.scrollToBottomToken, onAction: handle, onLink: openLink)
+            HTMLView(html: model.html, scrollToBottomToken: model.scrollToBottomToken, focusThreadToken: model.threadFocusToken, onAction: handle, onLink: openLink)
                 .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, web: true, button: false) { await model.load(full: true) }
+                .overlay(alignment: .bottomTrailing) {
+                    let open = pr.reviewThreads.nodes.filter { !$0.isResolved }.count
+                    if open > 0 {
+                        Button { model.nextUnresolvedThread() } label: {
+                            Label(open == 1 ? "1 unresolved · Next" : "\(open) unresolved · Next", systemImage: "arrow.down.circle")
+                                .font(.syCaption.weight(.medium))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                        .help("Jump to the next unresolved thread (⌥⌘↓)")
+                        .padding(10)
+                    }
+                }
             Divider()
             HStack(alignment: .bottom, spacing: 8) {
                 ComposerBox(text: $text, placeholder: "Comment (Markdown) — ⌘↩ to send", minHeight: 56).frame(height: 64)
