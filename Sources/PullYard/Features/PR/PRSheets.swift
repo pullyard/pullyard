@@ -371,8 +371,7 @@ struct ReplySheet: View {
 }
 
 struct JobLogSheet: View {
-    let api: GitHubAPI
-    let repo: RepoRef
+    let load: () async throws -> String
     let check: CheckContext
     var onFix: ((String?) -> Void)?
     @Environment(\.dismiss) private var dismiss
@@ -408,12 +407,8 @@ struct JobLogSheet: View {
         }
         .frame(width: 980, height: 640)
         .task {
-            guard let id = check.databaseId else {
-                error = "This check has no job log. Open it on GitHub to see its output."
-                return
-            }
             do {
-                let raw = try await api.jobLog(repo: repo, jobId: id)
+                let raw = try await load()
                 log = await Task.detached { Self.clean(raw) }.value
             } catch {
                 if isCancellation(error) { return }

@@ -149,6 +149,19 @@ public static class GitLabReviewMapper
         };
     }).ToList();
 
+    private static readonly Regex TraceSection = new(@"section_(?:start|end):\d+:[A-Za-z0-9_.\-\[\]=,]+\r?(?:\x1B\[0K)?", RegexOptions.Compiled);
+
+    public static string CleanTrace(string raw)
+    {
+        var lines = TraceSection.Replace(raw, "").Split('\n').Select(line =>
+        {
+            var body = line.EndsWith('\r') ? line[..^1] : line;
+            var cut = body.LastIndexOf('\r');
+            return cut < 0 ? body : body[(cut + 1)..];
+        });
+        return CiLog.Clean(string.Join("\n", lines));
+    }
+
     public static string? RollupState(GitLabMR.Pipeline? pipeline) => pipeline?.Status switch
     {
         null => null,
@@ -355,6 +368,7 @@ public sealed class GitLabPRBackend : IPRBackend
     private readonly GitLabClient client;
     private readonly Dictionary<string, GitLabMR.Project?> settings = new();
     private readonly Dictionary<ItemRef, GitLabMR.DiffRefs?> refs = new();
+    private readonly Dictionary<ItemRef, string> jobProjects = new();
 
     public GitLabPRBackend(GitLabClient client)
     {
@@ -406,6 +420,7 @@ public sealed class GitLabPRBackend : IPRBackend
         if (mr.HeadPipeline is { } pipeline)
         {
             var owner = pipeline.ProjectId?.ToString(CultureInfo.InvariantCulture) ?? project;
+            lock (jobProjects) jobProjects[r] = owner;
             jobs = await Optional(client.Jobs(owner, pipeline.Id, ct)).ConfigureAwait(false) ?? new();
         }
         var approvals = await approvalsTask.ConfigureAwait(false);
@@ -490,4 +505,16 @@ public sealed class GitLabPRBackend : IPRBackend
     public Task<CommitDetailRest> Commit(RepoRef repo, string sha) => client.Commit(repo.Full, sha);
 
     public Task RevokeApproval(ItemRef r, PullRequestDetail pr) => client.Unapprove(r.Repo.Full, r.Number);
+
+    public bool CanShowLog(CheckContext check) =>
+        check.Typename == "GitLabJob" && check.DatabaseId is not null && check.Outcome is not CheckOutcome.Pending and not CheckOutcome.Skipped;
+
+    public async Task<string> JobLog(ItemRef r, CheckContext check, CancellationToken ct = default)
+    {
+        if (check.DatabaseId is not { } id) throw new ApiException("This job has no log");
+        string? project;
+        lock (jobProjects) jobProjects.TryGetValue(r, out project);
+        var raw = await client.JobTrace(project ?? r.Repo.Full, id, ct).ConfigureAwait(false);
+        return GitLabReviewMapper.CleanTrace(raw);
+    }
 }

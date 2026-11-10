@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde_json::json;
 
-use crate::api::models::{ItemRef, PendingComment, PrDetailResponse, PrFile, PrLight, PullRequestDetail};
+use crate::api::models::{CheckContext, ItemRef, PendingComment, PrDetailResponse, PrFile, PrLight, PullRequestDetail};
 use crate::api::queries as q;
 use crate::api::{ApiError, ApiResult, GitHubApi};
 use crate::diff::DiffFile;
@@ -72,7 +72,7 @@ impl PrFeatures {
             draft_toggle: true,
             update_branch: true,
             rerun_checks: false,
-            job_logs: false,
+            job_logs: true,
             request_changes: false,
             revoke_approval: true,
             agent: false,
@@ -93,7 +93,7 @@ impl PrFeatures {
             draft_toggle: true,
             update_branch: false,
             rerun_checks: false,
-            job_logs: false,
+            job_logs: true,
             request_changes: true,
             revoke_approval: true,
             agent: false,
@@ -325,6 +325,25 @@ impl PrBackend {
         }
     }
 
+    pub fn can_show_log(&self, check: &CheckContext) -> bool {
+        match self {
+            PrBackend::GitHub(..) => check.is_actions_job(),
+            PrBackend::GitLab(_) => GitLabReview::can_show_log(check),
+            PrBackend::Bitbucket(_) => BitbucketReview::can_show_log(check),
+        }
+    }
+
+    pub async fn job_log(&self, r: &ItemRef, check: &CheckContext) -> ApiResult<String> {
+        match self {
+            PrBackend::GitHub(api, _) => {
+                let Some(id) = check.database_id else { return Err(ApiError::new("This check has no job log. Open it on GitHub to see its output.")) };
+                api.job_log(&r.repo, id).await
+            }
+            PrBackend::GitLab(lab) => lab.job_log(r, check).await,
+            PrBackend::Bitbucket(bb) => bb.job_log(r, check).await,
+        }
+    }
+
     pub async fn rerun_failed(&self, r: &ItemRef, runs: HashSet<i64>) -> ApiResult<()> {
         match self {
             PrBackend::GitHub(api, _) => {
@@ -336,5 +355,119 @@ impl PrBackend {
             PrBackend::GitLab(_) => Err(unsupported(GitProvider::Gitlab)),
             PrBackend::Bitbucket(_) => Err(unsupported(GitProvider::Bitbucket)),
         }
+    }
+}
+
+#[cfg(test)]
+mod job_log_tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::api::models::RepoRef;
+    use crate::forge::bitbucket_review::build_number;
+    use crate::forge::gitlab_review::clean_trace;
+    use crate::forge::stub::Stub;
+    use crate::forge::ForgeClient;
+
+    fn check(typename: &str, id: Option<i64>, conclusion: Option<&str>, link: Option<&str>) -> CheckContext {
+        serde_json::from_value(json!({
+            "__typename": typename,
+            "databaseId": id,
+            "name": "unit",
+            "status": if conclusion.is_none() { "IN_PROGRESS" } else { "COMPLETED" },
+            "conclusion": conclusion,
+            "detailsUrl": link,
+        }))
+        .unwrap()
+    }
+
+    fn bitbucket(stub: Arc<Stub>) -> PrBackend {
+        PrBackend::Bitbucket(BitbucketReview::new(ForgeClient::stubbed(GitProvider::Bitbucket, "bitbucket.org", "s", stub)))
+    }
+
+    #[test]
+    fn gitlab_trace_cleanup() {
+        let raw = "section_start:1700000000:prepare_script\r\u{1b}[0K\u{1b}[0K\u{1b}[36;1mPreparing\u{1b}[0;m\nprogress 10%\rprogress 100%\n\u{1b}[31mERROR: tests failed\u{1b}[0m\nsection_end:1700000001:prepare_script\r\u{1b}[0K";
+        assert_eq!(clean_trace(raw), "Preparing\nprogress 100%\nERROR: tests failed\n");
+    }
+
+    #[test]
+    fn gitlab_job_log() {
+        let stub = Arc::new(Stub::default());
+        stub.route("/jobs/3/trace", 200, "line one\nERROR boom");
+        let backend = PrBackend::GitLab(GitLabReview::new(ForgeClient::stubbed(GitProvider::Gitlab, "gitlab.example.com", "s", stub.clone())));
+        let r = ItemRef { repo: RepoRef::new("group", "app"), number: 1 };
+        assert!(backend.features().job_logs);
+        assert!(backend.can_show_log(&check("GitLabJob", Some(3), Some("FAILURE"), None)));
+        assert!(!backend.can_show_log(&check("GitLabJob", Some(3), None, None)));
+        assert!(!backend.can_show_log(&check("GitLabJob", Some(3), Some("SKIPPED"), None)));
+        assert!(!backend.can_show_log(&check("CheckRun", Some(3), Some("FAILURE"), None)));
+        let log = crate::rt::block_on(backend.job_log(&r, &check("GitLabJob", Some(3), Some("FAILURE"), None))).unwrap();
+        assert_eq!(log, "line one\nERROR boom");
+        let last = stub.all().last().cloned().unwrap();
+        assert_eq!(last.accept, "text/plain");
+        assert!(last.path.ends_with("/projects/group/app/jobs/3/trace"));
+    }
+
+    #[test]
+    fn bitbucket_build_number() {
+        assert_eq!(build_number(Some("https://bitbucket.org/acme/api/pipelines/results/42")), Some(42));
+        assert_eq!(build_number(Some("https://bitbucket.org/acme/api/addon/pipelines/home#!/results/7")), Some(7));
+        assert_eq!(build_number(Some("https://ci.example.com/build/9")), None);
+        assert_eq!(build_number(None), None);
+    }
+
+    #[test]
+    fn bitbucket_pipeline_log() {
+        let stub = Arc::new(Stub::default());
+        stub.route("/pipelines/42", 200, r#"{"uuid":"{p-1}","build_number":42,"state":{"name":"COMPLETED","result":{"name":"FAILED"}}}"#);
+        stub.route("/steps/", 200, r#"{"values":[{"uuid":"{s-1}","name":"Build","state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}}},{"uuid":"{s-2}","name":"Test","state":{"name":"COMPLETED","result":{"name":"FAILED"}}}]}"#);
+        stub.route("/steps/{s-1}/log", 200, "compiled\n");
+        stub.route("/steps/{s-2}/log", 200, "\u{1b}[31mFAIL\u{1b}[0m test_a\n");
+        let backend = bitbucket(stub.clone());
+        let r = ItemRef { repo: RepoRef::new("acme", "api"), number: 5 };
+        let build = check("BitbucketStatus", Some(1), Some("FAILURE"), Some("https://bitbucket.org/acme/api/pipelines/results/42"));
+        assert!(backend.features().job_logs);
+        assert!(backend.can_show_log(&build));
+        assert!(!backend.can_show_log(&check("BitbucketStatus", Some(1), Some("FAILURE"), Some("https://ci.example.com/9"))));
+        assert!(!backend.can_show_log(&check("BitbucketStatus", Some(1), None, Some("https://bitbucket.org/acme/api/pipelines/results/42"))));
+        let log = crate::rt::block_on(backend.job_log(&r, &build)).unwrap();
+        assert_eq!(log, "=== Build (successful) ===\ncompiled\n\n=== Test (failed) ===\nFAIL test_a");
+        assert!(stub.all().iter().all(|q| q.authorized));
+    }
+
+    #[test]
+    fn bitbucket_log_falls_back_and_follows_redirects_safely() {
+        let stub = Arc::new(Stub::default());
+        stub.route("/pipelines/42", 404, r#"{"error":{"message":"not found"}}"#);
+        stub.route("/pipelines/", 200, r#"{"values":[{"uuid":"{p-0}","build_number":41},{"uuid":"{p-1}","build_number":42}]}"#);
+        stub.route("/steps/", 200, r#"{"values":[{"uuid":"{s-1}","name":"Build"},{"uuid":"{s-2}","name":"Deploy","state":{"name":"COMPLETED"}},{"uuid":"{s-3}","name":"Lint"}]}"#);
+        stub.route("/steps/{s-1}/log", 302, "/2.0/repositories/acme/api/pipelines/{p-1}/steps/{s-1}/log-moved");
+        stub.route("/log-moved", 307, "https://storage.example.com/logs/s1");
+        stub.route("/logs/s1", 200, "stored\n");
+        stub.route("/steps/{s-2}/log", 302, "http://storage.example.com/logs/s2");
+        let backend = bitbucket(stub.clone());
+        let r = ItemRef { repo: RepoRef::new("acme", "api"), number: 5 };
+        let build = check("BitbucketStatus", Some(1), Some("FAILURE"), Some("https://bitbucket.org/acme/api/addon/pipelines/home#!/results/42"));
+        let log = crate::rt::block_on(backend.job_log(&r, &build)).unwrap();
+        assert_eq!(log, "=== Build ===\nstored\n\n=== Deploy (completed) ===\nLog unavailable: Bitbucket sent an insecure log address\n\n=== Lint ===\nLog unavailable: Bitbucket 404: 404 Not Found");
+        assert_eq!(stub.requests("GET", "/pipelines/").len(), 1);
+        assert!(stub.requests("GET", "/pipelines/")[0].url.contains("sort=-created_on"));
+        assert!(stub.requests("GET", "/{p-1}/steps/").len() == 1);
+        assert!(stub.requests("GET", "/log-moved").iter().all(|q| q.authorized));
+        let storage = stub.requests("GET", "/logs/s1");
+        assert_eq!(storage.len(), 1);
+        assert!(!storage[0].authorized);
+        assert!(storage[0].url.starts_with("https://storage.example.com/"));
+        assert!(stub.requests("GET", "/logs/s2").is_empty());
+    }
+
+    #[test]
+    fn github_only_shows_actions_jobs() {
+        let backend = PrBackend::GitHub(GitHubApi::new("x"), GitProvider::Github);
+        let mut job = check("CheckRun", Some(5), Some("FAILURE"), None);
+        job.check_suite = serde_json::from_value(json!({ "workflowRun": { "databaseId": 9, "workflow": { "name": "CI" } } })).unwrap();
+        assert!(backend.can_show_log(&job));
+        assert!(!backend.can_show_log(&check("StatusContext", None, None, None)));
     }
 }

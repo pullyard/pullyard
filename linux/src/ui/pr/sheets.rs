@@ -5,8 +5,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 
 use super::model::{Change, PrModel};
-use crate::api::models::{CheckContext, RepoRef, ReviewThread};
-use crate::api::GitHubApi;
+use crate::api::models::{CheckContext, ReviewThread};
 use crate::ui::composer::Composer;
 use crate::ui::dialogs::Sheet;
 use crate::ui::widgets::*;
@@ -534,7 +533,10 @@ fn show_log(view: &gtk::TextView, buffer: &gtk::TextBuffer) {
     view.scroll_mark_onscreen(&mark);
 }
 
-pub fn job_log(api: GitHubApi, repo: RepoRef, check: CheckContext, fix: Option<Rc<dyn Fn(Option<String>)>>) {
+pub fn job_log<F>(load: F, check: CheckContext, fix: Option<Rc<dyn Fn(Option<String>)>>)
+where
+    F: std::future::Future<Output = crate::api::ApiResult<String>> + Send + 'static,
+{
     let sheet = Sheet::new(&check.workflow_name().map(|w| format!("{w} / {}", check.title())).unwrap_or_else(|| check.title()), 980, 640);
     let stack = gtk::Stack::new();
     stack.add_named(&loading(), Some("loading"));
@@ -609,9 +611,8 @@ pub fn job_log(api: GitHubApi, repo: RepoRef, check: CheckContext, fix: Option<R
         }
     });
     sheet.present();
-    let Some(job) = check.database_id else { return };
     crate::rt::spawn_local(async move {
-        let res = crate::rt::run(async move { api.job_log(&repo, job).await }).await;
+        let res = crate::rt::run(load).await;
         let res = match res {
             Ok(raw) => Ok(crate::rt::blocking(move || {
                 let text = clean_log(&raw);

@@ -132,6 +132,15 @@ enum GitLabReviewMapper {
         }
     }
 
+    static func cleanTrace(_ raw: String) -> String {
+        let markers = raw.replacingOccurrences(of: #"section_(start|end):\d+:[A-Za-z0-9_.\-\[\]=,]+\r?(\u{1B}\[0K)?"#, with: "", options: .regularExpression)
+        let lines = markers.components(separatedBy: "\n").map { line -> String in
+            guard let last = line.dropLast(line.hasSuffix("\r") ? 1 : 0).components(separatedBy: "\r").last else { return line }
+            return last
+        }
+        return CILogExcerpt.clean(lines.joined(separator: "\n"))
+    }
+
     static func rollupState(_ pipeline: GitLabMR.Pipeline?) -> String? {
         switch pipeline?.status {
         case nil: return nil
@@ -312,6 +321,7 @@ final class GitLabPRBackend: PRBackend {
     let features = PRFeatures.gitlab
     private var settings: [String: GitLabMR.Project] = [:]
     private var refs: [ItemRef: GitLabMR.DiffRefs] = [:]
+    private var jobProjects: [ItemRef: String] = [:]
 
     init(client: GitLabClient) {
         self.client = client
@@ -336,6 +346,7 @@ final class GitLabPRBackend: PRBackend {
         var jobs: [GitLabMR.Job] = []
         if let pipeline = mr.headPipeline {
             let owner = pipeline.projectId.map(String.init) ?? project
+            jobProjects[ref] = owner
             jobs = (try? await client.jobs(owner, pipeline: pipeline.id)) ?? []
         }
         let approvals = await approvalsTask
@@ -430,5 +441,15 @@ final class GitLabPRBackend: PRBackend {
 
     func revokeApproval(_ ref: ItemRef, pr: PullRequestDetail) async throws {
         try await client.unapprove(ref.repo.full, iid: ref.number)
+    }
+
+    func canShowLog(_ check: CheckContext) -> Bool {
+        check.typename == "GitLabJob" && check.databaseId != nil && check.outcome != .pending && check.outcome != .skipped
+    }
+
+    func jobLog(_ ref: ItemRef, check: CheckContext) async throws -> String {
+        guard let id = check.databaseId else { throw APIError(message: "This job has no log") }
+        let raw = try await client.jobTrace(jobProjects[ref] ?? ref.repo.full, job: id)
+        return GitLabReviewMapper.cleanTrace(raw)
     }
 }

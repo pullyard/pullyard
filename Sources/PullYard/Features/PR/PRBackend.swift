@@ -35,9 +35,9 @@ struct PRFeatures {
 
     static let github = PRFeatures(provider: .github, stack: true, localConflicts: true, viewedFiles: true, requestReviewers: true, editing: true, draftToggle: true, updateBranch: true, rerunChecks: true, jobLogs: true, requestChanges: true, claude: true, blame: true, deleteBranch: true)
 
-    static let gitlab = PRFeatures(provider: .gitlab, editing: true, draftToggle: true, updateBranch: true, revokeApproval: true)
+    static let gitlab = PRFeatures(provider: .gitlab, editing: true, draftToggle: true, updateBranch: true, jobLogs: true, revokeApproval: true)
 
-    static let bitbucket = PRFeatures(provider: .bitbucket, editing: true, draftToggle: true, requestChanges: true, revokeApproval: true, reopen: false)
+    static let bitbucket = PRFeatures(provider: .bitbucket, editing: true, draftToggle: true, jobLogs: true, requestChanges: true, revokeApproval: true, reopen: false)
 
     var checksTitle: String { provider == .gitlab ? "Pipeline" : provider == .bitbucket ? "Builds" : "Checks" }
     var updateBranchTitle: String { provider == .gitlab ? "Rebase" : "Update branch" }
@@ -69,6 +69,8 @@ protocol PRBackend: AnyObject {
     func deleteBranch(_ ref: ItemRef, pr: PullRequestDetail) async throws
     func setViewed(_ ref: ItemRef, pr: PullRequestDetail, path: String, viewed: Bool) async throws
     func rerunFailed(_ ref: ItemRef, runs: Set<Int>) async throws
+    func canShowLog(_ check: CheckContext) -> Bool
+    func jobLog(_ ref: ItemRef, check: CheckContext) async throws -> String
 }
 
 extension PRBackend {
@@ -78,6 +80,8 @@ extension PRBackend {
     func deleteBranch(_ ref: ItemRef, pr: PullRequestDetail) async throws { throw PRBackendUnsupported(provider: features.provider) }
     func setViewed(_ ref: ItemRef, pr: PullRequestDetail, path: String, viewed: Bool) async throws { throw PRBackendUnsupported(provider: features.provider) }
     func rerunFailed(_ ref: ItemRef, runs: Set<Int>) async throws { throw PRBackendUnsupported(provider: features.provider) }
+    func canShowLog(_ check: CheckContext) -> Bool { false }
+    func jobLog(_ ref: ItemRef, check: CheckContext) async throws -> String { throw PRBackendUnsupported(provider: features.provider) }
 }
 
 @MainActor
@@ -170,5 +174,12 @@ final class GitHubPRBackend: PRBackend {
 
     func rerunFailed(_ ref: ItemRef, runs: Set<Int>) async throws {
         for id in runs { try await api.rerunFailedJobs(repo: ref.repo, runId: id) }
+    }
+
+    func canShowLog(_ check: CheckContext) -> Bool { check.isActionsJob }
+
+    func jobLog(_ ref: ItemRef, check: CheckContext) async throws -> String {
+        guard let id = check.databaseId else { throw APIError(message: "This check has no job log. Open it on GitHub to see its output.") }
+        return try await api.jobLog(repo: ref.repo, jobId: id)
     }
 }

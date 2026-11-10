@@ -443,4 +443,33 @@ public sealed class BitbucketPRBackend : IPRBackend
     public Task<CommitDetailRest> Commit(RepoRef repo, string sha) => client.Commit(repo.Full, sha);
 
     public Task RevokeApproval(ItemRef r, PullRequestDetail pr) => client.Approve(r.Repo.Full, r.Number, false);
+
+    public bool CanShowLog(CheckContext check) => check.Outcome != CheckOutcome.Pending && BitbucketClient.BuildNumber(check.Link) is not null;
+
+    public async Task<string> JobLog(ItemRef r, CheckContext check, CancellationToken ct = default)
+    {
+        if (BitbucketClient.BuildNumber(check.Link) is not { } build)
+            throw new ApiException("Only Bitbucket Pipelines builds have a log here. Open this build in the browser.");
+        var repo = r.Repo.Full;
+        var pipeline = await client.Pipeline(repo, build, ct).ConfigureAwait(false);
+        var steps = await client.PipelineSteps(repo, pipeline.Uuid, ct).ConfigureAwait(false);
+        if (steps.Count == 0) return $"Pipeline #{build} has no steps.";
+        var parts = new List<string>();
+        foreach (var step in steps)
+        {
+            var result = step.State?.Result?.Name ?? step.State?.Name ?? "";
+            var header = $"=== {step.Name ?? "Step"}" + (result.Length == 0 ? "" : $" ({result.ToLowerInvariant()})") + " ===";
+            string text;
+            try
+            {
+                text = CiLog.Clean(await client.StepLog(repo, pipeline.Uuid, step.Uuid, ct).ConfigureAwait(false));
+            }
+            catch (Exception e) when (!ct.IsCancellationRequested)
+            {
+                text = "Log unavailable: " + e.Message;
+            }
+            parts.Add(header + "\n" + text.Trim('\n', '\r'));
+        }
+        return string.Join("\n\n", parts);
+    }
 }

@@ -1150,9 +1150,10 @@ public sealed class PRContent : Grid, IShortcutHost
             foreach (var c in checks)
             {
                 void Fix() => Dialogs.FixCi(XamlRoot, model, c).Forget();
-                var api = model.Api;
-                Action log = api is null ? () => { } : () => Dialogs.JobLog(XamlRoot, api, model.Ref.Repo, c, l => Dialogs.FixCi(XamlRoot, model, c, l).Forget()).Forget();
-                items.Add(new CheckRowItem(c, log, model.Features.Agent && CiFailures.IsFixable(c) ? new Action(Fix) : null, model.Features.JobLogs));
+                var backend = model.Backend;
+                var reference = model.Ref;
+                Action log = () => Dialogs.JobLog(XamlRoot, () => backend.JobLog(reference, c), c, model.Features.Agent ? l => Dialogs.FixCi(XamlRoot, model, c, l).Forget() : null).Forget();
+                items.Add(new CheckRowItem(c, log, model.Features.Agent && CiFailures.IsFixable(c) ? new Action(Fix) : null, model.Features.JobLogs && backend.CanShowLog(c)));
             }
             list.ItemsSource = items;
         }
@@ -1553,7 +1554,7 @@ public sealed record CheckRowItem(CheckContext Check, Action ShowLog, Action? Fi
         var body = Ui.V(1, Ui.Text(c.FullTitle, 13), Ui.Caption(string.Join(" · ", parts)));
         var right = Ui.H(4);
         if (Fix is not null) right.Children.Add(Ui.Button(L.T("Fix_Button", "Fix with agent"), Fix, glyph: "\uE945", tooltip: L.T("CiFix_RowHelp", "Send this check's log and the PR context to Claude Code")));
-        if (Logs && c.IsActionsJob && c.Outcome is not CheckOutcome.Pending and not CheckOutcome.Skipped)
+        if (Logs && c.Outcome is not CheckOutcome.Pending and not CheckOutcome.Skipped)
             right.Children.Add(Ui.Button(L.T("Checks_Log", "Log"), ShowLog));
         if (c.Link is { } link) right.Children.Add(Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(link)));
         var grid = Ui.Columns((Ui.CheckIcon(c.Outcome, 15), Ui.Auto), (body, Ui.Star), (right, Ui.Auto));

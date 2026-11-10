@@ -120,6 +120,24 @@ enum BitbucketPR {
         var path: String { new?.path ?? old?.path ?? "" }
     }
 
+    struct Outcome: Decodable {
+        struct Result: Decodable { let name: String? }
+        let name: String?
+        let result: Result?
+    }
+
+    struct Pipeline: Decodable {
+        let uuid: String
+        let buildNumber: Int?
+        let state: Outcome?
+    }
+
+    struct Step: Decodable {
+        let uuid: String
+        let name: String?
+        let state: Outcome?
+    }
+
     struct Page<T: Decodable>: Decodable {
         let values: [T]
         let next: String?
@@ -222,6 +240,29 @@ extension BitbucketClient {
             stats: .init(additions: files.reduce(0) { $0 + $1.additions }, deletions: files.reduce(0) { $0 + $1.deletions }),
             files: files
         )
+    }
+
+    static func buildNumber(_ link: String?) -> Int? {
+        guard let link, let r = link.range(of: #"(pipelines/results/|#!/results/)(\d+)"#, options: .regularExpression) else { return nil }
+        return Int(link[r].split(separator: "/").last ?? "")
+    }
+
+    func pipeline(_ repo: String, build: Int) async throws -> BitbucketPR.Pipeline {
+        do {
+            return try await http.get(Self.repoPath(repo) + "/pipelines/\(build)")
+        } catch let e as APIError where e.status == 404 || e.status == 400 {
+            let page: BitbucketPR.Page<BitbucketPR.Pipeline> = try await http.get(Self.repoPath(repo) + "/pipelines/", [URLQueryItem(name: "sort", value: "-created_on"), URLQueryItem(name: "pagelen", value: "100")])
+            guard let hit = page.values.first(where: { $0.buildNumber == build }) else { throw e }
+            return hit
+        }
+    }
+
+    func pipelineSteps(_ repo: String, pipeline: String) async throws -> [BitbucketPR.Step] {
+        try await pages(Self.repoPath(repo) + "/pipelines/\(Self.segment(pipeline))/steps/", limit: 3)
+    }
+
+    func stepLog(_ repo: String, pipeline: String, step: String) async throws -> String {
+        try await http.download(Self.repoPath(repo) + "/pipelines/\(Self.segment(pipeline))/steps/\(Self.segment(step))/log")
     }
 
     func reviewBackend() -> PRBackend? {
