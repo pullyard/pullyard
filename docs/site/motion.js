@@ -808,11 +808,12 @@
       stars += '<i class="st" style="--x:' + clamp(sx, 1, 99).toFixed(2) + "%;--y:" + (10 + rnd() * 92).toFixed(1) + "px;--z:" + (1.1 + rnd() * 1.4).toFixed(2) + "px;--d:" + (2.4 + rnd() * 4.6).toFixed(2) + "s;--l:-" + (rnd() * 7).toFixed(2) + 's"></i>';
     }
     stars += '<i class="st big" style="--x:88.5%;--y:34px;--z:3px;--d:5.2s;--l:-2s"></i>';
+    stars += '<i class="shoot"></i>';
     var gull = '<svg viewBox="0 0 16 7"><path d="M1 6 Q4.5 1.2 8 5 Q11.5 1.2 15 6"/></svg>';
     sea.innerHTML = '<div class="sea-stars">' + stars + "</div>" +
       '<div class="sea-clouds"><i class="cl c1"></i><i class="cl c2"></i><i class="cl c3"></i></div>' +
       '<div class="sea-gulls"><i class="gl g1">' + gull + '</i><i class="gl g2">' + gull + "</i></div>" +
-      '<div class="sea-water"></div><div class="sea-line"></div>' +
+      '<div class="sea-water"></div><div class="sea-line"></div><i class="sea-wave"></i><i class="sea-wave w2"></i>' +
       '<div class="sea-floats"><i class="fl" style="--c:#5dbe8a;--t:118s;--l:-38s"><i></i></i><i class="fl" style="--c:#9d8cf0;--t:156s;--l:-121s"><i></i></i><i class="fl" style="--c:#ee6f5f;--t:197s;--l:-12s"><i></i></i></div>' +
       '<div class="sea-fx"></div>';
     document.body.appendChild(sea);
@@ -827,7 +828,7 @@
       '<g class="bt-cargo"><rect class="bt-box" x="486" y="500" width="94" height="66" rx="7"/><path class="bt-rib" d="M504 514v38M562 514v38"/></g>' +
       '<rect x="702" y="392" width="40" height="86" rx="8" fill="#E2E8F0"/><rect x="702" y="392" width="40" height="20" rx="6" fill="#FB7185"/>' +
       '<rect x="584" y="462" width="176" height="104" rx="16" fill="#F8FAFC"/><rect x="584" y="540" width="176" height="26" fill="#E2E8F0"/>' +
-      '<rect x="610" y="488" width="38" height="34" rx="8" fill="#1E293B"/><rect x="664" y="488" width="38" height="34" rx="8" fill="#1E293B"/>' +
+      '<rect class="bt-win" x="610" y="488" width="38" height="34" rx="8" fill="#1E293B"/><rect class="bt-win" x="664" y="488" width="38" height="34" rx="8" fill="#1E293B"/>' +
       '<path d="M470 566 L866 566 L800 728 L540 728 Z" fill="url(#bt-h)"/><path d="M470 566 L866 566 L857 590 L480 590 Z" fill="#FECDD3"/>' +
       '<circle cx="770" cy="642" r="15" fill="#FFE4E6" opacity=".9"/></svg></span></span></span></span>';
     var tilt = boat.querySelector(".boat-tilt"), hop = boat.querySelector(".boat-hop"), flip = boat.querySelector(".boat-flip"), cargoEl = boat.querySelector(".bt-cargo"), boatSvg = boat.querySelector("svg");
@@ -1117,6 +1118,92 @@
         }, 3200 + Math.random() * 4200);
       })();
     }
+  }
+
+  [].slice.call(document.querySelectorAll("[data-hero-flow],[data-flow]")).forEach(function (flow) {
+    if (!flow.pauseAnimations) return;
+    if (!motion) { flow.pauseAnimations(); return; }
+    var seen = true;
+    var sync = function () { if (seen && !document.hidden) flow.unpauseAnimations(); else flow.pauseAnimations(); };
+    if (hasIO) new IntersectionObserver(function (entries) { entries.forEach(function (e) { seen = e.isIntersecting; sync(); }); }).observe(flow);
+    document.addEventListener("visibilitychange", sync);
+  });
+
+  var toTop = document.createElement("button");
+  toTop.type = "button";
+  toTop.className = "to-top";
+  toTop.setAttribute("aria-label", "Back to top");
+  toTop.innerHTML = '<svg viewBox="0 0 26 26" aria-hidden="true" focusable="false"><path class="tt-arrow" d="M13 9V2M9.5 5.2 13 1.8l3.5 3.4"/>' +
+    '<g class="tt-boat" style="transform-box:fill-box;transform-origin:50% 100%"><rect x="12" y="11.5" width="6.5" height="5" rx="1.2" fill="#F8FAFC"/><rect x="15.6" y="9" width="2" height="3.4" rx=".6" fill="#FB7185"/>' +
+    '<path d="M4 16.5h18l-3 7H7.5z" fill="#EE6F5F"/><path d="M4 16.5h18l-.6 1.4H4.6z" fill="#FECDD3"/></g></svg>';
+  document.body.appendChild(toTop);
+  toTop.addEventListener("click", function () {
+    glideTo(0, function () { var m = document.getElementById("main"); if (m) focusTarget(m); });
+  });
+
+  var statsEl = document.querySelector("[data-stats]");
+  if (statsEl && window.fetch) {
+    var statSeen = !hasIO, statVals = {};
+    var fmtStat = function (n) {
+      n = Math.round(n);
+      if (n >= 10000) return (n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, "") + "k";
+      return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    };
+    var runStat = function (key) {
+      var el = statsEl.querySelector('[data-stat="' + key + '"]'), to = statVals[key];
+      if (!el || to == null || el.__ran) return;
+      el.__ran = true;
+      if (!motion) { el.textContent = fmtStat(to); return; }
+      var t0 = 0;
+      var step = function (now) {
+        if (!t0) t0 = now;
+        var p = clamp((now - t0) / 1400, 0, 1);
+        el.textContent = fmtStat(to * outCubic(p));
+        if (p < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    };
+    var setStat = function (key, v) {
+      var el = statsEl.querySelector('[data-stat="' + key + '"]');
+      if (!el || !(v > 0)) return;
+      statVals[key] = v;
+      el.parentNode.hidden = false;
+      if (statSeen) runStat(key);
+    };
+    if (hasIO) {
+      var sio = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (!e.isIntersecting) return;
+          sio.disconnect();
+          statSeen = true;
+          Object.keys(statVals).forEach(runStat);
+        });
+      }, { threshold: 0.4 });
+      sio.observe(statsEl);
+    }
+    var getJSON = function (url) { return fetch(url).then(function (r) { return r.ok ? r.json() : null; }); };
+    getJSON("https://api.github.com/repos/pullyard/pullyard").then(function (j) { if (j && j.stargazers_count >= 50) setStat("stars", j.stargazers_count); }).catch(function () {});
+  }
+
+  var siteHeader = document.querySelector(".site-header");
+  if (siteHeader) {
+    var progress = document.createElement("span");
+    progress.className = "scroll-progress";
+    progress.setAttribute("aria-hidden", "true");
+    siteHeader.appendChild(progress);
+    var docMax = 1, lastProgress = -1, isScrolled = null, toTopOn = false;
+    scenes.push({
+      on: true,
+      measure: function () { docMax = Math.max(1, document.documentElement.scrollHeight - vh); },
+      update: function (y, raw) {
+        var p = clamp(y / docMax, 0, 1);
+        if (Math.abs(p - lastProgress) > 0.0004) { lastProgress = p; progress.style.transform = "scaleX(" + p.toFixed(4) + ")"; }
+        var s = raw > 12;
+        if (s !== isScrolled) { isScrolled = s; siteHeader.classList.toggle("is-scrolled", s); }
+        var tt = raw > vh * 0.9 && raw < docMax - 220;
+        if (tt !== toTopOn) { toTopOn = tt; toTop.classList.toggle("is-on", tt); }
+      }
+    });
   }
 
   invalidate();

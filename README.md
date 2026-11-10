@@ -5,8 +5,8 @@
 <h1 align="center">PullYard</h1>
 
 <p align="center">
-  <b>Pull requests, without the browser.</b><br>
-  A tiny native GitHub client for macOS, Windows and Linux, with a built-in workspace for AI coding agents that runs Claude Code.
+  <b>Review it. Fix it. Ship it.</b><br>
+  A native app for pull requests on macOS, Windows and Linux, with a built-in workspace for AI coding agents that runs Claude Code.
 </p>
 
 <p align="center">
@@ -30,7 +30,7 @@
 
 ---
 
-GitHub in a browser tab can take up a gigabyte of memory to show a single diff. PullYard is a small native app for everyday review: SwiftUI on macOS, WinUI 3 on Windows, GTK 4 and libadwaita on Linux. It starts fast, scrolls big diffs without stutter, and can pass review comments to Claude Code.
+GitHub in a browser tab can take up a gigabyte of memory to show a single diff. PullYard is a native app that takes a pull request from review to merge: SwiftUI on macOS, WinUI 3 on Windows, GTK 4 and libadwaita on Linux. It starts fast, scrolls big diffs without stutter, and can pass review comments to Claude Code.
 
 ## Features
 

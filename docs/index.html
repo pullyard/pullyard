@@ -3,20 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PullYard: pull requests without the browser</title>
-<meta name="description" content="PullYard is a tiny native client for GitHub, GitLab and Bitbucket pull requests on macOS, Windows and Linux, with a built-in agent workspace that runs Claude Code.">
+<title>PullYard: review, fix and ship pull requests</title>
+<meta name="description" content="PullYard is a free native app for pull requests on macOS, Windows and Linux. Review the diff, let an AI agent fix the feedback, then merge. Works with GitHub, GitLab, Bitbucket and Gitea.">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0a0f1b" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f6f7fa" media="(prefers-color-scheme: light)">
-<meta property="og:title" content="PullYard: pull requests without the browser">
-<meta property="og:description" content="A tiny native client for GitHub, GitLab and Bitbucket pull requests on macOS, Windows and Linux, with a built-in agent workspace that runs Claude Code.">
+<meta property="og:title" content="PullYard: review, fix and ship pull requests">
+<meta property="og:description" content="A free native app for pull requests. Review the diff, let an AI agent fix the feedback, then merge. For GitHub, GitLab, Bitbucket and Gitea.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="PullYard">
 <meta property="og:url" content="https://pullyard.app/">
 <meta property="og:image" content="https://pullyard.app/img/og-card.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="PullYard: pull requests without the browser, for GitHub, GitLab, Bitbucket and Gitea">
+<meta property="og:image:alt" content="PullYard: review it, fix it, ship it. A native app for pull requests on GitHub, GitLab, Bitbucket and Gitea">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://pullyard.app/img/og-card.jpg">
 <link rel="icon" type="image/png" href="favicon.png">
@@ -47,7 +47,7 @@
       "@id": "https://pullyard.app/#software",
       "name": "PullYard",
       "url": "https://pullyard.app/",
-      "description": "A tiny native client for GitHub, GitLab and Bitbucket pull requests on macOS, Windows and Linux, with a built-in agent workspace that runs Claude Code.",
+      "description": "A free native app for pull requests on macOS, Windows and Linux. Review the diff, let an AI agent fix the feedback, then merge. Works with GitHub, GitLab, Bitbucket and Gitea.",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS 14+, Windows 10, Windows 11, Linux",
       "softwareVersion": "2.13.6",
@@ -105,7 +105,7 @@
   --bg:#0a0f1b;--bg2:#111a2c;--panel:#152036;--panel2:#18243c;
   --surface:#111a2c;--surface-hover:#152036;--raised:#18243c;
   --line:rgba(160,174,196,.10);--line2:rgba(160,174,196,.18);--line3:rgba(160,174,196,.30);
-  --text:#e6ebf2;--text-soft:#c7d0dc;--muted:#8693a8;--dim:#7d899e;
+  --text:#e6ebf2;--text-soft:#c7d0dc;--muted:#96a2b6;--dim:#8591a5;
   --coral-ink:#ee6f5f;--violet-ink:#9d8cf0;--sky-ink:#5bb8ec;--green-ink:#5dbe8a;--amber-ink:#e8b44c;--teal-ink:#2dd4bf;
   --on-coral:#1a0b09;--ghost:rgba(255,255,255,.06);--ghost-hover:rgba(255,255,255,.10);
   --focus:#5bb8ec;--nav-bg:rgba(10,15,27,.82);
@@ -239,12 +239,12 @@ h2{font-size:clamp(30px,4vw,46px);line-height:1.08;letter-spacing:-.028em;margin
 .t-teal{--tile:var(--teal);--tile-ink:var(--teal-ink)}
 .t-green{--tile:var(--green);--tile-ink:var(--green-ink)}
 .card h3{margin:0;font-size:17.5px;line-height:1.3;letter-spacing:-.01em}
-.card p{margin:0;color:var(--muted);font-size:15px;line-height:1.6}
+.card p{margin:0;color:var(--muted);font-size:16px;line-height:1.6}
 
 .band{background:var(--band)}
 .split{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:var(--s-8);align-items:center}
 .checks{list-style:none;padding:0;margin:var(--s-6) 0 0;display:grid;gap:var(--s-3)}
-.checks li{display:flex;gap:var(--s-3);color:var(--text-soft);font-size:15.5px;line-height:1.55;max-width:var(--measure)}
+.checks li{display:flex;gap:var(--s-3);color:var(--text-soft);font-size:16px;line-height:1.55;max-width:var(--measure)}
 .checks li svg{width:20px;height:20px;flex:none;margin-top:2px;color:var(--coral-ink)}
 .checks b{color:var(--text);font-weight:600}
 .shot-img{display:block;width:100%;height:auto;aspect-ratio:1600/958;border-radius:var(--r-md);filter:drop-shadow(var(--shadow-shot))}
@@ -254,7 +254,7 @@ picture{display:block}
 
 .gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-6) var(--s-5);margin-top:var(--s-7)}
 .gallery figure{margin:0}
-.gallery figcaption{margin-top:var(--s-4);color:var(--muted);font-size:15px;line-height:1.6;max-width:var(--measure)}
+.gallery figcaption{margin-top:var(--s-4);color:var(--muted);font-size:16px;line-height:1.6;max-width:var(--measure)}
 .gallery figcaption b{color:var(--text);font-weight:600}
 .gallery .wide{grid-column:1/-1}
 
@@ -273,7 +273,7 @@ picture{display:block}
 .step{padding:var(--s-5);border-radius:var(--r-lg);background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-card)}
 .step:before{counter-increment:s;content:counter(s);display:grid;place-items:center;width:32px;height:32px;border-radius:var(--r-sm);background:color-mix(in srgb,var(--sky) 15%,transparent);color:var(--sky-ink);font-weight:700;margin-bottom:var(--s-4)}
 .step h4{margin:0 0 6px;font-size:17px;line-height:1.3}
-.step p{margin:0;color:var(--muted);font-size:15px}
+.step p{margin:0;color:var(--muted);font-size:16px;line-height:1.6}
 .code{margin-top:var(--s-4);display:flex;align-items:center;gap:var(--s-3);padding:var(--s-2) var(--s-2) var(--s-2) var(--s-4);min-height:52px;border-radius:var(--r-md);background:var(--surface);border:1px solid var(--line);font:14px var(--mono);color:var(--text-soft);overflow-x:auto}
 .code + .code{margin-top:var(--s-2)}
 .code code{white-space:nowrap}
@@ -309,13 +309,13 @@ summary::-webkit-details-marker{display:none}
 summary:hover{color:var(--text)}
 summary .chev{width:18px;height:18px;flex:none;color:var(--dim);transition:transform var(--dur) var(--ease),color var(--dur) var(--ease)}
 details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
-.faq details p{color:var(--muted);margin:0;padding:0 var(--s-5) var(--s-5);font-size:15px;line-height:1.65}
+.faq details p{color:var(--muted);margin:0;padding:0 var(--s-5) var(--s-5);font-size:16px;line-height:1.65}
 .faq details p a{color:var(--text);text-decoration:underline;text-underline-offset:3px}
 .faq details code{font-size:13.5px;padding:1px 6px;border-radius:6px;background:var(--ghost)}
 .pizza-link{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
 .pizza-link svg{width:16px;height:16px}
 
-.final{text-align:center;padding:var(--s-9) 0 120px}
+.final{text-align:center;padding:var(--s-7) 0 120px}
 .final-card{padding:var(--s-8) var(--s-5);border-radius:var(--r-xl);background:radial-gradient(120% 140% at 50% 0%,color-mix(in srgb,var(--coral) 12%,transparent),transparent 60%),var(--surface);border:1px solid var(--line)}
 .final .sub{margin:0 auto var(--s-6)}
 .final .pizza{margin:var(--s-4) auto 0;color:var(--dim);font-size:13.5px}
@@ -401,6 +401,7 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
+<div class="page-tint" aria-hidden="true"></div>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
   <symbol id="i-apple" viewBox="0 0 24 24"><path fill="currentColor" d="M16.37 12.6c-.02-2.3 1.88-3.4 1.97-3.46-1.07-1.57-2.74-1.78-3.33-1.8-1.42-.14-2.77.83-3.49.83-.72 0-1.83-.81-3.01-.79-1.55.02-2.98.9-3.78 2.29-1.61 2.8-.41 6.94 1.16 9.21.77 1.11 1.68 2.36 2.88 2.31 1.16-.05 1.6-.75 3-.75s1.79.75 3.01.72c1.25-.02 2.04-1.13 2.8-2.25.88-1.29 1.24-2.54 1.26-2.6-.03-.01-2.42-.93-2.47-3.71zM14.08 5.85c.64-.78 1.07-1.85.95-2.93-.92.04-2.04.61-2.7 1.39-.59.69-1.11 1.79-.97 2.85 1.03.08 2.07-.52 2.72-1.31z"/></symbol>
@@ -450,10 +451,42 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
 <section class="hero" aria-labelledby="hero-title">
   <div class="hero-bg" aria-hidden="true"><div class="hero-grid"></div><div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div></div>
   <div class="wrap">
+    <svg class="hero-flow" data-hero-flow viewBox="0 0 1600 360" width="1600" height="360" aria-hidden="true" focusable="false">
+      <defs>
+        <path id="hf-la" pathLength="1" d="M0 56 C250 56 300 180 520 180 L716 180"/><path id="hf-lb" pathLength="1" d="M0 304 C250 304 300 180 520 180"/><path id="hf-lc" pathLength="1" d="M0 180 L520 180"/><path id="hf-ld" pathLength="1" d="M150 0 C230 70 250 118 372 131"/><path id="hf-ra" pathLength="1" d="M884 180 L1080 180 C1300 180 1350 100 1600 100"/><path id="hf-rb" pathLength="1" d="M1080 180 C1300 180 1350 268 1600 268"/>
+      </defs>
+      <g class="hf-lines">
+        <use class="hf-line hf-main" href="#hf-lc" style="--d:0s"/>
+        <use class="hf-line hf-violet" href="#hf-la" style="--d:.15s"/>
+        <use class="hf-line hf-sky" href="#hf-lb" style="--d:.3s"/>
+        <use class="hf-line hf-faint" href="#hf-ld" style="--d:.5s"/>
+        <use class="hf-line hf-coral" href="#hf-ra" style="--d:1.1s"/>
+        <use class="hf-line hf-green" href="#hf-rb" style="--d:1.25s"/>
+      </g>
+      <g class="hf-nodes">
+        <circle class="hf-node hf-violet" cx="150" cy="77" r="5" style="--d:.7s"/>
+        <circle class="hf-node hf-sky" cx="150" cy="283" r="5" style="--d:.85s"/>
+        <circle class="hf-node hf-main" cx="260" cy="180" r="5" style="--d:.6s"/>
+        <circle class="hf-node hf-merge" cx="520" cy="180" r="6" style="--d:1s"/>
+        <circle class="hf-node hf-coral hf-ship" cx="1080" cy="180" r="6" style="--d:1.5s"/>
+        <circle class="hf-node hf-coral" cx="1440" cy="118" r="5" style="--d:1.8s"/>
+        <circle class="hf-node hf-green" cx="1440" cy="250" r="5" style="--d:1.9s"/>
+      </g>
+      <g class="hf-dots">
+        <circle class="hf-dot hf-violet" r="3.2"><animateMotion dur="6.5s" begin="1.8s" repeatCount="indefinite" calcMode="linear"><mpath href="#hf-la"/></animateMotion></circle>
+        <circle class="hf-dot hf-violet" r="3.2"><animateMotion dur="6.5s" begin="5.0s" repeatCount="indefinite" calcMode="linear"><mpath href="#hf-la"/></animateMotion></circle>
+        <circle class="hf-dot hf-sky" r="3.2"><animateMotion dur="7.5s" begin="2.6s" repeatCount="indefinite" calcMode="linear"><mpath href="#hf-lb"/></animateMotion></circle>
+        <circle class="hf-dot hf-sky" r="3.2"><animateMotion dur="7.5s" begin="6.4s" repeatCount="indefinite" calcMode="linear"><mpath href="#hf-lb"/></animateMotion></circle>
+        <circle class="hf-dot hf-main" r="3.2"><animateMotion dur="5.5s" begin="2.2s" repeatCount="indefinite" calcMode="linear"><mpath href="#hf-lc"/></animateMotion></circle>
+        <circle class="hf-dot hf-coral" r="3.2"><animateMotion dur="6s" begin="3.0s" repeatCount="indefinite" calcMode="linear"><mpath href="#hf-ra"/></animateMotion></circle>
+        <circle class="hf-dot hf-coral" r="3.2"><animateMotion dur="6s" begin="6.0s" repeatCount="indefinite" calcMode="linear"><mpath href="#hf-ra"/></animateMotion></circle>
+        <circle class="hf-dot hf-green" r="3.2"><animateMotion dur="7s" begin="4.2s" repeatCount="indefinite" calcMode="linear"><mpath href="#hf-rb"/></animateMotion></circle>
+      </g>
+    </svg>
     <div class="hero-logo" data-hero-logo role="img" aria-label="PullYard app icon"><img src="icon.svg" width="156" height="156" alt="" fetchpriority="high" decoding="async"></div>
     <div class="pill intro" style="--d:0ms"><span class="dot" aria-hidden="true"></span><b>Free &amp; open source</b> · native on macOS, Windows &amp; Linux</div>
-    <h1 id="hero-title">Pull requests,<br><span class="grad">without the browser.</span></h1>
-    <p class="lead intro" style="--d:70ms">PullYard is a free, MIT-licensed desktop app for reviewing GitHub pull requests outside the browser, with native builds for macOS, Windows and Linux. It also signs in to GitLab, Bitbucket, Gitea and GitHub Enterprise, reads big diffs instantly and sends review comments to Claude Code with one click.</p>
+    <h1 id="hero-title">Review it. Fix it.<br><span class="grad">Ship it.</span></h1>
+    <p class="lead intro" style="--d:70ms">PullYard is a free, MIT-licensed desktop app for pull requests, with native builds for macOS, Windows and Linux. Read big diffs without the lag, hand the review comments to an AI agent with one click, and merge when it's ready. It works with GitHub, GitLab, Bitbucket, Gitea and GitHub Enterprise.</p>
     <div class="cta intro" style="--d:130ms">
       <a class="btn btn-primary btn-lg os-only" href="https://github.com/pullyard/pullyard/releases/latest/download/PullYard.dmg" data-download>
         <span class="dl-ic" data-download-icon><svg aria-hidden="true" focusable="false"><use href="#i-apple"/></svg></span>
@@ -469,8 +502,13 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
         View source
       </a>
     </div>
+    <div class="code hero-cmd intro" style="--d:160ms"><span class="label">Homebrew</span><code>brew install --cask pullyard/tap/pullyard</code><button type="button" aria-label="Copy Homebrew command"><svg aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span>Copy</span></button></div>
     <a class="other-link intro" style="--d:190ms" href="#install" data-other-platforms>Other platforms<svg aria-hidden="true" focusable="false"><use href="#i-arrow-down"/></svg></a>
     <div class="meta intro" style="--d:220ms"><a href="https://github.com/pullyard/pullyard/releases/latest" data-version>Version 2.7.0</a><span class="sep" aria-hidden="true">·</span><a href="changelog.html" data-whats-new>What's new</a><span class="sep" aria-hidden="true">·</span><span data-os-meta>macOS, Windows and Linux</span></div>
+
+    <div class="providers intro" style="--d:260ms" role="img" aria-label="Works with GitHub, GitLab, Bitbucket, Gitea and GitHub Enterprise">
+      <div class="providers-track" aria-hidden="true"><div class="pv-group"><span>GitHub</span><span>GitLab</span><span>Bitbucket</span><span>Gitea</span><span>GitHub Enterprise</span><span>GitHub</span><span>GitLab</span><span>Bitbucket</span><span>Gitea</span><span>GitHub Enterprise</span></div><div class="pv-group"><span>GitHub</span><span>GitLab</span><span>Bitbucket</span><span>Gitea</span><span>GitHub Enterprise</span><span>GitHub</span><span>GitLab</span><span>Bitbucket</span><span>Gitea</span><span>GitHub Enterprise</span></div></div>
+    </div>
 
     <figure class="tour-video reveal">
       <video muted loop playsinline controls preload="none" width="1920" height="1080" poster="img/pullyard-web-poster.jpg" aria-label="PullYard product tour" aria-describedby="tour-hint" data-tour-video>
@@ -491,6 +529,12 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
       </div>
       <p class="demo-hint"><i aria-hidden="true"></i><span data-platform-text='{"mac":"Live demo. Click around, press ⌘K, then try “Fix with agent”","windows":"Live demo. Click around, press Ctrl+K, then try “Fix with agent”","linux":"Live demo. Click around, press Ctrl+K, then try “Fix with agent”"}'>Live demo. Click around, press ⌘K, then try “Fix with agent”</span></p>
     </div>
+    <ul class="stats reveal" data-stats aria-label="PullYard in numbers">
+      <li hidden><b data-stat="stars">0</b><span>GitHub stars</span></li>
+      <li><b>3</b><span>Native platforms</span></li>
+      <li><b>5</b><span>Git hosts in one sidebar</span></li>
+      <li><b>MIT</b><span>Free and open source</span></li>
+    </ul>
   </div>
 </section>
 
@@ -559,13 +603,21 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
     <div class="section-head reveal">
       <div class="eyebrow">Why PullYard</div>
       <h2 id="features-title">The parts of GitHub<br>you use every day.</h2>
-      <p class="sub">GitHub in a browser tab can take up a gigabyte of memory to show a single diff. PullYard is a small native app for everyday review work.</p>
+      <p class="sub">A browser tab can take a gigabyte of memory to show one diff, and it leaves the fixing to you. PullYard opens fast and takes a pull request from review to merge in one window.</p>
     </div>
     <div class="grid">
-      <article class="card reveal">
+      <article class="card reveal wide ">
         <div class="tile t-sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
         <h3>Native and fast</h3>
         <p>SwiftUI on macOS, WinUI 3 on Windows, GTK 4 on Linux. Diffs with thousands of lines scroll without stutter, and file headers stay pinned.</p>
+        <div class="mini mini-diff" aria-hidden="true">
+          <div class="md-head"><i></i><span>src/search/useSearch.ts</span><b>+3</b><em>−1</em></div>
+          <div class="md-line del" style="--n:0"><span>−</span><code>fetchResults(query)</code></div>
+          <div class="md-line add" style="--n:1"><span>+</span><code>const q = useDebounce(query, 200)</code></div>
+          <div class="md-line add" style="--n:2"><span>+</span><code>fetchResults(q)</code></div>
+          <div class="md-line add" style="--n:3"><span>+</span><code>  .then(setResults)</code></div>
+          <div class="md-line" style="--n:4"><span></span><code>setLoading(false)</code></div>
+        </div>
       </article>
       <article class="card reveal">
         <div class="tile t-violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V10a3 3 0 0 0-3-3h-4"/><path d="m13 5-2 2 2 2"/></svg></div>
@@ -577,21 +629,60 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
         <h3>Fix with agent</h3>
         <p>One click sends review feedback to Claude Code. If the reviewer left a “Fix prompt”, PullYard uses it; otherwise it writes one from the comments.</p>
       </article>
-      <article class="card reveal">
+      <article class="card reveal wide ">
         <div class="tile t-amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></div>
         <h3>Fresh without reloading</h3>
         <p>Pull requests refresh every 30 seconds and new ones appear at the top. Pull down on a list or press ⌘R / Ctrl+R to refresh right away. A menu bar badge on the Mac, or a tray icon on Windows, counts the reviews waiting on you.</p>
+        <div class="mini mini-list" aria-hidden="true">
+          <div class="ml-row is-new"><i class="ml-st"></i><span>Speed up search with debounced queries</span><em>now</em></div>
+          <div class="ml-row"><i class="ml-st"></i><span>Fix flaky SearchBar test</span><em>2m</em></div>
+          <div class="ml-row"><i class="ml-st merged"></i><span>Keep selection after output</span><em>1h</em></div>
+          <div class="ml-row"><i class="ml-st merged"></i><span>Re-snap the cell grid on scale change</span><em>3h</em></div>
+        </div>
       </article>
       <article class="card reveal">
         <div class="tile t-teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
         <h3>Repos and projects</h3>
         <p>Browse repository files with syntax highlighting and open your GitHub Projects boards in the same window.</p>
       </article>
-      <article class="card reveal">
+      <article class="card reveal wide ">
         <div class="tile t-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
         <h3>Private by default</h3>
         <p>Sign in with the GitHub CLI, a personal token or Device Flow. Your token is kept in the system keychain, and PullYard talks to GitHub directly with no server of its own.</p>
+        <div class="mini mini-direct" aria-hidden="true">
+          <div class="mdr-row"><span class="mdr-node">PullYard</span><span class="mdr-wire"><i></i></span><span class="mdr-node">GitHub API</span></div>
+          <small>Direct connection. No PullYard server in between.</small>
+        </div>
       </article>
+    </div>
+    <ul class="keys reveal" aria-label="Keyboard shortcuts">
+      <li class="key" style="--k:0"><kbd data-platform-text='{"mac":"⌘K","windows":"Ctrl+K","linux":"Ctrl+K"}'>⌘K</kbd><span>Command palette</span></li>
+      <li class="key" style="--k:1"><kbd data-platform-text='{"mac":"⌘R","windows":"Ctrl+R","linux":"Ctrl+R"}'>⌘R</kbd><span>Refresh now</span></li>
+      <li class="key mac-only" style="--k:2"><kbd>⌘L</kbd><span>Open any link</span></li>
+      <li class="key mac-only" style="--k:3"><kbd>C</kbd><span>Next comment</span></li>
+      <li class="key mac-only" style="--k:4"><kbd>V</kbd><span>Mark file viewed</span></li>
+    </ul>
+  </div>
+</section>
+
+<section id="compare" class="section" aria-labelledby="compare-title" data-stack-node style="padding-top:var(--s-6)">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow sky">Side by side</div>
+      <h2 id="compare-title">A browser tab,<br>or PullYard.</h2>
+      <p class="sub">The same pull requests, without the tab.</p>
+    </div>
+    <div class="compare-wrap">
+      <table class="compare">
+        <thead><tr class="reveal"><th scope="col"><span class="sr-only">Topic</span></th><th scope="col">Browser tab</th><th scope="col">PullYard</th></tr></thead>
+        <tbody>
+          <tr class="reveal" style="--i:0"><th scope="row">Where it runs</th><td class="cmp-no"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M7 12h10"/></svg>A tab next to everything else</td><td class="cmp-yes"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" pathLength="1"/></svg>Its own native window: SwiftUI, WinUI 3 or GTK 4</td></tr>
+          <tr class="reveal" style="--i:1"><th scope="row">Review inbox</th><td class="cmp-no"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M7 12h10"/></svg>Open the page to check</td><td class="cmp-yes"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" pathLength="1"/></svg>Refreshes every 30 seconds, with a badge in the menu bar or tray</td></tr>
+          <tr class="reveal" style="--i:2"><th scope="row">Git hosts</th><td class="cmp-no"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M7 12h10"/></svg>One site per tab</td><td class="cmp-yes"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" pathLength="1"/></svg>GitHub, GitLab, Bitbucket and Gitea in one sidebar</td></tr>
+          <tr class="reveal" style="--i:3"><th scope="row">Big diffs</th><td class="cmp-no"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M7 12h10"/></svg>A web page that can take a gigabyte of memory</td><td class="cmp-yes"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" pathLength="1"/></svg>A native diff view with pinned file headers</td></tr>
+          <tr class="reveal" style="--i:4"><th scope="row">Fixing feedback</th><td class="cmp-no"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M7 12h10"/></svg>Copy review comments to your agent by hand</td><td class="cmp-yes"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" pathLength="1"/></svg>Fix with agent sends them in one click</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 </section>
@@ -614,6 +705,12 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
     <div class="reveal">
       <img class="shot-img" src="img/claude.webp" data-shot="claude.webp" width="1600" height="958" loading="lazy" decoding="async" alt="Claude Code chat in PullYard editing a file and asking permission to run tests" data-alt="Claude Code chat in PullYard editing a file and asking permission to run tests">
     </div>
+    <ol class="loop reveal" aria-label="The pull request loop">
+      <li style="--s:0"><i aria-hidden="true"></i><b>Review</b><span>Read the diff, leave comments</span></li>
+      <li style="--s:1"><i aria-hidden="true"></i><b>Fix with agent</b><span>The feedback goes to an agent</span></li>
+      <li style="--s:2"><i aria-hidden="true"></i><b>Push</b><span>Re-request review in one click</span></li>
+      <li style="--s:3"><i aria-hidden="true"></i><b>Merge</b><span>Ship it when checks pass</span></li>
+    </ol>
   </div>
 </section>
 
@@ -754,6 +851,12 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
 <section class="final" aria-labelledby="final-title" data-stack-node>
   <div class="wrap">
     <div class="final-card reveal">
+      <svg class="final-flow" data-flow viewBox="0 0 1200 220" width="1200" height="220" aria-hidden="true" focusable="false">
+        <defs><path id="ff-la" pathLength="1" d="M0 40 C200 40 240 110 380 110 L540 110"/><path id="ff-lb" pathLength="1" d="M0 180 C200 180 240 110 380 110"/><path id="ff-ra" pathLength="1" d="M660 110 L820 110 C960 110 1000 50 1200 50"/><path id="ff-rb" pathLength="1" d="M820 110 C960 110 1000 170 1200 170"/></defs>
+        <use class="hf-line hf-violet" href="#ff-la" style="--d:0s"/><use class="hf-line hf-sky" href="#ff-lb" style="--d:.15s"/><use class="hf-line hf-coral" href="#ff-ra" style="--d:.7s"/><use class="hf-line hf-green" href="#ff-rb" style="--d:.85s"/>
+        <circle class="hf-node hf-merge" cx="380" cy="110" r="5.5" style="--d:.6s"/><circle class="hf-node hf-coral" cx="820" cy="110" r="5.5" style="--d:1.1s"/>
+        <g class="hf-dots"><circle class="hf-dot hf-violet" r="3"><animateMotion dur="5.5s" begin="0.5s" repeatCount="indefinite" calcMode="linear"><mpath href="#ff-la"/></animateMotion></circle><circle class="hf-dot hf-sky" r="3"><animateMotion dur="6.5s" begin="2s" repeatCount="indefinite" calcMode="linear"><mpath href="#ff-lb"/></animateMotion></circle><circle class="hf-dot hf-coral" r="3"><animateMotion dur="5.5s" begin="1.2s" repeatCount="indefinite" calcMode="linear"><mpath href="#ff-ra"/></animateMotion></circle><circle class="hf-dot hf-green" r="3"><animateMotion dur="6.5s" begin="3s" repeatCount="indefinite" calcMode="linear"><mpath href="#ff-rb"/></animateMotion></circle></g>
+      </svg>
       <span class="final-logo" data-final-logo aria-hidden="true"><img src="icon.svg" width="96" height="96" alt="" loading="lazy" decoding="async"></span>
       <h2 id="final-title">Give it a try.</h2>
       <p class="sub">Free and open source, for macOS, Windows and Linux.</p>
