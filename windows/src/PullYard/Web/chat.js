@@ -119,11 +119,14 @@
 
   function anchor() {
     var kids = document.getElementById("list").children;
-    for (var i = 0; i < kids.length; i++) {
-      var r = kids[i].getBoundingClientRect();
-      if (r.bottom > 0) return { id: kids[i].getAttribute("data-id"), top: r.top };
+    var lo = 0, hi = kids.length;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (kids[mid].getBoundingClientRect().bottom > 0) hi = mid;
+      else lo = mid + 1;
     }
-    return null;
+    if (lo >= kids.length) return null;
+    return { id: kids[lo].getAttribute("data-id"), top: kids[lo].getBoundingClientRect().top };
   }
 
   function restore(a) {
@@ -147,7 +150,16 @@
     if (stick && window.innerHeight > 0) window.scrollTo(0, document.body.scrollHeight);
   }
 
+  function recheckStick() {
+    if (stick && !jumping && !atBottom()) {
+      stick = false;
+      awayCount = items.length;
+    }
+    updateJump();
+  }
+
   var lastY = window.scrollY;
+  var readAnchor = null;
 
   function innerScrolls(target, dy) {
     var n = target instanceof Element ? target : null;
@@ -172,20 +184,27 @@
     if (window.innerHeight <= 0) return;
     var y = window.scrollY;
     var down = y > lastY;
+    var up = y < lastY;
     lastY = y;
     if (jumping) {
       if (atBottom()) finishJump();
       return;
     }
     var was = stick;
-    if (!atBottom()) stick = false;
-    else if (down) stick = true;
+    var bottom = atBottom();
+    if (up && !bottom) stick = false;
+    else if (down && bottom) stick = true;
+    readAnchor = stick ? null : anchor();
     if (was && !stick) awayCount = items.length;
     if (stick) awayCount = null;
     updateJump();
   }, { passive: true });
 
-  window.addEventListener("resize", repin);
+  window.addEventListener("resize", function () {
+    if (window.innerHeight <= 0) return;
+    if (stick) repin();
+    else if (readAnchor) restore(readAnchor);
+  });
 
   document.addEventListener("load", function (e) {
     if (e.target instanceof HTMLImageElement) repin();
@@ -522,6 +541,7 @@
     var a = anchor();
     render();
     restore(a);
+    recheckStick();
   }
 
   function actions(list) {
@@ -682,7 +702,11 @@
         var body = el("div", "body");
         body.textContent = item.text || "";
         node.appendChild(body);
-        node.addEventListener("toggle", function () { openState[item.id] = node.open; });
+        node.addEventListener("toggle", function () {
+          if (!!openState[item.id] === node.open) return;
+          openState[item.id] = node.open;
+          recheckStick();
+        });
         return node;
       }
       case "notice": {
