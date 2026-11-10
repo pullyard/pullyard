@@ -48,6 +48,7 @@ public interface IForgeClient
     Task<List<ForgeNotification>> Notifications(CancellationToken ct = default) => Task.FromResult(new List<ForgeNotification>());
     Task MarkDone(ForgeNotification notification, CancellationToken ct = default) => Task.CompletedTask;
     Task<List<ForgeRepo>> Repositories(CancellationToken ct = default) => Task.FromResult(new List<ForgeRepo>());
+    IPRBackend? ReviewBackend() => null;
 }
 
 public static class ForgeClients
@@ -114,13 +115,19 @@ public sealed class ForgeHttp
     }
 
     public async Task Post(string path, IEnumerable<(string Key, string Value)>? query = null, string method = "POST", CancellationToken ct = default) =>
-        await Call(new HttpMethod(method), path, query, ct).ConfigureAwait(false);
+        await Call(new HttpMethod(method), path, query, null, ct).ConfigureAwait(false);
 
-    private async Task<byte[]> Call(HttpMethod method, string path, IEnumerable<(string Key, string Value)>? query, CancellationToken ct)
+    public async Task Post(string path, JsonObject json, string method = "POST", CancellationToken ct = default) =>
+        await Call(new HttpMethod(method), path, null, Encoding.UTF8.GetBytes(json.ToJsonString()), ct).ConfigureAwait(false);
+
+    private Task<byte[]> Call(HttpMethod method, string path, IEnumerable<(string Key, string Value)>? query, CancellationToken ct) =>
+        Call(method, path, query, null, ct);
+
+    private async Task<byte[]> Call(HttpMethod method, string path, IEnumerable<(string Key, string Value)>? query, byte[]? body, CancellationToken ct)
     {
         var target = Url(path, query);
         var used = Authorization;
-        var (status, data) = await Send(method, target, used, ct).ConfigureAwait(false);
+        var (status, data) = await Send(method, target, used, body, ct).ConfigureAwait(false);
         if (status == 401 && Refresh is { } refresh)
         {
             await refreshGate.WaitAsync(ct).ConfigureAwait(false);
@@ -132,7 +139,7 @@ public sealed class ForgeHttp
             {
                 refreshGate.Release();
             }
-            (status, data) = await Send(method, target, Authorization, ct).ConfigureAwait(false);
+            (status, data) = await Send(method, target, Authorization, body, ct).ConfigureAwait(false);
         }
         if (status is < 200 or >= 300)
         {
@@ -142,9 +149,14 @@ public sealed class ForgeHttp
         return data;
     }
 
-    private async Task<(int Status, byte[] Data)> Send(HttpMethod method, Uri url, string authorization, CancellationToken ct)
+    private async Task<(int Status, byte[] Data)> Send(HttpMethod method, Uri url, string authorization, byte[]? body, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(method, url);
+        if (body is not null)
+        {
+            req.Content = new ByteArrayContent(body);
+            req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        }
         req.Headers.TryAddWithoutValidation("Authorization", authorization);
         req.Headers.Accept.ParseAdd("application/json");
         req.Headers.UserAgent.ParseAdd(AppInfo.UserAgent);
@@ -159,12 +171,23 @@ public sealed class ForgeHttp
         try
         {
             if (JsonNode.Parse(data) is not JsonObject o) return null;
-            return o.Str("message") ?? o.Obj("error").Str("message") ?? o.Str("error_description") ?? o.Str("error");
+            return o.Str("message") ?? Listed(o["message"]) ?? o.Obj("error").Str("message") ?? o.Str("error_description") ?? o.Str("error");
         }
         catch (JsonException)
         {
             return null;
         }
+    }
+
+    private static string? Listed(JsonNode? message)
+    {
+        if (message is JsonArray list && list.Strings().ToList() is { Count: > 0 } items) return string.Join("; ", items);
+        if (message is not JsonObject fields || fields.Count == 0) return null;
+        return string.Join("; ", fields.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f =>
+        {
+            var value = f.Value is JsonArray a ? string.Join(", ", a.Strings()) : f.Value?.ToString() ?? "";
+            return f.Key == "base" ? value : $"{f.Key} {value}";
+        }));
     }
 
     public static string Basic(string user, string secret) => "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{user}:{secret}"));

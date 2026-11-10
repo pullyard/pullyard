@@ -413,6 +413,13 @@ public sealed class ShellView : Grid
     private void ShowForgeDetail()
     {
         if (app.Forge is null || app.Section.Kind == SectionKind.Claude) return;
+        if (app.ForgeSelection is { IsPR: true } pr && app.ForgeReviews)
+        {
+            app.Select(Route.Pr(pr.Ref));
+            return;
+        }
+        stack.Clear();
+        if (app.DetailRoot is not null) app.DetailRoot = null;
         if (app.ForgeSelection is not { } item)
         {
             detailHost.Content = ForgeDetailView.Empty(app.Provider);
@@ -448,7 +455,7 @@ public sealed class ShellView : Grid
 
     private void OnRoute(Route route, bool push)
     {
-        if (app.Section.Kind == SectionKind.Claude || app.Forge is not null) return;
+        if (app.Section.Kind == SectionKind.Claude || (app.Forge is not null && !app.ForgeReviews)) return;
         if (!push) stack.Clear();
         if (stack.Count > 0 && stack[^1].Route == route) return;
         var view = CreateDetail(route);

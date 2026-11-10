@@ -54,7 +54,8 @@ fn close_on_success(sheet: &Sheet) -> impl Fn(bool) + Clone {
 
 pub fn review(model: Rc<PrModel>) {
     let Some(pr) = model.pr.borrow().clone() else { return };
-    let sheet = Sheet::new(&format!("Review #{}", pr.number), 560, -1);
+    let f = model.features;
+    let sheet = Sheet::new(&format!("Review {}{}", f.number_prefix(), pr.number), 560, -1);
     let pending = model.pending.borrow().len();
     if pending > 0 {
         let l = hbox(6);
@@ -70,8 +71,9 @@ pub fn review(model: Rc<PrModel>) {
     approve.set_group(Some(&comment));
     let changes = gtk::CheckButton::with_label("Request changes");
     changes.set_group(Some(&comment));
-    approve.set_sensitive(!pr.viewer_did_author);
+    approve.set_sensitive(pr.viewer_can_approve.unwrap_or(!pr.viewer_did_author) && pr.viewer_approved != Some(true));
     changes.set_sensitive(!pr.viewer_did_author);
+    changes.set_visible(f.request_changes);
     sheet.body.append(&comment);
     sheet.body.append(&approve);
     sheet.body.append(&changes);
@@ -138,8 +140,9 @@ pub fn merge(model: Rc<PrModel>) {
             })
             .collect(),
     };
-    let sheet = Sheet::new(&format!("Merge #{} into {}", pr.number, pr.base_ref_name), 560, -1);
-    let names: Vec<&str> = allowed.iter().map(|m| m.title()).collect();
+    let f = model.features;
+    let sheet = Sheet::new(&format!("Merge {}{} into {}", f.number_prefix(), pr.number, pr.base_ref_name), 560, -1);
+    let names: Vec<&str> = allowed.iter().map(|m| if *m == MergeMethod::Merge && f.is_gitlab() { "Merge" } else { m.title() }).collect();
     let method = gtk::DropDown::from_strings(&names);
     let default = MergeMethod::from_key(repo.as_ref().map(|r| r.viewer_default_merge_method.as_str()).unwrap_or("MERGE")).unwrap_or(MergeMethod::Merge);
     let initial = allowed.iter().position(|m| *m == default).unwrap_or(0);
@@ -149,7 +152,7 @@ pub fn merge(model: Rc<PrModel>) {
     row.append(&method);
     sheet.body.append(&row);
     let title = gtk::Entry::new();
-    title.set_placeholder_text(Some("Commit title (GitHub default)"));
+    title.set_placeholder_text(Some(&format!("Commit title ({} default)", f.service_title())));
     let message = Composer::new("Commit description (optional)", 80);
     let commit_box = vbox(8);
     commit_box.append(&title);
@@ -167,10 +170,12 @@ pub fn merge(model: Rc<PrModel>) {
         let pr_title = pr.title.clone();
         let number = pr.number;
         let allowed = allowed.clone();
+        let github = f.provider.is_github();
         Rc::new(move |idx: u32| {
             let m = allowed.get(idx as usize).copied().unwrap_or(MergeMethod::Merge);
             commit_box.set_visible(m != MergeMethod::Rebase);
-            title.set_text(&if m == MergeMethod::Squash { format!("{pr_title} (#{number})") } else { String::new() });
+            let squashed = if github { format!("{pr_title} (#{number})") } else { pr_title.clone() };
+            title.set_text(&if m == MergeMethod::Squash { squashed } else { String::new() });
         })
     };
     prefill(initial as u32);
@@ -179,7 +184,7 @@ pub fn merge(model: Rc<PrModel>) {
     let done = close_on_success(&sheet);
     if repo.as_ref().map(|r| r.auto_merge_allowed).unwrap_or(false) && pr.auto_merge_request.is_none() && pr.merge_state_status.as_deref() != Some("CLEAN") {
         let auto = button("Enable auto-merge");
-        auto.set_tooltip_text(Some("Merge automatically when checks and reviews pass"));
+        auto.set_tooltip_text(Some(if f.is_gitlab() { "Merge automatically when the pipeline succeeds" } else { "Merge automatically when checks and reviews pass" }));
         let m = model.clone();
         let method = method.clone();
         let allowed = allowed.clone();
@@ -215,7 +220,7 @@ pub fn merge(model: Rc<PrModel>) {
 
 pub fn edit(model: Rc<PrModel>) {
     let Some(pr) = model.pr.borrow().clone() else { return };
-    let sheet = Sheet::new(&format!("Edit #{}", pr.number), 680, 560);
+    let sheet = Sheet::new(&format!("Edit {}{}", model.features.number_prefix(), pr.number), 680, 560);
     let title = gtk::Entry::new();
     title.set_text(&pr.title);
     title.set_placeholder_text(Some("Title"));

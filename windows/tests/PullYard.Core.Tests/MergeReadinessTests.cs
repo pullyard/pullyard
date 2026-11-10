@@ -200,4 +200,67 @@ public class MergeReadinessTests
         Assert.Equal(CapabilityState.Unsupported, ForgeCapabilities.Initial.PullRequestReview);
         Assert.Equal(CapabilityState.Unsupported, ForgeCapabilities.Initial.MergeRequirements);
     }
+    private static List<MergeRequirement> GitLab(string status, int? required = null, int? left = null, JsonObject? overrides = null)
+    {
+        var p = Pr(overrides);
+        p.ForgeMerge = new ForgeMergeInfo { Status = status, ApprovalsRequired = required, ApprovalsLeft = left };
+        return MergeReadiness.Requirements(p, RulesStatus.Loading);
+    }
+
+    [Fact]
+    public void GitLabRequirementsFromDetailedStatus()
+    {
+        var ready = GitLab("mergeable", 2, 0, new JsonObject { ["latestOpinionatedReviews"] = new JsonObject { ["nodes"] = new JsonArray(Review("a", "APPROVED"), Review("b", "APPROVED")) } });
+        Assert.Equal(new[] { "No conflicts with main", "2 of 2 required approvals" }, ready.Select(r => r.Title));
+        Assert.DoesNotContain(ready, r => r.Blocks);
+
+        var approvals = GitLab("not_approved", 2, 1).First(r => r.Kind == RequirementKind.Approvals);
+        Assert.Equal("1 of 2 required approvals", approvals.Title);
+        Assert.Equal("Needs 1 more approval", approvals.Detail);
+        Assert.Equal(RequirementState.Missing, approvals.State);
+        Assert.Null(approvals.Action);
+
+        Assert.Equal(RequirementState.Missing, GitLab("conflict")[0].State);
+        Assert.Equal(RequirementState.Pending, GitLab("checking")[0].State);
+        Assert.Equal(RequirementAction.UpdateBranch, GitLab("need_rebase").First(r => r.Kind == RequirementKind.Behind).Action);
+        Assert.DoesNotContain(GitLab("mergeable"), r => r.Kind is RequirementKind.Rules or RequirementKind.OtherRules);
+    }
+
+    [Fact]
+    public void GitLabPipelineAndThreads()
+    {
+        var ci = GitLab("ci_must_pass", overrides: Checks(Run("test", "FAILURE"))).First(r => r.Kind == RequirementKind.Checks);
+        Assert.Equal("1 job failed", ci.Title);
+        Assert.Equal(RequirementState.Missing, ci.State);
+        Assert.Equal("A pipeline must run and succeed", GitLab("ci_must_pass").First(r => r.Kind == RequirementKind.Checks).Title);
+        Assert.Equal(RequirementState.Pending, GitLab("ci_still_running", overrides: Checks(Run("build", null))).First(r => r.Kind == RequirementKind.Checks).State);
+        Assert.Equal(RequirementState.Advisory, GitLab("mergeable", overrides: Checks(Run("lint", "FAILURE"))).First(r => r.Kind == RequirementKind.Checks).State);
+
+        JsonObject Threads() => new()
+        {
+            ["reviewThreads"] = new JsonObject
+            {
+                ["nodes"] = new JsonArray(new JsonObject
+                {
+                    ["id"] = "t", ["isResolved"] = false, ["isOutdated"] = false, ["path"] = "a", ["line"] = 1, ["diffSide"] = "RIGHT",
+                    ["viewerCanResolve"] = true, ["viewerCanUnresolve"] = false, ["viewerCanReply"] = true, ["comments"] = new JsonObject { ["nodes"] = new JsonArray() }
+                })
+            }
+        };
+        var blocking = GitLab("discussions_not_resolved", overrides: Threads()).First(r => r.Kind == RequirementKind.Conversations);
+        Assert.Equal("1 unresolved thread", blocking.Title);
+        Assert.Equal(RequirementState.Missing, blocking.State);
+        Assert.Equal(RequirementState.Advisory, GitLab("mergeable", overrides: Threads()).First(r => r.Kind == RequirementKind.Conversations).State);
+    }
+
+    [Fact]
+    public void GitLabUnknownBlockerIsShown()
+    {
+        var p = Pr();
+        p.MergeBlocker = "Title or description must reference a Jira issue";
+        p.ForgeMerge = new ForgeMergeInfo { Status = "jira_association_missing" };
+        var other = MergeReadiness.Requirements(p, RulesStatus.Loading).First(r => r.Kind == RequirementKind.OtherRules);
+        Assert.Equal("Title or description must reference a Jira issue", other.Title);
+        Assert.Equal(RequirementState.Missing, other.State);
+    }
 }

@@ -242,10 +242,9 @@ public sealed class CommitDetailView : LiveDetail
 
     private async Task Load()
     {
-        if (App.Api is not { } api) return;
         try
         {
-            var c = await api.Commit(repo, sha);
+            if (await App.CommitDetail(repo, sha) is not { } c) return;
             var files = await Task.Run(() => (c.Files ?? new()).Select(f => new DiffFile(f)).ToList());
             loaded = true;
             Render(c, files);

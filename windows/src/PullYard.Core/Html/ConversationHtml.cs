@@ -84,7 +84,7 @@ public static class ConversationHtml
         if (t.ViewerCanReply) actions += $"<button onclick=\"post('reply','{Esc(t.Id)}')\">Reply</button>";
         if (t.IsResolved && t.ViewerCanUnresolve) actions += $"<button onclick=\"post('unresolve','{Esc(t.Id)}')\">Unresolve</button>";
         if (!t.IsResolved && t.ViewerCanResolve) actions += $"<button onclick=\"post('resolve','{Esc(t.Id)}')\">Resolve</button>";
-        return ThreadBox(t, line, tags, comments, actions, includeFileLink: true);
+        return ThreadBox(t, line, tags, comments, actions, includeFileLink: t.Path.Length > 0);
     }
 
     public static string InlineThread(ReviewThread t)
@@ -107,7 +107,8 @@ public static class ConversationHtml
     {
         if (includeFileLink) actions += $"<button class=\"ghost\" onclick=\"post('file','{Esc(t.Path)}')\">View in files</button>";
         var ln = line is { } l ? $"<span class=\"ln\">:{l}</span>" : "";
-        return $"<details class=\"thread\"{(t.IsResolved ? "" : " open")}><summary class=\"th\">{Esc(t.Path)}{ln}{tags}</summary>\n{Hunk(t.Comments.Items.FirstOrDefault()?.DiffHunk)}{comments}<div class=\"actions\">{actions}</div></details>";
+        var title = t.Path.Length == 0 ? "Thread" : Esc(t.Path) + ln;
+        return $"<details class=\"thread\"{(t.IsResolved ? "" : " open")}><summary class=\"th\">{title}{tags}</summary>\n{Hunk(t.Comments.Items.FirstOrDefault()?.DiffHunk)}{comments}<div class=\"actions\">{actions}</div></details>";
     }
 
     public static string Render(PullRequestDetail pr)
@@ -164,6 +165,7 @@ public static class ConversationHtml
             "CHANGES_REQUESTED" => ("±", "bad", "requested changes"),
             "DISMISSED" => ("✕", "", "review dismissed"),
             "PENDING" => ("…", "", "pending review"),
+            "DISCUSSION" => ("💬", "", "started a thread"),
             _ => ("💬", "", "reviewed")
         };
         if (!hasBody && threads.Count == 0)
@@ -212,6 +214,8 @@ public static class ConversationHtml
                 return item.Label is { } l ? Event("🏷", "", item.Actor, $"label {Label(l)}", item.CreatedAt) : "";
             case "RenamedTitleEvent":
                 return Event("✎", "", item.Actor, $"title: <s>{Esc(item.PreviousTitle)}</s> → {Esc(item.CurrentTitle)}", item.CreatedAt);
+            case "SystemNote":
+                return SystemNote(item);
             case "CrossReferencedEvent":
             {
                 if (item.Source is not { Url: { } url } s) return "";
@@ -221,6 +225,25 @@ public static class ConversationHtml
             default:
                 return "";
         }
+    }
+
+    private static string SystemNote(TimelineItem item)
+    {
+        var text = (item.Body ?? "").Split('\n').FirstOrDefault(l => l.Trim().Length > 0) ?? "";
+        if (text.Length == 0) return "";
+        var lower = text.ToLowerInvariant();
+        var (icon, cls) = lower switch
+        {
+            _ when lower.StartsWith("unapproved") || lower.StartsWith("closed") => ("✕", "bad"),
+            _ when lower.StartsWith("approved") || lower.StartsWith("reopened") || lower.Contains("as **ready**") => ("✓", "ok"),
+            _ when lower.StartsWith("merged") => ("⇢", "merged"),
+            _ when lower.StartsWith("added") && lower.Contains("commit") => ("●", ""),
+            _ when lower.Contains("label") => ("🏷", ""),
+            _ when lower.Contains("review") => ("👁", ""),
+            _ when lower.StartsWith("mentioned") => ("↗", ""),
+            _ => ("•", "")
+        };
+        return Event(icon, cls, item.Actor, MarkdownHtml.Inline(text), item.CreatedAt);
     }
 
     public static string Wrap(string content) => $"<div class=\"tl\">{content}</div>";

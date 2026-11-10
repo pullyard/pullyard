@@ -144,6 +144,9 @@ fn is_text_input(w: &gtk::Widget) -> bool {
 }
 
 fn blame_target(m: &PrModel) -> Option<(RepoRef, String)> {
+    if !m.features.blame {
+        return None;
+    }
     let oid = m.files_oid.borrow().clone().or_else(|| m.pr.borrow().as_ref().map(|p| p.head_ref_oid.clone()))?;
     Some((m.r.repo.clone(), oid)).filter(|(_, oid)| !oid.is_empty())
 }
@@ -723,6 +726,9 @@ impl FilesTab {
             ']' => self.jump_hunk(1),
             '[' => self.jump_hunk(-1),
             'v' => {
+                if !self.model.features.viewed_files {
+                    return false;
+                }
                 let Some(path) = self.current_file() else { return false };
                 let m = self.model.clone();
                 crate::rt::spawn_local(async move { m.toggle_viewed(path).await });
@@ -901,7 +907,12 @@ impl FilesTab {
         }
         self.file_list_sig.set(sig);
         let viewed_count = files.iter().filter(|f| viewed.contains(&f.id)).count();
-        self.viewed_label.set_text(&format!("{viewed_count}/{}", files.len()));
+        if m.features.viewed_files {
+            self.viewed_label.set_text(&format!("{viewed_count}/{}", files.len()));
+        } else {
+            self.viewed_label.set_text(&files.len().to_string());
+            self.viewed_label.set_tooltip_text(Some("Files"));
+        }
         self.suppress_select.set(true);
         self.file_list.remove_all();
         let mut keys = vec![];
@@ -1016,11 +1027,12 @@ impl FilesTab {
                 crate::rt::spawn_local(async move { mm.toggle_viewed(id).await });
             });
         });
+        viewed.set_visible(m.features.viewed_files);
         b.append(&viewed);
         let menu = Menu::new();
         let id = f.id.clone();
         menu.item("Copy file path", move || util::copy(&id));
-        if f.status != "removed" {
+        if f.status != "removed" && m.features.blame {
             let mm = m.clone();
             let id = f.id.clone();
             menu.item("Blame", move || match blame_target(&mm) {
@@ -1051,13 +1063,15 @@ impl FilesTab {
                 }
             });
         }
-        let mm = m.clone();
-        let id = f.id.clone();
-        menu.item(if is_viewed { "Mark as not viewed (V)" } else { "Mark as viewed (V)" }, move || {
-            let mm = mm.clone();
-            let id = id.clone();
-            crate::rt::spawn_local(async move { mm.toggle_viewed(id).await });
-        });
+        if m.features.viewed_files {
+            let mm = m.clone();
+            let id = f.id.clone();
+            menu.item(if is_viewed { "Mark as not viewed (V)" } else { "Mark as viewed (V)" }, move || {
+                let mm = mm.clone();
+                let id = id.clone();
+                crate::rt::spawn_local(async move { mm.toggle_viewed(id).await });
+            });
+        }
         menu.section(None);
         menu.item(if diff_view::wrap() { "Don't wrap lines (W)" } else { "Wrap lines (W)" }, || diff_view::set_wrap(!diff_view::wrap()));
         if self.split_fits.get() {

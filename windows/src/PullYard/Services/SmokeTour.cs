@@ -137,7 +137,7 @@ public static class SmokeTour
             }
             if (pr is { Kind: RouteKind.PullRequest, Item: { } stacked } && app.PrModel(stacked) is { CurrentNode: { } node } stackModel)
             {
-                StackStore.Shared.Seed(stackModel.CacheAccount, stackModel.Api.Host, stacked.Repo, TourStack(node, stacked.Repo.Full));
+                StackStore.Shared.Seed(stackModel.CacheAccount, (stackModel.Api?.Host ?? ""), stacked.Repo, TourStack(node, stacked.Repo.Full));
                 app.Section = Section.Stacks;
                 await Step("stacks", 7000);
                 stackModel.Tab = PRTab.Stack;
@@ -183,7 +183,7 @@ public static class SmokeTour
         Settings.Shared.Set(Keys.StackView, "list");
         Settings.Shared.Set(Keys.StackSupportAsked, false);
         var nodes = TourStack(current, item.Repo.Full);
-        StackStore.Shared.Seed(model.CacheAccount, model.Api.Host, item.Repo, nodes);
+        StackStore.Shared.Seed(model.CacheAccount, (model.Api?.Host ?? ""), item.Repo, nodes);
         StackNotes.Shared.Replace(NoteKey(model, 9003), new[] { new StackNote(Guid.NewGuid(), StackNoteKind.Note, "Rebase after the API client lands.", DateTimeOffset.Now) });
         Memory("before stack tab");
         await model.LoadStack();
@@ -238,7 +238,7 @@ public static class SmokeTour
         await Step("text zoom reset", 800);
     }
 
-    private static string NoteKey(PRDetailViewModel model, int number) => StackNotes.Key(model.CacheAccount, model.Api.Host, model.Ref.Repo, number);
+    private static string NoteKey(PRDetailViewModel model, int number) => StackNotes.Key(model.CacheAccount, (model.Api?.Host ?? ""), model.Ref.Repo, number);
 
     private static void Memory(string label)
     {

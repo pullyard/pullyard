@@ -231,6 +231,55 @@ final class MergeReadinessTests: XCTestCase {
         XCTAssertNil(MergeReadiness.requirements(p, rules: .loading).first { $0.kind == .approvals }?.detail)
     }
 
+    private func gitlab(_ status: String, required: Int? = nil, left: Int? = nil, _ overrides: [String: Any] = [:]) throws -> [MergeRequirement] {
+        var p = try pr(overrides)
+        p.forgeMerge = ForgeMergeInfo(status: status, approvalsRequired: required, approvalsLeft: left)
+        return MergeReadiness.requirements(p, rules: .loading)
+    }
+
+    func testGitLabRequirementsFromDetailedStatus() throws {
+        let ready = try gitlab("mergeable", required: 2, left: 0, ["latestOpinionatedReviews": ["nodes": [review("a", "APPROVED"), review("b", "APPROVED")]]])
+        XCTAssertEqual(ready.map(\.title), ["No conflicts with main", "2 of 2 required approvals"])
+        XCTAssertFalse(ready.contains { $0.state.blocks })
+
+        let approvals = try XCTUnwrap(try gitlab("not_approved", required: 2, left: 1).first { $0.kind == .approvals })
+        XCTAssertEqual(approvals.title, "1 of 2 required approvals")
+        XCTAssertEqual(approvals.detail, "Needs 1 more approval")
+        XCTAssertEqual(approvals.state, .missing)
+        XCTAssertNil(approvals.action)
+
+        XCTAssertEqual(try gitlab("conflict").first?.state, .missing)
+        XCTAssertEqual(try gitlab("checking").first?.state, .pending)
+        XCTAssertEqual(try gitlab("need_rebase").first { $0.kind == .behind }?.action, .updateBranch)
+        XCTAssertNil(try gitlab("mergeable").first { $0.kind == .rules || $0.kind == .otherRules })
+    }
+
+    func testGitLabPipelineAndThreads() throws {
+        let failing = try gitlab("ci_must_pass", checks([run("test", conclusion: "FAILURE")]))
+        let ci = try XCTUnwrap(failing.first { $0.kind == .checks })
+        XCTAssertEqual(ci.title, "1 job failed")
+        XCTAssertEqual(ci.state, .missing)
+        XCTAssertEqual(try gitlab("ci_must_pass").first { $0.kind == .checks }?.title, "A pipeline must run and succeed")
+        XCTAssertEqual(try gitlab("ci_still_running", checks([run("build", conclusion: nil)])).first { $0.kind == .checks }?.state, .pending)
+        XCTAssertEqual(try gitlab("mergeable", checks([run("lint", conclusion: "FAILURE")])).first { $0.kind == .checks }?.state, .advisory)
+
+        let thread: [String: Any] = ["id": "t", "isResolved": false, "isOutdated": false, "path": "a", "line": 1, "diffSide": "RIGHT",
+                                     "viewerCanResolve": true, "viewerCanUnresolve": false, "viewerCanReply": true, "comments": ["nodes": []]]
+        let blocking = try XCTUnwrap(try gitlab("discussions_not_resolved", ["reviewThreads": ["nodes": [thread]]]).first { $0.kind == .conversations })
+        XCTAssertEqual(blocking.title, "1 unresolved thread")
+        XCTAssertEqual(blocking.state, .missing)
+        XCTAssertEqual(try gitlab("mergeable", ["reviewThreads": ["nodes": [thread]]]).first { $0.kind == .conversations }?.state, .advisory)
+    }
+
+    func testGitLabUnknownBlockerIsShown() throws {
+        var p = try pr(["mergeStateStatus": "BLOCKED"])
+        p.mergeBlocker = "Title or description must reference a Jira issue"
+        p.forgeMerge = ForgeMergeInfo(status: "jira_association_missing", approvalsRequired: nil, approvalsLeft: nil)
+        let other = try XCTUnwrap(MergeReadiness.requirements(p, rules: .loading).first { $0.kind == .otherRules })
+        XCTAssertEqual(other.title, "Title or description must reference a Jira issue")
+        XCTAssertEqual(other.state, .missing)
+    }
+
     func testForgeDefaultsDoNotClaimReviewSupport() {
         let caps = ForgeCapabilities(pullFilters: [.mine])
         XCTAssertEqual(caps.pullRequestReview, .unsupported)

@@ -362,7 +362,7 @@
   <data name="Diagnostics_Totals" xml:space="preserve"><value>{0} requests · {1} · avg {2} ms · p95 {3} ms</value></data>
   <data name="Diagnostics_WindowTitle" xml:space="preserve"><value>{0} Diagnostics</value></data>
   <data name="Edit_Body" xml:space="preserve"><value>Description (Markdown)</value></data>
-  <data name="Edit_Header" xml:space="preserve"><value>Edit #{0}</value></data>
+  <data name="Edit_Header" xml:space="preserve"><value>Edit {0}</value></data>
   <data name="Edit_Title" xml:space="preserve"><value>Title</value></data>
   <data name="Empty_AssignedMessage" xml:space="preserve"><value>{0} assigned to you show up here.</value></data>
   <data name="Empty_ClearFilter" xml:space="preserve"><value>Clear filter</value></data>
@@ -392,6 +392,7 @@
   <data name="Empty_ReviewedMessage" xml:space="preserve"><value>{0} you’ve reviewed show up here.</value></data>
   <data name="Empty_TryDifferent" xml:space="preserve"><value>Try a different search.</value></data>
   <data name="Files_Binary" xml:space="preserve"><value>Binary or large file</value></data>
+  <data name="Files_Count" xml:space="preserve"><value>Files</value></data>
   <data name="Files_DiffLayout" xml:space="preserve"><value>Diff layout</value></data>
   <data name="Files_Filter" xml:space="preserve"><value>Filter files</value></data>
   <data name="Files_LayoutNarrow" xml:space="preserve"><value>Widen the window to use split view</value></data>
@@ -617,6 +618,24 @@
   <data name="Login_SignInWithGlab" xml:space="preserve"><value>Sign in with glab</value></data>
   <data name="Login_YourAccounts" xml:space="preserve"><value>Your accounts</value></data>
   <data name="Login_YourServer" xml:space="preserve"><value>your server</value></data>
+  <data name="MR_ActShowPipeline" xml:space="preserve"><value>Show pipeline</value></data>
+  <data name="MR_ApproveQ" xml:space="preserve"><value>Approve this merge request?</value></data>
+  <data name="MR_Close" xml:space="preserve"><value>Close merge request…</value></data>
+  <data name="MR_CloseButton" xml:space="preserve"><value>Close merge request</value></data>
+  <data name="MR_CloseQ" xml:space="preserve"><value>Close merge request without merging?</value></data>
+  <data name="MR_CopyCheckout" xml:space="preserve"><value>Copy “glab mr checkout {0}”</value></data>
+  <data name="MR_MarkDraft" xml:space="preserve"><value>Mark as draft</value></data>
+  <data name="MR_MarkReady" xml:space="preserve"><value>Mark as ready</value></data>
+  <data name="MR_Merge" xml:space="preserve"><value>Merge merge request</value></data>
+  <data name="MR_MergeMethod" xml:space="preserve"><value>Merge</value></data>
+  <data name="MR_NoPipeline" xml:space="preserve"><value>No pipeline for the latest commit</value></data>
+  <data name="MR_Rebase" xml:space="preserve"><value>Rebase</value></data>
+  <data name="MR_RebaseOnto" xml:space="preserve"><value>Rebase onto {0}</value></data>
+  <data name="MR_RebaseStarted" xml:space="preserve"><value>Rebase started</value></data>
+  <data name="MR_Reopen" xml:space="preserve"><value>Reopen merge request</value></data>
+  <data name="MR_RevokeApproval" xml:space="preserve"><value>Revoke approval</value></data>
+  <data name="MR_RevokeApprovalQ" xml:space="preserve"><value>Revoke your approval?</value></data>
+  <data name="MR_TitlePlaceholder" xml:space="preserve"><value>Commit title (GitLab default)</value></data>
   <data name="Menu_CheckForUpdates" xml:space="preserve"><value>Check for Updates…</value></data>
   <data name="Menu_CopyCheckout" xml:space="preserve"><value>Copy “gh pr checkout”</value></data>
   <data name="Menu_CopyLink" xml:space="preserve"><value>Copy Link</value></data>
@@ -633,6 +652,7 @@
   <data name="Merge_Behind" xml:space="preserve"><value>Branch is behind {0}</value></data>
   <data name="Merge_Blocked" xml:space="preserve"><value>Blocked by branch protection</value></data>
   <data name="Merge_BodyPlaceholder" xml:space="preserve"><value>Commit description (optional)</value></data>
+  <data name="Merge_BranchNotDeleted" xml:space="preserve"><value>Merged, but the branch {0} couldn’t be deleted: {1}</value></data>
   <data name="Merge_CanMergeBut" xml:space="preserve"><value>Can be merged, but </value></data>
   <data name="Merge_Checking" xml:space="preserve"><value>Checking mergeability…</value></data>
   <data name="Merge_ChecksFailed" xml:space="preserve"><value>{0} checks failed</value></data>
@@ -658,7 +678,7 @@
   <data name="Merge_Requirements" xml:space="preserve"><value>Merge requirements</value></data>
   <data name="Merge_ShowRequirements" xml:space="preserve"><value>Show merge requirements</value></data>
   <data name="Merge_Squash" xml:space="preserve"><value>Squash and merge</value></data>
-  <data name="Merge_Title" xml:space="preserve"><value>Merge #{0} into {1}</value></data>
+  <data name="Merge_Title" xml:space="preserve"><value>Merge {0} into {1}</value></data>
   <data name="Merge_TitlePlaceholder" xml:space="preserve"><value>Commit title (GitHub default)</value></data>
   <data name="Merge_UpdateBranch" xml:space="preserve"><value>Update branch</value></data>
   <data name="Nav_AI" xml:space="preserve"><value>AI</value></data>
@@ -723,8 +743,8 @@
   <data name="PR_ApproveQ" xml:space="preserve"><value>Approve this pull request?</value></data>
   <data name="PR_Assignees" xml:space="preserve"><value>Assignees:</value></data>
   <data name="PR_BlameAtHead" xml:space="preserve"><value>Blame this file at the pull request head</value></data>
+  <data name="PR_BranchUpdated" xml:space="preserve"><value>Branch updated from {0}</value></data>
   <data name="PR_BrowserAndMore" xml:space="preserve"><value>Browser and more</value></data>
-  <data name="PR_Checks" xml:space="preserve"><value>Checks</value></data>
   <data name="PR_ChecksSummary" xml:space="preserve"><value>{0} failed, {1} pending, {2} passed</value></data>
   <data name="PR_Close" xml:space="preserve"><value>Close pull request…</value></data>
   <data name="PR_CloseButton" xml:space="preserve"><value>Close pull request</value></data>
@@ -745,6 +765,7 @@
   <data name="PR_FixWithAgent" xml:space="preserve"><value>Send review comments to a new agent session</value></data>
   <data name="PR_Merge" xml:space="preserve"><value>Merge pull request</value></data>
   <data name="PR_MergeButton" xml:space="preserve"><value>Merge</value></data>
+  <data name="PR_Pipeline" xml:space="preserve"><value>Pipeline</value></data>
   <data name="PR_ReadyForReview" xml:space="preserve"><value>Ready for review</value></data>
   <data name="PR_Reopen" xml:space="preserve"><value>Reopen pull request</value></data>
   <data name="PR_RequestReviewMenu" xml:space="preserve"><value>Request review…</value></data>
@@ -852,7 +873,7 @@
   <data name="Review_Required" xml:space="preserve"><value>Review required</value></data>
   <data name="Review_Submit" xml:space="preserve"><value>Submit review</value></data>
   <data name="Review_Summary" xml:space="preserve"><value>Review summary (optional when approving)</value></data>
-  <data name="Review_Title" xml:space="preserve"><value>Review #{0}</value></data>
+  <data name="Review_Title" xml:space="preserve"><value>Review {0}</value></data>
   <data name="Reviewers_Already" xml:space="preserve"><value>already requested</value></data>
   <data name="Reviewers_CodeOwner" xml:space="preserve"><value>code owner</value></data>
   <data name="Reviewers_CodeOwners" xml:space="preserve"><value>Code owners of changed files</value></data>

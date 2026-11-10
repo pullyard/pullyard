@@ -224,8 +224,19 @@ struct ForgeDetailColumn: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
+        @Bindable var app = app
         if let item = app.forgeSelection {
-            ForgeItemDetailView(item: item, provider: app.provider, caps: app.forgeCaps).id(item.id).transition(.routeSwap)
+            if item.isPR, app.forgeReviews {
+                NavigationStack(path: $app.detailPath) {
+                    PRDetailView(ref: item.ref)
+                        .environment(\.liveFront, app.detailPath.isEmpty)
+                        .navigationDestination(for: Route.self) { RouteView(route: $0) }
+                }
+                .id(item.id)
+                .transition(.routeSwap)
+            } else {
+                ForgeItemDetailView(item: item, provider: app.provider, caps: app.forgeCaps).id(item.id).transition(.routeSwap)
+            }
         } else {
             VStack(spacing: 12) {
                 IconTile(systemImage: app.provider.icon, color: .syViolet, size: 56).opacity(0.9)

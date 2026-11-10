@@ -55,7 +55,7 @@ struct FilesTab: View {
     }
 
     private var blameAction: ((DiffFile) -> Void)? {
-        guard let head = model.filesOid ?? model.pr?.headRefOid else { return nil }
+        guard model.features.blame, let head = model.filesOid ?? model.pr?.headRefOid else { return nil }
         let app = app
         let repo = model.ref.repo
         return { file in app.openCode(repo, ref: head, path: file.id, blame: true) }
@@ -80,7 +80,7 @@ struct FilesTab: View {
         case "c": navigator.jumpThread(1)
         case "C": navigator.jumpThread(-1)
         case "v":
-            guard let path = currentFile else { return false }
+            guard model.features.viewedFiles, let path = currentFile else { return false }
             let markingViewed = !model.viewedPaths.contains(path)
             Task { await model.toggleViewed(path, scroll: !markingViewed) }
             if markingViewed { stepFile(1) }
@@ -357,8 +357,12 @@ private struct FileListPane: View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 TextField("Filter files", text: $filter).textFieldStyle(.roundedBorder).controlSize(.small)
-                Text("\(model.viewedPaths.intersection(model.displayedFiles.map(\.id)).count)/\(model.displayedFiles.count)")
-                    .font(.syCaption.monospacedDigit()).foregroundStyle(Color.syMuted).help("Viewed")
+                if model.features.viewedFiles {
+                    Text("\(model.viewedPaths.intersection(model.displayedFiles.map(\.id)).count)/\(model.displayedFiles.count)")
+                        .font(.syCaption.monospacedDigit()).foregroundStyle(Color.syMuted).help("Viewed")
+                } else {
+                    Text("\(model.displayedFiles.count)").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syMuted).help("Files")
+                }
             }
             .padding(8)
             List(files, selection: Binding(get: { focus.current ?? model.scrollTarget }, set: { p in if let p { model.revealFile(p) } })) { f in
@@ -436,10 +440,12 @@ struct FileHeader: View {
             .textSelection(.enabled)
             DiffStat(additions: file.additions, deletions: file.deletions)
             Spacer()
-            Toggle("Viewed", isOn: Binding(get: { viewed }, set: { _ in Task { await model.toggleViewed(file.id) } }))
-                .toggleStyle(.checkbox)
-                .controlSize(.small)
-                .help(review == nil ? "Mark file as viewed" : "Mark file as viewed (V)")
+            if model.features.viewedFiles {
+                Toggle("Viewed", isOn: Binding(get: { viewed }, set: { _ in Task { await model.toggleViewed(file.id) } }))
+                    .toggleStyle(.checkbox)
+                    .controlSize(.small)
+                    .help(review == nil ? "Mark file as viewed" : "Mark file as viewed (V)")
+            }
             Menu {
                 Button("Copy path") { copyToPasteboard(file.id) }
                 if file.status != "removed", let onBlame {
@@ -454,7 +460,9 @@ struct FileHeader: View {
                     Button("Previous file (P)") { review.perform("p") }
                     Button("Next hunk (])") { review.perform("]") }
                     Button("Previous hunk ([)") { review.perform("[") }
-                    Button(viewed ? "Mark as not viewed (V)" : "Mark as viewed (V)") { Task { await model.toggleViewed(file.id) } }
+                    if model.features.viewedFiles {
+                        Button(viewed ? "Mark as not viewed (V)" : "Mark as viewed (V)") { Task { await model.toggleViewed(file.id) } }
+                    }
                     Divider()
                     Toggle("Wrap lines (W)", isOn: Binding(get: { review.wrap }, set: { _ in review.perform("w") }))
                     Toggle("Split view (S)", isOn: Binding(get: { review.split }, set: { _ in review.perform("s") }))

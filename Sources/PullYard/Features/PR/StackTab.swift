@@ -309,7 +309,7 @@ struct StackTab: View {
     }
 
     private func noteKey(_ number: Int) -> String {
-        StackNotes.key(account: model.cacheAccount, host: model.api.host, repo: model.ref.repo, number: number)
+        StackNotes.key(account: model.cacheAccount, host: model.api?.host ?? "", repo: model.ref.repo, number: number)
     }
 
     private func open(_ number: Int) {
@@ -329,7 +329,7 @@ struct StackTab: View {
         }
         next.tab = .stack
         if let node = tree.nodes[number] {
-            let nodes = StackStore.memoryNodes(api: model.api, repo: model.ref.repo, account: model.cacheAccount) ?? Array(tree.nodes.values)
+            let nodes = model.api.flatMap { StackStore.memoryNodes(api: $0, repo: model.ref.repo, account: model.cacheAccount) } ?? Array(tree.nodes.values)
             next.seedStack(node, nodes: nodes)
         }
         guard inPlace, next.pr == nil else {

@@ -8,6 +8,7 @@ public sealed class ForgeStub : HttpMessageHandler
     public Dictionary<string, (HttpStatusCode Status, string Body)> Routes { get; } = new();
     public List<(string Contains, HttpStatusCode Status, string Body)> QueryRoutes { get; } = new();
     public List<HttpRequestMessage> Requests { get; } = new();
+    public Dictionary<HttpRequestMessage, string> Bodies { get; } = new();
 
     public HttpClient Client() => new(this);
 
@@ -18,15 +19,25 @@ public sealed class ForgeStub : HttpMessageHandler
 
     public string LastQuery => Uri.UnescapeDataString(Requests[^1].RequestUri!.Query);
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    public string Body(HttpRequestMessage? request)
     {
-        lock (Requests) Requests.Add(request);
+        lock (Requests) return request is not null && Bodies.TryGetValue(request, out var b) ? b : "";
+    }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct);
+        lock (Requests)
+        {
+            Requests.Add(request);
+            Bodies[request] = body;
+        }
         var full = Uri.UnescapeDataString(request.RequestUri!.AbsoluteUri);
         var path = request.RequestUri.AbsolutePath;
         (HttpStatusCode Status, string Body) reply;
         if (QueryRoutes.FirstOrDefault(r => full.Contains(r.Contains, StringComparison.Ordinal)) is { Contains: not null } q) reply = (q.Status, q.Body);
         else if (Routes.FirstOrDefault(r => path.EndsWith(r.Key, StringComparison.Ordinal)) is { Key: not null } hit) reply = hit.Value;
         else reply = (HttpStatusCode.NotFound, "{\"message\":\"not found\"}");
-        return Task.FromResult(new HttpResponseMessage(reply.Status) { Content = new StringContent(reply.Body, Encoding.UTF8, "application/json") });
+        return new HttpResponseMessage(reply.Status) { Content = new StringContent(reply.Body, Encoding.UTF8, "application/json") };
     }
 }

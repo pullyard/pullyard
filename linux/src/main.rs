@@ -21,6 +21,7 @@ mod icons;
 mod jira;
 mod list_cache;
 mod local_repo;
+mod markdown_html;
 mod notify;
 mod rt;
 mod secret;

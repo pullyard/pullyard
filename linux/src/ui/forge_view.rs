@@ -45,10 +45,15 @@ fn text(value: &str) -> gtk::Widget {
 
 pub fn page(url: &str) -> adw::NavigationPage {
     let provider = app::provider();
-    let body = vbox(16);
-    pad(&body, 24);
     let item = lookup(url);
     let is_pr = item.as_ref().is_none_or(|i| i.is_pr());
+    if is_pr && app::forge_reviews() {
+        if let Some(r) = crate::forge::gitlab_review::parse_url(url).or_else(|| item.as_ref().map(|i| i.item_ref())) {
+            return super::pr::page(&r);
+        }
+    }
+    let body = vbox(16);
+    pad(&body, 24);
     let prefix = if is_pr { provider.number_prefix() } else { "#" };
     let title = match &item {
         Some(i) => format!("{}{prefix}{}", i.repository.name_with_owner, i.number),

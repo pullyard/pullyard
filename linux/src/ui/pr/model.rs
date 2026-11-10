@@ -4,18 +4,18 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
-use serde_json::json;
 
 use crate::api::code_owners::{CodeOwnersStatus, OwnershipSummary};
 use crate::api::interdiff::{self, DiffScope, ReviewedCommit};
 use crate::api::merge_readiness::{self, MergeRequirement, RequirementState, RulesStatus};
 use crate::api::models::*;
-use crate::api::queries as q;
 use crate::api::{ApiError, ErrorKind, GitHubApi};
 use crate::conversation_html::{self, Look};
 use crate::diff::{DiffAnchor, DiffFile};
 use crate::signal::Signal;
 use crate::stack::{self, context, StackNode, StackTree};
+
+use super::backend::{PrAction, PrBackend, PrFeatures};
 
 const FULL_REFRESH_EVERY: Duration = Duration::from_secs(300);
 
@@ -88,7 +88,9 @@ pub struct ReviewerInfo {
 
 pub struct PrModel {
     pub r: ItemRef,
-    pub api: GitHubApi,
+    pub api: Option<GitHubApi>,
+    pub backend: PrBackend,
+    pub features: PrFeatures,
     pub repo: RefCell<Option<PrRepository>>,
     pub pr: RefCell<Option<PullRequestDetail>>,
     pub viewer_login: RefCell<String>,
@@ -142,9 +144,16 @@ pub struct PrModel {
 
 impl PrModel {
     pub fn new(r: ItemRef, api: GitHubApi) -> Rc<Self> {
+        let provider = Some(crate::app::provider()).filter(|p| p.is_github()).unwrap_or(crate::git_accounts::GitProvider::Github);
+        Self::with_backend(r, PrBackend::GitHub(api, provider))
+    }
+
+    pub fn with_backend(r: ItemRef, backend: PrBackend) -> Rc<Self> {
         Rc::new(PrModel {
             r,
-            api,
+            api: backend.github().cloned(),
+            features: backend.features(),
+            backend,
             repo: RefCell::new(None),
             pr: RefCell::new(None),
             viewer_login: RefCell::new(String::new()),
@@ -226,6 +235,19 @@ impl PrModel {
         }
     }
 
+    pub fn diff_stat(&self) -> Option<(i64, i64)> {
+        let pr = self.pr.borrow();
+        let pr = pr.as_ref()?;
+        if self.features.provider.is_github() || pr.additions + pr.deletions > 0 {
+            return Some((pr.additions, pr.deletions));
+        }
+        if !self.files_loaded.get() {
+            return None;
+        }
+        let files = self.files.borrow();
+        Some((files.iter().map(|f| f.additions).sum(), files.iter().map(|f| f.deletions).sum()))
+    }
+
     pub fn can_write(&self) -> bool {
         self.repo.borrow().as_ref().map(|r| r.can_write()).unwrap_or(false)
     }
@@ -268,6 +290,9 @@ impl PrModel {
     }
 
     pub fn publish_context(&self) {
+        if self.api.is_none() {
+            return;
+        }
         let snapshot = {
             let pr = self.pr.borrow();
             let Some(pr) = pr.as_ref() else { return };
@@ -284,10 +309,11 @@ impl PrModel {
         let generation = self.viewed_gen.get() + 1;
         self.viewed_gen.set(generation);
         let Some(mut cursor) = cursor else { return };
+        let Some(api) = self.api.clone() else { return };
         let me = self.clone();
         crate::rt::spawn_local(async move {
             for _ in 0..30 {
-                let api = me.api.clone();
+                let api = api.clone();
                 let r = me.r.clone();
                 let after = cursor.clone();
                 let res = crate::rt::run(async move { api.pull_request_files_page(&r, &after).await }).await;
@@ -312,6 +338,7 @@ impl PrModel {
 
     fn load_code_owners(self: &Rc<Self>, base_oid: Option<String>) {
         let Some(base) = base_oid else { return };
+        let Some(api) = self.api.clone() else { return };
         let key = format!("{}|{base}", self.r.repo.full());
         if self.owners_key.borrow().as_deref() == Some(key.as_str()) {
             return;
@@ -319,7 +346,6 @@ impl PrModel {
         *self.owners_key.borrow_mut() = Some(key.clone());
         let me = self.clone();
         crate::rt::spawn_local(async move {
-            let api = me.api.clone();
             let repo = me.r.repo.clone();
             let res = crate::rt::run(async move { api.code_owners(&repo, &base).await }).await;
             if me.owners_key.borrow().as_deref() != Some(key.as_str()) {
@@ -342,6 +368,7 @@ impl PrModel {
     }
 
     fn load_rules(self: &Rc<Self>, base: String, force: bool) {
+        let Some(api) = self.api.clone() else { return };
         let key = format!("{}|{base}", self.r.repo.full());
         let fresh = self.rules_fetched.get().map(|t| t.elapsed() < Duration::from_secs(300)).unwrap_or(false);
         let same = self.rules_key.borrow().as_deref() == Some(key.as_str());
@@ -356,7 +383,6 @@ impl PrModel {
         let admin = self.repo.borrow().as_ref().and_then(|r| r.viewer_permission.clone()).as_deref() == Some("ADMIN");
         let me = self.clone();
         crate::rt::spawn_local(async move {
-            let api = me.api.clone();
             let repo = me.r.repo.clone();
             let res = crate::rt::run(async move { api.branch_rules(&repo, &base, admin).await }).await;
             if me.rules_key.borrow().as_deref() != Some(key.as_str()) {
@@ -482,9 +508,9 @@ impl PrModel {
     async fn check(self: Rc<Self>) {
         self.loading.set(true);
         self.emit(Change::Busy);
-        let api = self.api.clone();
+        let backend = self.backend.clone();
         let r = self.r.clone();
-        let res = crate::rt::run(async move { api.pull_request_light(&r).await }).await;
+        let res = crate::rt::run(async move { backend.pulse(&r).await }).await;
         self.loading.set(false);
         let current = self.pr.borrow().as_ref().map(|p| p.light.clone().normalized());
         match res {
@@ -506,10 +532,10 @@ impl PrModel {
     async fn fetch(self: Rc<Self>, reason: &'static str) {
         self.loading.set(true);
         self.emit(Change::Busy);
-        let api = self.api.clone();
+        let backend = self.backend.clone();
         let r = self.r.clone();
         let note = format!("full: {reason}");
-        let res = crate::rt::run(crate::diagnostics::with_note(note, async move { api.pull_request(&r).await })).await;
+        let res = crate::rt::run(crate::diagnostics::with_note(note, async move { backend.load(&r).await })).await;
         self.loading.set(false);
         match res {
             Ok(resp) => {
@@ -559,7 +585,7 @@ impl PrModel {
                 self.load_code_owners(base_oid);
                 self.emit(Change::Pr);
                 self.publish_context();
-                if self.stack_fresh.get() || self.stack_key.borrow().as_deref() != Some(stack_key.as_str()) {
+                if self.features.stack && (self.stack_fresh.get() || self.stack_key.borrow().as_deref() != Some(stack_key.as_str())) {
                     let force = self.stack_fresh.replace(false);
                     let me = self.clone();
                     crate::rt::spawn_local(async move { me.load_stack(force).await });
@@ -605,15 +631,16 @@ impl PrModel {
     }
 
     pub async fn load_stack(self: Rc<Self>, force: bool) {
+        let Some(api) = self.api.clone().filter(|_| self.features.stack) else { return };
         let Some(key) = self.pr.borrow().as_ref().map(stack_cache_key) else { return };
         *self.stack_key.borrow_mut() = Some(key);
-        if let Some((nodes, fresh)) = stack::store::cached(&self.api, &self.r.repo).await {
+        if let Some((nodes, fresh)) = stack::store::cached(&api, &self.r.repo).await {
             self.apply_stack(&nodes);
             if !force && fresh {
                 return;
             }
         }
-        if let Some(nodes) = stack::store::fetch(&self.api, &self.r.repo).await {
+        if let Some(nodes) = stack::store::fetch(&api, &self.r.repo).await {
             self.apply_stack(&nodes);
         }
     }
@@ -662,7 +689,7 @@ impl PrModel {
     }
 
     pub fn stack_note_key(&self, number: i64) -> String {
-        stack::notes::key(&crate::app::cache_account(), self.api.host(), &self.r.repo, number)
+        stack::notes::key(&crate::app::cache_account(), &self.backend.host(), &self.r.repo, number)
     }
 
     pub fn ensure_files(self: &Rc<Self>) {
@@ -686,9 +713,9 @@ impl PrModel {
         self.files_loading.set(true);
         self.files_stale.set(false);
         let oid = self.pr.borrow().as_ref().map(|p| p.head_ref_oid.clone());
-        let api = self.api.clone();
+        let backend = self.backend.clone();
         let r = self.r.clone();
-        let res = crate::rt::run(async move { api.pull_request_files(&r).await.map(|raw| raw.iter().map(DiffFile::new).collect::<Vec<_>>()) }).await;
+        let res = crate::rt::run(async move { backend.files(&r).await.map(|raw| raw.iter().map(DiffFile::new).collect::<Vec<_>>()) }).await;
         self.files_loading.set(false);
         match res {
             Ok(parsed) => {
@@ -711,6 +738,7 @@ impl PrModel {
     }
 
     pub fn last_reviewed(&self) -> Option<ReviewedCommit> {
+        self.api.as_ref()?;
         let pr = self.pr.borrow();
         interdiff::last_reviewed(pr.as_ref()?, &self.viewer_login.borrow())
     }
@@ -739,13 +767,13 @@ impl PrModel {
             self.set_diff_scope(DiffScope::All);
             return;
         };
+        let Some(api) = self.api.clone() else { return };
         let key = format!("{}...{head}", reviewed.oid);
         if (!force && self.interdiff_key.borrow().as_deref() == Some(key.as_str())) || self.interdiff_loading.get() {
             return;
         }
         self.interdiff_loading.set(true);
         self.emit(Change::Files);
-        let api = self.api.clone();
         let repo = self.r.repo.clone();
         let base = reviewed.oid.clone();
         let res = crate::rt::run(async move {
@@ -867,12 +895,12 @@ impl PrModel {
 
     pub async fn run<F, Fut>(self: &Rc<Self>, reload: bool, op: F) -> bool
     where
-        F: FnOnce(GitHubApi) -> Fut,
+        F: FnOnce(PrBackend) -> Fut,
         Fut: std::future::Future<Output = Result<(), ApiError>> + Send + 'static,
     {
         self.busy.set(true);
         self.emit(Change::Busy);
-        let fut = op(self.api.clone());
+        let fut = op(self.backend.clone());
         let res = crate::rt::run(fut).await;
         self.busy.set(false);
         self.emit(Change::Busy);
@@ -890,13 +918,14 @@ impl PrModel {
         }
     }
 
-    fn pr_id(&self) -> Option<String> {
-        self.pr.borrow().as_ref().map(|p| p.id.clone())
+    fn current(&self) -> Option<PullRequestDetail> {
+        self.pr.borrow().clone()
     }
 
     pub async fn comment(self: Rc<Self>, body: String) -> bool {
-        let Some(id) = self.pr_id() else { return false };
-        let ok = self.run(true, move |api| async move { api.add_comment(&id, &body).await }).await;
+        let Some(pr) = self.current() else { return false };
+        let r = self.r.clone();
+        let ok = self.run(true, move |b| async move { b.comment(&r, &pr, &body).await }).await;
         if ok {
             self.emit(Change::ScrollBottom);
         }
@@ -904,9 +933,11 @@ impl PrModel {
     }
 
     pub async fn submit_review(self: Rc<Self>, event: String, body: String) -> bool {
-        let Some(id) = self.pr_id() else { return false };
+        let Some(pr) = self.current() else { return false };
         let comments = self.pending.borrow().clone();
-        let ok = self.run(true, move |api| async move { api.add_review(&id, &event, Some(body), &comments).await }).await;
+        let files = self.files.borrow().clone();
+        let r = self.r.clone();
+        let ok = self.run(true, move |b| async move { b.submit_review(&r, &pr, &event, Some(body), &comments, &files).await }).await;
         if ok {
             self.pending.borrow_mut().clear();
             self.emit(Change::Diff);
@@ -918,8 +949,10 @@ impl PrModel {
     pub async fn add_inline(self: Rc<Self>, anchor: DiffAnchor, body: String, immediately: bool) -> bool {
         let c = PendingComment { id: uuid::Uuid::new_v4().to_string(), path: anchor.path.clone(), line: anchor.line, side: anchor.side.clone(), body };
         if immediately {
-            let Some(id) = self.pr_id() else { return false };
-            let ok = self.run(true, move |api| async move { api.add_review(&id, "COMMENT", None, &[c]).await }).await;
+            let Some(pr) = self.current() else { return false };
+            let files = self.files.borrow().clone();
+            let r = self.r.clone();
+            let ok = self.run(true, move |b| async move { b.submit_review(&r, &pr, "COMMENT", None, &[c], &files).await }).await;
             if ok {
                 *self.composer.borrow_mut() = None;
                 self.composer_text.borrow_mut().clear();
@@ -935,63 +968,71 @@ impl PrModel {
     }
 
     pub async fn reply(self: Rc<Self>, thread_id: String, body: String) -> bool {
-        self.run(true, move |api| async move { api.mutate(q::REPLY_THREAD, json!({ "id": thread_id, "b": body })).await }).await
+        let r = self.r.clone();
+        self.run(true, move |b| async move { b.reply(&r, &thread_id, &body).await }).await
     }
 
     pub async fn set_resolved(self: Rc<Self>, thread_id: String, resolved: bool) -> bool {
-        let query = if resolved { q::RESOLVE_THREAD } else { q::UNRESOLVE_THREAD };
-        self.run(true, move |api| async move { api.mutate(query, json!({ "id": thread_id })).await }).await
+        let r = self.r.clone();
+        self.run(true, move |b| async move { b.set_resolved(&r, &thread_id, resolved).await }).await
     }
 
     fn invalidate_stack(&self) {
-        stack::store::invalidate(&self.api, &self.r.repo);
+        if let Some(api) = &self.api {
+            stack::store::invalidate(api, &self.r.repo);
+        }
         self.stack_fresh.set(true);
     }
 
     pub async fn merge(self: Rc<Self>, method: String, title: Option<String>, body: Option<String>, delete_branch: bool) -> bool {
-        let Some(pr) = self.pr.borrow().clone() else { return false };
+        let Some(pr) = self.current() else { return false };
         self.invalidate_stack();
-        self.run(true, move |api| async move {
-            api.mutate(q::MERGE, json!({ "id": pr.id, "m": method, "t": title, "b": body })).await?;
-            if delete_branch {
-                if let Some(head) = pr.head_repository.as_ref() {
-                    let _ = api.delete_branch(&head.name_with_owner, &pr.head_ref_name).await;
-                }
-            }
-            Ok(())
-        })
-        .await
+        let r = self.r.clone();
+        self.run(true, move |b| async move { b.merge(&r, &pr, &method, title, body, delete_branch).await }).await
     }
 
     pub async fn enable_auto_merge(self: Rc<Self>, method: String) -> bool {
-        let Some(id) = self.pr_id() else { return false };
-        self.run(true, move |api| async move { api.mutate(q::ENABLE_AUTO_MERGE, json!({ "id": id, "m": method })).await }).await
+        let Some(pr) = self.current() else { return false };
+        let r = self.r.clone();
+        self.run(true, move |b| async move { b.enable_auto_merge(&r, &pr, &method).await }).await
     }
 
-    pub async fn simple(self: Rc<Self>, mutation: &'static str) -> bool {
-        let Some(id) = self.pr_id() else { return false };
+    pub async fn simple(self: Rc<Self>, action: PrAction) -> bool {
+        let Some(pr) = self.current() else { return false };
         self.invalidate_stack();
-        self.run(true, move |api| async move { api.mutate(mutation, json!({ "id": id })).await }).await
+        let r = self.r.clone();
+        self.run(true, move |b| async move { b.perform(action, &r, &pr).await }).await
+    }
+
+    pub async fn revoke_approval(self: Rc<Self>) -> bool {
+        let r = self.r.clone();
+        self.run(true, move |b| async move { b.revoke_approval(&r).await }).await
     }
 
     pub async fn edit(self: Rc<Self>, title: String, body: String) -> bool {
-        let Some(id) = self.pr_id() else { return false };
-        self.run(true, move |api| async move { api.mutate(q::EDIT_PR, json!({ "id": id, "t": title, "b": body })).await }).await
+        let Some(pr) = self.current() else { return false };
+        let r = self.r.clone();
+        self.run(true, move |b| async move { b.edit(&r, &pr, &title, &body).await }).await
     }
 
     pub async fn request_reviewers(self: Rc<Self>, logins: Vec<String>) -> bool {
         let r = self.r.clone();
-        self.run(true, move |api| async move { api.request_reviewers(&r, &logins).await }).await
+        self.run(true, move |b| async move { b.request_reviewers(&r, &logins).await }).await
     }
 
     pub async fn delete_branch(self: Rc<Self>) -> bool {
-        let Some(pr) = self.pr.borrow().clone() else { return false };
-        let Some(head) = pr.head_repository.clone() else { return false };
-        self.run(true, move |api| async move { api.delete_branch(&head.name_with_owner, &pr.head_ref_name).await }).await
+        let Some(pr) = self.current() else { return false };
+        if pr.head_repository.is_none() {
+            return false;
+        }
+        self.run(true, move |b| async move { b.delete_branch(&pr).await }).await
     }
 
     pub async fn toggle_viewed(self: Rc<Self>, path: String) {
-        let Some(id) = self.pr_id() else { return };
+        if !self.features.viewed_files {
+            return;
+        }
+        let Some(pr) = self.current() else { return };
         let viewed = self.viewed.borrow().contains(&path);
         if viewed {
             self.viewed.borrow_mut().remove(&path);
@@ -1000,20 +1041,13 @@ impl PrModel {
             self.collapsed.borrow_mut().insert(path.clone());
         }
         self.emit(Change::Diff);
-        let query = if viewed { q::UNMARK_VIEWED } else { q::MARK_VIEWED };
-        self.run(false, move |api| async move { api.mutate(query, json!({ "id": id, "p": path })).await }).await;
+        self.run(false, move |b| async move { b.set_viewed(&pr, &path, !viewed).await }).await;
     }
 
     pub async fn rerun_failed(self: Rc<Self>) -> bool {
         let runs: HashSet<i64> = self.pr.borrow().as_ref().map(|p| p.checks().iter().filter(|c| c.outcome() == CheckOutcome::Failure).filter_map(|c| c.run_id()).collect()).unwrap_or_default();
-        let repo = self.r.repo.clone();
-        self.run(true, move |api| async move {
-            for id in runs {
-                api.rerun_failed_jobs(&repo, id).await?;
-            }
-            Ok(())
-        })
-        .await
+        let r = self.r.clone();
+        self.run(true, move |b| async move { b.rerun_failed(&r, runs).await }).await
     }
 }
 
@@ -1100,6 +1134,7 @@ fn changed_paths(pr: &PullRequestDetail) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn context_snapshot_maps_model() {
