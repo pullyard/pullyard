@@ -148,11 +148,56 @@ footer a:hover{color:var(--text)}
 
 <main class="wrap">
 
+<article class="release" id="v2.14.0">
+  <div class="side">
+    <a class="ver" href="#v2.14.0">2.14.0 <span class="hash">#</span></a>
+    <time class="date" datetime="2026-11-10">November 10, 2026</time>
+    <span class="badge latest">Latest</span>
+    <div class="plats"><span class="plat">macOS</span><span class="plat">Windows</span><span class="plat">Linux</span></div>
+  </div>
+  <div class="body">
+    <h2>Know what a pull request needs to merge</h2>
+    <p class="lede">A merge requirements checklist, code owners, full review for GitLab and Bitbucket, merge queues, and agents that help close the review loop.</p>
+    <div class="group g-new">
+      <h3><i></i>New</h3>
+      <ul>
+        <li data-os="mac windows linux"><b>Merge requirements.</b> The merge status bar expands into a checklist: draft, conflicts, branch behind, approvals (1 of 2), code owner review, approval after the last push, required checks and unresolved conversations. Blocking rows link straight to the fix.</li>
+        <li data-os="mac windows linux"><b>Code owners</b> from CODEOWNERS on GitHub, GitLab (with sections) and Bitbucket. Each file in Files shows its owners, the requirements list groups them, and Request review suggests owners who haven’t been asked.</li>
+        <li data-os="mac windows linux"><b>GitLab and Bitbucket review.</b> Merge requests and Bitbucket pull requests open in the full review view: conversation, inline comments, approvals, merge requirements, pipelines and files.</li>
+        <li data-os="mac windows linux"><b>Changes since your last review</b> in Files, so a re-review shows only the new commits.</li>
+        <li data-os="mac windows linux"><b>Merge queue and merge train.</b> See a pull request’s place in the queue, add it from the merge sheet and remove it from More.</li>
+        <li data-os="mac windows linux"><b>Look closer</b> labels flag risky paths such as secrets, migrations, CI config and dependencies, and “Next unresolved” jumps through open threads.</li>
+        <li data-os="mac windows linux"><b>Draft comments with the agent.</b> The agent suggests inline review comments; you keep and edit the ones you want before submitting.</li>
+        <li data-os="mac windows linux">After Fix with agent pushes, <b>Reply and resolve</b> answers and closes the fixed threads in one go. Fix with agent now works in an isolated git worktree.</li>
+        <li data-os="mac windows linux">Agents open merge and pull requests on GitLab and Bitbucket too.</li>
+        <li data-os="mac windows linux">Agent accounts can use OpenRouter or another Anthropic-compatible endpoint, and a session can pause at a budget you set.</li>
+        <li data-os="mac windows linux">After a merge, linked Jira issues that aren’t done offer <b>Move to Done</b>.</li>
+        <li data-os="mac windows linux">Request review shows how many open reviews each person or team already has.</li>
+      </ul>
+    </div>
+    <div class="group g-improved">
+      <h3><i></i>Improved</h3>
+      <ul>
+        <li data-os="mac windows linux">Job logs open for GitLab jobs and Bitbucket Pipelines, not only GitHub Actions.</li>
+        <li data-os="mac windows linux">Agents can read the pull request you’re looking at through PullYard’s MCP tools.</li>
+        <li data-os="mac windows linux">The chat keeps your reading position while a reply streams, when you drag the scroller and when the window is resized.</li>
+      </ul>
+    </div>
+    <div class="group g-fixed">
+      <h3><i></i>Fixed</h3>
+      <ul>
+        <li data-os="mac windows linux">The agent session cost no longer counts earlier turns again.</li>
+        <li data-os="mac">Scrolling up in the chat no longer jumps back toward the bottom.</li>
+      </ul>
+    </div>
+    <p class="empty">No changes for this platform in this release.</p>
+  </div>
+</article>
+
 <article class="release" id="v2.13.6">
   <div class="side">
     <a class="ver" href="#v2.13.6">2.13.6 <span class="hash">#</span></a>
     <time class="date" datetime="2026-10-30">October 30, 2026</time>
-    <span class="badge latest">Latest</span>
     <div class="plats"><span class="plat">macOS</span><span class="plat">Windows</span><span class="plat">Linux</span></div>
   </div>
   <div class="body">
