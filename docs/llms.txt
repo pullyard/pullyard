@@ -27,6 +27,9 @@ Facts:
 
 - [Home](https://pullyard.app/): features, screenshots, install and FAQ
 - [PullYard vs GitHub Desktop](https://pullyard.app/github-desktop-alternative.html): what each app does and how they work together
+- [PullYard vs GitKraken](https://pullyard.app/gitkraken-alternative.html): a full git client compared with a review-only app
+- [PullYard vs Pulldog](https://pullyard.app/pulldog-alternative.html): two native pull request apps compared
+- [Stacked pull requests](https://pullyard.app/stacked-pull-requests.html): how PullYard shows and reviews a stack
 - [Changelog](https://pullyard.app/changelog.html): every release
 - [Roadmap](https://pullyard.app/roadmap.html): what comes next
 
