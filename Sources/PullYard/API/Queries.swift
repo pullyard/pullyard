@@ -49,7 +49,7 @@ enum Q {
     """
 
     static let prTimeline = """
-    ... on PullRequestReview { id author \(actor) state body bodyHTML createdAt url }
+    ... on PullRequestReview { id author \(actor) state body bodyHTML createdAt url commit { oid } }
     ... on PullRequestCommit { commit { oid abbreviatedOid messageHeadline committedDate author { name avatarUrl user { login } } } }
     ... on MergedEvent { actor \(actor) createdAt mergeRefName commit { abbreviatedOid } }
     ... on HeadRefForcePushedEvent { actor \(actor) createdAt }
@@ -85,14 +85,14 @@ enum Q {
           autoMergeRequest { enabledAt mergeMethod }
           labels(first: 20) { nodes { name color } }
           assignees(first: 10) { nodes { login avatarUrl } }
-          reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login avatarUrl } ... on Team { name } ... on Mannequin { login avatarUrl } } } }
+          reviewRequests(first: 20) { nodes { asCodeOwner requestedReviewer { __typename ... on User { login avatarUrl } ... on Team { name combinedSlug avatarUrl } ... on Mannequin { login avatarUrl } } } }
           latestOpinionatedReviews(first: 20) { nodes { state submittedAt commit { oid } author \(actor) } }
           lastCommit: commits(last: 1) { nodes { commit { oid committedDate statusCheckRollup { state contexts(first: 100) { nodes { __typename
-            ... on CheckRun { databaseId name status conclusion detailsUrl startedAt completedAt checkSuite { workflowRun { databaseId workflow { name } } } }
-            ... on StatusContext { context state targetUrl description }
+            ... on CheckRun { databaseId name status conclusion detailsUrl startedAt completedAt isRequired(pullRequestNumber: $number) checkSuite { workflowRun { databaseId workflow { name } } } }
+            ... on StatusContext { context state targetUrl description isRequired(pullRequestNumber: $number) }
           } } } } } }
           allCommits: commits(first: 100) { totalCount nodes { commit { oid abbreviatedOid messageHeadline committedDate url author { name avatarUrl user { login } } statusCheckRollup { state } } } }
-          files(first: 100) { nodes { path viewerViewedState } }
+          files(first: 100) { totalCount pageInfo { hasNextPage endCursor } nodes { path viewerViewedState } }
           timelineItems(last: 100, itemTypes: [ISSUE_COMMENT, PULL_REQUEST_REVIEW, PULL_REQUEST_COMMIT, MERGED_EVENT, CLOSED_EVENT, REOPENED_EVENT, HEAD_REF_FORCE_PUSHED_EVENT, HEAD_REF_DELETED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, REVIEW_REQUESTED_EVENT, CROSS_REFERENCED_EVENT, LABELED_EVENT, RENAMED_TITLE_EVENT]) {
             totalCount nodes { __typename \(commonTimeline) \(prTimeline) }
           }
@@ -102,6 +102,19 @@ enum Q {
       }
     }
     """ + prPulseFragment
+
+    static let pullRequestLegacy = pullRequest
+        .replacingOccurrences(of: " isRequired(pullRequestNumber: $number)", with: "")
+        .replacingOccurrences(of: "asCodeOwner ", with: "")
+        .replacingOccurrences(of: " combinedSlug avatarUrl", with: "")
+
+    static let codeOwners = """
+    query CodeOwners($owner: String!, $name: String!, $a: String!, $b: String!, $c: String!) { repository(owner: $owner, name: $name) { a: object(expression: $a) { ... on Blob { text isTruncated } } b: object(expression: $b) { ... on Blob { text isTruncated } } c: object(expression: $c) { ... on Blob { text isTruncated } } } }
+    """
+
+    static let pullRequestFiles = """
+    query PullRequestFiles($owner: String!, $name: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { files(first: 100, after: $after) { totalCount pageInfo { hasNextPage endCursor } nodes { path viewerViewedState } } } } }
+    """
 
     static let issue = """
     query Issue($owner: String!, $name: String!, $number: Int!) {

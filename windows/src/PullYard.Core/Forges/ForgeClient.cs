@@ -23,10 +23,14 @@ public sealed record ForgeCapabilities(IReadOnlyList<ForgeFilter> PullFilters, I
 {
     public static ForgeCapabilities Initial { get; } = new(new[] { ForgeFilter.ReviewRequested, ForgeFilter.Mine }, Array.Empty<ForgeIssueFilter>(), ForgeInbox.None, false);
 
+    public CapabilityState PullRequestReview { get; init; } = CapabilityState.Unsupported;
+    public CapabilityState MergeRequirements { get; init; } = CapabilityState.Unsupported;
+
     public bool HasInbox => Inbox != ForgeInbox.None;
 
     public bool Same(ForgeCapabilities other) =>
-        PullFilters.SequenceEqual(other.PullFilters) && IssueFilters.SequenceEqual(other.IssueFilters) && Inbox == other.Inbox && Repositories == other.Repositories;
+        PullFilters.SequenceEqual(other.PullFilters) && IssueFilters.SequenceEqual(other.IssueFilters) && Inbox == other.Inbox && Repositories == other.Repositories
+        && PullRequestReview == other.PullRequestReview && MergeRequirements == other.MergeRequirements;
 }
 
 public sealed record ForgeNotification(string Id, string Title, string Repo, string Kind, string Reason, string Url, DateTimeOffset UpdatedAt, Actor? Author, bool Unread);

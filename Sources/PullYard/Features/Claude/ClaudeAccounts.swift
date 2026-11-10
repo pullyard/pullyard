@@ -8,6 +8,7 @@ struct ClaudeProfile: Codable, Identifiable, Hashable {
     var email: String?
     var plan: String?
     var owner: String?
+    var endpoint: AgentEndpoint?
 
     var isDefault: Bool { configDir == nil }
     var initial: String { String((label.isEmpty ? (email ?? "C") : label).prefix(1)).uppercased() }
@@ -95,6 +96,9 @@ final class ClaudeProfiles {
         if let configDir {
             env["CLAUDE_CONFIG_DIR"] = configDir
         }
+        if let endpoint = AgentEndpoints.environment(configDir: configDir) {
+            env.merge(endpoint) { _, new in new }
+        }
     }
 
     var activeOverride: String? { active.configDir }
@@ -115,7 +119,7 @@ final class ClaudeProfiles {
     }
 
     @discardableResult
-    func add(label: String, shareSettings: Bool, owner: String? = nil) throws -> ClaudeProfile {
+    func add(label: String, shareSettings: Bool, owner: String? = nil, endpoint: AgentEndpoint? = nil, key: String? = nil) throws -> ClaudeProfile {
         let id = UUID().uuidString.lowercased()
         let dir = Self.baseDir.appendingPathComponent(id, isDirectory: true)
         let fm = FileManager.default
@@ -129,7 +133,8 @@ final class ClaudeProfiles {
             }
         }
         let name = label.trimmingCharacters(in: .whitespaces)
-        let profile = ClaudeProfile(id: id, label: name.isEmpty ? "Account \(profiles.count + 1)" : name, configDir: dir.path, owner: owner ?? scope)
+        if endpoint != nil, let key { try Keychain.save(key, account: AgentEndpoint.keychainAccount(profileID: id)) }
+        let profile = ClaudeProfile(id: id, label: name.isEmpty ? "Account \(profiles.count + 1)" : name, configDir: dir.path, owner: owner ?? scope, endpoint: endpoint)
         profiles.append(profile)
         save()
         return profile
@@ -143,8 +148,16 @@ final class ClaudeProfiles {
         save()
     }
 
+    func updateEndpoint(_ id: String, endpoint: AgentEndpoint, key: String?) throws {
+        guard let i = profiles.firstIndex(where: { $0.id == id }), !profiles[i].isDefault else { return }
+        if let key, !key.isEmpty { try Keychain.save(key, account: AgentEndpoint.keychainAccount(profileID: id)) }
+        profiles[i].endpoint = endpoint
+        save()
+    }
+
     func remove(_ id: String) {
         guard id != Self.defaultID else { return }
+        Keychain.delete(account: AgentEndpoint.keychainAccount(profileID: id))
         profiles.removeAll { $0.id == id }
         activeByOwner = activeByOwner.filter { $0.value != id }
         if activeID == id { activeID = Self.defaultID }
@@ -272,23 +285,52 @@ struct ProfileBadge: View {
 }
 
 struct AddClaudeProfileSheet: View {
+    enum Access: Hashable { case signIn, endpoint(AgentEndpoint.Kind) }
+
+    var editing: ClaudeProfile? = nil
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var label = ""
     @State private var share = true
+    @State private var access: Access = .signIn
+    @State private var baseURL = AgentEndpoint.openRouterURL
+    @State private var key = ""
+    @State private var model = ""
     @State private var error: String?
     private var ownsMain: Bool { ClaudeProfiles.shared.visible.contains { $0.isDefault } }
 
+    private var kind: AgentEndpoint.Kind? {
+        if case .endpoint(let k) = access { return k }
+        return nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("New Claude account").font(.syHeadline)
-            Text("The account gets its own sign-in, session history and limits. Sign-in opens right after.")
-                .font(.syCallout)
-                .foregroundStyle(Color.syMuted)
-            TextField("Name, e.g. “Personal” or “Work”", text: $label)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit(create)
-            if ownsMain {
+            Text(editing == nil ? "New Claude account" : "Edit endpoint").font(.syHeadline)
+            if editing == nil {
+                Picker("Access", selection: $access) {
+                    Text("Claude sign-in").tag(Access.signIn)
+                    ForEach(AgentEndpoint.Kind.allCases) { Text($0.title).tag(Access.endpoint($0)) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .onChange(of: access) { _, new in
+                    if new == .endpoint(.openRouter) { baseURL = AgentEndpoint.openRouterURL }
+                    if new == .endpoint(.custom), baseURL == AgentEndpoint.openRouterURL { baseURL = "" }
+                    error = nil
+                }
+                Text(kind == nil ? "The account gets its own sign-in, session history and limits. Sign-in opens right after." : "Claude Code sends requests to this endpoint with your API key. Usage is billed by the endpoint, not your Claude plan.")
+                    .font(.syCallout)
+                    .foregroundStyle(Color.syMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                TextField(kind == .openRouter ? "Name, e.g. “OpenRouter”" : "Name, e.g. “Personal” or “Work”", text: $label)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(create)
+            }
+            if kind != nil {
+                endpointFields
+            }
+            if editing == nil, ownsMain {
                 Toggle("Use my settings, CLAUDE.md, skills and plugins from the main account", isOn: $share)
                     .toggleStyle(.checkbox)
             }
@@ -296,19 +338,73 @@ struct AddClaudeProfileSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Create and sign in", action: create)
-                .buttonStyle(.borderedProminent)
-                .tint(.syCoral)
-                .keyboardShortcut(.defaultAction)
+                Button(editing != nil ? "Save" : kind == nil ? "Create and sign in" : "Create", action: create)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.syCoral)
+                    .keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
-        .frame(width: 460)
+        .frame(width: 500)
+        .onAppear {
+            guard let endpoint = editing?.endpoint else { return }
+            access = .endpoint(endpoint.kind)
+            baseURL = endpoint.baseURL
+            model = endpoint.model ?? ""
+        }
+    }
+
+    @ViewBuilder private var endpointFields: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if kind == .custom {
+                TextField("Base URL, e.g. https://gateway.example.com", text: $baseURL)
+                    .textFieldStyle(.roundedBorder)
+            }
+            SecureField(editing != nil ? "API key (leave empty to keep the saved key)" : kind == .openRouter ? "OpenRouter API key (sk-or-…)" : "API key", text: $key)
+                .textFieldStyle(.roundedBorder)
+            TextField(kind == .openRouter ? "Model (optional), e.g. anthropic/claude-sonnet-4.5" : "Model (optional)", text: $model)
+                .textFieldStyle(.roundedBorder)
+            Text("The key is stored in the macOS Keychain and passed only to Claude Code for this account. Your Claude sign-in is not used here; Remote Control and plan usage limits are not available.")
+                .font(.syCaption)
+                .foregroundStyle(Color.syMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            if kind == .openRouter {
+                Button("Get an OpenRouter key") { openInBrowser("https://openrouter.ai/settings/keys") }
+                    .buttonStyle(.link)
+                    .font(.syCaption)
+            }
+        }
     }
 
     private func create() {
+        error = nil
         do {
-            let p = try ClaudeProfiles.shared.add(label: label, shareSettings: share && ownsMain)
+            guard let kind else {
+                let p = try ClaudeProfiles.shared.add(label: label, shareSettings: share && ownsMain)
+                app.switchClaudeProfile(to: p.id)
+                app.section = .claude
+                dismiss()
+                return
+            }
+            if let problem = AgentEndpoint.problem(baseURL: baseURL) {
+                error = problem
+                return
+            }
+            let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedModel = model.trimmingCharacters(in: .whitespaces)
+            let endpoint = AgentEndpoint(kind: kind, baseURL: AgentEndpoint.normalized(baseURL), model: trimmedModel.isEmpty ? nil : trimmedModel)
+            if let editing {
+                try ClaudeProfiles.shared.updateEndpoint(editing.id, endpoint: endpoint, key: trimmedKey)
+                Task { await ClaudeAccountStore.shared.refresh(force: true) }
+                dismiss()
+                return
+            }
+            guard !trimmedKey.isEmpty else {
+                error = "Enter the API key."
+                return
+            }
+            let name = label.trimmingCharacters(in: .whitespaces)
+            let p = try ClaudeProfiles.shared.add(label: name.isEmpty ? kind.title : name, shareSettings: share && ownsMain, endpoint: endpoint, key: trimmedKey)
             app.switchClaudeProfile(to: p.id)
             app.section = .claude
             dismiss()

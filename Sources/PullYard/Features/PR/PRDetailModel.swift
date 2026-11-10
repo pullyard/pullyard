@@ -1,4 +1,5 @@
 import Foundation
+import StackNotesKit
 import SwiftUI
 
 enum PRTab: String, CaseIterable, Identifiable {
@@ -34,6 +35,14 @@ enum DiffRow: Identifiable {
         case .note(let s): return "n\(s)"
         }
     }
+}
+
+struct PRReviewer: Hashable {
+    let login: String
+    let avatar: String?
+    let state: String
+    var isTeam = false
+    var codeOwner = false
 }
 
 @Observable
@@ -88,6 +97,25 @@ final class PRDetailModel {
     private static let manualRefreshGrace: TimeInterval = 20
     @ObservationIgnored private var mergeRecheck: Task<Void, Never>?
     @ObservationIgnored private var mergeRechecks = 0
+    var branchRules: RulesStatus = .loading
+    var codeOwners: CodeOwnersStatus = .loading
+    var changedPaths: [String] = []
+    @ObservationIgnored private var ownersKey: String?
+    @ObservationIgnored private var rulesKey: String?
+    @ObservationIgnored private var rulesFetched: Date?
+    @ObservationIgnored private var viewedLoad: Task<Void, Never>?
+    var diffScope: DiffScope = .all {
+        didSet {
+            guard diffScope != oldValue else { return }
+            filesVersion += 1
+            if diffScope == .sinceReview { Task { await loadInterdiff() } }
+        }
+    }
+    var interdiffFiles: [DiffFile] = []
+    var interdiffLoading = false
+    var interdiffError: String?
+    var interdiffRebased = false
+    @ObservationIgnored private var interdiffKey: String?
     var html = ""
     var scrollToBottomToken = 0
     var conflicts: ConflictState?
@@ -123,18 +151,67 @@ final class PRDetailModel {
 
     var canWrite: Bool { repo?.canWrite ?? false }
 
-    var reviewers: [(login: String, avatar: String?, state: String)] {
+    var reviewers: [PRReviewer] {
         guard let pr else { return [] }
-        var result: [(String, String?, String)] = pr.latestOpinionatedReviews.nodes.compactMap { r in
+        var result: [PRReviewer] = pr.latestOpinionatedReviews.nodes.compactMap { r in
             guard let a = r.author else { return nil }
-            return (a.login, a.avatarUrl, r.state)
+            return PRReviewer(login: a.login, avatar: a.avatarUrl, state: r.state)
         }
-        let done = Set(result.map(\.0))
+        let done = Set(result.map(\.login))
         for req in pr.reviewRequests.nodes {
             guard let r = req.requestedReviewer, !done.contains(r.display) else { continue }
-            result.append((r.display, r.avatarUrl, "PENDING"))
+            result.append(PRReviewer(login: r.display, avatar: r.avatarUrl, state: "PENDING", isTeam: r.isTeam, codeOwner: req.asCodeOwner == true))
         }
         return result
+    }
+
+    var ownership: OwnershipSummary? {
+        guard let pr, case .loaded(let owners) = codeOwners else { return nil }
+        return OwnershipSummary.build(owners: owners, files: changedPaths, pr: pr)
+    }
+
+    var lastReviewed: ReviewedCommit? {
+        guard let pr else { return nil }
+        return Interdiff.lastReviewed(pr, viewer: viewerLogin)
+    }
+
+    var displayedFiles: [DiffFile] { diffScope == .sinceReview ? interdiffFiles : files }
+
+    func loadInterdiff(force: Bool = false) async {
+        guard let pr, let reviewed = lastReviewed else {
+            diffScope = .all
+            return
+        }
+        let key = "\(reviewed.oid)...\(pr.headRefOid)"
+        guard force || key != interdiffKey, !interdiffLoading else { return }
+        interdiffLoading = true
+        defer { interdiffLoading = false }
+        do {
+            let result = try await api.compare(ref.repo, base: reviewed.oid, head: pr.headRefOid)
+            let raw = result.files ?? []
+            let parsed = await Task.detached(priority: .userInitiated) { raw.map(DiffFile.init) }.value
+            interdiffFiles = parsed
+            interdiffKey = key
+            interdiffError = nil
+            interdiffRebased = reviewed.rewritten || (result.behindBy ?? 0) > 0
+            collapsed.subtract(parsed.map(\.id))
+            filesVersion += 1
+        } catch {
+            if isCancellation(error) { return }
+            interdiffError = error.localizedDescription
+        }
+    }
+
+    func publishContext() {
+        guard let pr else { return }
+        let key = StackNotesFile.key(account: cacheAccount, host: api.host, repo: ref.repo.full, number: ref.number)
+        let snapshot = PRContextPublisher.snapshot(ref: ref, pr: pr, requirements: requirements, ownership: ownership, files: changedPaths, reviewed: lastReviewed)
+        Task.detached(priority: .utility) { try? PRContextStore.write(snapshot, key: key) }
+    }
+
+    var requirements: [MergeRequirement] {
+        guard let pr else { return [] }
+        return MergeReadiness.requirements(pr, rules: branchRules)
     }
 
     var lastCommitDate: Date? { pr?.lastCommit.nodes.first?.commit.committedDate }
@@ -227,7 +304,14 @@ final class PRDetailModel {
             self.pr = pr
             updateConflicts(pr)
             renderHTML()
-            viewedPaths = Set(pr.files?.nodes.filter { $0.viewerViewedState == "VIEWED" }.map(\.path) ?? [])
+            viewedPaths = pr.files?.viewedPaths ?? []
+            changedPaths = pr.files?.nodes.map(\.path) ?? []
+            loadMoreViewed(after: pr.files?.nextCursor)
+            loadRules(pr, force: forced != nil && reason.hasPrefix("refresh"))
+            loadCodeOwners(pr)
+            if diffScope == .sinceReview {
+                if lastReviewed == nil { diffScope = .all } else { Task { await loadInterdiff() } }
+            }
             indexThreads(pr.reviewThreads.nodes)
             error = nil
             refreshError = nil
@@ -239,12 +323,74 @@ final class PRDetailModel {
                 Task(priority: .utility) { await self.loadStack() }
             }
             scheduleMergeRecheck(pr)
+            publishContext()
             if reloadFiles, filesLoaded { markFilesStale() }
             reloadFiles = false
             ensureFiles()
         } catch {
             if isCancellation(error) { return }
             if pr == nil { self.error = error.localizedDescription } else { refreshError = error.localizedDescription }
+        }
+    }
+
+    private func loadMoreViewed(after cursor: String?) {
+        viewedLoad?.cancel()
+        guard let cursor else { return }
+        viewedLoad = Task { [weak self] in
+            var next: String? = cursor
+            var pages = 0
+            while let after = next, pages < 30 {
+                guard let self, !Task.isCancelled else { return }
+                guard let page = try? await self.api.pullRequestFilesPage(self.ref, after: after), !Task.isCancelled else { return }
+                self.viewedPaths.formUnion(page.viewedPaths)
+                self.changedPaths += page.nodes.map(\.path)
+                next = page.nextCursor
+                pages += 1
+            }
+            self?.publishContext()
+        }
+    }
+
+    private func loadCodeOwners(_ pr: PullRequestDetail) {
+        guard let base = pr.baseTipOid else { return }
+        let key = "\(ref.repo.full)|\(base)"
+        guard key != ownersKey else { return }
+        ownersKey = key
+        Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            do {
+                let owners = try await self.api.codeOwners(self.ref.repo, ref: base)
+                guard self.ownersKey == key else { return }
+                self.codeOwners = owners.map { .loaded($0) } ?? .missing
+                self.publishContext()
+            } catch {
+                guard self.ownersKey == key, !isCancellation(error) else { return }
+                self.ownersKey = nil
+                self.codeOwners = .failed
+            }
+        }
+    }
+
+    private func loadRules(_ pr: PullRequestDetail, force: Bool) {
+        let key = "\(ref.repo.full)|\(pr.baseRefName)"
+        let fresh = rulesFetched.map { Date().timeIntervalSince($0) < 300 } ?? false
+        if !force, key == rulesKey, fresh || branchRules == .loading { return }
+        if key != rulesKey { branchRules = .loading }
+        rulesKey = key
+        rulesFetched = Date()
+        let admin = repo?.viewerPermission == "ADMIN"
+        Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            do {
+                let rules = try await self.api.branchRules(self.ref.repo, branch: pr.baseRefName, admin: admin)
+                guard self.rulesKey == key else { return }
+                self.branchRules = .loaded(rules)
+                self.publishContext()
+            } catch {
+                guard self.rulesKey == key, !isCancellation(error) else { return }
+                self.rulesFetched = nil
+                if self.branchRules.rules == nil { self.branchRules = .failed }
+            }
         }
     }
 
@@ -434,10 +580,10 @@ final class PRDetailModel {
     }
 
     func flatRows(filter: String) -> [FlatDiffRow] {
-        let key = "\(filter)|\(filesVersion)|\(collapsed.sorted().joined(separator: ","))|\(pending.map { $0.id.uuidString }.joined())|\(composer.map { "\($0.path):\($0.side):\($0.line)" } ?? "")|\(threadsVersion)"
+        let key = "\(diffScope)|\(filter)|\(filesVersion)|\(collapsed.sorted().joined(separator: ","))|\(pending.map { $0.id.uuidString }.joined())|\(composer.map { "\($0.path):\($0.side):\($0.line)" } ?? "")|\(threadsVersion)"
         if key == flatCacheKey { return flatCache }
         var out: [FlatDiffRow] = []
-        for file in files where filter.isEmpty || file.id.localizedCaseInsensitiveContains(filter) {
+        for file in displayedFiles where filter.isEmpty || file.id.localizedCaseInsensitiveContains(filter) {
             out.append(.header(file))
             if collapsed.contains(file.id) { continue }
             for r in rows(for: file) { out.append(.row(file, r)) }
@@ -453,6 +599,7 @@ final class PRDetailModel {
 
     func rows(for file: DiffFile) -> [DiffRow] {
         guard file.hasPatch else { return [.note("Diff unavailable (binary or too large)")] }
+        if diffScope == .sinceReview { return file.lines.map { .line($0) } }
         var rows: [DiffRow] = []
         rows.reserveCapacity(file.lines.count + 4)
         let filePending = pending.filter { $0.path == file.id }

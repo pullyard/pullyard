@@ -348,18 +348,35 @@ public static class ClaudeAccountCard
     public static FrameworkElement Create(ClaudeAccountInfo info, bool compact = false)
     {
         var profile = ClaudeProfiles.Shared.Active;
-        var nameRow = Ui.H(5, Ui.Text(info.Email ?? L.T("Claude_SignedIn", "Signed in"), compact ? 13 : 15, "text", FontWeights.Medium));
+        var endpoint = profile.Endpoint;
+        var nameRow = Ui.H(5, Ui.Text(endpoint?.ProviderName ?? info.Email ?? L.T("Claude_SignedIn", "Signed in"), compact ? 13 : 15, "text", FontWeights.Medium));
         if (ClaudeProfiles.Shared.Visible.Count > 1) nameRow.Children.Add(Ui.Chip(profile.Label, "muted"));
         var sub = Ui.H(5);
+        if (endpoint is not null)
+        {
+            var model = Ui.Caption(endpoint.TrimmedModel ?? L.T("Claude_DefaultModels", "Default models"));
+            model.TextTrimming = TextTrimming.CharacterEllipsis;
+            sub.Children.Add(model);
+            if (!AgentEndpoints.HasKey(profile.Id)) sub.Children.Add(Ui.H(4, Ui.Glyph("\uE7BA", 11, "amber"), Ui.Caption(L.T("Claude_ApiKeyMissing", "API key missing"), "amber")));
+        }
         if (info.OrgName is { } org) sub.Children.Add(Ui.Caption(org));
         if (info.Subscription is { } plan) sub.Children.Add(Ui.Chip(plan, "coral"));
         else if (info.Method == "console" || info.Provider != "firstParty") sub.Children.Add(Ui.Caption(info.Provider == "firstParty" ? "API" : info.Provider ?? "API"));
         var more = Ui.IconButton("", L.T("Common_More", "More"), () => { }, "text");
         var menu = ProfileMenu();
         menu.Items.Add(Ui.Separator());
-        menu.Items.Add(Ui.MenuItem(L.T("Claude_SignOutThis", "Sign out of this account…"), () => ConfirmSignOut().Forget()));
-        menu.Items.Add(Ui.Separator());
-        menu.Items.Add(Ui.MenuItem(L.T("Claude_UsagePage", "Usage page"), () => LinkBrowser.Open("https://claude.ai/settings/usage")));
+        if (endpoint is not null)
+        {
+            menu.Items.Add(Ui.MenuItem(L.T("Claude_EditEndpointMenu", "Edit endpoint…"), () => ClaudeDialogs.EditEndpoint(App.MainWindow?.Content?.XamlRoot, profile).Forget()));
+            if (endpoint.Kind == AgentEndpointKind.OpenRouter)
+                menu.Items.Add(Ui.MenuItem(L.T("Claude_OpenRouterActivity", "OpenRouter activity"), () => LinkBrowser.Open("https://openrouter.ai/activity")));
+        }
+        else
+        {
+            menu.Items.Add(Ui.MenuItem(L.T("Claude_SignOutThis", "Sign out of this account…"), () => ConfirmSignOut().Forget()));
+            menu.Items.Add(Ui.Separator());
+            menu.Items.Add(Ui.MenuItem(L.T("Claude_UsagePage", "Usage page"), () => LinkBrowser.Open("https://claude.ai/settings/usage")));
+        }
         menu.Items.Add(Ui.MenuItem(L.T("Claude_RefreshStatus", "Refresh status"), () => ClaudeAccountStore.Shared.Refresh().Forget()));
         more.Flyout = menu;
         var grid = Ui.Columns((ProfileBadge(profile, compact ? 26 : 34), Ui.Auto), (Ui.V(1, nameRow, sub), Ui.Star), (more, Ui.Auto));
@@ -420,22 +437,116 @@ public static class ClaudeAccountCard
 
 public static class ClaudeDialogs
 {
-    public static async Task AddProfile(XamlRoot? root)
+    public static Task AddProfile(XamlRoot? root) => ShowProfileDialog(root, null);
+
+    public static Task EditEndpoint(XamlRoot? root, ClaudeProfile profile) => ShowProfileDialog(root, profile);
+
+    private static string KindTitle(AgentEndpointKind kind) => kind == AgentEndpointKind.OpenRouter ? "OpenRouter" : L.T("Claude_CustomEndpoint", "Custom endpoint");
+
+    private static async Task ShowProfileDialog(XamlRoot? root, ClaudeProfile? editing)
     {
         if (root is null) return;
+        AgentEndpointKind? kind = editing?.Endpoint?.Kind;
         var name = new TextBox { PlaceholderText = L.T("Claude_ProfileName", "Name, e.g. “Personal” or “Work”") };
         var ownsMain = ClaudeProfiles.Shared.OwnsMain;
-        var share = new CheckBox { Content = L.T("Claude_ShareSettings", "Use my settings, CLAUDE.md, skills and plugins from the main account"), IsChecked = true, Visibility = ownsMain ? Visibility.Visible : Visibility.Collapsed };
+        var share = new CheckBox { Content = L.T("Claude_ShareSettings", "Use my settings, CLAUDE.md, skills and plugins from the main account"), IsChecked = true, Visibility = editing is null && ownsMain ? Visibility.Visible : Visibility.Collapsed };
         var error = Ui.Text("", 12, "red", wrap: true);
-        var panel = Ui.V(10, Ui.Text(L.T("Claude_ProfileHelp", "The account gets its own sign-in, session history and limits. Sign-in opens right after."), 13, "muted", wrap: true), name, share, error);
-        var d = Dialogs.Create(root, L.T("Claude_NewAccount", "New Claude account"), panel, L.T("Claude_CreateAndSignIn", "Create and sign in"));
+        var help = Ui.Text("", 13, "muted", wrap: true);
+        var baseUrl = new TextBox { PlaceholderText = L.T("Claude_EndpointBaseUrl", "Base URL, e.g. https://gateway.example.com"), Text = editing?.Endpoint?.BaseUrl ?? AgentEndpoint.OpenRouterUrl };
+        var key = new PasswordBox();
+        var model = new TextBox { Text = editing?.Endpoint?.Model ?? "" };
+        var getKey = Ui.Link(L.T("Claude_GetOpenRouterKey", "Get an OpenRouter key"), () => LinkBrowser.Open("https://openrouter.ai/settings/keys"));
+        var endpointFields = Ui.V(8, baseUrl, key, model,
+            Ui.Text(L.T("Claude_EndpointKeyNote", "The key is stored in Windows Credential Manager and passed only to Claude Code for this account. Your Claude sign-in is not used here; Remote Control and plan usage limits are not available."), 12, "muted", wrap: true),
+            getKey);
+        var d = Dialogs.Create(root, editing is null ? L.T("Claude_NewAccount", "New Claude account") : L.T("Claude_EditEndpoint", "Edit endpoint"), new StackPanel(), L.T("Claude_CreateAndSignIn", "Create and sign in"), maxWidth: 560);
+
+        void Update()
+        {
+            help.Text = kind is null
+                ? L.T("Claude_ProfileHelp", "The account gets its own sign-in, session history and limits. Sign-in opens right after.")
+                : L.T("Claude_EndpointHelp", "Claude Code sends requests to this endpoint with your API key. Usage is billed by the endpoint, not your Claude plan.");
+            name.PlaceholderText = kind == AgentEndpointKind.OpenRouter ? L.T("Claude_ProfileNameOpenRouter", "Name, e.g. “OpenRouter”") : L.T("Claude_ProfileName", "Name, e.g. “Personal” or “Work”");
+            endpointFields.Visibility = kind is null ? Visibility.Collapsed : Visibility.Visible;
+            baseUrl.Visibility = kind == AgentEndpointKind.Custom ? Visibility.Visible : Visibility.Collapsed;
+            getKey.Visibility = kind == AgentEndpointKind.OpenRouter ? Visibility.Visible : Visibility.Collapsed;
+            key.PlaceholderText = editing is not null ? L.T("Claude_EndpointKeyKeep", "API key (leave empty to keep the saved key)")
+                : kind == AgentEndpointKind.OpenRouter ? L.T("Claude_OpenRouterKey", "OpenRouter API key (sk-or-…)") : L.T("Claude_EndpointKey", "API key");
+            model.PlaceholderText = kind == AgentEndpointKind.OpenRouter ? L.T("Claude_EndpointModelOpenRouter", "Model (optional), e.g. anthropic/claude-sonnet-4.5") : L.T("Claude_EndpointModel", "Model (optional)");
+            d.PrimaryButtonText = editing is not null ? L.T("Common_Save", "Save") : kind is null ? L.T("Claude_CreateAndSignIn", "Create and sign in") : L.T("Claude_Create", "Create");
+        }
+
+        var panel = Ui.V(10);
+        if (editing is null)
+        {
+            var access = new SelectorBar();
+            foreach (var (tag, title) in new[] { ("signin", L.T("Claude_AccessSignIn", "Claude sign-in")), ("openrouter", KindTitle(AgentEndpointKind.OpenRouter)), ("custom", KindTitle(AgentEndpointKind.Custom)) })
+            {
+                var item = new SelectorBarItem { Text = title, Tag = tag };
+                access.Items.Add(item);
+                if (tag == "signin") access.SelectedItem = item;
+            }
+            access.SelectionChanged += (s, _) =>
+            {
+                kind = s.SelectedItem?.Tag switch
+                {
+                    "openrouter" => AgentEndpointKind.OpenRouter,
+                    "custom" => AgentEndpointKind.Custom,
+                    _ => null
+                };
+                if (kind == AgentEndpointKind.OpenRouter) baseUrl.Text = AgentEndpoint.OpenRouterUrl;
+                if (kind == AgentEndpointKind.Custom && baseUrl.Text == AgentEndpoint.OpenRouterUrl) baseUrl.Text = "";
+                error.Text = "";
+                Update();
+            };
+            panel.Children.Add(access);
+            panel.Children.Add(help);
+            panel.Children.Add(name);
+        }
+        panel.Children.Add(endpointFields);
+        panel.Children.Add(share);
+        panel.Children.Add(error);
+        d.Content = panel;
+        Update();
         d.PrimaryButtonClick += (_, args) =>
         {
+            error.Text = "";
             try
             {
-                var p = ClaudeProfiles.Shared.Add(name.Text, ownsMain && share.IsChecked == true);
                 var app = AppViewModel.Shared;
-                app.SwitchClaudeProfile(p.Id);
+                if (kind is not { } k)
+                {
+                    var p = ClaudeProfiles.Shared.Add(name.Text, ownsMain && share.IsChecked == true);
+                    app.SwitchClaudeProfile(p.Id);
+                    app.Section = Section.Claude;
+                    return;
+                }
+                if (AgentEndpoint.Problem(baseUrl.Text) is { } problem)
+                {
+                    error.Text = problem == AgentEndpointProblem.MissingAddress
+                        ? L.T("Claude_EndpointMissingAddress", "Enter the full address, e.g. https://openrouter.ai/api")
+                        : L.T("Claude_EndpointInsecure", "Use https. Plain http is allowed only for localhost.");
+                    args.Cancel = true;
+                    return;
+                }
+                var trimmedKey = key.Password.Trim();
+                var trimmedModel = model.Text.Trim();
+                var endpoint = new AgentEndpoint { Kind = k, BaseUrl = AgentEndpoint.Normalized(baseUrl.Text), Model = trimmedModel.Length == 0 ? null : trimmedModel };
+                if (editing is not null)
+                {
+                    ClaudeProfiles.Shared.UpdateEndpoint(editing.Id, endpoint, trimmedKey);
+                    ClaudeAccountStore.Shared.Refresh().Forget();
+                    return;
+                }
+                if (trimmedKey.Length == 0)
+                {
+                    error.Text = L.T("Claude_EndpointKeyRequired", "Enter the API key.");
+                    args.Cancel = true;
+                    return;
+                }
+                var label = name.Text.Trim();
+                var created = ClaudeProfiles.Shared.Add(label.Length == 0 ? KindTitle(k) : label, ownsMain && share.IsChecked == true, endpoint: endpoint, key: trimmedKey);
+                app.SwitchClaudeProfile(created.Id);
                 app.Section = Section.Claude;
             }
             catch (Exception e)

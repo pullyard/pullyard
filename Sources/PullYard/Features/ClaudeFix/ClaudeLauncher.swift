@@ -83,7 +83,7 @@ enum ClaudeLauncher {
         let scriptURL = dir.appendingPathComponent("fix-\(id).command")
         try positionalPrompt(prompt).write(to: promptURL, atomically: true, encoding: .utf8)
 
-        let configExport = configDir.map { "export CLAUDE_CONFIG_DIR=\(shellQuote($0))" } ?? ""
+        let configExport = (configDir.map { "export CLAUDE_CONFIG_DIR=\(shellQuote($0))" } ?? "") + "\n" + (try AgentEndpoints.shellPrelude(configDir: configDir, directory: dir))
         var args = ""
         if mode != .standard { args += " --permission-mode \(mode.rawValue)" }
         if let resumeId { args += " --resume \(shellQuote(resumeId))" } else { args += " -n \(shellQuote(sessionName))" }
@@ -101,7 +101,7 @@ enum ClaudeLauncher {
 
         """
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
 
         let bundleID = target == .iterm ? "com.googlecode.iterm2" : "com.apple.Terminal"
         guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {

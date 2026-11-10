@@ -49,6 +49,11 @@ public sealed class BranchName
     public string Name { get; set; } = "";
 }
 
+public sealed class RefTip
+{
+    public ReviewCommit? Target { get; set; }
+}
+
 public sealed class RepoName
 {
     public string NameWithOwner { get; set; } = "";
@@ -149,12 +154,15 @@ public sealed class Reviewer
     public string? Login { get; set; }
     public string? AvatarUrl { get; set; }
     public string? Name { get; set; }
-    public string Display => Login ?? Name ?? "?";
+    public string? CombinedSlug { get; set; }
+    public bool IsTeam => Typename == "Team";
+    public string Display => Login ?? CombinedSlug ?? Name ?? "?";
 }
 
 public sealed class ReviewRequest
 {
     public Reviewer? RequestedReviewer { get; set; }
+    public bool? AsCodeOwner { get; set; }
 }
 
 public sealed class ReviewCommit
@@ -204,6 +212,7 @@ public sealed class CheckContext
     public string? State { get; set; }
     public string? TargetUrl { get; set; }
     public string? Description { get; set; }
+    public bool? IsRequired { get; set; }
 
     public string Id => $"{Typename}-{(DatabaseId?.ToString() ?? Context ?? Name ?? "?")}";
     public string Title => Name ?? Context ?? "?";
@@ -293,6 +302,20 @@ public sealed class FileViewed
 {
     public string Path { get; set; } = "";
     public string ViewerViewedState { get; set; } = "";
+}
+
+public sealed class FileViewedPage
+{
+    [JsonIgnore]
+    public List<FileViewed> Items { get; set; } = new();
+    public int? TotalCount { get; set; }
+    public PageInfo? PageInfo { get; set; }
+
+    [JsonPropertyName("nodes")]
+    public List<FileViewed?> RawNodes { get => Items.Cast<FileViewed?>().ToList(); set => Items = (value ?? new()).OfType<FileViewed>().ToList(); }
+
+    public HashSet<string> ViewedPaths => Items.Where(f => f.ViewerViewedState == "VIEWED").Select(f => f.Path).ToHashSet();
+    public string? NextCursor => PageInfo?.HasNextPage == true ? PageInfo.EndCursor : null;
 }
 
 public sealed class XRefSource
@@ -400,6 +423,7 @@ public sealed class PullRequestDetail
     public string HeadRefOid { get; set; } = "";
     public RepoName? HeadRepository { get; set; }
     public BranchName? HeadRef { get; set; }
+    public RefTip? BaseRef { get; set; }
     public int Additions { get; set; }
     public int Deletions { get; set; }
     public int ChangedFiles { get; set; }
@@ -413,7 +437,7 @@ public sealed class PullRequestDetail
     public Nodes<LatestReview> LatestOpinionatedReviews { get; set; } = new();
     public Nodes<LastCommitNode> LastCommit { get; set; } = new();
     public Nodes<CommitInfoNode> AllCommits { get; set; } = new();
-    public Nodes<FileViewed>? Files { get; set; }
+    public FileViewedPage? Files { get; set; }
     public Nodes<TimelineItem> TimelineItems { get; set; } = new();
     public Nodes<ReviewThread> ReviewThreads { get; set; } = new();
 
@@ -421,6 +445,7 @@ public sealed class PullRequestDetail
     public StatusRollup? Rollup => LastCommit.Items.FirstOrDefault()?.Commit.StatusCheckRollup;
     public List<CheckContext> Checks => Rollup?.Contexts?.Items ?? new();
     public bool IsOpen => State == "OPEN";
+    public string? BaseTipOid => BaseRef?.Target?.Oid;
 }
 
 public sealed class PRRepository

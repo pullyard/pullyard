@@ -176,7 +176,7 @@ public static class ClaudeLauncher
         _ => true
     };
 
-    public static Dictionary<string, string?> ProcessEnvironment(string? configDir)
+    public static Dictionary<string, string?> ProcessEnvironment(string? configDir, bool withEndpoint = true)
     {
         var env = new Dictionary<string, string?>();
         foreach (System.Collections.DictionaryEntry e in System.Environment.GetEnvironmentVariables())
@@ -188,6 +188,8 @@ public static class ClaudeLauncher
         if (configDir is not null) env["CLAUDE_CONFIG_DIR"] = configDir;
         if (Command is { } c && c.Directory.Length > 0)
             env["PATH"] = c.Directory + Path.PathSeparator + (System.Environment.GetEnvironmentVariable("PATH") ?? "");
+        if (withEndpoint && AgentEndpoints.Environment(configDir) is { } endpoint)
+            foreach (var (k, v) in endpoint) env[k] = v;
         return env;
     }
 
@@ -248,7 +250,7 @@ public static class ClaudeLauncher
             psi.ArgumentList.Add(WtArg(powershell));
             foreach (var a in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File" }) psi.ArgumentList.Add(a);
             psi.ArgumentList.Add(WtArg(script));
-            Apply(psi, configDir);
+            Apply(psi, configDir, false);
             Process.Start(psi);
             return;
         }
@@ -292,7 +294,7 @@ public static class ClaudeLauncher
 
     private static string WtArg(string value) => value.Replace(";", "\\;");
 
-    private static string PsQuote(string value) =>
+    internal static string PsQuote(string value) =>
         "'" + value.Replace("'", "''").Replace("\u2018", "\u2018\u2018").Replace("\u2019", "\u2019\u2019").Replace("\u201A", "\u201A\u201A").Replace("\u201B", "\u201B\u201B") + "'";
 
     private const string EscapePromptScript = """
@@ -306,6 +308,7 @@ $p = $p -replace '(\\+)\z', '$1$1'
         System.IO.Directory.CreateDirectory(dir);
         var sb = new StringBuilder();
         if (configDir is not null) sb.Append("$env:CLAUDE_CONFIG_DIR = ").Append(PsQuote(configDir)).Append("\r\n");
+        sb.Append(AgentEndpoints.PowerShellPrelude(configDir));
         sb.Append("$a = @(").Append(string.Join(",", command.PrefixArgs.Concat(args).Select(PsQuote))).Append(")\r\n");
         if (prompt.Length > 0)
         {
@@ -322,9 +325,9 @@ $p = $p -replace '(\\+)\z', '$1$1'
         return script;
     }
 
-    private static void Apply(ProcessStartInfo psi, string? configDir)
+    private static void Apply(ProcessStartInfo psi, string? configDir, bool withEndpoint = true)
     {
-        foreach (var (k, v) in ProcessEnvironment(configDir))
+        foreach (var (k, v) in ProcessEnvironment(configDir, withEndpoint))
         {
             if (v is null) psi.Environment.Remove(k);
             else psi.Environment[k] = v;

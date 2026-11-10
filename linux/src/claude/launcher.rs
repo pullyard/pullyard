@@ -114,7 +114,7 @@ pub fn launch(prompt: &str, folder: &str, target: Target, mode: PermissionMode, 
     let prompt_path = format!("{dir}/prompt-{id}.md");
     let script_path = format!("{dir}/fix-{id}.sh");
     write_private(&prompt_path, prompt, 0o600)?;
-    let config_export = config_dir.map(|d| format!("export CLAUDE_CONFIG_DIR={}", util::shell_quote(d))).unwrap_or_default();
+    let config_export = config_dir.map(|d| format!("export CLAUDE_CONFIG_DIR={}", util::shell_quote(d))).unwrap_or_default() + "\n" + &super::endpoint::shell_prelude(config_dir, std::path::Path::new(&dir))?;
     let mut args = String::new();
     if mode != PermissionMode::Standard {
         args.push_str(&format!(" --permission-mode {}", mode.key()));

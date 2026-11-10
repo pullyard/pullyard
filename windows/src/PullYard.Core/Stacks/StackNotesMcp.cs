@@ -143,19 +143,21 @@ public sealed class StackNotesMcpServer
 {
     public static readonly string[] Versions = { "2025-06-18", "2025-03-26", "2024-11-05" };
 
-    public const string Instructions = "PullYard stack notes. Use add_stack_note when the user asks you to leave a note, question or decision on a pull request in their stack, or when you finish work on a stacked PR and something is worth remembering for the reviewer. Notes stay on the user's PC and are never posted to GitHub.";
+    public const string Instructions = "PullYard stack notes and pull request context. Use add_stack_note when the user asks you to leave a note, question or decision on a pull request in their stack, or when you finish work on a stacked PR and something is worth remembering for the reviewer. Notes stay on the user's PC and are never posted to GitHub. The read-only tools get_pull_request, list_review_threads, list_checks and list_changed_files return what PullYard last loaded for a pull request the user opened: merge requirements, required checks, review threads, code owners and changes since the user's last review.";
 
     public string? Account { get; }
     public string Host { get; }
+    public string ContextDirectory { get; }
     private readonly string notesFile;
     private readonly Func<DateTimeOffset> now;
 
-    public StackNotesMcpServer(string? account, string host, string notesFile, Func<DateTimeOffset>? now = null)
+    public StackNotesMcpServer(string? account, string host, string notesFile, Func<DateTimeOffset>? now = null, string? contextDirectory = null)
     {
         Account = string.IsNullOrEmpty(account) ? null : account;
         Host = host;
         this.notesFile = notesFile;
         this.now = now ?? (() => DateTimeOffset.Now);
+        ContextDirectory = contextDirectory ?? PRContextStore.DirectoryFor(notesFile);
     }
 
     public static string? Value(IReadOnlyList<string> args, string name)
@@ -275,6 +277,16 @@ public sealed class StackNotesMcpServer
                 {
                     return Text(id, $"Couldn't save the note: {e.Message}", true);
                 }
+            case "get_pull_request" or "list_review_threads" or "list_checks" or "list_changed_files":
+                if (PRContextStore.Read(key, ContextDirectory) is not { } snapshot)
+                    return Text(id, $"PullYard has no context for {repo}#{number}. Ask the user to open that pull request in PullYard, then try again.", true);
+                return Text(id, name switch
+                {
+                    "get_pull_request" => PRContextFormatter.Overview(snapshot),
+                    "list_review_threads" => PRContextFormatter.Threads(snapshot, args.Bool("include_resolved") ?? false),
+                    "list_checks" => PRContextFormatter.Checks(snapshot),
+                    _ => PRContextFormatter.Files(snapshot)
+                });
             case "list_stack_notes":
                 var notes = StackNotesFile.Read(notesFile, key);
                 if (notes.Count == 0) return Text(id, $"No notes on {repo}#{number}.");
@@ -294,6 +306,15 @@ public sealed class StackNotesMcpServer
         var add = Target();
         add["kind"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("note", "question", "decision"), ["description"] = "note (default), question or decision" };
         add["text"] = new JsonObject { ["type"] = "string", ["description"] = "The note text, plain text or short Markdown" };
+        var threadProps = Target();
+        threadProps["include_resolved"] = new JsonObject { ["type"] = "boolean", ["description"] = "Also return resolved threads (default false)" };
+        JsonObject ReadOnly(string name, string description, JsonObject properties) => new()
+        {
+            ["name"] = name,
+            ["description"] = description,
+            ["inputSchema"] = new JsonObject { ["type"] = "object", ["properties"] = properties, ["required"] = new JsonArray("repo", "pr") },
+            ["annotations"] = new JsonObject { ["readOnlyHint"] = true }
+        };
         return new JsonArray(
             new JsonObject
             {
@@ -307,7 +328,11 @@ public sealed class StackNotesMcpServer
                 ["description"] = "List the PullYard stack notes on a pull request.",
                 ["inputSchema"] = new JsonObject { ["type"] = "object", ["properties"] = Target(), ["required"] = new JsonArray("repo", "pr") },
                 ["annotations"] = new JsonObject { ["readOnlyHint"] = true }
-            });
+            },
+            ReadOnly("get_pull_request", "Overview of a pull request as PullYard last loaded it: title, branches, description, merge status with each merge requirement (approvals, required checks, conversations, conflicts), reviewers, code owners and the commit the user last reviewed.", Target()),
+            ReadOnly("list_review_threads", "Review threads on a pull request with file, line and comments. Unresolved threads only unless include_resolved is true.", threadProps),
+            ReadOnly("list_checks", "CI checks on the pull request head commit, failing first, marked required or optional when GitHub reports it.", Target()),
+            ReadOnly("list_changed_files", "Files changed by the pull request, with their code owners when the repository has a CODEOWNERS file.", Target()));
     }
 }
 

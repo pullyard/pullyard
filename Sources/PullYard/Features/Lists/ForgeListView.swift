@@ -225,7 +225,7 @@ struct ForgeDetailColumn: View {
 
     var body: some View {
         if let item = app.forgeSelection {
-            ForgeItemDetailView(item: item, provider: app.provider).id(item.id).transition(.routeSwap)
+            ForgeItemDetailView(item: item, provider: app.provider, caps: app.forgeCaps).id(item.id).transition(.routeSwap)
         } else {
             VStack(spacing: 12) {
                 IconTile(systemImage: app.provider.icon, color: .syViolet, size: 56).opacity(0.9)
@@ -251,6 +251,7 @@ private extension ForgeDetailColumn {
 struct ForgeItemDetailView: View {
     let item: SearchItem
     let provider: GitProvider
+    var caps = ForgeCapabilities(pullFilters: [])
 
     var body: some View {
         ScrollView {
@@ -292,17 +293,27 @@ struct ForgeItemDetailView: View {
                 }
                 .controlSize(.large)
                 .padding(.top, 4)
-                Label(item.isPR ? "Changed files, comments and review for \(provider.title) are coming in a later version. Open the \(provider.requestTitle) in the browser to review it." : "Comments for \(provider.title) issues are coming in a later version. Open the issue in the browser to reply.", systemImage: "info.circle")
-                    .font(.syCallout)
-                    .foregroundStyle(Color.syMuted)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .card(radius: 10, fill: .sySunken)
+                if !item.isPR || caps.pullRequestReview != .supported {
+                    Label(item.isPR ? prNotice : "Comments for \(provider.title) issues are coming in a later version. Open the issue in the browser to reply.", systemImage: "info.circle")
+                        .font(.syCallout)
+                        .foregroundStyle(Color.syMuted)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .card(radius: 10, fill: .sySunken)
+                }
             }
             .padding(24)
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+private extension ForgeItemDetailView {
+    var prNotice: String {
+        let review = "Changed files, comments and review for \(provider.title) are coming in a later version."
+        let merge = caps.mergeRequirements == .supported ? "" : " Merge requirements aren’t available for \(provider.title) yet."
+        return review + merge + " Open the \(provider.requestTitle) in the browser to review it."
     }
 }
 

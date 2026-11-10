@@ -12,6 +12,8 @@ struct FixWithClaudeSheet: View {
     @Environment(AppModel.self) private var app
     @AppStorage("claudeTarget.v2") private var target: ClaudeTarget = .app
     @AppStorage("claudeMode") private var mode: ClaudePermissionMode = .standard
+    @AppStorage("agentFix.isolatedWorktree") private var isolate = true
+    @State private var launching = false
     @State private var found: FoundFixPrompt?
     @State private var source: FixSource = .composed
     @State private var selected: Set<String> = []
@@ -76,8 +78,9 @@ struct FixWithClaudeSheet: View {
             .onChange(of: options.push) { _, push in if !push { options.replyAndResolve = false } }
             promptEditor
             ClaudeFolderRow(repo: model.ref.repo, folder: $folder, detecting: detecting)
+            ClaudeWorktreeRow(folder: folder, number: pr.number, target: target, isolate: $isolate)
             if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
-            ClaudeLaunchRow(target: $target, mode: $mode, canLaunch: !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (target == .copy || folder != nil) && !(source == .ci && (ciLoading || ciSelected.isEmpty)), onLaunch: launch)
+            ClaudeLaunchRow(target: $target, mode: $mode, canLaunch: !launching && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (target == .copy || folder != nil) && !(source == .ci && (ciLoading || ciSelected.isEmpty)), onLaunch: launch)
         }
         .padding(20)
         .frame(width: 780, height: 680)
@@ -305,15 +308,20 @@ struct FixWithClaudeSheet: View {
     }
 
     private func launch() {
-        do {
-            let name = source == .ci ? "Fix CI PR #\(pr.number): \(pr.title)" : "Fix PR #\(pr.number): \(pr.title)"
-            let tab = try ClaudeLauncher.start(app: app, prompt: prompt, folder: folder, target: target, mode: mode, name: name)
-            if source == .ci, target != .copy {
-                app.claude.ciFixes[model.ref] = CIFixLaunch(tabID: tab?.id, target: target, headOid: pr.headRefOid, at: Date())
+        let name = source == .ci ? "Fix CI PR #\(pr.number): \(pr.title)" : "Fix PR #\(pr.number): \(pr.title)"
+        launching = true
+        error = nil
+        Task {
+            defer { launching = false }
+            do {
+                let tab = try await ClaudeLauncher.startForPR(app: app, prompt: prompt, folder: folder, isolate: isolate, pr: pr, repo: model.ref.repo, target: target, mode: mode, name: name)
+                if source == .ci, target != .copy {
+                    app.claude.ciFixes[model.ref] = CIFixLaunch(tabID: tab?.id, target: target, headOid: pr.headRefOid, at: Date())
+                }
+                dismiss()
+            } catch {
+                self.error = error.localizedDescription
             }
-            dismiss()
-        } catch {
-            self.error = error.localizedDescription
         }
     }
 }

@@ -42,7 +42,7 @@ fn common_timeline() -> String {
 
 fn pr_timeline() -> String {
     format!(
-        "... on PullRequestReview {{ id author {ACTOR} state body bodyHTML createdAt url }}
+        "... on PullRequestReview {{ id author {ACTOR} state body bodyHTML createdAt url commit {{ oid }} }}
 ... on PullRequestCommit {{ commit {{ oid abbreviatedOid messageHeadline committedDate author {{ name avatarUrl user {{ login }} }} }} }}
 ... on MergedEvent {{ actor {ACTOR} createdAt mergeRefName commit {{ abbreviatedOid }} }}
 ... on HeadRefForcePushedEvent {{ actor {ACTOR} createdAt }}
@@ -59,6 +59,17 @@ pub fn pull_request_light() -> String {
     format!("query($owner: String!, $name: String!, $number: Int!) {{ repository(owner: $owner, name: $name) {{ pullRequest(number: $number) {{ ...PrLight }} }} }}\n{PR_LIGHT_FRAGMENT}")
 }
 
+pub fn pull_request_legacy() -> String {
+    pull_request()
+        .replace(" isRequired(pullRequestNumber: $number)", "")
+        .replace("asCodeOwner ", "")
+        .replace(" combinedSlug avatarUrl", "")
+}
+
+pub const PULL_REQUEST_FILES: &str = "query($owner: String!, $name: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { files(first: 100, after: $after) { totalCount pageInfo { hasNextPage endCursor } nodes { path viewerViewedState } } } } }";
+
+pub const CODE_OWNERS: &str = "query($owner: String!, $name: String!, $a: String!, $b: String!, $c: String!) { repository(owner: $owner, name: $name) { a: object(expression: $a) { ... on Blob { text isTruncated } } b: object(expression: $b) { ... on Blob { text isTruncated } } c: object(expression: $c) { ... on Blob { text isTruncated } } } }";
+
 pub fn pull_request() -> String {
     format!(
         "query($owner: String!, $name: String!, $number: Int!) {{
@@ -69,6 +80,7 @@ pub fn pull_request() -> String {
       id number title url state isDraft merged mergeable mergeStateStatus body bodyHTML createdAt
       author {ACTOR}
       headRefName baseRefName headRefOid
+      baseRef {{ target {{ oid }} }}
       headRepository {{ nameWithOwner }}
       headRef {{ name }}
       additions deletions changedFiles
@@ -76,14 +88,14 @@ pub fn pull_request() -> String {
       autoMergeRequest {{ enabledAt mergeMethod }}
       labels(first: 20) {{ nodes {{ name color }} }}
       assignees(first: 10) {{ nodes {{ login avatarUrl }} }}
-      reviewRequests(first: 20) {{ nodes {{ requestedReviewer {{ __typename ... on User {{ login avatarUrl }} ... on Team {{ name }} ... on Mannequin {{ login avatarUrl }} }} }} }}
+      reviewRequests(first: 20) {{ nodes {{ asCodeOwner requestedReviewer {{ __typename ... on User {{ login avatarUrl }} ... on Team {{ name combinedSlug avatarUrl }} ... on Mannequin {{ login avatarUrl }} }} }} }}
       latestOpinionatedReviews(first: 20) {{ nodes {{ state submittedAt commit {{ oid }} author {ACTOR} }} }}
       lastCommit: commits(last: 1) {{ nodes {{ commit {{ oid committedDate statusCheckRollup {{ state contexts(first: 100) {{ nodes {{ __typename
-        ... on CheckRun {{ databaseId name status conclusion detailsUrl startedAt completedAt checkSuite {{ workflowRun {{ databaseId workflow {{ name }} }} }} }}
-        ... on StatusContext {{ context state targetUrl description }}
+        ... on CheckRun {{ databaseId name status conclusion detailsUrl startedAt completedAt isRequired(pullRequestNumber: $number) checkSuite {{ workflowRun {{ databaseId workflow {{ name }} }} }} }}
+        ... on StatusContext {{ context state targetUrl description isRequired(pullRequestNumber: $number) }}
       }} }} }} }} }} }}
       allCommits: commits(first: 100) {{ totalCount nodes {{ commit {{ oid abbreviatedOid messageHeadline committedDate url author {{ name avatarUrl user {{ login }} }} statusCheckRollup {{ state }} }} }} }}
-      files(first: 100) {{ nodes {{ path viewerViewedState }} }}
+      files(first: 100) {{ totalCount pageInfo {{ hasNextPage endCursor }} nodes {{ path viewerViewedState }} }}
       timelineItems(last: 100, itemTypes: [ISSUE_COMMENT, PULL_REQUEST_REVIEW, PULL_REQUEST_COMMIT, MERGED_EVENT, CLOSED_EVENT, REOPENED_EVENT, HEAD_REF_FORCE_PUSHED_EVENT, HEAD_REF_DELETED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, REVIEW_REQUESTED_EVENT, CROSS_REFERENCED_EVENT, LABELED_EVENT, RENAMED_TITLE_EVENT]) {{
         totalCount nodes {{ __typename {} {} }}
       }}

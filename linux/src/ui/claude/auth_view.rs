@@ -4,6 +4,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 
 use crate::claude::accounts::{self, LoginMethod, Status};
+use crate::claude::endpoint::{self, AgentEndpoint, Kind, OPENROUTER_ACTIVITY_URL, OPENROUTER_KEYS_URL, OPENROUTER_URL};
 use crate::settings::ClaudeProfile;
 use crate::ui::dialogs::{self, Sheet};
 use crate::ui::menu::Menu;
@@ -121,15 +122,63 @@ pub fn profile_switcher() -> gtk::MenuButton {
 }
 
 pub fn add_profile_sheet() {
-    let sheet = Sheet::new("New Claude account", 460, -1);
-    sheet.body.append(&wrap_label("The account gets its own sign-in, session history and limits. Sign-in opens right after.", &["sy-muted"]));
+    profile_sheet(None);
+}
+
+pub fn edit_endpoint_sheet(profile: ClaudeProfile) {
+    profile_sheet(Some(profile));
+}
+
+fn profile_sheet(editing: Option<ClaudeProfile>) {
+    let editing_endpoint = editing.as_ref().and_then(|p| p.endpoint.clone());
+    let sheet = Sheet::new(if editing.is_some() { "Edit endpoint" } else { "New Claude account" }, 500, -1);
+    let access: Rc<Cell<Option<Kind>>> = Rc::new(Cell::new(editing_endpoint.as_ref().map(|e| e.kind)));
+    let toggles = hbox(0);
+    toggles.add_css_class("linked");
+    let mut choices: Vec<(gtk::ToggleButton, Option<Kind>)> = vec![];
+    let mut first: Option<gtk::ToggleButton> = None;
+    for (title, kind) in std::iter::once(("Claude sign-in", None)).chain(Kind::ALL.into_iter().map(|k| (k.title(), Some(k)))) {
+        let t = gtk::ToggleButton::with_label(title);
+        t.set_hexpand(true);
+        match &first {
+            Some(f) => t.set_group(Some(f)),
+            None => first = Some(t.clone()),
+        }
+        t.set_active(access.get() == kind);
+        toggles.append(&t);
+        choices.push((t, kind));
+    }
+    let intro = wrap_label("", &["sy-muted"]);
     let entry = gtk::Entry::new();
-    entry.set_placeholder_text(Some("Name, e.g. “Personal” or “Work”"));
-    sheet.body.append(&entry);
+    if editing.is_none() {
+        sheet.body.append(&toggles);
+        sheet.body.append(&intro);
+        sheet.body.append(&entry);
+    }
+    let fields = vbox(8);
+    let base_url = gtk::Entry::new();
+    base_url.set_placeholder_text(Some("Base URL, e.g. https://gateway.example.com"));
+    base_url.set_text(editing_endpoint.as_ref().map(|e| e.base_url.as_str()).unwrap_or(OPENROUTER_URL));
+    fields.append(&base_url);
+    let key = gtk::PasswordEntry::new();
+    key.set_show_peek_icon(true);
+    fields.append(&key);
+    let model = gtk::Entry::new();
+    model.set_text(editing_endpoint.as_ref().and_then(|e| e.model.as_deref()).unwrap_or(""));
+    fields.append(&model);
+    fields.append(&wrap_label(
+        "The key is stored in the system keyring and passed only to Claude Code for this account. Your Claude sign-in is not used here; Remote Control and plan usage limits are not available.",
+        &["sy-muted", "sy-small"],
+    ));
+    let get_key = link_button("Get an OpenRouter key");
+    get_key.set_halign(gtk::Align::Start);
+    get_key.connect_clicked(|_| util::open_url(OPENROUTER_KEYS_URL));
+    fields.append(&get_key);
+    sheet.body.append(&fields);
     let share = gtk::CheckButton::with_label("Use my settings, CLAUDE.md, skills and plugins from the main account");
     let owns_main = accounts::owns_main();
     share.set_active(owns_main);
-    share.set_visible(owns_main);
+    share.set_visible(owns_main && editing.is_none());
     sheet.body.append(&share);
     let error = label_with("", &["fg-red", "sy-small"]);
     error.set_visible(false);
@@ -138,23 +187,123 @@ pub fn add_profile_sheet() {
     sheet.cancel_button();
     let create = tinted("Create and sign in", "coral");
     sheet.footer.append(&create);
+    let is_edit = editing.is_some();
+    let update = {
+        let (access, intro, entry, base_url, key, model, fields, get_key, create, error) = (access.clone(), intro.clone(), entry.clone(), base_url.clone(), key.clone(), model.clone(), fields.clone(), get_key.clone(), create.clone(), error.clone());
+        Rc::new(move || {
+            let kind = access.get();
+            intro.set_text(if kind.is_none() {
+                "The account gets its own sign-in, session history and limits. Sign-in opens right after."
+            } else {
+                "Claude Code sends requests to this endpoint with your API key. Usage is billed by the endpoint, not your Claude plan."
+            });
+            entry.set_placeholder_text(Some(if kind == Some(Kind::OpenRouter) { "Name, e.g. “OpenRouter”" } else { "Name, e.g. “Personal” or “Work”" }));
+            fields.set_visible(kind.is_some());
+            base_url.set_visible(kind == Some(Kind::Custom));
+            get_key.set_visible(kind == Some(Kind::OpenRouter));
+            key.set_placeholder_text(Some(if is_edit {
+                "API key (leave empty to keep the saved key)"
+            } else if kind == Some(Kind::OpenRouter) {
+                "OpenRouter API key (sk-or-…)"
+            } else {
+                "API key"
+            }));
+            model.set_placeholder_text(Some(if kind == Some(Kind::OpenRouter) { "Model (optional), e.g. anthropic/claude-sonnet-4.5" } else { "Model (optional)" }));
+            create.set_label(if is_edit {
+                "Save"
+            } else if kind.is_none() {
+                "Create and sign in"
+            } else {
+                "Create"
+            });
+            error.set_visible(false);
+        })
+    };
+    update();
+    for (t, kind) in &choices {
+        let (access, base_url, update, kind) = (access.clone(), base_url.clone(), update.clone(), *kind);
+        t.connect_toggled(move |b| {
+            if !b.is_active() {
+                return;
+            }
+            access.set(kind);
+            if kind == Some(Kind::OpenRouter) {
+                base_url.set_text(OPENROUTER_URL);
+            }
+            if kind == Some(Kind::Custom) && base_url.text() == OPENROUTER_URL {
+                base_url.set_text("");
+            }
+            update();
+        });
+    }
+    let key_input = key.clone();
     let d = sheet.dialog.clone();
     let e = entry.clone();
-    let go = Rc::new(move || match accounts::add(&e.text(), owns_main && share.is_active()) {
-        Ok(p) => {
-            switch_profile(&p.id);
-            app::set_section(app::Section::Claude);
-            d.close();
+    let busy = Rc::new(Cell::new(false));
+    let go = Rc::new(move || {
+        if busy.get() {
+            return;
         }
-        Err(msg) => {
-            error.set_text(&msg);
-            error.set_visible(true);
+        error.set_visible(false);
+        let fail = {
+            let error = error.clone();
+            move |msg: &str| {
+                error.set_text(msg);
+                error.set_visible(true);
+            }
+        };
+        let Some(kind) = access.get() else {
+            match accounts::add(&e.text(), owns_main && share.is_active()) {
+                Ok(p) => {
+                    switch_profile(&p.id);
+                    app::set_section(app::Section::Claude);
+                    d.close();
+                }
+                Err(msg) => fail(&msg),
+            }
+            return;
+        };
+        if let Some(problem) = AgentEndpoint::problem(&base_url.text()) {
+            fail(problem);
+            return;
         }
+        let trimmed_key = key.text().trim().to_string();
+        let trimmed_model = model.text().trim().to_string();
+        let endpoint = AgentEndpoint { kind, base_url: AgentEndpoint::normalized(&base_url.text()), model: if trimmed_model.is_empty() { None } else { Some(trimmed_model) } };
+        if editing.is_none() && trimmed_key.is_empty() {
+            fail("Enter the API key.");
+            return;
+        }
+        busy.set(true);
+        let (d, busy, editing) = (d.clone(), busy.clone(), editing.clone());
+        let name = e.text().trim().to_string();
+        let shared = owns_main && share.is_active();
+        crate::rt::spawn_local(async move {
+            let result = match &editing {
+                Some(p) => accounts::update_endpoint(&p.id, endpoint, &trimmed_key).await.map(|_| None),
+                None => accounts::add_endpoint(if name.is_empty() { kind.title() } else { &name }, shared, endpoint, &trimmed_key).await.map(Some),
+            };
+            busy.set(false);
+            match result {
+                Ok(Some(p)) => {
+                    switch_profile(&p.id);
+                    app::set_section(app::Section::Claude);
+                    d.close();
+                }
+                Ok(None) => {
+                    crate::rt::spawn_local(async { accounts::store().refresh().await });
+                    d.close();
+                }
+                Err(msg) => fail(&msg),
+            }
+        });
     });
     let g = go.clone();
     create.connect_clicked(move |_| g());
     let g = go.clone();
     entry.connect_activate(move |_| g());
+    let g = go.clone();
+    key_input.connect_activate(move |_| g());
     sheet.present();
 }
 
@@ -167,19 +316,30 @@ pub fn account_card(info: &accounts::AccountInfo, compact: bool) -> gtk::Box {
     let col = vbox(1);
     col.set_hexpand(true);
     let top = hbox(5);
-    let email = ellipsized(info.email.as_deref().unwrap_or("Signed in"), &["sy-text", if compact { "sy-bold" } else { "heading" }]);
+    let endpoint = profile.endpoint.clone();
+    let title = endpoint.as_ref().map(|e| e.display_name()).or_else(|| info.email.clone()).unwrap_or_else(|| "Signed in".into());
+    let email = ellipsized(&title, &["sy-text", if compact { "sy-bold" } else { "heading" }]);
     top.append(&email);
     if accounts::visible().len() > 1 {
         top.append(&chip(&profile.label, "muted", None, false));
     }
     col.append(&top);
     let sub = hbox(5);
+    if let Some(e) = &endpoint {
+        let model = ellipsized(&e.model_name().unwrap_or_else(|| "Default models".into()), &["sy-muted", "sy-small"]);
+        model.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+        sub.append(&model);
+        if !endpoint::has_key(&profile.id) {
+            sub.append(&colored_icon("sy-attention-symbolic", 12, "amber"));
+            sub.append(&label_with("API key missing", &["fg-amber", "sy-small"]));
+        }
+    }
     if let Some(org) = &info.org_name {
         sub.append(&ellipsized(org, &["sy-muted", "sy-small"]));
     }
     if let Some(plan) = &info.subscription {
         sub.append(&chip(plan, "coral", None, false));
-    } else if info.method.as_deref() == Some("console") || info.provider.as_deref() != Some("firstParty") {
+    } else if endpoint.is_none() && (info.method.as_deref() == Some("console") || info.provider.as_deref() != Some("firstParty")) {
         let label = if info.provider.as_deref() == Some("firstParty") { "API".to_string() } else { info.provider.clone().unwrap_or_else(|| "API".into()) };
         sub.append(&label_with(&label, &["sy-muted", "sy-tiny"]));
     }
@@ -188,20 +348,28 @@ pub fn account_card(info: &accounts::AccountInfo, compact: bool) -> gtk::Box {
     let mut menu = Menu::new();
     profile_menu(&mut menu);
     menu.section(None);
-    menu.item("Sign out of this account…", || {
-        let body = if accounts::active().is_default() {
-            "This also signs out Claude Code in the terminal. You can sign in again afterwards, including with another account.".to_string()
-        } else {
-            format!("Signs out only “{}”. Other accounts are not affected.", accounts::active().label)
-        };
-        dialogs::confirm("Sign out of Claude Code?", Some(&body), "Sign out", true, || {
-            let a = app::get();
-            a.claude.sleep_all();
-            crate::rt::spawn_local(async { accounts::store().logout(None).await });
+    if let Some(e) = &endpoint {
+        let p = profile.clone();
+        menu.item("Edit endpoint…", move || edit_endpoint_sheet(p.clone()));
+        if e.kind == Kind::OpenRouter {
+            menu.item("OpenRouter activity", || util::open_url(OPENROUTER_ACTIVITY_URL));
+        }
+    } else {
+        menu.item("Sign out of this account…", || {
+            let body = if accounts::active().is_default() {
+                "This also signs out Claude Code in the terminal. You can sign in again afterwards, including with another account.".to_string()
+            } else {
+                format!("Signs out only “{}”. Other accounts are not affected.", accounts::active().label)
+            };
+            dialogs::confirm("Sign out of Claude Code?", Some(&body), "Sign out", true, || {
+                let a = app::get();
+                a.claude.sleep_all();
+                crate::rt::spawn_local(async { accounts::store().logout(None).await });
+            });
         });
-    });
-    menu.section(None);
-    menu.item("Usage page", || util::open_url("https://claude.ai/settings/usage"));
+        menu.section(None);
+        menu.item("Usage page", || util::open_url("https://claude.ai/settings/usage"));
+    }
     menu.item("Refresh status", || crate::rt::spawn_local(async { accounts::store().refresh().await }));
     card.append(&menu.button("view-more-symbolic", "Account"));
     card

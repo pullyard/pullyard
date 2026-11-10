@@ -60,6 +60,10 @@ async fn logged_in(config_dir: Option<String>) -> bool {
 }
 
 pub fn sign_in_again(config_dir: Option<String>, on_done: impl FnOnce(Result<(), String>) + 'static) {
+    if super::endpoint::endpoint(config_dir.as_deref()).is_some() {
+        on_done(Err("This account uses an API endpoint and has no Claude sign-in. Check its API key with “Edit endpoint…”.".into()));
+        return;
+    }
     let dir = config_dir.clone().unwrap_or_else(|| accounts::config_dir(None));
     let start = credentials_stamp(&dir);
     if let Err(e) = open_terminal_login(config_dir.as_deref()) {

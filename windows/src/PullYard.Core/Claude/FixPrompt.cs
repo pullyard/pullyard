@@ -23,6 +23,9 @@ public static class FixPrompt
             .Select(i => new GeneralFeedback(i.Id ?? Guid.NewGuid().ToString(), i.Author?.Login ?? "ghost", i.Body!.Trim()))
             .ToList();
 
+    public static string CheckoutStep(int number) =>
+        $"Make sure the working tree is on the PR branch: run `gh pr checkout {number}` and `git pull`. If there are uncommitted local changes, stop and ask me first.";
+
     private static string Quote(string body) => string.Join("\n", body.Replace("\r\n", "\n").Split('\n').Select(l => "> " + l));
 
     public static string Build(PullRequestDetail pr, RepoRef repo, IReadOnlyList<ReviewThread> threads, IReadOnlyList<GeneralFeedback> general, FixOptions options)
@@ -32,7 +35,7 @@ public static class FixPrompt
         sb.Append($"PR: {pr.Url}\n");
         sb.Append($"Branch: {pr.HeadRefName} → {pr.BaseRefName}\n\n");
         sb.Append("Steps:\n");
-        sb.Append($"1. Make sure the working tree is on the PR branch: run `gh pr checkout {pr.Number}` and `git pull`. If there are uncommitted local changes, stop and ask me first.\n");
+        sb.Append($"1. {CheckoutStep(pr.Number)}\n");
         sb.Append("2. Go through every item below. Make the change the reviewer asked for. If a comment is unclear, already handled, or you disagree with it, do not change code for it — explain why in your summary.\n");
         sb.Append("3. Keep changes minimal and in the style of the surrounding code. Run the project's analyzer/linter and the tests related to the touched code.\n");
         var step = 4;
@@ -124,10 +127,13 @@ public static class FixPromptExtractor
         return best;
     }
 
+    public static string CheckoutNote(int number) =>
+        $"Before starting: make sure the working tree is on the PR branch — run `gh pr checkout {number}` and `git pull`. If there are uncommitted local changes, stop and ask me first.";
+
     public static string Wrap(FoundFixPrompt found, PullRequestDetail pr, FixOptions options)
     {
         var sb = new StringBuilder();
-        sb.Append($"Before starting: make sure the working tree is on the PR branch — run `gh pr checkout {pr.Number}` and `git pull`. If there are uncommitted local changes, stop and ask me first.\n\n");
+        sb.Append(CheckoutNote(pr.Number)).Append("\n\n");
         sb.Append(found.Text).Append('\n');
         var extra = new List<string>();
         if (options.Commit) extra.Add("Commit the fixes with a clear message.");

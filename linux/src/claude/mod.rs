@@ -1,6 +1,7 @@
 pub mod accounts;
 pub mod chat;
 pub mod desktop;
+pub mod endpoint;
 pub mod git;
 pub mod launcher;
 pub mod memory;
@@ -14,6 +15,7 @@ pub mod sessions;
 pub mod ship;
 pub mod tool_groups;
 pub mod workspace;
+pub mod worktree;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ModelOption {

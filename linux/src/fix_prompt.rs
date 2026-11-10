@@ -54,16 +54,24 @@ fn quote(body: &str) -> String {
     body.split('\n').map(|l| format!("> {l}")).collect::<Vec<_>>().join("\n")
 }
 
+pub fn checkout_step(number: i64) -> String {
+    format!("Make sure the working tree is on the PR branch: run `gh pr checkout {number}` and `git pull`. If there are uncommitted local changes, stop and ask me first.")
+}
+
+pub fn before_starting_step(number: i64) -> String {
+    format!("Before starting: make sure the working tree is on the PR branch — run `gh pr checkout {number}` and `git pull`. If there are uncommitted local changes, stop and ask me first.")
+}
+
 pub fn build(pr: &PullRequestDetail, repo: &RepoRef, threads: &[&ReviewThread], general: &[GeneralFeedback], options: &FixOptions) -> String {
     let mut out = format!(
-        "Address the code review feedback on pull request #{} \"{}\" in {}.\nPR: {}\nBranch: {} → {}\n\nSteps:\n1. Make sure the working tree is on the PR branch: run `gh pr checkout {}` and `git pull`. If there are uncommitted local changes, stop and ask me first.\n2. Go through every item below. Make the change the reviewer asked for. If a comment is unclear, already handled, or you disagree with it, do not change code for it — explain why in your summary.\n3. Keep changes minimal and in the style of the surrounding code. Run the project's analyzer/linter and the tests related to the touched code.\n",
+        "Address the code review feedback on pull request #{} \"{}\" in {}.\nPR: {}\nBranch: {} → {}\n\nSteps:\n1. {}\n2. Go through every item below. Make the change the reviewer asked for. If a comment is unclear, already handled, or you disagree with it, do not change code for it — explain why in your summary.\n3. Keep changes minimal and in the style of the surrounding code. Run the project's analyzer/linter and the tests related to the touched code.\n",
         pr.number,
         pr.title,
         repo.full(),
         pr.url,
         pr.head_ref_name,
         pr.base_ref_name,
-        pr.number
+        checkout_step(pr.number)
     );
     let mut step = 4;
     if options.commit {
@@ -171,8 +179,9 @@ pub fn latest(pr: &PullRequestDetail) -> Option<FoundFixPrompt> {
 
 pub fn wrap(found: &FoundFixPrompt, pr: &PullRequestDetail, options: &FixOptions) -> String {
     let mut out = format!(
-        "Before starting: make sure the working tree is on the PR branch — run `gh pr checkout {}` and `git pull`. If there are uncommitted local changes, stop and ask me first.\n\n{}\n",
-        pr.number, found.text
+        "{}\n\n{}\n",
+        before_starting_step(pr.number),
+        found.text
     );
     let mut extra = vec![];
     if options.commit {

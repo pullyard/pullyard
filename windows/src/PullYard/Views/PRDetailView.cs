@@ -124,6 +124,8 @@ public sealed class PRContent : Grid, IShortcutHost
     private string lastHtml = "";
     private CheckBox? wrapBox;
     private ComboBox? layoutBox;
+    private ComboBox? scopeBox;
+    private readonly ContentControl interdiffBanner = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, IsTabStop = false };
     private bool splitFits;
     private bool syncingReviewBar;
 
@@ -237,6 +239,11 @@ public sealed class PRContent : Grid, IShortcutHost
                 RenderHeader();
                 RenderBanners();
                 break;
+            case nameof(PRDetailViewModel.RulesState):
+            case nameof(PRDetailViewModel.CodeOwnersState):
+            case nameof(PRDetailViewModel.Ownership):
+                RenderHeader();
+                break;
             case nameof(PRDetailViewModel.Tab):
                 ShowTab();
                 break;
@@ -264,6 +271,16 @@ public sealed class PRContent : Grid, IShortcutHost
                     model.ActionError = null;
                     Dialogs.Alert(XamlRoot, L.T("Common_Error", "Error"), err).Forget();
                 }
+                break;
+            case nameof(PRDetailViewModel.LastReviewed):
+            case nameof(PRDetailViewModel.DiffScope):
+            case nameof(PRDetailViewModel.InterdiffLoading):
+            case nameof(PRDetailViewModel.InterdiffError):
+            case nameof(PRDetailViewModel.InterdiffRebased):
+            case nameof(PRDetailViewModel.InterdiffFiles):
+                SyncScope();
+                RenderInterdiffBanner();
+                RenderFiles();
                 break;
             case nameof(PRDetailViewModel.DiffVersion):
             case nameof(PRDetailViewModel.Files):
@@ -339,7 +356,7 @@ public sealed class PRContent : Grid, IShortcutHost
             header.Children.Add(row);
         }
         if (model.StackTree is { } tree) header.Children.Add(StackUi.Strip(tree, model.Ref.Repo, () => model.Tab = PRTab.Stack));
-        if (MergeStatusBar(model, app, () => Dialogs.Merge(XamlRoot, model).Forget()) is { } bar) header.Children.Add(bar);
+        if (MergeStatusBar(model, app, () => Dialogs.Merge(XamlRoot, model).Forget(), () => Dialogs.Reviewers(XamlRoot, model).Forget()) is { } bar) header.Children.Add(bar);
     }
 
     public static Border BranchChip(string name, string color)
@@ -366,34 +383,17 @@ public sealed class PRContent : Grid, IShortcutHost
         return p;
     }
 
-    public static FrameworkElement? MergeStatusBar(PRDetailViewModel model, AppViewModel app, Action onMerge)
+    private static bool requirementsExpanded = true;
+
+    public static FrameworkElement? MergeStatusBar(PRDetailViewModel model, AppViewModel app, Action onMerge, Action? onRequestReview = null)
     {
         if (model.Pr is not { IsOpen: true } pr) return null;
         var checks = pr.Checks;
-        var failed = checks.Count(c => c.Outcome == CheckOutcome.Failure);
-        var pending = checks.Count(c => c.Outcome == CheckOutcome.Pending);
+        var requirements = model.Requirements;
         var ok = checks.Count(c => c.Outcome == CheckOutcome.Success);
-        var failedText = failed == 1 ? L.T("Merge_OneCheckFailed", "1 check failed") : L.F("Merge_ChecksFailed", "{0} checks failed", failed);
-        var pendingText = pending == 1 ? L.T("Merge_OneCheckRunning", "1 check is still running") : L.F("Merge_ChecksRunning", "{0} checks are still running", pending);
-        (string glyph, string color, string text, bool ready) s;
-        if (pr.IsDraft) s = ("", "slate", L.T("Merge_Draft", "Draft — merging is unavailable"), false);
-        else if (pr.Mergeable == "CONFLICTING" || pr.MergeStateStatus == "DIRTY") s = ("", "red", L.F("Merge_Conflicts", "Has conflicts with {0}", pr.BaseRefName), false);
-        else
-        {
-            s = pr.MergeStateStatus switch
-            {
-                "BEHIND" => ("", "amber", L.F("Merge_Behind", "Branch is behind {0}", pr.BaseRefName), false),
-                "BLOCKED" => pr.ReviewDecision switch
-                {
-                    "CHANGES_REQUESTED" => ("", "red", L.T("Review_ChangesRequested", "Changes requested"), false),
-                    "REVIEW_REQUIRED" => ("", "amber", L.T("Review_Required", "Review required"), false),
-                    _ => failed > 0 ? ("", "red", failedText, false) : pending > 0 ? ("", "amber", pendingText, false) : ("", "amber", L.T("Merge_Blocked", "Blocked by branch protection"), false)
-                },
-                "UNSTABLE" => failed > 0 ? ("", "amber", L.T("Merge_CanMergeBut", "Can be merged, but ") + failedText.ToLowerInvariant(), true) : pending > 0 ? ("", "amber", pendingText, true) : ("", "green", L.T("Merge_Ready", "Ready to merge"), true),
-                "CLEAN" or "HAS_HOOKS" => ("", "green", L.T("Merge_Ready", "Ready to merge"), true),
-                _ => ("", "slate", L.T("Merge_Checking", "Checking mergeability…"), false)
-            };
-        }
+        var anyFailed = checks.Count(c => c.Outcome == CheckOutcome.Failure);
+        var anyPending = checks.Count(c => c.Outcome == CheckOutcome.Pending);
+        var s = PRDetailViewModel.Headline(pr, requirements);
         var row = new WrapPanel(8, Ui.Glyph(s.glyph, 14, s.color), Ui.Text(s.text, 13));
         if (pr.AutoMergeRequest is { } auto)
         {
@@ -403,12 +403,12 @@ public sealed class PRContent : Grid, IShortcutHost
         if (checks.Count > 0)
         {
             var chips = Ui.H(6);
-            if (failed > 0) chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "red"), Ui.Caption(failed.ToString(), "red")));
-            if (pending > 0) chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "amber"), Ui.Caption(pending.ToString(), "amber")));
+            if (anyFailed > 0) chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "red"), Ui.Caption(anyFailed.ToString(), "red")));
+            if (anyPending > 0) chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "amber"), Ui.Caption(anyPending.ToString(), "amber")));
             chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "green"), Ui.Caption(ok.ToString(), "green")));
             var b = new Button { Content = chips, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(4, 0, 4, 0) };
             Ui.Tip(b, L.T("PR_Checks", "Checks"));
-            Ui.Named(b, L.T("PR_Checks", "Checks"), L.F("PR_ChecksSummary", "{0} failed, {1} pending, {2} passed", failed, pending, ok));
+            Ui.Named(b, L.T("PR_Checks", "Checks"), L.F("PR_ChecksSummary", "{0} failed, {1} pending, {2} passed", anyFailed, anyPending, ok));
             b.Click += (_, _) => model.Tab = PRTab.Checks;
             row.Children.Add(b);
         }
@@ -421,7 +421,161 @@ public sealed class PRContent : Grid, IShortcutHost
             actions.Children.Add(merge);
         }
         var grid = Ui.Columns((row, Ui.Star), (actions, Ui.Auto));
-        return new Border { Background = Palette.Brush(s.color, 0.08), CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 6, 8, 6), Child = grid };
+        if (requirements.Count == 0)
+            return new Border { Background = Palette.Brush(s.color, 0.08), CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 6, 8, 6), Child = grid };
+        var list = RequirementsList(model, pr, requirements, onRequestReview);
+        list.Visibility = requirementsExpanded ? Visibility.Visible : Visibility.Collapsed;
+        var toggle = new Button { Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(4, 2, 4, 2) };
+        void SyncToggle()
+        {
+            var label = requirementsExpanded ? L.T("Merge_HideRequirements", "Hide merge requirements") : L.T("Merge_ShowRequirements", "Show merge requirements");
+            toggle.Content = Ui.Glyph(requirementsExpanded ? "" : "", 11, "muted");
+            Ui.Tip(toggle, label);
+            Ui.Named(toggle, label);
+        }
+        SyncToggle();
+        toggle.Click += (_, _) =>
+        {
+            requirementsExpanded = !requirementsExpanded;
+            list.Visibility = requirementsExpanded ? Visibility.Visible : Visibility.Collapsed;
+            SyncToggle();
+        };
+        actions.Children.Add(toggle);
+        return new Border { Background = Palette.Brush(s.color, 0.08), CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 6, 8, 6), Child = Ui.V(6, grid, list) };
+    }
+
+    private static StackPanel RequirementsList(PRDetailViewModel model, PullRequestDetail pr, List<MergeRequirement> requirements, Action? onRequestReview)
+    {
+        static int Rank(RequirementState s) => s switch
+        {
+            RequirementState.Missing => 0,
+            RequirementState.Pending => 1,
+            RequirementState.Unknown => 2,
+            RequirementState.Advisory => 3,
+            _ => 4
+        };
+        bool CanPerform(RequirementAction a) => a switch
+        {
+            RequirementAction.RequestReview => onRequestReview is not null && (model.CanWrite || pr.ViewerDidAuthor),
+            RequirementAction.UpdateBranch => false,
+            RequirementAction.ReadyForReview => pr.ViewerCanUpdate,
+            _ => true
+        };
+        void Perform(RequirementAction a)
+        {
+            switch (a)
+            {
+                case RequirementAction.RequestReview: onRequestReview?.Invoke(); break;
+                case RequirementAction.ShowChecks: model.Tab = PRTab.Checks; break;
+                case RequirementAction.ShowConversation: model.Tab = PRTab.Conversation; break;
+                case RequirementAction.ShowConflicts:
+                    model.Tab = PRTab.Conversation;
+                    model.ScrollToBottomToken++;
+                    break;
+                case RequirementAction.UpdateBranch: model.Simple(Q.UpdateBranch).Forget(); break;
+                case RequirementAction.ReadyForReview: model.Simple(Q.ReadyForReview).Forget(); break;
+            }
+        }
+        var panel = Ui.V(4);
+        Ui.Named(panel, L.T("Merge_Requirements", "Merge requirements"));
+        foreach (var r in requirements.Select((r, i) => (r, i)).OrderBy(x => Rank(x.r.State)).ThenBy(x => x.i).Select(x => x.r))
+        {
+            var (glyph, color, spoken) = r.State switch
+            {
+                RequirementState.Satisfied => ("", "green", L.T("Merge_ReqMet", "met")),
+                RequirementState.Missing => ("", "red", L.T("Merge_ReqBlocking", "blocking")),
+                RequirementState.Pending => ("", "amber", L.T("Merge_ReqPending", "in progress")),
+                RequirementState.Unknown => ("", "muted", L.T("Merge_ReqUnknown", "unknown")),
+                _ => ("", "muted", L.T("Merge_ReqAdvisory", "doesn’t block"))
+            };
+            var text = Ui.V(1, Ui.Text(r.Title, 13, r.State == RequirementState.Satisfied ? "muted" : "text", wrap: true));
+            if (r.Detail is { } d) text.Children.Add(Ui.Caption(d));
+            UIElement? action = null;
+            if (r.Action is { } a && r.State != RequirementState.Satisfied && CanPerform(a))
+            {
+                var title = a switch
+                {
+                    RequirementAction.RequestReview => L.T("Merge_ActRequestReview", "Request review"),
+                    RequirementAction.ShowChecks => L.T("Merge_ActShowChecks", "Show checks"),
+                    RequirementAction.ShowConversation => L.T("Merge_ActShowConversation", "Show conversation"),
+                    RequirementAction.ShowConflicts => L.T("Merge_ActShowConflicts", "View conflicts"),
+                    RequirementAction.UpdateBranch => L.T("Merge_UpdateBranch", "Update branch"),
+                    _ => L.T("Merge_ActReady", "Ready for review")
+                };
+                action = Ui.Link(title, () => Perform(a));
+            }
+            var line = Ui.Columns((Ui.Glyph(glyph, 12, color), Ui.Auto), (text, Ui.Star), (action, Ui.Auto));
+            Ui.Named(line, r.Title, spoken);
+            panel.Children.Add(line);
+        }
+        if (model.Ownership is { } ownership && (ownership.Groups.Count > 0 || ownership.Unowned.Count > 0))
+        {
+            var owners = CodeOwnersSection(ownership, CanPerform(RequirementAction.RequestReview) ? () => Perform(RequirementAction.RequestReview) : null);
+            owners.Margin = new Thickness(0, 4, 0, 0);
+            panel.Children.Add(owners);
+        }
+        return panel;
+    }
+
+    private const int OwnerGroupLimit = 6;
+
+    private static StackPanel CodeOwnersSection(OwnershipSummary summary, Action? onRequestReview)
+    {
+        static string Files(int n) => n == 1 ? L.T("Owners_OneFile", "1 file") : L.F("Owners_Files", "{0} files", n);
+        static string Color(OwnerStatus s) => s switch
+        {
+            OwnerStatus.Approved => "green",
+            OwnerStatus.ChangesRequested => "red",
+            OwnerStatus.Requested => "amber",
+            _ => "text"
+        };
+        static string Title(OwnerStatus s) => s switch
+        {
+            OwnerStatus.Approved => L.T("Owners_Approved", "approved"),
+            OwnerStatus.ChangesRequested => L.T("Owners_ChangesRequested", "changes requested"),
+            OwnerStatus.Requested => L.T("Owners_Requested", "review requested"),
+            _ => L.T("Owners_NotRequested", "not requested")
+        };
+        var title = L.T("Owners_Title", "Code owners");
+        var panel = Ui.V(4);
+        Ui.Named(panel, title);
+        var header = Ui.H(6, Ui.Text(title, 12, "muted", FontWeights.SemiBold), Ui.Text(summary.SourcePath, 12, "dim", mono: true));
+        UIElement? request = onRequestReview is not null && summary.Suggestions(new HashSet<string>()).Count > 0
+            ? Ui.Link(L.T("Owners_Request", "Request owners"), onRequestReview)
+            : null;
+        panel.Children.Add(Ui.Columns((header, Ui.Star), (request, Ui.Auto)));
+        foreach (var group in summary.Groups.Take(OwnerGroupLimit))
+        {
+            var row = new WrapPanel(6);
+            foreach (var o in group.Owners)
+            {
+                var handle = Ui.Text("@" + o.Handle, 13, Color(o.Status));
+                Ui.Tip(handle, $"@{o.Handle}: {Title(o.Status)}");
+                row.Children.Add(handle);
+            }
+            var count = Ui.Caption(Files(group.Files.Count));
+            Ui.Tip(count, string.Join("\n", group.Files));
+            row.Children.Add(count);
+            var line = Ui.Columns((Ui.Glyph(group.Satisfied ? "\ue73e" : "\ue716", 12, group.Satisfied ? "green" : "muted"), Ui.Auto), (row, Ui.Star));
+            Ui.Named(line, string.Join(", ", group.Owners.Select(o => $"{o.Handle}, {Title(o.Status)}")), Files(group.Files.Count));
+            panel.Children.Add(line);
+        }
+        if (summary.Groups.Count > OwnerGroupLimit)
+        {
+            var more = Ui.Caption(L.F("Owners_MoreGroups", "+{0} more owner groups", summary.Groups.Count - OwnerGroupLimit));
+            more.Margin = new Thickness(20, 0, 0, 0);
+            panel.Children.Add(more);
+        }
+        if (summary.Unowned.Count > 0)
+        {
+            var text = L.F("Owners_Unowned", "{0} without a code owner", Files(summary.Unowned.Count));
+            var caption = Ui.Caption(text);
+            Ui.Tip(caption, string.Join("\n", summary.Unowned));
+            var line = Ui.Columns((Ui.Glyph("\ue9ce", 12, "amber"), Ui.Auto), (caption, Ui.Star));
+            Ui.Named(line, text);
+            panel.Children.Add(line);
+        }
+        return panel;
     }
 
     private void RenderBanners()
@@ -935,8 +1089,12 @@ public sealed class PRContent : Grid, IShortcutHost
 
         var right = new Grid();
         right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         right.Children.Add(ReviewBar());
+        SetRow(interdiffBanner, 1);
+        right.Children.Add(interdiffBanner);
+        RenderInterdiffBanner();
         diff = new HtmlView();
         diff.LinkClicked += url => HtmlView.OpenLink(url);
         diff.ActionInvoked += OnDiffAction;
@@ -948,7 +1106,7 @@ public sealed class PRContent : Grid, IShortcutHost
             SyncReviewBar();
             RenderFiles();
         };
-        SetRow(diff, 1);
+        SetRow(diff, 2);
         right.Children.Add(diff);
         SetColumn(right, 2);
         grid.Children.Add(right);
@@ -995,11 +1153,22 @@ public sealed class PRContent : Grid, IShortcutHost
             Ui.Line(vertical: true),
             Nav("\uE74A", L.T("Files_PrevHunk", "Previous hunk"), "[", "["),
             Nav("\uE74B", L.T("Files_NextHunk", "Next hunk"), "]", "]"));
+        scopeBox = new ComboBox { MinWidth = 120, VerticalAlignment = VerticalAlignment.Center };
+        scopeBox.Items.Add(L.T("Files_ScopeAll", "All changes"));
+        scopeBox.Items.Add("");
+        AutomationProperties.SetName(scopeBox, L.T("Files_ScopeName", "Changes to show"));
+        ToolTipService.SetToolTip(scopeBox, L.T("Files_ScopeTip", "Show only what changed since your last review"));
+        scopeBox.SelectionChanged += (_, _) =>
+        {
+            if (!syncingReviewBar && scopeBox.SelectedIndex >= 0) model.DiffScope = scopeBox.SelectedIndex == 1 ? DiffScope.SinceReview : DiffScope.All;
+        };
         var options = Ui.H(12, wrapBox, layoutBox);
-        var row = Ui.Columns((nav, Ui.Auto), (null, Ui.Star), (options, Ui.Auto));
+        var row = Ui.Columns((nav, Ui.Auto), (scopeBox, Ui.Auto), (null, Ui.Star), (options, Ui.Auto));
+        row.ColumnSpacing = 12;
         row.Padding = new Thickness(8, 4, 10, 4);
         AutomationProperties.SetName(row, L.T("Files_ReviewBar", "Review navigation"));
         SyncReviewBar();
+        SyncScope();
         var line = Ui.Line();
         line.VerticalAlignment = VerticalAlignment.Bottom;
         var bar = new Grid();
@@ -1017,6 +1186,71 @@ public sealed class PRContent : Grid, IShortcutHost
         layoutBox.IsEnabled = splitFits;
         ToolTipService.SetToolTip(layoutBox, splitFits ? L.T("Files_LayoutTip", "Unified or side-by-side diff (S)") : L.T("Files_LayoutNarrow", "Widen the window to use split view"));
         syncingReviewBar = false;
+    }
+
+    private static string SinceTitle(ReviewedCommit r) => r.CommitsSince switch
+    {
+        null => L.T("Files_ScopeSince", "Since your review"),
+        1 => L.T("Files_ScopeSinceOne", "Since your review · 1 commit"),
+        { } n => L.F("Files_ScopeSinceN", "Since your review · {0} commits", n)
+    };
+
+    private void SyncScope()
+    {
+        if (scopeBox is null) return;
+        syncingReviewBar = true;
+        if (model.LastReviewed is { } reviewed)
+        {
+            scopeBox.Items[1] = SinceTitle(reviewed);
+            scopeBox.SelectedIndex = model.DiffScope == DiffScope.SinceReview ? 1 : 0;
+            scopeBox.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            scopeBox.SelectedIndex = 0;
+            scopeBox.Visibility = Visibility.Collapsed;
+        }
+        syncingReviewBar = false;
+    }
+
+    private void RenderInterdiffBanner()
+    {
+        if (model.DiffScope != DiffScope.SinceReview)
+        {
+            interdiffBanner.Content = null;
+            interdiffBanner.Visibility = Visibility.Collapsed;
+            return;
+        }
+        interdiffBanner.Visibility = Visibility.Visible;
+        string? text = null;
+        if (model.InterdiffLoading) text = L.T("Interdiff_Loading", "Comparing with the commit you reviewed…");
+        else if (model.InterdiffError is { } e) text = L.F("Interdiff_Error", "Couldn’t load changes since your review: {0}", e);
+        else if (model.InterdiffRebased) text = L.F("Interdiff_Rebased", "The branch was rebased or force-pushed after your review, so this can include changes from {0}.", model.Pr?.BaseRefName ?? L.T("Interdiff_BaseBranch", "the base branch"));
+        else if (model.InterdiffFiles.Count == 0) text = L.T("Interdiff_Empty", "No file changes since your review.");
+        var line = Ui.Line();
+        line.VerticalAlignment = VerticalAlignment.Bottom;
+        var host = new Grid();
+        if (text is null)
+        {
+            var note = Ui.Caption(L.T("Interdiff_ReadOnly", "Read-only: comments are hidden while comparing with your last review. Switch to All changes to comment."));
+            note.TextWrapping = TextWrapping.WrapWholeWords;
+            note.Margin = new Thickness(12, 4, 12, 4);
+            host.Children.Add(note);
+        }
+        else
+        {
+            var failed = model.InterdiffError is not null;
+            var message = Ui.Caption(text);
+            message.TextWrapping = TextWrapping.WrapWholeWords;
+            var retry = failed ? Ui.Button(L.T("Common_Retry", "Retry"), () => model.LoadInterdiff(true).Forget()) : null;
+            var row = Ui.Columns((Ui.Glyph(failed ? "\uE7BA" : "\uE946", 13, failed ? "amber" : "muted"), Ui.Auto), (message, Ui.Star), (retry, Ui.Auto));
+            row.ColumnSpacing = 8;
+            row.Padding = new Thickness(12, 5, 12, 5);
+            host.Background = Palette.Brush("amber", 0.12);
+            host.Children.Add(row);
+        }
+        host.Children.Add(line);
+        interdiffBanner.Content = host;
     }
 
     private void OnSettings(string key)
@@ -1073,24 +1307,26 @@ public sealed class PRContent : Grid, IShortcutHost
     private void RenderFiles()
     {
         if (diff is null || fileList is null) return;
-        if (!model.FilesLoaded)
+        var interdiff = model.DiffScope == DiffScope.SinceReview;
+        if (!model.FilesLoaded && !interdiff)
         {
             if (model.FilesError is { } e) diff.Render($"<div class=\"tl\"><p class=\"empty\">{ConversationHtml.Esc(e)}</p></div>");
             return;
         }
         var filter = fileFilter?.Text.Trim() ?? "";
-        var visible = model.Files.Where(f => filter.Length == 0 || f.Id.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
+        var shown = model.DisplayedFiles;
+        var visible = shown.Where(f => filter.Length == 0 || f.Id.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
         var selected = model.ScrollTarget;
         fileList.ItemsSource = visible.Select(f => new FileListItem(f, model.ViewedPaths.Contains(f.Id), model.ThreadCount(f.Id))).ToList();
         if (selected is not null) fileList.SelectedItem = (fileList.ItemsSource as List<FileListItem>)?.FirstOrDefault(f => f.File.Id == selected);
-        if (viewedCount is not null) viewedCount.Text = $"{model.ViewedPaths.Intersect(model.Files.Select(f => f.Id)).Count()}/{model.Files.Count}";
-        var layout = $"{WrapPref}|{SplitActive}";
+        if (viewedCount is not null) viewedCount.Text = $"{model.ViewedPaths.Intersect(shown.Select(f => f.Id)).Count()}/{shown.Count}";
+        var layout = $"{WrapPref}|{SplitActive}|{model.DiffScope}";
         if (renderedDiffVersion == model.DiffVersion && renderedFilter == filter && renderedLayout == layout) return;
         var first = renderedDiffVersion < 0;
         renderedDiffVersion = model.DiffVersion;
         renderedFilter = filter;
         renderedLayout = layout;
-        var html = DiffHtml.Render(model.Files, model.RenderOptions(filter, WrapPref, SplitActive));
+        var html = DiffHtml.Render(shown, model.RenderOptions(filter, WrapPref, SplitActive));
         diff.Render(html, "diff", first && selected is not null ? "file:" + selected : first ? "top" : null, "flush review");
     }
 
@@ -1101,7 +1337,7 @@ public sealed class PRContent : Grid, IShortcutHost
             case "comment":
             {
                 var parts = id.Split('|');
-                if (parts.Length >= 3 && int.TryParse(parts[^1], out var line))
+                if (model.DiffScope == DiffScope.All && parts.Length >= 3 && int.TryParse(parts[^1], out var line))
                 {
                     var path = string.Join("|", parts[..^2]);
                     Dialogs.InlineComment(XamlRoot, model, new DiffAnchor(path, line, parts[^2])).Forget();
@@ -1122,7 +1358,7 @@ public sealed class PRContent : Grid, IShortcutHost
                 break;
             case "expand":
                 model.Collapsed.Remove(id);
-                if (model.Files.FirstOrDefault(f => f.Id == id) is { } file)
+                if (model.DisplayedFiles.FirstOrDefault(f => f.Id == id) is { } file)
                     diff?.Send(new JsonObject { ["op"] = "fileBody", ["path"] = id, ["html"] = DiffHtml.Body(file, model.RenderOptions("", WrapPref, SplitActive)) });
                 break;
             case "review":

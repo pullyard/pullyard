@@ -7,6 +7,8 @@ struct ResolveConflictsSheet: View {
     @Environment(AppModel.self) private var app
     @AppStorage("claudeTarget.v2") private var target: ClaudeTarget = .app
     @AppStorage("claudeMode") private var mode: ClaudePermissionMode = .standard
+    @AppStorage("agentFix.isolatedWorktree") private var isolate = true
+    @State private var launching = false
     @State private var push = true
     @State private var custom: String?
     @State private var folder: String?
@@ -40,8 +42,9 @@ struct ResolveConflictsSheet: View {
             Toggle("Push when done", isOn: $push).toggleStyle(.checkbox)
             promptEditor
             ClaudeFolderRow(repo: model.ref.repo, folder: $folder, detecting: detecting)
+            ClaudeWorktreeRow(folder: folder, number: pr.number, target: target, isolate: $isolate)
             if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
-            ClaudeLaunchRow(target: $target, mode: $mode, canLaunch: !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (target == .copy || folder != nil), onLaunch: launch)
+            ClaudeLaunchRow(target: $target, mode: $mode, canLaunch: !launching && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (target == .copy || folder != nil), onLaunch: launch)
         }
         .padding(20)
         .frame(width: 780, height: 640)
@@ -110,11 +113,16 @@ struct ResolveConflictsSheet: View {
     }
 
     private func launch() {
-        do {
-            try ClaudeLauncher.start(app: app, prompt: prompt, folder: folder, target: target, mode: mode, name: "Resolve conflicts PR #\(pr.number): \(pr.title)")
-            dismiss()
-        } catch {
-            self.error = error.localizedDescription
+        launching = true
+        error = nil
+        Task {
+            defer { launching = false }
+            do {
+                try await ClaudeLauncher.startForPR(app: app, prompt: prompt, folder: folder, isolate: isolate, pr: pr, repo: model.ref.repo, target: target, mode: mode, name: "Resolve conflicts PR #\(pr.number): \(pr.title)")
+                dismiss()
+            } catch {
+                self.error = error.localizedDescription
+            }
         }
     }
 }

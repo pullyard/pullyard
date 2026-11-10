@@ -15,6 +15,7 @@ public sealed class ClaudeProfile
     public string? Email { get; set; }
     public string? Plan { get; set; }
     public string? Owner { get; set; }
+    public AgentEndpoint? Endpoint { get; set; }
 
     public bool IsDefault => ConfigDir is null;
     public string Initial => (Label.Length > 0 ? Label : Email ?? "C")[..1].ToUpperInvariant();
@@ -131,9 +132,10 @@ public sealed partial class ClaudeProfiles : ObservableObject
         Save();
     }
 
-    public ClaudeProfile Add(string label, bool shareSettings, string? owner = null)
+    public ClaudeProfile Add(string label, bool shareSettings, string? owner = null, AgentEndpoint? endpoint = null, string? key = null)
     {
         var id = Guid.NewGuid().ToString().ToLowerInvariant();
+        if (endpoint is not null && key is not null) AgentEndpoints.SaveKey(id, key);
         var dir = Path.Combine(baseDir, id);
         Directory.CreateDirectory(dir);
         if (shareSettings)
@@ -173,7 +175,7 @@ public sealed partial class ClaudeProfiles : ObservableObject
             }
         }
         var name = label.Trim();
-        var profile = new ClaudeProfile { Id = id, Label = name.Length == 0 ? $"Account {Profiles.Count + 1}" : name, ConfigDir = dir, Owner = owner ?? Scope };
+        var profile = new ClaudeProfile { Id = id, Label = name.Length == 0 ? $"Account {Profiles.Count + 1}" : name, ConfigDir = dir, Owner = owner ?? Scope, Endpoint = endpoint };
         Profiles = Profiles.Append(profile).ToList();
         Save();
         return profile;
@@ -195,9 +197,19 @@ public sealed partial class ClaudeProfiles : ObservableObject
         Save();
     }
 
+    public void UpdateEndpoint(string id, AgentEndpoint endpoint, string? key)
+    {
+        if (Profiles.FirstOrDefault(p => p.Id == id) is not { IsDefault: false } p) return;
+        if (!string.IsNullOrEmpty(key)) AgentEndpoints.SaveKey(id, key);
+        p.Endpoint = endpoint;
+        Profiles = Profiles.ToList();
+        Save();
+    }
+
     public void Remove(string id)
     {
         if (id == DefaultId) return;
+        AgentEndpoints.DeleteKey(id);
         Profiles = Profiles.Where(p => p.Id != id).ToList();
         Forget(id);
         if (ActiveId == id) ActiveId = DefaultId;
@@ -319,6 +331,13 @@ public sealed partial class ClaudeAccountStore : ObservableObject
         {
             Status = ClaudeAccountStatus.NotInstalled;
             Info = null;
+            return;
+        }
+        if (ClaudeProfiles.Shared.Active.Endpoint is { } endpoint)
+        {
+            LastChecked = DateTimeOffset.Now;
+            Info = new ClaudeAccountInfo(null, null, null, "endpoint", endpoint.ProviderName);
+            Status = ClaudeAccountStatus.LoggedIn;
             return;
         }
         if (Status == ClaudeAccountStatus.Unknown) Status = ClaudeAccountStatus.Checking;

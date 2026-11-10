@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::brand;
+use crate::claude::endpoint::AgentEndpoint;
 use crate::git_accounts::GitAccount;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -19,6 +20,8 @@ pub struct ClaudeProfile {
     pub plan: Option<String>,
     #[serde(default)]
     pub owner: Option<String>,
+    #[serde(default)]
+    pub endpoint: Option<AgentEndpoint>,
 }
 
 impl ClaudeProfile {
@@ -63,6 +66,7 @@ pub struct Settings {
     pub claude_ui: String,
     pub claude_target: String,
     pub claude_launch_mode: String,
+    pub agent_fix_isolated_worktree: bool,
     pub claude_profiles: Vec<ClaudeProfile>,
     pub claude_active_profile: String,
     pub claude_active_by_owner: HashMap<String, String>,
@@ -118,6 +122,7 @@ impl Default for Settings {
             claude_ui: "chat".into(),
             claude_target: "app".into(),
             claude_launch_mode: "default".into(),
+            agent_fix_isolated_worktree: true,
             claude_profiles: Vec::new(),
             claude_active_profile: "default".into(),
             claude_active_by_owner: HashMap::new(),

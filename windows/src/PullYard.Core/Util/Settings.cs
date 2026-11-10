@@ -173,6 +173,7 @@ public static class Keys
     public const string ClaudeTarget = "claudeTarget.v2";
     public const string ClaudePermissionMode = "claudeMode";
     public const string LocalRepoPaths = "localRepoPaths";
+    public const string AgentFixIsolatedWorktree = "agentFix.isolatedWorktree";
     public const string CloseToTray = "window.closeToTray";
     public const string WindowBounds = "window.bounds";
     public const string DiagnosticsEnabled = "diagnosticsEnabled";
