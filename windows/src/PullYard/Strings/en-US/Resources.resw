@@ -438,6 +438,8 @@
   <data name="Empty_ReviewedMessage" xml:space="preserve"><value>{0} you’ve reviewed show up here.</value></data>
   <data name="Empty_TryDifferent" xml:space="preserve"><value>Try a different search.</value></data>
   <data name="Files_Binary" xml:space="preserve"><value>Binary or large file</value></data>
+  <data name="Files_CodeOwners" xml:space="preserve"><value>Code owners</value></data>
+  <data name="Files_CodeOwnersApproved" xml:space="preserve"><value>approved</value></data>
   <data name="Files_Count" xml:space="preserve"><value>Files</value></data>
   <data name="Files_DiffLayout" xml:space="preserve"><value>Diff layout</value></data>
   <data name="Files_Filter" xml:space="preserve"><value>Filter files</value></data>

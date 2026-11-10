@@ -183,7 +183,8 @@ final class PRDetailModel {
 
     var ownership: OwnershipSummary? {
         guard let pr, case .loaded(let owners) = codeOwners else { return nil }
-        return OwnershipSummary.build(owners: owners, files: changedPaths, pr: pr)
+        let paths = changedPaths.isEmpty ? files.map(\.id) : changedPaths
+        return OwnershipSummary.build(owners: owners, files: paths, pr: pr)
     }
 
     var lastReviewed: ReviewedCommit? {
@@ -381,15 +382,14 @@ final class PRDetailModel {
     }
 
     private func loadCodeOwners(_ pr: PullRequestDetail) {
-        guard api != nil, let base = pr.baseTipOid else { return }
+        guard let base = pr.baseTipOid, !base.isEmpty else { return }
         let key = "\(ref.repo.full)|\(base)"
         guard key != ownersKey else { return }
         ownersKey = key
         Task(priority: .utility) { [weak self] in
             guard let self else { return }
             do {
-                guard let api = self.api else { return }
-                let owners = try await api.codeOwners(self.ref.repo, ref: base)
+                let owners = try await self.backend.codeOwners(self.ref, base: base)
                 guard self.ownersKey == key else { return }
                 self.codeOwners = owners.map { .loaded($0) } ?? .missing
                 self.publishContext()

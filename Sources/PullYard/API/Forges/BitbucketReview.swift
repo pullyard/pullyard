@@ -257,6 +257,15 @@ extension BitbucketClient {
         }
     }
 
+    func sourceFile(_ repo: String, commit: String, path: String) async throws -> String? {
+        let encoded = path.split(separator: "/").map { Self.segment(String($0)) }.joined(separator: "/")
+        do {
+            return try await http.text(Self.repoPath(repo) + "/src/\(Self.segment(commit))/\(encoded)")
+        } catch let e as APIError where e.status == 404 {
+            return nil
+        }
+    }
+
     func pipelineSteps(_ repo: String, pipeline: String) async throws -> [BitbucketPR.Step] {
         try await pages(Self.repoPath(repo) + "/pipelines/\(Self.segment(pipeline))/steps/", limit: 3)
     }

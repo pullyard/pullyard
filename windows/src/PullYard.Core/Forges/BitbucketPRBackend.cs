@@ -444,6 +444,16 @@ public sealed class BitbucketPRBackend : IPRBackend
 
     public Task RevokeApproval(ItemRef r, PullRequestDetail pr) => client.Approve(r.Repo.Full, r.Number, false);
 
+    public async Task<CodeOwners?> CodeOwners(ItemRef r, string @base, CancellationToken ct = default)
+    {
+        foreach (var path in Api.CodeOwners.BitbucketPaths)
+        {
+            if (await client.SourceFile(r.Repo.Full, @base, path, ct).ConfigureAwait(false) is { } text)
+                return new CodeOwners(text, path);
+        }
+        return null;
+    }
+
     public bool CanShowLog(CheckContext check) => check.Outcome != CheckOutcome.Pending && BitbucketClient.BuildNumber(check.Link) is not null;
 
     public async Task<string> JobLog(ItemRef r, CheckContext check, CancellationToken ct = default)

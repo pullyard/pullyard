@@ -5,31 +5,56 @@ struct CodeOwnersRule {
     let owners: [String]
     let line: Int
     let regex: NSRegularExpression
+    var section = 0
 }
 
 struct CodeOwners {
+    enum Flavor { case github, gitlab }
+
     static let paths = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"]
+    static let gitlabPaths = ["CODEOWNERS", "docs/CODEOWNERS", ".gitlab/CODEOWNERS"]
+    static let bitbucketPaths = [".bitbucket/CODEOWNERS", "CODEOWNERS"]
 
     let path: String
     let rules: [CodeOwnersRule]
     let invalidLines: [Int]
+    let flavor: Flavor
 
-    init(text: String, path: String = ".github/CODEOWNERS") {
+    init(text: String, path: String = ".github/CODEOWNERS", flavor: Flavor = .github) {
         self.path = path
+        self.flavor = flavor
         var rules: [CodeOwnersRule] = []
         var invalid: [Int] = []
+        var section = 0
+        var defaults: [String] = []
         for (index, raw) in text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: .newlines).enumerated() {
+            if flavor == .gitlab, let header = Self.sectionHeader(raw) {
+                section += 1
+                defaults = header
+                continue
+            }
             let tokens = Self.tokens(raw)
             guard let pattern = tokens.first else { continue }
-            let owners = Array(tokens.dropFirst())
+            var owners = Array(tokens.dropFirst())
             guard owners.allSatisfy(Self.isOwner), let regex = Self.regex(for: pattern) else {
                 invalid.append(index + 1)
                 continue
             }
-            rules.append(CodeOwnersRule(pattern: pattern, owners: owners, line: index + 1, regex: regex))
+            if owners.isEmpty, flavor == .gitlab { owners = defaults }
+            rules.append(CodeOwnersRule(pattern: pattern, owners: owners, line: index + 1, regex: regex, section: section))
         }
         self.rules = rules
         invalidLines = invalid
+    }
+
+    static func sectionHeader(_ line: String) -> [String]? {
+        var s = Substring(line.trimmingCharacters(in: .whitespaces))
+        if s.hasPrefix("^") { s = s.dropFirst() }
+        guard s.hasPrefix("["), let close = s.firstIndex(of: "]"), s.index(after: s.startIndex) < close else { return nil }
+        var rest = s[s.index(after: close)...]
+        if rest.hasPrefix("["), let count = rest.firstIndex(of: "]") { rest = rest[rest.index(after: count)...] }
+        let owners = tokens(String(rest))
+        return owners.allSatisfy(isOwner) ? owners : nil
     }
 
     func rule(for file: String) -> CodeOwnersRule? {
@@ -38,7 +63,12 @@ struct CodeOwners {
     }
 
     func owners(for file: String) -> [String] {
-        rule(for: file)?.owners ?? []
+        guard flavor == .gitlab else { return rule(for: file)?.owners ?? [] }
+        let range = NSRange(file.startIndex..., in: file)
+        var lastBySection: [Int: CodeOwnersRule] = [:]
+        for r in rules where r.regex.firstMatch(in: file, range: range) != nil { lastBySection[r.section] = r }
+        var seen = Set<String>()
+        return lastBySection.keys.sorted().flatMap { lastBySection[$0]?.owners ?? [] }.filter { seen.insert($0.lowercased()).inserted }
     }
 
     static func isOwner(_ token: String) -> Bool {
@@ -175,6 +205,10 @@ struct OwnershipSummary {
             return OwnerGroup(owners: entries, files: byOwners[list] ?? [])
         }
         return OwnershipSummary(groups: groups, unowned: unowned, sourcePath: owners.path)
+    }
+
+    func owners(of file: String) -> [OwnerEntry]? {
+        groups.first { $0.files.contains(file) }?.owners
     }
 
     func suggestions(excluding: Set<String>) -> [OwnerEntry] {

@@ -70,6 +70,7 @@ protocol PRBackend: AnyObject {
     func setViewed(_ ref: ItemRef, pr: PullRequestDetail, path: String, viewed: Bool) async throws
     func rerunFailed(_ ref: ItemRef, runs: Set<Int>) async throws
     func canShowLog(_ check: CheckContext) -> Bool
+    func codeOwners(_ ref: ItemRef, base: String) async throws -> CodeOwners?
     func jobLog(_ ref: ItemRef, check: CheckContext) async throws -> String
 }
 
@@ -81,6 +82,7 @@ extension PRBackend {
     func setViewed(_ ref: ItemRef, pr: PullRequestDetail, path: String, viewed: Bool) async throws { throw PRBackendUnsupported(provider: features.provider) }
     func rerunFailed(_ ref: ItemRef, runs: Set<Int>) async throws { throw PRBackendUnsupported(provider: features.provider) }
     func canShowLog(_ check: CheckContext) -> Bool { false }
+    func codeOwners(_ ref: ItemRef, base: String) async throws -> CodeOwners? { nil }
     func jobLog(_ ref: ItemRef, check: CheckContext) async throws -> String { throw PRBackendUnsupported(provider: features.provider) }
 }
 
@@ -177,6 +179,10 @@ final class GitHubPRBackend: PRBackend {
     }
 
     func canShowLog(_ check: CheckContext) -> Bool { check.isActionsJob }
+
+    func codeOwners(_ ref: ItemRef, base: String) async throws -> CodeOwners? {
+        try await api.codeOwners(ref.repo, ref: base)
+    }
 
     func jobLog(_ ref: ItemRef, check: CheckContext) async throws -> String {
         guard let id = check.databaseId else { throw APIError(message: "This check has no job log. Open it on GitHub to see its output.") }

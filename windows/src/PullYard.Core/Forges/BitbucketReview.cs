@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using PullYard.Core.Api;
@@ -293,6 +294,19 @@ public sealed partial class BitbucketClient
             var page = await http.Get<BitbucketPR.Page<BitbucketPR.Pipeline>>($"{RepoPath(repo)}/pipelines/", new[] { ("sort", "-created_on"), ("pagelen", "100") }, ct).ConfigureAwait(false);
             if (page.Values?.FirstOrDefault(p => p.BuildNumber == build) is { } hit) return hit;
             throw;
+        }
+    }
+
+    public async Task<string?> SourceFile(string repo, string commit, string path, CancellationToken ct = default)
+    {
+        var encoded = string.Join("/", path.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.EscapeDataString));
+        try
+        {
+            return await http.Text($"{RepoPath(repo)}/src/{Uri.EscapeDataString(commit)}/{encoded}", ct: ct).ConfigureAwait(false);
+        }
+        catch (ApiException e) when (e.Status == (int)HttpStatusCode.NotFound)
+        {
+            return null;
         }
     }
 

@@ -7,6 +7,7 @@ use gtk::{gio, glib};
 
 use super::diff_view::{self, DiffSelection, HScroll, OnComment, RowLine, RowOpts, Side};
 use super::model::{Change, FlatRow, PrModel};
+use crate::api::code_owners::{OwnerEntry, OwnerStatus};
 use crate::api::interdiff::{DiffScope, ReviewedCommit};
 use crate::api::models::{PendingComment, RepoRef, ReviewThread};
 use crate::diff::{DiffAnchor, DiffFile, DiffLine, LineKind};
@@ -49,6 +50,30 @@ pub struct FilesTab {
     expanded_threads: RefCell<std::collections::HashMap<String, bool>>,
     pending_reveal: RefCell<Option<String>>,
     suppress_select: Cell<bool>,
+    owner_badges: RefCell<std::collections::HashMap<String, OwnerBadge>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerBadge {
+    pub text: String,
+    pub tooltip: String,
+    pub accessible: String,
+    pub approved: bool,
+}
+
+pub fn owner_badge(owners: &[OwnerEntry]) -> Option<OwnerBadge> {
+    if owners.is_empty() {
+        return None;
+    }
+    let approved = owners.iter().any(|o| o.status == OwnerStatus::Approved);
+    let mut text = owners.iter().take(2).map(|o| format!("@{}", o.handle)).collect::<Vec<_>>().join(", ");
+    if owners.len() > 2 {
+        text.push_str(&format!(" +{}", owners.len() - 2));
+    }
+    let all = owners.iter().map(|o| format!("@{}", o.handle)).collect::<Vec<_>>().join(", ");
+    let tooltip = format!("Code owners: {all}{}", if approved { " · approved" } else { "" });
+    let accessible = format!("Code owners {}", owners.iter().map(|o| o.handle.as_str()).collect::<Vec<_>>().join(", "));
+    Some(OwnerBadge { text, tooltip, accessible, approved })
 }
 
 #[derive(PartialEq)]
@@ -298,6 +323,7 @@ impl FilesTab {
             banner,
             expanded_threads: RefCell::new(std::collections::HashMap::new()),
             pending_reveal: RefCell::new(None),
+            owner_badges: RefCell::new(std::collections::HashMap::new()),
             suppress_select: Cell::new(false),
         });
 
@@ -454,6 +480,12 @@ impl FilesTab {
                         me.rebuild();
                     }
                     Change::Diff | Change::Pr => me.rebuild(),
+                    Change::Rules => {
+                        if me.sync_owner_badges() {
+                            me.rows_open.set(None);
+                            me.rebuild();
+                        }
+                    }
                     Change::Reveal(p) => me.reveal(p),
                     _ => {}
                 }
@@ -490,6 +522,7 @@ impl FilesTab {
             return;
         }
         self.widget.set_visible_child_name("files");
+        let owners_changed = self.sync_owner_badges();
         self.sync_scope();
         let filter = self.filter.borrow().clone();
         let flat = m.flat_rows(&filter);
@@ -501,7 +534,7 @@ impl FilesTab {
         let old = self.row_keys.replace(vec![]);
         let n = self.store.n_items() as usize;
         let mode = Some((wrap, split));
-        let full = self.rows_open.get() != open || self.rows_mode.get() != mode || old.len() != n || self.rows_filter.borrow().as_str() != filter;
+        let full = owners_changed || self.rows_open.get() != open || self.rows_mode.get() != mode || old.len() != n || self.rows_filter.borrow().as_str() != filter;
         if full || !wrap {
             let longest = if wrap { 0 } else { self.longest_columns(&rows) };
             self.hscroll.reset(longest, !wrap);
@@ -533,6 +566,19 @@ impl FilesTab {
             let me = self.clone();
             glib::idle_add_local_once(move || me.reveal(&p));
         }
+    }
+
+    fn sync_owner_badges(&self) -> bool {
+        let fresh: std::collections::HashMap<String, OwnerBadge> = self
+            .model
+            .ownership()
+            .map(|o| o.groups.iter().filter_map(|g| owner_badge(&g.owners).map(|b| (b, &g.files))).flat_map(|(b, files)| files.iter().map(move |f| (f.clone(), b.clone()))).collect())
+            .unwrap_or_default();
+        if *self.owner_badges.borrow() == fresh {
+            return false;
+        }
+        *self.owner_badges.borrow_mut() = fresh;
+        true
     }
 
     fn sync_scope(&self) {
@@ -1013,6 +1059,13 @@ impl FilesTab {
         l.set_selectable(true);
         b.append(&l);
         b.append(&diff_stat(f.additions, f.deletions));
+        if let Some(badge) = self.owner_badges.borrow().get(&f.id) {
+            let owners = label_with(&badge.text, &[if badge.approved { "fg-green" } else { "sy-muted" }, "sy-small"]);
+            owners.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            owners.set_tooltip_text(Some(&badge.tooltip));
+            owners.update_property(&[gtk::accessible::Property::Label(&badge.accessible)]);
+            b.append(&owners);
+        }
         b.append(&spacer());
         let is_viewed = m.viewed.borrow().contains(&f.id);
         let viewed = gtk::CheckButton::with_label("Viewed");
@@ -1306,5 +1359,28 @@ impl FilesTab {
 impl Drop for FilesTab {
     fn drop(&mut self) {
         self.remove_keys();
+    }
+}
+
+#[cfg(test)]
+mod owner_badge_tests {
+    use super::*;
+
+    fn entry(handle: &str, status: OwnerStatus) -> OwnerEntry {
+        OwnerEntry { handle: handle.to_string(), is_team: handle.contains('/'), status }
+    }
+
+    #[test]
+    fn badge_lists_two_owners_and_count() {
+        assert!(owner_badge(&[]).is_none());
+        let one = owner_badge(&[entry("alice", OwnerStatus::NotRequested)]).unwrap();
+        assert_eq!(one.text, "@alice");
+        assert!(!one.approved);
+        assert_eq!(one.tooltip, "Code owners: @alice");
+        let many = owner_badge(&[entry("alice", OwnerStatus::Requested), entry("acme/core", OwnerStatus::Approved), entry("bob", OwnerStatus::NotRequested), entry("eve", OwnerStatus::NotRequested)]).unwrap();
+        assert_eq!(many.text, "@alice, @acme/core +2");
+        assert!(many.approved);
+        assert_eq!(many.tooltip, "Code owners: @alice, @acme/core, @bob, @eve · approved");
+        assert_eq!(many.accessible, "Code owners alice, acme/core, bob, eve");
     }
 }

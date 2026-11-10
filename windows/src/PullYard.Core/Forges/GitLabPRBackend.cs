@@ -529,6 +529,16 @@ public sealed class GitLabPRBackend : IPRBackend
 
     public Task RevokeApproval(ItemRef r, PullRequestDetail pr) => client.Unapprove(r.Repo.Full, r.Number);
 
+    public async Task<CodeOwners?> CodeOwners(ItemRef r, string @base, CancellationToken ct = default)
+    {
+        foreach (var path in Api.CodeOwners.GitLabPaths)
+        {
+            if (await client.RawFile(r.Repo.Full, path, @base, ct).ConfigureAwait(false) is { } text)
+                return new CodeOwners(text, path, CodeOwnersFlavor.GitLab);
+        }
+        return null;
+    }
+
     public bool CanShowLog(CheckContext check) =>
         check.Typename == "GitLabJob" && check.DatabaseId is not null && check.Outcome is not CheckOutcome.Pending and not CheckOutcome.Skipped;
 
