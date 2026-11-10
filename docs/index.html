@@ -46,13 +46,14 @@
       "@type": "SoftwareApplication",
       "@id": "https://pullyard.app/#software",
       "name": "PullYard",
+      "alternateName": "Shipyard",
       "url": "https://pullyard.app/",
       "description": "A free native app for pull requests on macOS, Windows and Linux. Review the diff, let an AI agent fix the feedback, then merge. Works with GitHub, GitLab, Bitbucket and Gitea.",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS 14+, Windows 10, Windows 11, Linux",
-      "softwareVersion": "2.13.6",
+      "softwareVersion": "2.14.0",
       "datePublished": "2026-10-13",
-      "dateModified": "2026-10-30",
+      "dateModified": "2026-11-10",
       "image": "https://pullyard.app/icon-512.png",
       "screenshot": "https://pullyard.app/img/og-card.jpg",
       "license": "https://opensource.org/licenses/MIT",
@@ -63,7 +64,24 @@
       "downloadUrl": "https://github.com/pullyard/pullyard/releases/latest",
       "releaseNotes": "https://pullyard.app/changelog.html",
       "codeRepository": "https://github.com/pullyard/pullyard",
-      "sameAs": ["https://github.com/pullyard/pullyard"]
+      "sameAs": ["https://github.com/pullyard/pullyard"],
+      "subjectOf": { "@id": "https://pullyard.app/#tour" }
+    },
+    {
+      "@type": "VideoObject",
+      "@id": "https://pullyard.app/#tour",
+      "name": "PullYard product tour",
+      "description": "A one-minute tour of PullYard: reading diffs, reviewing and merging a pull request, Fix with agent and accounts.",
+      "thumbnailUrl": "https://pullyard.app/img/pullyard-web-poster.jpg",
+      "contentUrl": "https://pullyard.app/img/pullyard-web-1280x720.mp4",
+      "encodingFormat": "video/mp4",
+      "uploadDate": "2026-10-15",
+      "duration": "PT58S",
+      "width": 1280,
+      "height": 720,
+      "inLanguage": "en",
+      "publisher": { "@id": "https://pullyard.app/#organization" },
+      "about": { "@id": "https://pullyard.app/#software" }
     },
     {
       "@type": "FAQPage",
@@ -504,7 +522,7 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
     </div>
     <div class="code hero-cmd intro" style="--d:160ms"><span class="label">Homebrew</span><code>brew install --cask pullyard/tap/pullyard</code><button type="button" aria-label="Copy Homebrew command"><svg aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span>Copy</span></button></div>
     <a class="other-link intro" style="--d:190ms" href="#install" data-other-platforms>Other platforms<svg aria-hidden="true" focusable="false"><use href="#i-arrow-down"/></svg></a>
-    <div class="meta intro" style="--d:220ms"><a href="https://github.com/pullyard/pullyard/releases/latest" data-version>Version 2.7.0</a><span class="sep" aria-hidden="true">·</span><a href="changelog.html" data-whats-new>What's new</a><span class="sep" aria-hidden="true">·</span><span data-os-meta>macOS, Windows and Linux</span></div>
+    <div class="meta intro" style="--d:220ms"><a href="https://github.com/pullyard/pullyard/releases/latest" data-version>Version 2.14.0</a><span class="sep" aria-hidden="true">·</span><a href="changelog.html" data-whats-new>What's new</a><span class="sep" aria-hidden="true">·</span><span data-os-meta>macOS, Windows and Linux</span></div>
 
     <div class="providers intro" style="--d:260ms" role="img" aria-label="Works with GitHub, GitLab, Bitbucket, Gitea and GitHub Enterprise">
       <div class="providers-track" aria-hidden="true"><div class="pv-group"><span>GitHub</span><span>GitLab</span><span>Bitbucket</span><span>Gitea</span><span>GitHub Enterprise</span><span>GitHub</span><span>GitLab</span><span>Bitbucket</span><span>Gitea</span><span>GitHub Enterprise</span></div><div class="pv-group"><span>GitHub</span><span>GitLab</span><span>Bitbucket</span><span>Gitea</span><span>GitHub Enterprise</span><span>GitHub</span><span>GitLab</span><span>Bitbucket</span><span>Gitea</span><span>GitHub Enterprise</span></div></div>

@@ -1,0 +1,23 @@
+PackageIdentifier: PullYard.PullYard
+PackageVersion: 2.14.0
+MinimumOSVersion: 10.0.17763.0
+InstallerType: inno
+Scope: user
+InstallModes:
+- interactive
+- silent
+- silentWithProgress
+UpgradeBehavior: install
+ProductCode: PullYard.PullYard_is1
+ReleaseDate: 2026-11-10
+Protocols:
+- pullyard
+Installers:
+- Architecture: x64
+  InstallerUrl: https://github.com/pullyard/pullyard/releases/download/v2.14.0/PullYard-windows-x64-setup.exe
+  InstallerSha256: 3DB05AC3E602915E65CCC9BC36D1CD8F0904CD7596C7E9F18CAE3EE73ABE7877
+- Architecture: arm64
+  InstallerUrl: https://github.com/pullyard/pullyard/releases/download/v2.14.0/PullYard-windows-arm64-setup.exe
+  InstallerSha256: F65B106AC4ACBF0860E21BB7D4AF0BC45620A68318EBBBDF32FDD885A1BA3D0E
+ManifestType: installer
+ManifestVersion: 1.6.0

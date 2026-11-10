@@ -9,6 +9,13 @@ BUILD_NUMBER="$VERSION"
 plutil -replace CFBundleShortVersionString -string "$VERSION" Resources/Info.plist
 plutil -replace CFBundleVersion -string "$BUILD_NUMBER" Resources/Info.plist
 
+sed -i '' -E \
+    -e "s/(data-version>Version )[0-9][0-9.]*/\1$VERSION/" \
+    -e "s/(\"softwareVersion\": \")[^\"]*/\1$VERSION/" \
+    -e "s/(\"dateModified\": \")[^\"]*/\1$(date +%F)/" \
+    docs/index.html
+sed -i '' -E "s/^- Latest version: .*/- Latest version: $VERSION ($(date '+%B %-d, %Y'))./" docs/llms.txt
+
 UNIVERSAL=1 ./scripts/build.sh
 
 APP="build/PullYard.app"
