@@ -272,6 +272,16 @@ pub fn reviewers(model: Rc<PrModel>) {
     let rerequest: HashSet<String> = model.reviewers_to_rerequest().into_iter().collect();
     let selected: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(rerequest.clone()));
     let go = suggested("Request");
+    let load_labels: Rc<RefCell<Vec<(String, gtk::Label)>>> = Rc::new(RefCell::new(Vec::new()));
+    let load_label = {
+        let load_labels = load_labels.clone();
+        move |handle: &str| -> gtk::Label {
+            let l = label_with("", &["sy-dim", "sy-small"]);
+            l.set_visible(false);
+            load_labels.borrow_mut().push((handle.to_string(), l.clone()));
+            l
+        }
+    };
     if !candidates.is_empty() {
         sheet.body.append(&label_with("Reviewers on this pull request", &["sy-muted", "sy-small"]));
         for r in &candidates {
@@ -286,6 +296,7 @@ pub fn reviewers(model: Rc<PrModel>) {
             if r.code_owner {
                 content.append(&label_with("code owner", &["fg-violet", "sy-small"]));
             }
+            content.append(&load_label(&r.login));
             if rerequest.contains(&r.login) {
                 content.append(&label_with("reviewed before latest push", &["fg-amber", "sy-small"]));
             } else if r.state == "PENDING" {
@@ -322,6 +333,7 @@ pub fn reviewers(model: Rc<PrModel>) {
             if o.is_team {
                 content.append(&label_with("team", &["sy-muted", "sy-small"]));
             }
+            content.append(&load_label(&o.handle));
             content.append(&label_with("not requested", &["sy-muted", "sy-small"]));
             check.set_child(Some(&content));
             let s = selected.clone();
@@ -390,6 +402,24 @@ pub fn reviewers(model: Rc<PrModel>) {
     go.connect_clicked(move |_| s());
     let s = send.clone();
     entry.connect_activate(move |_| s());
+    if let Some(api) = model.api.clone() {
+        let handles: Vec<String> = load_labels.borrow().iter().map(|(h, _)| h.clone()).collect();
+        if !handles.is_empty() {
+            crate::rt::spawn_local(async move {
+                let counts = crate::api::review_load::load(handles, api).await;
+                for (handle, l) in load_labels.borrow().iter() {
+                    let Some(n) = counts.get(&handle.to_lowercase()).copied() else { continue };
+                    l.set_text(&format!("· {}", crate::api::review_load::label(n)));
+                    if crate::api::review_load::busy(n) {
+                        l.remove_css_class("sy-dim");
+                        l.add_css_class("fg-amber");
+                    }
+                    l.set_tooltip_text(Some(&format!("Open pull requests waiting for {handle}'s review, among those you can see")));
+                    l.set_visible(true);
+                }
+            });
+        }
+    }
     sheet.present();
 }
 

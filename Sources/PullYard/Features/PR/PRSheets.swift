@@ -253,6 +253,7 @@ struct ReviewersSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var logins = ""
     @State private var selected: Set<String> = []
+    @State private var load: [String: Int] = [:]
 
     private var candidates: [PRReviewer] {
         model.reviewers.filter { $0.login != model.viewerLogin && !$0.login.hasSuffix("[bot]") && ($0.isTeam || !$0.login.contains("/")) }
@@ -291,6 +292,7 @@ struct ReviewersSheet: View {
                                 if r.codeOwner {
                                     Text("code owner").font(.syCaption).foregroundStyle(Color.syViolet)
                                 }
+                                loadLabel(r.login)
                                 if model.reviewersToReRequest.contains(r.login) {
                                     Text("reviewed before latest push").font(.syCaption).foregroundStyle(Color.syAmber)
                                 } else if r.state == "PENDING" {
@@ -313,6 +315,7 @@ struct ReviewersSheet: View {
                                     Text("team").font(.syCaption).foregroundStyle(Color.syMuted)
                                 }
                                 Text("not requested").font(.syCaption).foregroundStyle(Color.syMuted)
+                                loadLabel(o.handle)
                             }
                         }
                         .toggleStyle(.checkbox)
@@ -333,6 +336,20 @@ struct ReviewersSheet: View {
             }
         }
         .onAppear { selected = Set(model.reviewersToReRequest) }
+        .task {
+            guard let api = model.api else { return }
+            load = await ReviewLoadStore.shared.load(candidates.map(\.login) + ownerSuggestions.map(\.handle), api: api)
+        }
+    }
+
+    @ViewBuilder
+    private func loadLabel(_ handle: String) -> some View {
+        if let n = load[handle.lowercased()] {
+            Text("· " + ReviewLoad.label(n))
+                .font(.syCaption.monospacedDigit())
+                .foregroundStyle(ReviewLoad.busy(n) ? Color.syAmber : Color.syDim)
+                .help("Open pull requests waiting for \(handle)'s review, among those you can see")
+        }
     }
 }
 
