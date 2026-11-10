@@ -203,7 +203,7 @@ public static class MergeReadiness
         if (pr.MergeQueueEntry is { } entry)
             list.Add(new(RequirementKind.MergeQueue, entry.Failing ? RequirementState.Missing : RequirementState.Pending, entry.Summary, entry.Failing ? "Fix the failing checks or conflicts and add it again" : null));
         else if (pr.IsMergeQueueEnabled == true)
-            list.Add(new(RequirementKind.MergeQueue, RequirementState.Advisory, "Merges through a merge queue", "Add it to the queue on GitHub with “Merge when ready”"));
+            list.Add(new(RequirementKind.MergeQueue, RequirementState.Advisory, "Merges through a merge queue", "Add it from the merge sheet with “Add to merge queue”"));
 
         if (status.Phase == RulesPhase.Failed)
             list.Add(new(RequirementKind.Rules, RequirementState.Unknown, "Branch rules couldn’t be read", "Showing what GitHub reports for this pull request"));

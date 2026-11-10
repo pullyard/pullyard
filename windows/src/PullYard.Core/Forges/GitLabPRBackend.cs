@@ -518,6 +518,7 @@ public sealed class GitLabPRBackend : IPRBackend
             PRAction.ReadyForReview => client.Update(project, r.Number, new JsonObject { ["title"] = GitLabReviewMapper.Undrafted(pr.Title) }),
             PRAction.ConvertToDraft => client.Update(project, r.Number, new JsonObject { ["title"] = "Draft: " + GitLabReviewMapper.Undrafted(pr.Title) }),
             PRAction.UpdateBranch => client.Rebase(project, r.Number),
+            PRAction.Enqueue => client.AddToTrain(project, r.Number, Sha(pr)),
             _ => client.CancelAutoMerge(project, r.Number)
         };
     }

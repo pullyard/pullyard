@@ -12,7 +12,7 @@ struct PRLoad {
 }
 
 enum PRAction {
-    case close, reopen, readyForReview, convertToDraft, updateBranch, disableAutoMerge
+    case close, reopen, readyForReview, convertToDraft, updateBranch, disableAutoMerge, enqueue, dequeue
 }
 
 struct PRFeatures {
@@ -32,15 +32,17 @@ struct PRFeatures {
     var blame = false
     var deleteBranch = false
     var reopen = true
+    var mergeQueue = false
 
-    static let github = PRFeatures(provider: .github, stack: true, localConflicts: true, viewedFiles: true, requestReviewers: true, editing: true, draftToggle: true, updateBranch: true, rerunChecks: true, jobLogs: true, requestChanges: true, claude: true, blame: true, deleteBranch: true)
+    static let github = PRFeatures(provider: .github, stack: true, localConflicts: true, viewedFiles: true, requestReviewers: true, editing: true, draftToggle: true, updateBranch: true, rerunChecks: true, jobLogs: true, requestChanges: true, claude: true, blame: true, deleteBranch: true, mergeQueue: true)
 
-    static let gitlab = PRFeatures(provider: .gitlab, editing: true, draftToggle: true, updateBranch: true, jobLogs: true, revokeApproval: true)
+    static let gitlab = PRFeatures(provider: .gitlab, editing: true, draftToggle: true, updateBranch: true, jobLogs: true, revokeApproval: true, mergeQueue: true)
 
     static let bitbucket = PRFeatures(provider: .bitbucket, editing: true, draftToggle: true, jobLogs: true, requestChanges: true, revokeApproval: true, reopen: false)
 
     var checksTitle: String { provider == .gitlab ? "Pipeline" : provider == .bitbucket ? "Builds" : "Checks" }
     var updateBranchTitle: String { provider == .gitlab ? "Rebase" : "Update branch" }
+    var queueTitle: String { provider == .gitlab ? "merge train" : "merge queue" }
     var serviceTitle: String { provider == .githubEnterprise ? "GitHub Enterprise" : provider.title }
 }
 
@@ -153,6 +155,10 @@ final class GitHubPRBackend: PRBackend {
         case .convertToDraft: mutation = Q.convertToDraft
         case .updateBranch: mutation = Q.updateBranch
         case .disableAutoMerge: mutation = Q.disableAutoMerge
+        case .enqueue:
+            try await api.mutate(Q.enqueue, ["id": pr.id, "oid": pr.headRefOid.isEmpty ? nil : pr.headRefOid])
+            return
+        case .dequeue: mutation = Q.dequeue
         }
         try await api.mutate(mutation, ["id": pr.id])
     }

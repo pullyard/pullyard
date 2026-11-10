@@ -111,6 +111,10 @@ public sealed partial class PRDetailViewModel : ObservableObject
 
     public string UpdateBranchTitle => IsGitLab ? L.T("MR_Rebase", "Rebase") : L.T("Merge_UpdateBranch", "Update branch");
 
+    public string QueueTitle => IsGitLab ? L.T("MR_MergeTrain", "merge train") : L.T("PR_MergeQueue", "merge queue");
+
+    public bool UsesQueue => Features.MergeQueue && Pr is { IsMergeQueueEnabled: true, MergeQueueEntry: null };
+
     public string UpdatedToast => IsGitLab ? L.T("MR_RebaseStarted", "Rebase started") : L.F("PR_BranchUpdated", "Branch updated from {0}", Pr?.BaseRefName ?? "");
 
     public bool CanApprove => Pr is { } pr && (pr.ViewerCanApprove ?? !pr.ViewerDidAuthor) && pr.ViewerApproved != true;

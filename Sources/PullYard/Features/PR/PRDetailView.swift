@@ -36,7 +36,7 @@ struct PRDetailView: View {
 }
 
 enum PRConfirm: Identifiable {
-    case approve, revokeApproval, close, deleteBranch, disableAutoMerge, rerunFailed
+    case approve, revokeApproval, close, deleteBranch, disableAutoMerge, rerunFailed, dequeue
     var id: Int { hashValue }
 }
 
@@ -180,6 +180,7 @@ struct PRDetailContent: View {
         case .close: return "Close \(model.provider.requestTitle) without merging?"
         case .deleteBranch: return "Delete branch \(pr.headRefName)?"
         case .disableAutoMerge: return "Disable auto-merge?"
+        case .dequeue: return "Remove from the \(model.features.queueTitle)?"
         case .rerunFailed:
             let runs = Set(pr.checks.filter { $0.outcome == .failure }.compactMap(\.runId)).count
             return "Re-run failed jobs in \(plural(runs, "workflow run", "workflow runs"))?"
@@ -194,6 +195,7 @@ struct PRDetailContent: View {
         case .close: return "Close \(model.provider.requestTitle)"
         case .deleteBranch: return "Delete branch"
         case .disableAutoMerge: return "Disable"
+        case .dequeue: return "Remove"
         case .rerunFailed: return "Re-run failed jobs"
         }
     }
@@ -206,6 +208,7 @@ struct PRDetailContent: View {
             case .close: await model.simple(.close)
             case .deleteBranch: await model.deleteBranch()
             case .disableAutoMerge: await model.simple(.disableAutoMerge)
+            case .dequeue: if await model.simple(.dequeue) { app.showToast("Removed from the \(model.features.queueTitle)") }
             case .rerunFailed: await model.rerunFailed()
             }
         }
@@ -330,6 +333,9 @@ struct PRDetailContent: View {
             }
             if pr.autoMergeRequest != nil {
                 Button("Disable auto-merge") { confirm = .disableAutoMerge }
+            }
+            if model.features.mergeQueue, pr.mergeQueueEntry != nil, pr.viewerCanUpdate {
+                Button("Remove from \(model.features.queueTitle)…") { confirm = .dequeue }
             }
             Divider()
             if pr.viewerCanUpdate {

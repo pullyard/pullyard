@@ -19,6 +19,8 @@ pub enum PrAction {
     ConvertToDraft,
     UpdateBranch,
     DisableAutoMerge,
+    Enqueue,
+    Dequeue,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -39,6 +41,7 @@ pub struct PrFeatures {
     pub delete_branch: bool,
     pub branch_rules: bool,
     pub reopen: bool,
+    pub merge_queue: bool,
 }
 
 impl PrFeatures {
@@ -60,6 +63,7 @@ impl PrFeatures {
             delete_branch: true,
             branch_rules: true,
             reopen: true,
+            merge_queue: true,
         }
     }
 
@@ -81,6 +85,7 @@ impl PrFeatures {
             delete_branch: false,
             branch_rules: false,
             reopen: true,
+            merge_queue: true,
         }
     }
 
@@ -102,6 +107,7 @@ impl PrFeatures {
             delete_branch: false,
             branch_rules: false,
             reopen: false,
+            merge_queue: false,
         }
     }
 
@@ -122,6 +128,14 @@ impl PrFeatures {
             "Rebase"
         } else {
             "Update branch"
+        }
+    }
+
+    pub fn queue_title(&self) -> &'static str {
+        if self.is_gitlab() {
+            "merge train"
+        } else {
+            "merge queue"
         }
     }
 
@@ -263,6 +277,14 @@ impl PrBackend {
                     PrAction::ConvertToDraft => q::CONVERT_TO_DRAFT,
                     PrAction::UpdateBranch => q::UPDATE_BRANCH,
                     PrAction::DisableAutoMerge => q::DISABLE_AUTO_MERGE,
+                    PrAction::Dequeue => q::DEQUEUE,
+                    PrAction::Enqueue => {
+                        let mut vars = json!({ "id": pr.id });
+                        if !pr.head_ref_oid.is_empty() {
+                            vars["oid"] = json!(pr.head_ref_oid);
+                        }
+                        return api.mutate(q::ENQUEUE, vars).await;
+                    }
                 };
                 api.mutate(mutation, json!({ "id": pr.id })).await
             }
@@ -272,13 +294,14 @@ impl PrBackend {
                 PrAction::ReadyForReview => lab.set_draft(r, pr, false).await,
                 PrAction::ConvertToDraft => lab.set_draft(r, pr, true).await,
                 PrAction::UpdateBranch => lab.rebase(r).await,
-                PrAction::DisableAutoMerge => lab.cancel_auto_merge(r).await,
+                PrAction::DisableAutoMerge | PrAction::Dequeue => lab.cancel_auto_merge(r).await,
+                PrAction::Enqueue => lab.add_to_train(r, (!pr.head_ref_oid.is_empty()).then_some(pr.head_ref_oid.as_str())).await,
             },
             PrBackend::Bitbucket(bb) => match action {
                 PrAction::Close => bb.decline(r).await,
                 PrAction::ReadyForReview => bb.set_draft(r, false).await,
                 PrAction::ConvertToDraft => bb.set_draft(r, true).await,
-                PrAction::Reopen | PrAction::UpdateBranch | PrAction::DisableAutoMerge => Err(unsupported(GitProvider::Bitbucket)),
+                PrAction::Reopen | PrAction::UpdateBranch | PrAction::DisableAutoMerge | PrAction::Enqueue | PrAction::Dequeue => Err(unsupported(GitProvider::Bitbucket)),
             },
         }
     }
@@ -522,5 +545,74 @@ mod job_log_tests {
         let backend = PrBackend::GitLab(GitLabReview::new(ForgeClient::stubbed(GitProvider::Gitlab, "gitlab.example.com", "s", stub)));
         let r = ItemRef { repo: RepoRef::new("group", "app"), number: 1 };
         assert!(crate::rt::block_on(backend.code_owners(&r, "base1")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod merge_queue_tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::api::models::RepoRef;
+    use crate::forge::stub::Stub;
+    use crate::forge::ForgeClient;
+
+    fn pr(head: &str) -> PullRequestDetail {
+        serde_json::from_value(json!({
+            "id": "gitlab-mr-1", "number": 7, "title": "T", "url": "u", "state": "OPEN",
+            "isDraft": false, "merged": false, "mergeable": "MERGEABLE",
+            "body": "", "bodyHTML": "", "createdAt": "2026-01-01T00:00:00Z",
+            "headRefName": "f", "baseRefName": "main", "headRefOid": head,
+            "additions": 1, "deletions": 1, "changedFiles": 1, "viewerCanUpdate": true, "viewerDidAuthor": false
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn mutations_and_features() {
+        assert!(q::ENQUEUE.contains("enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $oid})"));
+        assert!(q::ENQUEUE.contains("$oid: GitObjectID"));
+        assert!(q::DEQUEUE.contains("dequeuePullRequest(input: {id: $id})"));
+        assert!(PrFeatures::github(GitProvider::Github).merge_queue);
+        assert!(PrFeatures::gitlab().merge_queue);
+        assert!(!PrFeatures::bitbucket().merge_queue);
+        assert_eq!(PrFeatures::github(GitProvider::Github).queue_title(), "merge queue");
+        assert_eq!(PrFeatures::gitlab().queue_title(), "merge train");
+    }
+
+    #[test]
+    fn gitlab_train_add_and_remove() {
+        let stub = Arc::new(Stub::default());
+        stub.route("/merge_trains/merge_requests/7", 201, "{}");
+        stub.route("/merge_requests/7/cancel_merge_when_pipeline_succeeds", 201, "{}");
+        let backend = PrBackend::GitLab(GitLabReview::new(ForgeClient::stubbed(GitProvider::Gitlab, "gitlab.example.com", "s", stub.clone())));
+        let r = ItemRef { repo: RepoRef::new("group", "app"), number: 7 };
+        crate::rt::block_on(backend.perform(PrAction::Enqueue, &r, &pr("abc123"))).unwrap();
+        let adds = stub.requests("POST", "/merge_trains/merge_requests/7");
+        assert_eq!(adds.len(), 1);
+        assert!(adds[0].path.ends_with("/projects/group/app/merge_trains/merge_requests/7"));
+        let body = adds[0].json();
+        assert_eq!(body["sha"], "abc123");
+        assert_eq!(body["when_pipeline_succeeds"], true);
+
+        crate::rt::block_on(backend.perform(PrAction::Enqueue, &r, &pr(""))).unwrap();
+        let unknown = stub.requests("POST", "/merge_trains/merge_requests/7").last().unwrap().json();
+        assert!(unknown.get("sha").is_none());
+        assert_eq!(unknown["when_pipeline_succeeds"], true);
+
+        crate::rt::block_on(backend.perform(PrAction::Dequeue, &r, &pr("abc123"))).unwrap();
+        assert_eq!(stub.requests("POST", "/merge_requests/7/cancel_merge_when_pipeline_succeeds").len(), 1);
+    }
+
+    #[test]
+    fn bitbucket_rejects_queue_actions() {
+        let stub = Arc::new(Stub::default());
+        let backend = PrBackend::Bitbucket(BitbucketReview::new(ForgeClient::stubbed(GitProvider::Bitbucket, "bitbucket.org", "s", stub.clone())));
+        let r = ItemRef { repo: RepoRef::new("a", "b"), number: 1 };
+        for action in [PrAction::Enqueue, PrAction::Dequeue] {
+            let e = crate::rt::block_on(backend.perform(action, &r, &pr("h"))).unwrap_err();
+            assert_eq!(e.message, "Not available for Bitbucket yet");
+        }
+        assert!(stub.all().is_empty());
     }
 }

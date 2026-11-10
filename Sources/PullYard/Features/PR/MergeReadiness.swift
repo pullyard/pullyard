@@ -235,7 +235,7 @@ enum MergeReadiness {
                                         detail: entry.failing ? "Fix the failing checks or conflicts and add it again" : nil))
         } else if pr.isMergeQueueEnabled == true {
             out.append(MergeRequirement(kind: .mergeQueue, state: .advisory, title: "Merges through a merge queue",
-                                        detail: "Add it to the queue on GitHub with “Merge when ready”"))
+                                        detail: "Add it from the merge sheet with “Add to merge queue”"))
         }
 
         if status == .failed {

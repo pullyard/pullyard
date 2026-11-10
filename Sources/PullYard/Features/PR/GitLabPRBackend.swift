@@ -447,7 +447,8 @@ final class GitLabPRBackend: PRBackend {
         case .readyForReview: try await client.update(project, iid: ref.number, fields: ["title": Self.undrafted(pr.title)])
         case .convertToDraft: try await client.update(project, iid: ref.number, fields: ["title": "Draft: " + Self.undrafted(pr.title)])
         case .updateBranch: try await client.rebase(project, iid: ref.number)
-        case .disableAutoMerge: try await client.cancelAutoMerge(project, iid: ref.number)
+        case .disableAutoMerge, .dequeue: try await client.cancelAutoMerge(project, iid: ref.number)
+        case .enqueue: try await client.addToTrain(project, iid: ref.number, sha: pr.headRefOid.isEmpty ? nil : pr.headRefOid)
         }
     }
 

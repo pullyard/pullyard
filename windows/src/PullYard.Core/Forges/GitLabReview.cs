@@ -303,6 +303,13 @@ public sealed partial class GitLabClient
         return http.Post(MrPath(project, iid) + "/merge", json, "PUT");
     }
 
+    public Task AddToTrain(string project, int iid, string? sha)
+    {
+        var json = new JsonObject { ["when_pipeline_succeeds"] = true };
+        if (sha is not null) json["sha"] = sha;
+        return http.Post($"{ProjectApiPath(project)}/merge_trains/merge_requests/{iid}", json);
+    }
+
     public Task CancelAutoMerge(string project, int iid) => http.Post(MrPath(project, iid) + "/cancel_merge_when_pipeline_succeeds");
 
     public Task Rebase(string project, int iid) => http.Post(MrPath(project, iid) + "/rebase", method: "PUT");

@@ -127,6 +127,11 @@ struct MergeSheet: View {
     let model: PRDetailModel
     let pr: PullRequestDetail
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppModel.self) private var app
+
+    private var usesQueue: Bool {
+        model.features.mergeQueue && pr.isMergeQueueEnabled == true && pr.mergeQueueEntry == nil
+    }
     @State private var method: MergeMethod = .MERGE
     @State private var title = ""
     @State private var message = ""
@@ -154,15 +159,13 @@ struct MergeSheet: View {
                 .padding(.vertical, Space.s)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: Radius.m).fill(readiness.color.opacity(Tint.banner)))
-            if model.provider.isGitHub, pr.isMergeQueueEnabled == true, pr.mergeQueueEntry == nil {
+            if usesQueue {
                 HStack(spacing: 6) {
                     Image(systemName: "tray.full").foregroundStyle(Color.syMuted)
-                    Text("\(pr.baseRefName) uses a merge queue. Merging here may be rejected; add it to the queue on GitHub instead.")
+                    Text("\(pr.baseRefName) uses a \(model.features.queueTitle). Add the \(model.provider.requestTitle) to it and it merges once the required checks pass; merging directly may be rejected.")
                         .font(.syCaption)
                         .foregroundStyle(Color.syMuted)
                         .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    Button("Open on GitHub") { openInBrowser(pr.url) }.controlSize(.small)
                 }
             }
             Picker("Method", selection: $method) {
@@ -186,7 +189,20 @@ struct MergeSheet: View {
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(blocked ? "Merge anyway" : "Merge") {
+                if usesQueue {
+                    Button("Add to \(model.features.queueTitle)") {
+                        Task {
+                            if await model.simple(.enqueue) {
+                                app.showToast("Added to the \(model.features.queueTitle)")
+                                dismiss()
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.syGreenFill)
+                    .disabled(model.busy)
+                }
+                Button(usesQueue ? "Merge directly" : blocked ? "Merge anyway" : "Merge") {
                     let t = title.trimmingCharacters(in: .whitespaces)
                     let b = message.trimmingCharacters(in: .whitespacesAndNewlines)
                     let del = deleteBranch && !(model.repo?.deleteBranchOnMerge ?? false) && pr.headRepository?.nameWithOwner == model.ref.repo.full
@@ -195,7 +211,7 @@ struct MergeSheet: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(blocked ? Color.syRedFill : Color.syGreenFill)
+                .tint(usesQueue ? Color.sySlate : blocked ? Color.syRedFill : Color.syGreenFill)
                 .help(blocked ? "GitHub may reject this merge: \(readiness.text)" : "Merge pull request")
                 .disabled(model.busy || allowed.isEmpty)
             }

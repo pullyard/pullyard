@@ -1099,6 +1099,21 @@ impl PrPage {
                     dialogs::confirm("Disable auto-merge?", None, "Disable", true, f);
                 });
             }
+            if f.merge_queue && pr.merge_queue_entry.is_some() && pr.viewer_can_update {
+                let mm = m.clone();
+                let queue = f.queue_title();
+                menu.item(&format!("Remove from {queue}…"), move || {
+                    let mm = mm.clone();
+                    dialogs::confirm(&format!("Remove from the {queue}?"), None, "Remove", true, move || {
+                        let mm = mm.clone();
+                        crate::rt::spawn_local(async move {
+                            if mm.simple(PrAction::Dequeue).await {
+                                app::toast(&format!("Removed from the {queue}"));
+                            }
+                        });
+                    });
+                });
+            }
             menu.section(None);
             if pr.viewer_can_update {
                 let mm = m.clone();

@@ -963,6 +963,14 @@ impl GitLabReview {
         self.client.http().post(Method::PUT, &format!("{}/rebase", mr_path(&r.repo.full(), r.number)), &[]).await
     }
 
+    pub async fn add_to_train(&self, r: &ItemRef, sha: Option<&str>) -> ApiResult<()> {
+        let mut body = json!({ "when_pipeline_succeeds": true });
+        if let Some(sha) = sha {
+            body["sha"] = json!(sha);
+        }
+        self.client.http().send_json(Method::POST, &format!("{}/merge_trains/merge_requests/{}", project_path(&r.repo.full()), r.number), body).await
+    }
+
     pub async fn cancel_auto_merge(&self, r: &ItemRef) -> ApiResult<()> {
         self.client.http().post(Method::POST, &format!("{}/cancel_merge_when_pipeline_succeeds", mr_path(&r.repo.full(), r.number)), &[]).await
     }

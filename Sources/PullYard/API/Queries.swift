@@ -192,6 +192,8 @@ enum Q {
     static let unresolveThread = "mutation UnresolveThread($id: ID!) { unresolveReviewThread(input: {threadId: $id}) { clientMutationId } }"
     static let merge = "mutation Merge($id: ID!, $m: PullRequestMergeMethod!, $t: String, $b: String) { mergePullRequest(input: {pullRequestId: $id, mergeMethod: $m, commitHeadline: $t, commitBody: $b}) { clientMutationId } }"
     static let enableAutoMerge = "mutation EnableAutoMerge($id: ID!, $m: PullRequestMergeMethod!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: $m}) { clientMutationId } }"
+    static let enqueue = "mutation Enqueue($id: ID!, $oid: GitObjectID) { enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $oid}) { clientMutationId } }"
+    static let dequeue = "mutation Dequeue($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }"
     static let disableAutoMerge = "mutation DisableAutoMerge($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }"
     static let closePR = "mutation ClosePR($id: ID!) { closePullRequest(input: {pullRequestId: $id}) { clientMutationId } }"
     static let reopenPR = "mutation ReopenPR($id: ID!) { reopenPullRequest(input: {pullRequestId: $id}) { clientMutationId } }"

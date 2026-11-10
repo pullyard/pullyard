@@ -173,6 +173,10 @@ fragment IssueItem on Issue { number title url issueState: state stateReason cre
 
     public const string EnableAutoMerge = "mutation EnableAutoMerge($id: ID!, $m: PullRequestMergeMethod!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: $m}) { clientMutationId } }";
 
+    public const string Enqueue = "mutation Enqueue($id: ID!, $oid: GitObjectID) { enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $oid}) { clientMutationId } }";
+
+    public const string Dequeue = "mutation Dequeue($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }";
+
     public const string DisableAutoMerge = "mutation DisableAutoMerge($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }";
 
     public const string ClosePR = "mutation ClosePR($id: ID!) { closePullRequest(input: {pullRequestId: $id}) { clientMutationId } }";

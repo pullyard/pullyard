@@ -167,21 +167,38 @@ public static class Dialogs
         Prefill();
         var canAuto = repo?.AutoMergeAllowed == true && pr.AutoMergeRequest is null && pr.MergeStateStatus != "CLEAN";
         var body = Ui.V(10, methods, title, message, deleteBox);
-        if (model.Features.IsGitHub && pr.IsMergeQueueEnabled == true && pr.MergeQueueEntry is null)
+        var queue = model.UsesQueue;
+        if (queue)
         {
-            var note = Ui.Text(L.F("Merge_QueueNote", "{0} uses a merge queue. Merging here may be rejected; add it to the queue on GitHub instead.", pr.BaseRefName), 12, "muted", wrap: true);
-            body.Children.Insert(0, Ui.Columns((Ui.Glyph("\ue916", 13), Ui.Auto), (note, Ui.Star), (Ui.Button(L.T("Merge_OpenOnGitHub", "Open on GitHub"), () => LinkBrowser.Open(pr.Url)), Ui.Auto)));
+            var note = Ui.Text(L.F("Merge_QueueNote", "{0} uses a {1}. Add the {2} to it and it merges once the required checks pass; merging directly may be rejected.", pr.BaseRefName, model.QueueTitle, model.Provider.RequestTitle()), 12, "muted", wrap: true);
+            body.Children.Insert(0, Ui.Columns((Ui.Glyph("\ue916", 13), Ui.Auto), (note, Ui.Star)));
         }
-        var d = Create(root, L.F("Merge_Title", "Merge {0} into {1}", model.NumberText, pr.BaseRefName), body, L.T("Merge_MergeButton", "Merge"), canAuto ? L.T("Merge_EnableAuto", "Enable auto-merge") : null);
-        d.IsPrimaryButtonEnabled = allowed.Count > 0;
-        d.PrimaryButtonClick += async (_, args) =>
+        var heading = L.F("Merge_Title", "Merge {0} into {1}", model.NumberText, pr.BaseRefName);
+        var d = queue
+            ? Create(root, heading, body, L.F("Merge_AddToQueue", "Add to {0}", model.QueueTitle), L.T("Merge_MergeDirectly", "Merge directly"))
+            : Create(root, heading, body, L.T("Merge_MergeButton", "Merge"), canAuto ? L.T("Merge_EnableAuto", "Enable auto-merge") : null);
+        Task<bool> MergeNow()
         {
             var t = title.Text.Trim();
             var b = message.Text.Trim();
             var del = deleteBox.IsChecked == true && deleteBox.Visibility == Visibility.Visible;
-            await RunWhileOpen(d, () => model.Merge(Method(), t.Length == 0 ? null : t, b.Length == 0 ? null : b, del), args);
-        };
-        d.SecondaryButtonClick += async (_, args) => await RunWhileOpen(d, () => model.EnableAutoMerge(Method()), args);
+            return model.Merge(Method(), t.Length == 0 ? null : t, b.Length == 0 ? null : b, del);
+        }
+        if (queue)
+        {
+            d.IsSecondaryButtonEnabled = allowed.Count > 0;
+            d.PrimaryButtonClick += async (_, args) =>
+            {
+                if (await RunWhileOpen(d, () => model.Simple(PRAction.Enqueue), args)) ShellView.Toast(L.F("Merge_AddedToQueue", "Added to the {0}", model.QueueTitle));
+            };
+            d.SecondaryButtonClick += async (_, args) => await RunWhileOpen(d, MergeNow, args);
+        }
+        else
+        {
+            d.IsPrimaryButtonEnabled = allowed.Count > 0;
+            d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, MergeNow, args);
+            d.SecondaryButtonClick += async (_, args) => await RunWhileOpen(d, () => model.EnableAutoMerge(Method()), args);
+        }
         await ShowAsync(d);
     }
 

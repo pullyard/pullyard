@@ -397,7 +397,7 @@ final class BitbucketPRBackend: PRBackend {
         case .close: try await client.decline(repo, id: ref.number)
         case .readyForReview: try await client.updatePull(repo, id: ref.number, fields: ["draft": false])
         case .convertToDraft: try await client.updatePull(repo, id: ref.number, fields: ["draft": true])
-        case .reopen, .updateBranch, .disableAutoMerge: throw PRBackendUnsupported(provider: features.provider)
+        case .reopen, .updateBranch, .disableAutoMerge, .enqueue, .dequeue: throw PRBackendUnsupported(provider: features.provider)
         }
     }
 
