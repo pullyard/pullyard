@@ -6,6 +6,7 @@ use gtk::prelude::*;
 use gtk::{gio, glib};
 
 use crate::api::models::{PrFile, RepoRef};
+use crate::claude::ship::GitRemote;
 use crate::diff::{self, DiffFile};
 use crate::host::{self, HostCmd};
 use crate::signal::Signal;
@@ -25,33 +26,26 @@ pub fn run(args: &[&str], dir: &str) -> (String, bool) {
     (out, ok)
 }
 
-pub fn remote_repo(dir: &str) -> Option<RepoRef> {
-    let (url, _) = run(&["remote", "get-url", "origin"], dir);
-    let url = url.trim();
-    if !url.contains("github.com") {
-        return None;
-    }
-    let mut tail = url.rsplit("github.com").next().unwrap_or("").trim_matches(|c| c == ':' || c == '/').to_string();
-    if tail.ends_with(".git") {
-        tail.truncate(tail.len() - 4);
-    }
-    RepoRef::from_full(&tail)
+pub fn remote(dir: &str) -> Option<GitRemote> {
+    GitRemote::parse(&run(&["remote", "get-url", "origin"], dir).0)
 }
 
 pub struct Snapshot {
     pub is_repo: bool,
     pub branch: Option<String>,
     pub repo: Option<RepoRef>,
+    pub remote: Option<GitRemote>,
     pub changes: Vec<DiffFile>,
     pub unpushed: Vec<CommitLine>,
 }
 
 pub fn snapshot(dir: String) -> Snapshot {
     if !run(&["rev-parse", "--is-inside-work-tree"], &dir).1 {
-        return Snapshot { is_repo: false, branch: None, repo: None, changes: vec![], unpushed: vec![] };
+        return Snapshot { is_repo: false, branch: None, repo: None, remote: None, changes: vec![], unpushed: vec![] };
     }
     let branch = run(&["rev-parse", "--abbrev-ref", "HEAD"], &dir).0.trim().to_string();
-    let repo = remote_repo(&dir);
+    let remote = remote(&dir);
+    let repo = remote.as_ref().and_then(|r| r.github_repo());
     let mut files: Vec<PrFile> = diff::parse_unified(&run(&["diff", "HEAD", "--no-ext-diff", "--no-textconv", "--no-color", "-M"], &dir).0);
     if files.is_empty() {
         files = diff::parse_unified(&run(&["diff", "--no-ext-diff", "--no-textconv", "--no-color", "-M"], &dir).0);
@@ -87,7 +81,7 @@ pub fn snapshot(dir: String) -> Snapshot {
     } else {
         vec![]
     };
-    Snapshot { is_repo: true, branch: if branch.is_empty() { None } else { Some(branch) }, repo, changes: files.iter().map(DiffFile::new).collect(), unpushed }
+    Snapshot { is_repo: true, branch: if branch.is_empty() { None } else { Some(branch) }, repo, remote, changes: files.iter().map(DiffFile::new).collect(), unpushed }
 }
 
 pub struct WorkingCopy {
@@ -95,6 +89,7 @@ pub struct WorkingCopy {
     pub is_repo: Cell<bool>,
     pub branch: RefCell<Option<String>>,
     pub repo: RefCell<Option<RepoRef>>,
+    pub remote: RefCell<Option<GitRemote>>,
     pub changes: RefCell<Vec<DiffFile>>,
     pub unpushed: RefCell<Vec<CommitLine>>,
     pub loading: Cell<bool>,
@@ -111,6 +106,7 @@ impl WorkingCopy {
             is_repo: Cell::new(false),
             branch: RefCell::new(None),
             repo: RefCell::new(None),
+            remote: RefCell::new(None),
             changes: RefCell::new(vec![]),
             unpushed: RefCell::new(vec![]),
             loading: Cell::new(false),
@@ -141,6 +137,7 @@ impl WorkingCopy {
                 me.is_repo.set(s.is_repo);
                 *me.branch.borrow_mut() = s.branch;
                 *me.repo.borrow_mut() = s.repo;
+                *me.remote.borrow_mut() = s.remote;
                 *me.changes.borrow_mut() = s.changes;
                 *me.unpushed.borrow_mut() = s.unpushed;
                 if !me.queued.get() {

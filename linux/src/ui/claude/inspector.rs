@@ -306,6 +306,7 @@ struct BranchPrs {
     detail: adw::Bin,
     last_key: RefCell<String>,
     repo_label: gtk::Label,
+    forge: gtk::Box,
 }
 
 impl BranchPrs {
@@ -313,6 +314,12 @@ impl BranchPrs {
         let widget = gtk::Stack::new();
         let none = empty_state("sy-repo-symbolic", "slate", "Folder isn't linked to a GitHub repository", None);
         widget.add_named(&none, Some("none"));
+        let forge = vbox(10);
+        forge.set_valign(gtk::Align::Center);
+        forge.set_halign(gtk::Align::Center);
+        forge.set_vexpand(true);
+        pad(&forge, 24);
+        widget.add_named(&forge, Some("forge"));
         let col = vbox(6);
         pad(&col, 10);
         let branch_box = vbox(6);
@@ -375,6 +382,7 @@ impl BranchPrs {
             detail,
             last_key: RefCell::new(String::new()),
             repo_label,
+            forge,
         });
         *holder.borrow_mut() = Some(Rc::downgrade(&me));
         for (i, b) in buttons.iter().enumerate() {
@@ -438,7 +446,7 @@ impl BranchPrs {
     }
 
     fn on_git_change(self: &Rc<Self>) {
-        let key = format!("{}|{}|{}", self.repo().map(|r| r.full()).unwrap_or_default(), self.tab.git.branch.borrow().clone().unwrap_or_default(), self.tab.git.ahead());
+        let key = format!("{}|{}|{}|{}", self.repo().map(|r| r.full()).unwrap_or_default(), self.tab.git.remote.borrow().as_ref().map(|r| r.web_url()).unwrap_or_default(), self.tab.git.branch.borrow().clone().unwrap_or_default(), self.tab.git.ahead());
         if *self.last_key.borrow() != key {
             *self.last_key.borrow_mut() = key;
             self.load_all();
@@ -461,7 +469,13 @@ impl BranchPrs {
             return;
         }
         let Some(repo) = self.repo() else {
-            self.widget.set_visible_child_name("none");
+            match self.tab.git.remote.borrow().clone().filter(|r| r.kind != ship::RemoteKind::Github) {
+                Some(remote) => {
+                    self.render_forge(&remote);
+                    self.widget.set_visible_child_name("forge");
+                }
+                None => self.widget.set_visible_child_name("none"),
+            }
             return;
         };
         self.widget.set_visible_child_name("list");
@@ -487,7 +501,8 @@ impl BranchPrs {
                 let agent = tinted("Open PR with agent", "coral");
                 let (tab, br) = (self.tab.clone(), b.clone());
                 agent.connect_clicked(move |_| {
-                    let prompt = ship::open_pr_prompt(&br, None, !tab.git.changes.borrow().is_empty(), tab.git.ahead());
+                    let remote = tab.git.remote.borrow().clone();
+                    let prompt = ship::open_request_prompt(&br, None, !tab.git.changes.borrow().is_empty(), tab.git.ahead(), remote.as_ref());
                     app::get().claude.send(&prompt, Some(tab.clone()), true);
                 });
                 row.append(&agent);
@@ -534,6 +549,37 @@ impl BranchPrs {
         for it in &list {
             self.list_box.append(&self.row(it));
         }
+    }
+
+    fn render_forge(&self, remote: &ship::GitRemote) {
+        clear(&self.forge);
+        self.forge.append(&icon_tile("sy-pr-symbolic", "slate", 52));
+        let title = label_with(&format!("{} · {}", remote.service(), remote.path), &["sy-text", "sy-bold"]);
+        title.set_wrap(true);
+        title.set_justify(gtk::Justification::Center);
+        self.forge.append(&title);
+        if let Some(b) = self.tab.git.branch.borrow().clone().filter(|b| b != "HEAD") {
+            self.forge.append(&label_with(&format!("Branch {b}"), &["sy-muted", "sy-small"]));
+            let row = hbox(6);
+            row.set_halign(gtk::Align::Center);
+            let agent = tinted(if remote.kind == ship::RemoteKind::Gitlab { "Open MR with agent" } else { "Open PR with agent" }, "coral");
+            let (tab, br, r) = (self.tab.clone(), b.clone(), remote.clone());
+            agent.connect_clicked(move |_| {
+                let prompt = ship::open_request_prompt(&br, None, !tab.git.changes.borrow().is_empty(), tab.git.ahead(), Some(&r));
+                app::get().claude.send(&prompt, Some(tab.clone()), true);
+            });
+            row.append(&agent);
+            let create = button("Create in browser");
+            let url = remote.new_request_url(&b);
+            create.connect_clicked(move |_| util::open_url(&url));
+            row.append(&create);
+            self.forge.append(&row);
+        }
+        let open = link_button(&format!("Open {}", remote.service()));
+        open.set_halign(gtk::Align::Center);
+        let web = remote.web_url();
+        open.connect_clicked(move |_| util::open_url(&web));
+        self.forge.append(&open);
     }
 
     fn row(&self, it: &SearchItem) -> gtk::ListBoxRow {

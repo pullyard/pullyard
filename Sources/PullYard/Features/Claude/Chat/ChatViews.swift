@@ -467,8 +467,8 @@ struct ChatWelcome: View {
         let git = tab?.git
         if let git, !git.changes.isEmpty {
             out.append(Suggestion(icon: "eye", title: "Review my uncommitted changes", prompt: "Review my uncommitted changes (git diff HEAD). Point out bugs, risky parts and missing tests."))
-            if let branch = git.branch, branch != "HEAD", git.repo != nil {
-                out.append(Suggestion(icon: "arrow.triangle.pull", title: "Open a pull request", prompt: AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: true, ahead: git.ahead)))
+            if let branch = git.branch, branch != "HEAD", let remote = git.remote {
+                out.append(Suggestion(icon: "arrow.triangle.pull", title: "Open a \(remote.noun)", prompt: AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: true, ahead: git.ahead, remote: remote)))
             }
         }
         if let tab, let pr = app.claude.pullRequest(for: tab) {

@@ -1044,10 +1044,10 @@ impl ChatView {
         let text = vbox(2);
         text.set_hexpand(true);
         text.set_valign(gtk::Align::Center);
-        text.append(&label_with(&format!("Pull request #{} is open", ship::pr_number(&url)), &["sy-bold", "sy-text"]));
-        let repo = ship::pr_repo(&url);
-        if !repo.is_empty() {
-            text.append(&label_with(&repo, &["sy-muted", "sy-small"]));
+        let info = ship::describe(&url);
+        text.append(&label_with(&info.title(), &["sy-bold", "sy-text"]));
+        if !info.repo.is_empty() {
+            text.append(&label_with(&info.repo, &["sy-muted", "sy-small"]));
         }
         row.append(&text);
         let copy = button("Copy link");
@@ -1133,13 +1133,14 @@ impl ChatView {
         let branch = git.branch.borrow().clone().filter(|b| b != "HEAD");
         let changes = git.changes.borrow().len();
         let ahead = git.ahead();
-        let has_repo = git.repo.borrow().is_some();
+        let remote = git.remote.borrow().clone();
+        let remote_key = remote.as_ref().map(|r| r.web_url()).unwrap_or_default();
         let sid = self.chat.session_id.borrow().clone().unwrap_or_default();
         let root = sessions::project_root(&self.tab.folder);
         let recent: Vec<SessionInfo> = ws.projects.borrow().iter().find(|p| p.path == root).map(|p| p.sessions.iter().filter(|s| s.id != sid).take(3).cloned().collect()).unwrap_or_default();
         let linked: Option<(i64, String)> = if sid.is_empty() { None } else { ws.find_session(&sid).and_then(|s| Some((s.pr_number?, s.pr_url?))) };
         let key = format!(
-            "{:?}|{changes}|{ahead}|{has_repo}|{:?}|{}",
+            "{:?}|{changes}|{ahead}|{remote_key}|{:?}|{}",
             branch,
             linked,
             recent.iter().map(|s| format!("{}:{}:{}", s.id, s.title, s.modified.timestamp())).collect::<Vec<_>>().join(",")
@@ -1180,8 +1181,8 @@ impl ChatView {
         let mut suggestions: Vec<(&str, String, String)> = vec![];
         if changes > 0 {
             suggestions.push(("sy-eye-symbolic", "Review my uncommitted changes".into(), "Review my uncommitted changes (git diff HEAD). Point out bugs, risky parts and missing tests.".into()));
-            if let (Some(b), true) = (&branch, has_repo) {
-                suggestions.push(("sy-pr-symbolic", "Open a pull request".into(), ship::open_pr_prompt(b, None, true, ahead)));
+            if let (Some(b), Some(r)) = (&branch, &remote) {
+                suggestions.push(("sy-pr-symbolic", format!("Open a {}", r.noun()), ship::open_request_prompt(b, None, true, ahead, Some(r))));
             }
         }
         if let Some((n, url)) = &linked {

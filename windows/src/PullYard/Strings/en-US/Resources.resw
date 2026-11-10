@@ -109,6 +109,7 @@
   <data name="ChatWeb_Hint" xml:space="preserve"><value>/ commands · @ files · Shift+Enter new line · paste a screenshot Ctrl+V</value></data>
   <data name="ChatWeb_JumpLatest" xml:space="preserve"><value>Jump to the latest message</value></data>
   <data name="ChatWeb_JumpNew" xml:space="preserve"><value>{0} new — jump to the latest message</value></data>
+  <data name="ChatWeb_MROpen" xml:space="preserve"><value>Merge request !{0} is open</value></data>
   <data name="ChatWeb_OpenInApp" xml:space="preserve"><value>Open in PullYard</value></data>
   <data name="ChatWeb_PROpen" xml:space="preserve"><value>Pull request #{0} is open</value></data>
   <data name="ChatWeb_Recent" xml:space="preserve"><value>Recent in this project</value></data>
@@ -127,6 +128,7 @@
   <data name="ChatWeb_SugAddress" xml:space="preserve"><value>Address review on #{0}</value></data>
   <data name="ChatWeb_SugBugs" xml:space="preserve"><value>Find bugs in recent changes</value></data>
   <data name="ChatWeb_SugExplain" xml:space="preserve"><value>Explain the project structure</value></data>
+  <data name="ChatWeb_SugOpenMR" xml:space="preserve"><value>Open a merge request</value></data>
   <data name="ChatWeb_SugOpenPR" xml:space="preserve"><value>Open a pull request</value></data>
   <data name="ChatWeb_SugReview" xml:space="preserve"><value>Review my uncommitted changes</value></data>
   <data name="ChatWeb_SugTests" xml:space="preserve"><value>Write tests for changed code</value></data>
@@ -492,10 +494,12 @@
   <data name="Inline_Single" xml:space="preserve"><value>Add single comment</value></data>
   <data name="Inline_Title" xml:space="preserve"><value>Comment on line</value></data>
   <data name="Inspector_AskReview" xml:space="preserve"><value>Ask Claude to review this PR</value></data>
+  <data name="Inspector_BranchName" xml:space="preserve"><value>Branch {0}</value></data>
   <data name="Inspector_Changes" xml:space="preserve"><value>Changes</value></data>
   <data name="Inspector_Collapse" xml:space="preserve"><value>Collapse inspector</value></data>
   <data name="Inspector_CollapseHint" xml:space="preserve"><value>Collapse (Esc)</value></data>
   <data name="Inspector_CommitAgent" xml:space="preserve"><value>Commit and push to #{0} with agent</value></data>
+  <data name="Inspector_CreateInBrowser" xml:space="preserve"><value>Create in browser</value></data>
   <data name="Inspector_CreatePR" xml:space="preserve"><value>Create PR in browser</value></data>
   <data name="Inspector_Expand" xml:space="preserve"><value>Expand inspector</value></data>
   <data name="Inspector_ExpandHint" xml:space="preserve"><value>Expand over the chat</value></data>
@@ -510,7 +514,9 @@
   <data name="Inspector_NoRepo" xml:space="preserve"><value>Folder isn't linked to a GitHub repository</value></data>
   <data name="Inspector_OpenFull" xml:space="preserve"><value>Open full</value></data>
   <data name="Inspector_OpenInPRs" xml:space="preserve"><value>Open in PR section</value></data>
+  <data name="Inspector_OpenMRAgent" xml:space="preserve"><value>Open MR with agent</value></data>
   <data name="Inspector_OpenPRAgent" xml:space="preserve"><value>Open PR with agent</value></data>
+  <data name="Inspector_OpenService" xml:space="preserve"><value>Open {0}</value></data>
   <data name="Inspector_PR" xml:space="preserve"><value>PR</value></data>
   <data name="Inspector_Resize" xml:space="preserve"><value>Resize inspector</value></data>
   <data name="Inspector_ResizeHint" xml:space="preserve"><value>Drag to resize, double-click to reset</value></data>

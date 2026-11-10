@@ -35,13 +35,8 @@ enum Git {
         return (String(decoding: data, as: UTF8.self), p.terminationStatus == 0, p.terminationStatus)
     }
 
-    static func remoteRepo(_ dir: String) -> RepoRef? {
-        let url = run(["remote", "get-url", "origin"], in: dir).out.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard url.contains("github.com") else { return nil }
-        var tail = url.components(separatedBy: "github.com").last ?? ""
-        tail = tail.trimmingCharacters(in: CharacterSet(charactersIn: ":/"))
-        if tail.hasSuffix(".git") { tail.removeLast(4) }
-        return RepoRef(full: tail)
+    static func remote(_ dir: String) -> GitRemote? {
+        GitRemote.parse(run(["remote", "get-url", "origin"], in: dir).out)
     }
 
     static func parseUnifiedDiff(_ text: String) -> [PRFile] {
@@ -98,6 +93,7 @@ final class GitWorkingCopy {
     var worktree: String?
     var localBranches: [String] = []
     var repo: RepoRef?
+    var remote: GitRemote?
     var changes: [DiffFile] = []
     var unpushed: [GitCommitLine] = []
     var ahead = 0
@@ -126,7 +122,7 @@ final class GitWorkingCopy {
         defer { loading = false }
         let dir = path
         let wantBranches = localBranches.isEmpty || branchesStale
-        let result = await Task.detached(priority: .utility) { () -> (Bool, String?, RepoRef?, [DiffFile], [GitCommitLine], String?, [String]?, Int) in
+        let result = await Task.detached(priority: .utility) { () -> (Bool, String?, GitRemote?, [DiffFile], [GitCommitLine], String?, [String]?, Int) in
             let info = Git.run(["rev-parse", "--is-inside-work-tree", "--abbrev-ref", "HEAD", "--path-format=absolute", "--git-dir", "--git-common-dir", "--show-toplevel"], in: dir)
             var lines = info.out.split(separator: "\n").map(String.init)
             if !info.ok {
@@ -139,7 +135,7 @@ final class GitWorkingCopy {
             let dirs = Array(lines.dropFirst(2))
             let worktree = dirs.count == 3 && dirs[0] != dirs[1] ? (dirs[2] as NSString).lastPathComponent : nil
             let branches = wantBranches ? Git.run(["for-each-ref", "--format=%(refname:short)", "--sort=-committerdate", "--count=30", "refs/heads"], in: dir).out.split(separator: "\n").map(String.init) : nil
-            let repo = Git.remoteRepo(dir)
+            let remote = Git.remote(dir)
             var diffText = Git.run(["diff", "HEAD", "--no-color", "-M"], in: dir).out
             var files = Git.parseUnifiedDiff(diffText)
             if files.isEmpty {
@@ -173,14 +169,16 @@ final class GitWorkingCopy {
                     return parts.count == 3 ? GitCommitLine(id: parts[0], short: parts[1], subject: parts[2]) : nil
                 }
             }
-            return (true, branch.isEmpty ? nil : branch, repo, files.map(DiffFile.init), commits, worktree, branches, hasher.finalize())
+            return (true, branch.isEmpty ? nil : branch, remote, files.map(DiffFile.init), commits, worktree, branches, hasher.finalize())
         }.value
         if isRepo != result.0 { isRepo = result.0 }
         if branch != result.1 {
             branch = result.1
             branchesStale = true
         }
-        if repo != result.2 { repo = result.2 }
+        if remote != result.2 { remote = result.2 }
+        let github = result.2?.githubRepo
+        if repo != github { repo = github }
         if changesSignature != result.7 {
             changesSignature = result.7
             changes = result.3

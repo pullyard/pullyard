@@ -33,20 +33,13 @@ public static class GitCli
             ["GIT_TERMINAL_PROMPT"] = "0"
         }, timeout: TimeSpan.FromSeconds(30), ct: ct);
 
-    public static async Task<RepoRef?> RemoteRepo(string dir)
+    public static async Task<GitRemote?> Remote(string dir)
     {
-        var url = (await Run(new[] { "remote", "get-url", "origin" }, dir).ConfigureAwait(false)).Out.Trim();
-        return ParseRemote(url);
+        var url = (await Run(new[] { "remote", "get-url", "origin" }, dir).ConfigureAwait(false)).Out;
+        return GitRemote.Parse(url);
     }
 
-    public static RepoRef? ParseRemote(string url)
-    {
-        var i = url.IndexOf("github.com", StringComparison.OrdinalIgnoreCase);
-        if (i < 0) return null;
-        var tail = url[(i + "github.com".Length)..].Trim(':', '/');
-        if (tail.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) tail = tail[..^4];
-        return RepoRef.Parse(tail);
-    }
+    public static RepoRef? ParseRemote(string url) => GitRemote.Parse(url)?.GitHubRepo;
 
     public static List<PRFile> ParseUnifiedDiff(string text)
     {

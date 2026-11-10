@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Controls;
 using PullYard.Controls;
 using PullYard.Core.Api;
 using PullYard.Core.Claude;
+using PullYard.Core.Git;
 using PullYard.Core.Html;
 using PullYard.Core.Util;
 using PullYard.Services;
@@ -669,8 +670,14 @@ public sealed class BranchPRPanel : Grid
             Render();
             return;
         }
-        if (e.PropertyName is nameof(Core.Git.GitWorkingCopy.Repo) or nameof(Core.Git.GitWorkingCopy.Branch) or nameof(Core.Git.GitWorkingCopy.Ahead))
+        if (e.PropertyName is nameof(Core.Git.GitWorkingCopy.Repo) or nameof(Core.Git.GitWorkingCopy.Remote) or nameof(Core.Git.GitWorkingCopy.Branch) or nameof(Core.Git.GitWorkingCopy.Ahead))
         {
+            if (Repo is null && selected is null)
+            {
+                loadedKey = "";
+                Render();
+                return;
+            }
             var key = $"{Repo?.Full}|{tab.Git.Branch}|{tab.Git.Ahead}";
             if (key == loadedKey) return;
             Load().Forget();
@@ -679,7 +686,9 @@ public sealed class BranchPRPanel : Grid
 
     private void OnTab(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ClaudeTab.State) && !tab.Busy && selected is null) LoadBranch().Forget();
+        if (e.PropertyName != nameof(ClaudeTab.State) || selected is not null) return;
+        if (Repo is null) Render();
+        else if (!tab.Busy) LoadBranch().Forget();
     }
 
     private async Task Load()
@@ -770,6 +779,11 @@ public sealed class BranchPRPanel : Grid
                 });
             return;
         }
+        if (Repo is null && tab.Git.Remote is { Kind: not GitRemoteKind.GitHub } remote)
+        {
+            host.Content = ForgePanel(remote);
+            return;
+        }
         if (Repo is null)
         {
             host.Content = Ui.Empty("", "slate", L.T("Inspector_NoRepo", "Folder isn't linked to a GitHub repository"));
@@ -784,7 +798,7 @@ public sealed class BranchPRPanel : Grid
             items.Add(new TextRowItem(L.F("Inspector_NoPR", "No PR for branch {0}", branchName)));
             if (tab.Git.Branch is { } b && b != "HEAD" && Repo is { } repo)
             {
-                items.Add(new ActionRowItem(L.T("Inspector_OpenPRAgent", "Open PR with agent"), () => app.Claude.Send(AgentShip.OpenPRPrompt(b, null, tab.Git.Changes.Count > 0, tab.Git.Ahead), tab, submit: true), "\uE8F2"));
+                items.Add(new ActionRowItem(L.T("Inspector_OpenPRAgent", "Open PR with agent"), () => app.Claude.Send(AgentShip.OpenPRPrompt(b, null, tab.Git.Changes.Count > 0, tab.Git.Ahead, tab.Git.Remote), tab, submit: true), "\uE8F2"));
                 items.Add(new ActionRowItem(L.T("Inspector_CreatePR", "Create PR in browser"), () => LinkBrowser.Open($"https://github.com/{repo.Full}/pull/new/{b}")));
             }
         }
@@ -827,6 +841,41 @@ public sealed class BranchPRPanel : Grid
         SetRow(listView, 1);
         grid.Children.Add(listView);
         host.Content = grid;
+    }
+
+    private FrameworkElement ForgePanel(GitRemote remote)
+    {
+        var service = remote.Kind switch
+        {
+            GitRemoteKind.GitLab => "GitLab",
+            GitRemoteKind.Bitbucket => "Bitbucket",
+            _ => remote.Host
+        };
+        var tile = Ui.IconTile("\uE8F2", "slate", 44);
+        tile.HorizontalAlignment = HorizontalAlignment.Center;
+        var title = Ui.Text($"{service} · {remote.Path}", 13, "text", FontWeights.SemiBold, wrap: true);
+        title.TextAlignment = TextAlignment.Center;
+        var panel = Ui.V(10, tile, title);
+        if (tab.Git.Branch is { } b && b != "HEAD")
+        {
+            var branchText = Ui.Caption(L.F("Inspector_BranchName", "Branch {0}", b));
+            branchText.HorizontalAlignment = HorizontalAlignment.Center;
+            panel.Children.Add(branchText);
+            var agent = Ui.Button(remote.Kind == GitRemoteKind.GitLab ? L.T("Inspector_OpenMRAgent", "Open MR with agent") : L.T("Inspector_OpenPRAgent", "Open PR with agent"),
+                () => app.Claude.Send(AgentShip.OpenPRPrompt(b, null, tab.Git.Changes.Count > 0, tab.Git.Ahead, remote), tab, submit: true), accent: true, glyph: "\uE8F2");
+            agent.IsEnabled = !tab.Busy;
+            var browser = Ui.Button(L.T("Inspector_CreateInBrowser", "Create in browser"), () => LinkBrowser.Open(remote.NewRequestUrl(b)));
+            var buttons = Ui.H(8, agent, browser);
+            buttons.HorizontalAlignment = HorizontalAlignment.Center;
+            panel.Children.Add(buttons);
+        }
+        var site = Ui.Link(L.F("Inspector_OpenService", "Open {0}", service), () => LinkBrowser.Open(remote.WebUrl));
+        site.HorizontalAlignment = HorizontalAlignment.Center;
+        panel.Children.Add(site);
+        panel.HorizontalAlignment = HorizontalAlignment.Center;
+        panel.VerticalAlignment = VerticalAlignment.Center;
+        panel.Margin = new Thickness(24);
+        return panel;
     }
 }
 
