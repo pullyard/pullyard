@@ -31,6 +31,7 @@ public sealed partial class ChatSession : ObservableObject
     [ObservableProperty] private int pendingCount;
     [ObservableProperty] private string? createdPR;
     [ObservableProperty] private string? draftRequest;
+    [ObservableProperty] private bool budgetPaused;
 
     public List<ChatItem> Items { get; } = new();
     public List<PermissionRequest> PendingPermissions { get; } = new();
@@ -49,6 +50,9 @@ public sealed partial class ChatSession : ObservableObject
     private int requestCounter;
     private readonly Dictionary<string, (string ToolId, string? Previous)> stopRequests = new();
     private bool intentionalStop;
+    private readonly SessionCostTracker cost = new();
+    private readonly List<(string Text, IReadOnlyList<ChatImage> Images)> heldPrompts = new();
+    internal Func<double> BudgetSource { get; set; } = () => SessionCost.Budget;
 
     public event Action<string>? OnSessionId;
     public event Action? OnTurnFinished;
@@ -143,6 +147,7 @@ public sealed partial class ChatSession : ObservableObject
             LastError = "claude CLI not found";
             return;
         }
+        cost.ProcessStarted();
         var args = new List<string>
         {
             "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
@@ -343,12 +348,30 @@ public sealed partial class ChatSession : ObservableObject
         if (trimmed.Length == 0 && images.Count == 0) return;
         LastActivity = DateTimeOffset.Now;
         Append(new UserItem(Guid.NewGuid().ToString(), trimmed, images));
+        if (BudgetPaused)
+        {
+            heldPrompts.Add((trimmed, images));
+            return;
+        }
         if (!Running)
         {
             queuedPrompts.Add((trimmed, images));
             return;
         }
         Deliver(trimmed, images);
+    }
+
+    public void ContinuePastBudget()
+    {
+        cost.Continue(BudgetSource());
+        BudgetPaused = cost.Paused;
+        var held = heldPrompts.ToList();
+        heldPrompts.Clear();
+        foreach (var h in held)
+        {
+            if (Running) Deliver(h.Text, h.Images);
+            else queuedPrompts.Add(h);
+        }
     }
 
     private void Deliver(string trimmed, IReadOnlyList<ChatImage> images)
@@ -716,7 +739,12 @@ public sealed partial class ChatSession : ObservableObject
     {
         Busy = false;
         Status = null;
-        if (o.Dbl("total_cost_usd") is { } c) TotalCost += c;
+        if (o.Dbl("total_cost_usd") is { } c)
+        {
+            cost.Report(c, BudgetSource());
+            TotalCost = cost.Total;
+            BudgetPaused = cost.Paused;
+        }
         foreach (var t in tools.Values.Where(t => t.Status == ToolStatus.Running && t.ParentToolUseId is null))
         {
             t.Status = ToolStatus.Done;

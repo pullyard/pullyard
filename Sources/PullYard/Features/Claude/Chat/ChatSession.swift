@@ -177,6 +177,10 @@ final class ChatSession {
     var commands: [ChatCommand] = []
     var pendingPermissions: [PermissionRequest] = []
     var totalCost: Double = 0
+    var budgetPaused = false
+    @ObservationIgnored private var costBase: Double = 0
+    @ObservationIgnored private var budgetAllowance: Double = 0
+    @ObservationIgnored private var heldPrompts: [(text: String, images: [ChatImage])] = []
     var contextPercent: Int?
     var context: ContextUsage?
     var lastError: String?
@@ -273,6 +277,7 @@ final class ChatSession {
             if ClaudeLauncher.claudeBinary == nil { lastError = "claude CLI not found" }
             return
         }
+        costBase = totalCost
         var args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                     "--include-partial-messages", "--permission-prompts", "host", "--permission-prompt-tool", "stdio"]
         if let model, !model.isEmpty { args += ["--model", model]; modelValue = model }
@@ -388,6 +393,10 @@ final class ChatSession {
         guard !trimmed.isEmpty || !images.isEmpty else { return }
         lastActivity = Date()
         items.append(.user(id: UUID().uuidString, text: trimmed, images: images))
+        if budgetPaused {
+            heldPrompts.append((trimmed, images))
+            return
+        }
         guard running else {
             queuedPrompts.append((trimmed, images))
             return
@@ -404,6 +413,16 @@ final class ChatSession {
         busy = true
         status = nil
         turnStartedAt = Date()
+    }
+
+    func continuePastBudget() {
+        budgetAllowance = SessionCost.nextAllowance(cost: totalCost, budget: SessionCost.budget)
+        budgetPaused = false
+        let held = heldPrompts
+        heldPrompts = []
+        for h in held {
+            if running { deliver(h.text, images: h.images) } else { queuedPrompts.append(h) }
+        }
     }
 
     private func flushQueue() {
@@ -482,7 +501,7 @@ final class ChatSession {
         for o in objects { handle(o) }
     }
 
-    private func handle(_ o: [String: Any]) {
+    func handle(_ o: [String: Any]) {
         switch o["type"] as? String {
         case "system": handleSystem(o)
         case "stream_event": handleStream(o)
@@ -731,7 +750,10 @@ final class ChatSession {
     private func handleResult(_ o: [String: Any]) {
         busy = false
         status = nil
-        if let c = o["total_cost_usd"] as? Double { totalCost += c }
+        if let c = o["total_cost_usd"] as? Double {
+            totalCost = SessionCost.total(base: costBase, reported: c)
+            if SessionCost.overBudget(cost: totalCost, budget: SessionCost.budget, allowance: budgetAllowance) { budgetPaused = true }
+        }
         for t in tools.values where t.status == .running { t.status = .done }
         if o["is_error"] as? Bool == true {
             let sub = o["subtype"] as? String ?? ""

@@ -304,7 +304,8 @@ public sealed class ClaudeWorkspaceView : Grid
     {
         var chat = tab.Chat;
         return string.Join("|", tab.Id, tab.Kind, tab.Git.Branch, tab.State, Fmt.Memory(tab.MemoryBytes), tab.Running, tab.SessionId.Length > 0, Ws.Model, Ws.Effort, Ws.Mode,
-            chat?.Model, chat is not null && (chat.TotalCost > 0 || chat.SessionId is not null), Ws.ShowInspector);
+            chat?.Model, chat is not null && (chat.TotalCost > 0 || chat.SessionId is not null), Ws.ShowInspector,
+            chat is null ? null : SessionCost.Format(chat.TotalCost), chat?.BudgetPaused, SessionCost.Budget, SessionCost.BilledPerUse);
     }
 
     private void RenderTabBar(bool force = true)
@@ -389,6 +390,14 @@ public sealed class ClaudeWorkspaceView : Grid
         else if (tab.Chat is { } chat && (chat.TotalCost > 0 || chat.SessionId is not null))
         {
             right.Children.Add(Ui.Caption(chat.Model.Replace("claude-", "")));
+        }
+        if (tab.Chat is { TotalCost: > 0 } costChat && (SessionCost.BilledPerUse || SessionCost.Budget > 0))
+        {
+            var cost = SessionCost.Format(costChat.TotalCost);
+            var costText = Ui.Caption(cost, costChat.BudgetPaused ? "amber" : "muted");
+            Ui.Tip(costText, SessionCost.Budget > 0 ? L.F("Claude_SessionCostLimit", "Session cost · limit {0}", SessionCost.Format(SessionCost.Budget)) : L.T("Claude_SessionCost", "Session cost"));
+            Ui.Named(costText, L.F("Claude_SessionCostLabel", "Session cost {0}", cost));
+            right.Children.Add(costText);
         }
         var kind = new SelectorBar();
         var chatItem = new SelectorBarItem { Icon = new FontIcon { Glyph = "", FontFamily = Ui.Icons }, Tag = "chat" };

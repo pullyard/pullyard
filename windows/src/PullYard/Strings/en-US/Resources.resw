@@ -139,6 +139,9 @@
   <data name="Chat_Allow" xml:space="preserve"><value>Allow</value></data>
   <data name="Chat_AskedQuestion" xml:space="preserve"><value>Claude asked a question — answer above</value></data>
   <data name="Chat_AttachImage" xml:space="preserve"><value>Attach image</value></data>
+  <data name="Chat_BudgetContinue" xml:space="preserve"><value>Continue (+{0})</value></data>
+  <data name="Chat_BudgetHint" xml:space="preserve"><value>New messages wait until you continue. Change the limit in Settings › Agents.</value></data>
+  <data name="Chat_BudgetReached" xml:space="preserve"><value>Session cost {0} reached your {1} limit</value></data>
   <data name="Chat_ContextHelp" xml:space="preserve"><value>Context {0}% — click for usage and limits</value></data>
   <data name="Chat_ContextHint" xml:space="preserve"><value>Show usage and limits</value></data>
   <data name="Chat_ContextName" xml:space="preserve"><value>Context {0}% used</value></data>
@@ -243,6 +246,7 @@
   <data name="Claude_Never" xml:space="preserve"><value>Never</value></data>
   <data name="Claude_NewAccount" xml:space="preserve"><value>New Claude account</value></data>
   <data name="Claude_NewSession" xml:space="preserve"><value>New session</value></data>
+  <data name="Claude_NoLimit" xml:space="preserve"><value>No limit</value></data>
   <data name="Claude_NoSessionsMessage" xml:space="preserve"><value>Start a session in a project folder and it shows up here.</value></data>
   <data name="Claude_NoSessionsTitle" xml:space="preserve"><value>No agent sessions yet</value></data>
   <data name="Claude_NotFound" xml:space="preserve"><value>claude CLI not found — see the right side</value></data>
@@ -257,6 +261,8 @@
   <data name="Claude_OpenRouterKey" xml:space="preserve"><value>OpenRouter API key (sk-or-…)</value></data>
   <data name="Claude_OpenSignInLink" xml:space="preserve"><value>Open sign-in link</value></data>
   <data name="Claude_PasteCode" xml:space="preserve"><value>Paste the code from the page</value></data>
+  <data name="Claude_PauseAt" xml:space="preserve"><value>Pause a session at</value></data>
+  <data name="Claude_PauseAtHelp" xml:space="preserve"><value>When an agent session's reported cost reaches the limit, new messages wait until you continue. Useful with API keys, OpenRouter or another endpoint; with a subscription plan the cost is an estimate.</value></data>
   <data name="Claude_PermissionMode" xml:space="preserve"><value>Permission mode</value></data>
   <data name="Claude_ProfileHelp" xml:space="preserve"><value>The account gets its own sign-in, session history and limits. Sign-in opens right after.</value></data>
   <data name="Claude_ProfileName" xml:space="preserve"><value>Name, e.g. “Personal” or “Work”</value></data>
@@ -272,6 +278,9 @@
   <data name="Claude_Reveal" xml:space="preserve"><value>Show transcript in Explorer</value></data>
   <data name="Claude_RevealFolder" xml:space="preserve"><value>Show in Explorer</value></data>
   <data name="Claude_SearchSessions" xml:space="preserve"><value>Search sessions</value></data>
+  <data name="Claude_SessionCost" xml:space="preserve"><value>Session cost</value></data>
+  <data name="Claude_SessionCostLabel" xml:space="preserve"><value>Session cost {0}</value></data>
+  <data name="Claude_SessionCostLimit" xml:space="preserve"><value>Session cost · limit {0}</value></data>
   <data name="Claude_ShareSettings" xml:space="preserve"><value>Use my settings, CLAUDE.md, skills and plugins from the main account</value></data>
   <data name="Claude_ShowInspector" xml:space="preserve"><value>Show changes panel</value></data>
   <data name="Claude_SignIn" xml:space="preserve"><value>Sign in…</value></data>

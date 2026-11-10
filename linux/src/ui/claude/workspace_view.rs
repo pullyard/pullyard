@@ -9,7 +9,7 @@ use super::indicator::Dot;
 use super::inspector::Inspector;
 use crate::claude::accounts::{self, Status};
 use crate::claude::workspace::{apply_terminal_colors, Tab, WsEvent};
-use crate::claude::{launcher, notifier, ClaudeMode, Indicator, ModelOption, TabKind, TabState, EFFORTS};
+use crate::claude::{launcher, notifier, session_cost, ClaudeMode, Indicator, ModelOption, TabKind, TabState, EFFORTS};
 use crate::ui::menu::Menu;
 use crate::ui::widgets::*;
 use crate::{app, settings, util};
@@ -307,8 +307,11 @@ impl View {
 
     fn render_control_bar(self: &Rc<Self>, tab: &Rc<Tab>) {
         let ws = app::get().claude.clone();
+        let cost = tab.chat.as_ref().map(|c| (c.total_cost.get(), c.budget(), c.budget_paused.get()));
+        let cost_shown = cost.filter(|(total, budget, _)| session_cost::show_in_header(*total, session_cost::billed_per_use(), *budget));
+        let cost_key = cost_shown.map(|(total, budget, paused)| format!("{}|{}|{paused}", session_cost::format(total), session_cost::format(budget))).unwrap_or_default();
         let key = format!(
-            "{}|{}|{}|{:?}|{}|{}|{}|{}|{:?}|{}|{}|{}|{}",
+            "{}|{}|{}|{:?}|{}|{}|{}|{}|{:?}|{}|{}|{}|{}|{}",
             notifier::enabled(),
             tab.id,
             tab.kind.key(),
@@ -321,7 +324,8 @@ impl View {
             ws.idle_minutes(),
             ws.preferred_kind().key(),
             tab.chat.as_ref().map(|c| c.model.borrow().clone()).unwrap_or_default(),
-            tab.chat.as_ref().map(|c| c.total_cost.get() > 0.0 || c.session_id.borrow().is_some()).unwrap_or(false)
+            tab.chat.as_ref().map(|c| c.total_cost.get() > 0.0 || c.session_id.borrow().is_some()).unwrap_or(false),
+            cost_key
         );
         if *self.control_key.borrow() == key {
             self.update_badges();
@@ -372,6 +376,12 @@ impl View {
         } else if let Some(chat) = &tab.chat {
             if chat.total_cost.get() > 0.0 || chat.session_id.borrow().is_some() {
                 self.control_bar.append(&label_with(&chat.model.borrow().replace("claude-", ""), &["sy-muted", "sy-small"]));
+            }
+            if let Some((total, budget, paused)) = cost_shown {
+                let l = label_with(&session_cost::format(total), &[if paused { "fg-amber" } else { "sy-muted" }, "sy-small", "sy-mono"]);
+                l.set_tooltip_text(Some(&session_cost::header_tooltip(budget)));
+                l.update_property(&[gtk::accessible::Property::Label(&format!("Session cost {}", session_cost::format(total)))]);
+                self.control_bar.append(&l);
             }
         }
         let kind = hbox(0);

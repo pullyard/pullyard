@@ -38,6 +38,10 @@ struct ChatView: View {
                             WorkingIndicator(chat: chat)
                                 .transition(.opacity)
                         }
+                        if chat.budgetPaused {
+                            BudgetPausedBanner(chat: chat)
+                                .transition(.pop)
+                        }
                         if let e = chat.lastError {
                             ErrorBanner(text: e, retry: { app.claude.restart(tab) }, reconnect: { app.claude.reconnect(tab) })
                                 .transition(.pop)
