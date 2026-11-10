@@ -34,6 +34,8 @@ Facts:
 - [Stacked pull requests](https://pullyard.app/stacked-pull-requests.html): how PullYard shows and reviews a stack
 - [Changelog](https://pullyard.app/changelog.html): every release
 - [Roadmap](https://pullyard.app/roadmap.html): what comes next
+- [Guide: fix review comments with Claude Code](https://pullyard.app/fix-review-comments-with-claude-code.html): the Fix with agent loop, step by step
+- [Guide: fix failing CI with Claude Code](https://pullyard.app/fix-failing-ci-with-claude-code.html): from a red check to a pushed fix
 
 ## Source and downloads
 
