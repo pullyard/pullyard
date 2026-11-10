@@ -672,6 +672,8 @@
   <data name="Merge_Method" xml:space="preserve"><value>Method</value></data>
   <data name="Merge_OneCheckFailed" xml:space="preserve"><value>1 check failed</value></data>
   <data name="Merge_OneCheckRunning" xml:space="preserve"><value>1 check is still running</value></data>
+  <data name="Merge_OpenOnGitHub" xml:space="preserve"><value>Open on GitHub</value></data>
+  <data name="Merge_QueueNote" xml:space="preserve"><value>{0} uses a merge queue. Merging here may be rejected; add it to the queue on GitHub instead.</value></data>
   <data name="Merge_Ready" xml:space="preserve"><value>Ready to merge</value></data>
   <data name="Merge_Rebase" xml:space="preserve"><value>Rebase and merge</value></data>
   <data name="Merge_ReqAdvisory" xml:space="preserve"><value>doesn’t block</value></data>

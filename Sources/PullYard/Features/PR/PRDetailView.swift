@@ -711,6 +711,10 @@ struct MergeStatusBar: View {
         let unstableFailed = pr.checks.filter { $0.outcome == .failure }.count
         let unstablePending = pr.checks.filter { $0.outcome == .pending }.count
         if pr.isDraft { return ("pencil.circle", .sySlate, "Draft — mark it ready for review to merge", false) }
+        if let entry = pr.mergeQueueEntry {
+            let text = pr.forgeMerge == nil ? entry.summary : entry.summary.replacingOccurrences(of: "Merge queue", with: "Merge train").replacingOccurrences(of: "Queued to merge", with: "In the merge train")
+            return (entry.failing ? "exclamationmark.triangle.fill" : "tray.full", entry.failing ? .ghRed : .ghGreen, text, false)
+        }
         if pr.mergeable == "CONFLICTING" || pr.mergeStateStatus == "DIRTY" {
             return ("exclamationmark.triangle.fill", .ghRed, "Has conflicts with \(pr.baseRefName)", false)
         }

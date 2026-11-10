@@ -159,6 +159,12 @@ enum GitLabMR {
         let mergeMethod: String?
         let squashOption: String?
         let removeSourceBranchAfterMerge: Bool?
+        var mergeTrainsEnabled: Bool? = nil
+    }
+
+    struct TrainCar: Decodable {
+        let status: String
+        let pipeline: Pipeline?
     }
 }
 
@@ -199,6 +205,10 @@ extension GitLabClient {
 
     func jobs(_ project: String, pipeline: Int) async throws -> [GitLabMR.Job] {
         try await pages("\(Self.projectPath(project))/pipelines/\(pipeline)/jobs", limit: 3)
+    }
+
+    func trainCar(_ project: String, iid: Int) async throws -> GitLabMR.TrainCar {
+        try await http.get("\(Self.projectPath(project))/merge_trains/merge_requests/\(iid)")
     }
 
     func jobTrace(_ project: String, job: Int) async throws -> String {

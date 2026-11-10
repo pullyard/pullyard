@@ -150,8 +150,14 @@ extension GitHubAPI {
     }
 
     func pullRequestPulse(_ ref: ItemRef) async throws -> PRPulse? {
-        let r: PRPulseResponse = try await graphQL(Q.prPulse, ["owner": ref.repo.owner, "name": ref.repo.name, "number": ref.number])
-        return r.repository?.pullRequest
+        let vars: [String: Any?] = ["owner": ref.repo.owner, "name": ref.repo.name, "number": ref.number]
+        do {
+            let r: PRPulseResponse = try await graphQL(Q.prPulse, vars)
+            return r.repository?.pullRequest
+        } catch let error as APIError where error.schemaError {
+            let r: PRPulseResponse = try await graphQL(Q.prPulseLegacy, vars)
+            return r.repository?.pullRequest
+        }
     }
 
     func issue(_ ref: ItemRef) async throws -> IssueDetailResponse {

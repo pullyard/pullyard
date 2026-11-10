@@ -392,6 +392,35 @@ public sealed class EditMark
     public DateTimeOffset? LastEditedAt { get; set; }
 }
 
+public sealed class MergeQueueEntry
+{
+    public int? Position { get; set; }
+    public string? State { get; set; }
+    public DateTimeOffset? EnqueuedAt { get; set; }
+    public int? EstimatedTimeToMerge { get; set; }
+
+    public string Summary
+    {
+        get
+        {
+            var place = Position is { } p ? (p <= 1 ? "next in line" : $"#{p} in line") : null;
+            var eta = EstimatedTimeToMerge is > 0 and var secs ? $"about {Math.Max(1, (int)Math.Round(secs / 60.0, MidpointRounding.AwayFromZero))} min" : null;
+            return State switch
+            {
+                "AWAITING_CHECKS" => "Merge queue: waiting for checks" + (place is null ? "" : " · " + place),
+                "MERGEABLE" => "Merge queue: merging next",
+                "UNMERGEABLE" => "Merge queue: can’t be merged and will be removed",
+                "LOCKED" => "Merge queue: locked",
+                _ => "Queued to merge" + string.Concat(new[] { place, eta }.Where(x => x is not null).Select(x => " · " + x))
+            };
+        }
+    }
+
+    public bool Failing => State == "UNMERGEABLE";
+
+    public string TrainSummary => Summary.Replace("Merge queue", "Merge train").Replace("Queued to merge", "In the merge train");
+}
+
 public sealed class AutoMergeRequest
 {
     public DateTimeOffset? EnabledAt { get; set; }
@@ -444,6 +473,9 @@ public sealed class PullRequestDetail
     public bool? ViewerApproved { get; set; }
     public string? MergeBlocker { get; set; }
     public ForgeMergeInfo? ForgeMerge { get; set; }
+    public bool? IsMergeQueueEnabled { get; set; }
+    public bool? IsInMergeQueue { get; set; }
+    public MergeQueueEntry? MergeQueueEntry { get; set; }
 
     public VisualState VisualState => VisualStates.Pr(State, IsDraft);
     public StatusRollup? Rollup => LastCommit.Items.FirstOrDefault()?.Commit.StatusCheckRollup;

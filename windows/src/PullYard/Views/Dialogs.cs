@@ -166,7 +166,13 @@ public static class Dialogs
         methods.SelectionChanged += (_, _) => Prefill();
         Prefill();
         var canAuto = repo?.AutoMergeAllowed == true && pr.AutoMergeRequest is null && pr.MergeStateStatus != "CLEAN";
-        var d = Create(root, L.F("Merge_Title", "Merge {0} into {1}", model.NumberText, pr.BaseRefName), Ui.V(10, methods, title, message, deleteBox), L.T("Merge_MergeButton", "Merge"), canAuto ? L.T("Merge_EnableAuto", "Enable auto-merge") : null);
+        var body = Ui.V(10, methods, title, message, deleteBox);
+        if (model.Features.IsGitHub && pr.IsMergeQueueEnabled == true && pr.MergeQueueEntry is null)
+        {
+            var note = Ui.Text(L.F("Merge_QueueNote", "{0} uses a merge queue. Merging here may be rejected; add it to the queue on GitHub instead.", pr.BaseRefName), 12, "muted", wrap: true);
+            body.Children.Insert(0, Ui.Columns((Ui.Glyph("\ue916", 13), Ui.Auto), (note, Ui.Star), (Ui.Button(L.T("Merge_OpenOnGitHub", "Open on GitHub"), () => LinkBrowser.Open(pr.Url)), Ui.Auto)));
+        }
+        var d = Create(root, L.F("Merge_Title", "Merge {0} into {1}", model.NumberText, pr.BaseRefName), body, L.T("Merge_MergeButton", "Merge"), canAuto ? L.T("Merge_EnableAuto", "Enable auto-merge") : null);
         d.IsPrimaryButtonEnabled = allowed.Count > 0;
         d.PrimaryButtonClick += async (_, args) =>
         {

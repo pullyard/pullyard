@@ -25,6 +25,7 @@ public static class PullRequestSignature
             pr.Mergeable,
             pr.MergeStateStatus,
             pr.ReviewDecision,
+            $"{pr.MergeQueueEntry?.Position}:{pr.MergeQueueEntry?.State}",
             pr.Comments?.TotalCount,
             pr.Reviews?.TotalCount,
             pr.TimelineItems.TotalCount,

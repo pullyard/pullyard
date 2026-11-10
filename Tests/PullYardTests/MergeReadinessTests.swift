@@ -280,6 +280,55 @@ final class MergeReadinessTests: XCTestCase {
         XCTAssertEqual(other.state, .missing)
     }
 
+    func testMergeQueueStatus() throws {
+        XCTAssertEqual(MergeQueueEntry(position: 3, state: "QUEUED", estimatedTimeToMerge: 290).summary, "Queued to merge · #3 in line · about 5 min")
+        XCTAssertEqual(MergeQueueEntry(position: 1, state: "QUEUED").summary, "Queued to merge · next in line")
+        XCTAssertEqual(MergeQueueEntry(position: 2, state: "AWAITING_CHECKS").summary, "Merge queue: waiting for checks · #2 in line")
+        XCTAssertTrue(MergeQueueEntry(position: 1, state: "UNMERGEABLE").failing)
+
+        let enabled = try pr(["isMergeQueueEnabled": true, "mergeStateStatus": "CLEAN"])
+        let note = try XCTUnwrap(MergeReadiness.requirements(enabled, rules: .loading).first { $0.kind == .mergeQueue })
+        XCTAssertEqual(note.state, .advisory)
+        XCTAssertEqual(note.title, "Merges through a merge queue")
+
+        let queued = try pr(["isMergeQueueEnabled": true, "isInMergeQueue": true, "mergeQueueEntry": ["position": 2, "state": "QUEUED", "estimatedTimeToMerge": 600]])
+        XCTAssertEqual(MergeReadiness.requirements(queued, rules: .loading).first { $0.kind == .mergeQueue }?.state, .pending)
+        XCTAssertEqual(MergeStatusBar.status(queued).text, "Queued to merge · #2 in line · about 10 min")
+        XCTAssertFalse(MergeStatusBar.status(queued).ready)
+
+        let removed = try pr(["mergeQueueEntry": ["position": 1, "state": "UNMERGEABLE"]])
+        XCTAssertEqual(MergeReadiness.requirements(removed, rules: .loading).first { $0.kind == .mergeQueue }?.state, .missing)
+        XCTAssertEqual(MergeStatusBar.status(removed).color, .ghRed)
+        XCTAssertNil(MergeReadiness.requirements(try pr(), rules: .loading).first { $0.kind == .mergeQueue })
+    }
+
+    func testLegacyQueryDropsMergeQueueFields() {
+        XCTAssertTrue(Q.pullRequest.contains("mergeQueueEntry { position state enqueuedAt estimatedTimeToMerge }"))
+        XCTAssertFalse(Q.pullRequestLegacy.contains("mergeQueue"))
+        XCTAssertFalse(Q.pullRequestLegacy.contains("isInMergeQueue"))
+        XCTAssertTrue(Q.prPulse.contains("mergeQueueEntry { position state }"))
+        XCTAssertFalse(Q.prPulseLegacy.contains("mergeQueue"))
+    }
+
+    func testGitLabMergeTrain() throws {
+        XCTAssertEqual(GitLabReviewMapper.trainEntry(nil), nil)
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let running = try decoder.decode(GitLabMR.TrainCar.self, from: Data(#"{"status":"fresh","pipeline":{"id":1,"status":"running"}}"#.utf8))
+        XCTAssertEqual(GitLabReviewMapper.trainEntry(running)?.state, "AWAITING_CHECKS")
+        let merging = try decoder.decode(GitLabMR.TrainCar.self, from: Data(#"{"status":"merging"}"#.utf8))
+        XCTAssertEqual(GitLabReviewMapper.trainEntry(merging)?.state, "MERGEABLE")
+        let done = try decoder.decode(GitLabMR.TrainCar.self, from: Data(#"{"status":"merged"}"#.utf8))
+        XCTAssertNil(GitLabReviewMapper.trainEntry(done))
+
+        var p = try pr()
+        p.forgeMerge = ForgeMergeInfo(status: "mergeable", approvalsRequired: nil, approvalsLeft: nil)
+        p.isMergeQueueEnabled = true
+        XCTAssertEqual(MergeReadiness.requirements(p, rules: .loading).first { $0.kind == .mergeQueue }?.title, "Merges through a merge train")
+        p.mergeQueueEntry = MergeQueueEntry(position: nil, state: "QUEUED")
+        XCTAssertEqual(MergeReadiness.requirements(p, rules: .loading).first { $0.kind == .mergeQueue }?.title, "In the merge train")
+    }
+
     func testForgeDefaultsDoNotClaimReviewSupport() {
         let caps = ForgeCapabilities(pullFilters: [.mine])
         XCTAssertEqual(caps.pullRequestReview, .unsupported)

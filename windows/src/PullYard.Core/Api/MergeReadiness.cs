@@ -128,7 +128,7 @@ public enum RequirementState { Satisfied, Missing, Pending, Unknown, Advisory }
 
 public enum RequirementAction { RequestReview, ShowChecks, ShowConversation, ShowConflicts, UpdateBranch, ReadyForReview }
 
-public enum RequirementKind { Draft, Conflicts, Behind, ChangesRequested, Approvals, CodeOwners, LastPush, Checks, OptionalChecks, Conversations, Rules, OtherRules }
+public enum RequirementKind { Draft, Conflicts, Behind, ChangesRequested, Approvals, CodeOwners, LastPush, Checks, OptionalChecks, Conversations, MergeQueue, Rules, OtherRules }
 
 public sealed record MergeRequirement(RequirementKind Kind, RequirementState State, string Title, string? Detail = null, RequirementAction? Action = null)
 {
@@ -199,6 +199,11 @@ public static class MergeReadiness
         list.AddRange(ReviewRequirements(pr, rules, status.ReviewRules, loading));
         list.AddRange(CheckRequirements(pr, rules));
         if (ConversationRequirement(pr, rules, loading) is { } c) list.Add(c);
+
+        if (pr.MergeQueueEntry is { } entry)
+            list.Add(new(RequirementKind.MergeQueue, entry.Failing ? RequirementState.Missing : RequirementState.Pending, entry.Summary, entry.Failing ? "Fix the failing checks or conflicts and add it again" : null));
+        else if (pr.IsMergeQueueEnabled == true)
+            list.Add(new(RequirementKind.MergeQueue, RequirementState.Advisory, "Merges through a merge queue", "Add it to the queue on GitHub with “Merge when ready”"));
 
         if (status.Phase == RulesPhase.Failed)
             list.Add(new(RequirementKind.Rules, RequirementState.Unknown, "Branch rules couldn’t be read", "Showing what GitHub reports for this pull request"));
@@ -363,6 +368,11 @@ public static class MergeReadiness
             list.Add(new(RequirementKind.Conversations, RequirementState.Missing, open > 0 ? threads : "All threads must be resolved", "The project requires resolving them", RequirementAction.ShowConversation));
         else if (open > 0)
             list.Add(new(RequirementKind.Conversations, RequirementState.Advisory, threads, "Not required to merge", RequirementAction.ShowConversation));
+
+        if (pr.MergeQueueEntry is { } entry)
+            list.Add(new(RequirementKind.MergeQueue, RequirementState.Pending, entry.TrainSummary));
+        else if (pr.IsMergeQueueEnabled == true)
+            list.Add(new(RequirementKind.MergeQueue, RequirementState.Advisory, "Merges through a merge train", "Merging starts or joins the train"));
 
         if (!GitLabCovered.Contains(merge.Status))
             list.Add(new(RequirementKind.OtherRules, RequirementState.Missing, pr.MergeBlocker ?? "Blocked by a project rule", "Reported by GitLab"));

@@ -154,6 +154,17 @@ struct MergeSheet: View {
                 .padding(.vertical, Space.s)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: Radius.m).fill(readiness.color.opacity(Tint.banner)))
+            if model.provider.isGitHub, pr.isMergeQueueEnabled == true, pr.mergeQueueEntry == nil {
+                HStack(spacing: 6) {
+                    Image(systemName: "tray.full").foregroundStyle(Color.syMuted)
+                    Text("\(pr.baseRefName) uses a merge queue. Merging here may be rejected; add it to the queue on GitHub instead.")
+                        .font(.syCaption)
+                        .foregroundStyle(Color.syMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Button("Open on GitHub") { openInBrowser(pr.url) }.controlSize(.small)
+                }
+            }
             Picker("Method", selection: $method) {
                 ForEach(allowed) { Text($0 == .MERGE && model.provider == .gitlab ? "Merge" : $0.title).tag($0) }
             }

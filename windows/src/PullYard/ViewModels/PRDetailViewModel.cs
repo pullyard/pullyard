@@ -202,6 +202,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
         var pendingText = pending == 1 ? L.T("Merge_OneCheckRunning", "1 check is still running") : L.F("Merge_ChecksRunning", "{0} checks are still running", pending);
         (string glyph, string color, string text, bool ready) s;
         if (pr.IsDraft) s = ("", "slate", L.T("Merge_Draft", "Draft — merging is unavailable"), false);
+        else if (pr.MergeQueueEntry is { } entry) s = (entry.Failing ? "\ue7ba" : "\ue916", entry.Failing ? "red" : "green", pr.ForgeMerge is null ? entry.Summary : entry.TrainSummary, false);
         else if (pr.Mergeable == "CONFLICTING" || pr.MergeStateStatus == "DIRTY") s = ("", "red", L.F("Merge_Conflicts", "Has conflicts with {0}", pr.BaseRefName), false);
         else
         {
