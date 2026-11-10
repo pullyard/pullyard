@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Review it. Fix it. Ship it.</b><br>
-  A native app for pull requests on macOS, Windows and Linux, with a built-in workspace for AI coding agents that runs Claude Code.
+  A native app for reviewing pull requests on macOS, Windows and Linux. Read the diff, leave inline comments, send them to Claude Code to fix, then merge.
 </p>
 
 <p align="center">
@@ -30,7 +30,9 @@
 
 ---
 
-GitHub in a browser tab can take up a gigabyte of memory to show a single diff. PullYard is a native app that takes a pull request from review to merge: SwiftUI on macOS, WinUI 3 on Windows, GTK 4 and libadwaita on Linux. It starts fast, scrolls big diffs without stutter, and can pass review comments to Claude Code.
+GitHub in a browser tab can take up a gigabyte of memory to show a single diff. PullYard is a native app that takes a pull request from review to merge: SwiftUI on macOS, WinUI 3 on Windows, GTK 4 and libadwaita on Linux. It starts fast and scrolls big diffs without stutter.
+
+It's a review tool first. You read the diff, leave inline comments, approve or request changes, and merge. When there's feedback to fix, **Fix with agent** sends the review comments to Claude Code in one click; the agent works in an isolated git worktree, and PullYard replies to and resolves the threads it fixed.
 
 ## Features
 
@@ -61,6 +63,7 @@ GitHub in a browser tab can take up a gigabyte of memory to show a single diff. 
 **Agents** (runs the Claude Code CLI you install)
 - A native chat for the official Claude Code CLI, right next to the PR, its changed files and its branch
 - **Fix with agent**: one click starts a new session with the review feedback. If the reviewer left a "Fix prompt", PullYard uses it; otherwise it writes one from the comments
+- Each fix runs in an isolated git worktree, so your own checkout stays untouched. After the push, **Reply and resolve** answers and closes the threads that were fixed
 - Session history grouped by project, showing the branch and the PR for each session
 - Change the model, effort and permission mode, approve tool calls in the chat, and see a diff for every edit
 - A Tasks tab that lists every command and subagent Claude runs, live, with its duration, failures and full output
