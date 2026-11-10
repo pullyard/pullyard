@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PullYard: review, fix and ship pull requests</title>
-<meta name="description" content="PullYard is a free native app for pull requests on macOS, Windows and Linux. Review the diff, let an AI agent fix the feedback, then merge. Works with GitHub, GitLab, Bitbucket and Gitea.">
+<meta name="description" content="PullYard is a free native app for pull requests on macOS, Windows and Linux. Review the diff, let an AI agent fix the feedback, then merge.">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0a0f1b" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f6f7fa" media="(prefers-color-scheme: light)">
@@ -815,7 +815,7 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
 
     <div class="os-panel" id="install-linux" role="tabpanel" aria-labelledby="tab-linux" tabindex="0" data-os-panel="linux">
       <h3 class="os-title">Linux</h3>
-      <p class="os-intro">Three ways to install, all for x86_64. Pick the one that fits your distribution.</p>
+      <p class="os-intro">Three ways to install. The .deb and the tarball come for x86_64 and ARM64, the Flatpak for x86_64. Pick the one that fits your distribution.</p>
       <div class="steps">
         <div class="step"><h4>.deb package</h4><p>For Ubuntu 24.04 or later, Debian and their derivatives. apt pulls in GTK 4, libadwaita and the other libraries.</p></div>
         <div class="step"><h4>Flatpak</h4><p>Works on any distribution. It uses the GNOME runtime from Flathub and runs git, gh and claude from your system.</p></div>
@@ -825,7 +825,7 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
       <div class="code"><span class="label">Flatpak</span><code>flatpak install --user PullYard-linux-x86_64.flatpak</code><button type="button" aria-label="Copy Flatpak install command"><svg aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span>Copy</span></button></div>
       <div class="code"><span class="label">Tarball</span><code>tar xzf PullYard-linux-x86_64.tar.gz &amp;&amp; ./PullYard-linux-x86_64/install.sh</code><button type="button" aria-label="Copy tarball install command"><svg aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span>Copy</span></button></div>
       <div class="req">
-        <span>GTK 4 and libadwaita</span><span>Ubuntu 24.04 or later, or any distro via Flatpak</span><span>x86_64</span><span>Optional: GitHub CLI</span><span>Optional: Claude Code CLI</span>
+        <span>GTK 4 and libadwaita</span><span>Ubuntu 24.04 or later, or any distro via Flatpak</span><span>x86_64 or ARM64</span><span>Optional: GitHub CLI</span><span>Optional: Claude Code CLI</span>
       </div>
     </div>
 
@@ -1026,7 +1026,7 @@ details.is-open > summary .chev{transform:rotate(180deg);color:var(--text)}
   var META={
     mac:"Universal · Apple Silicon & Intel · macOS 14 Sonoma or later",
     windows:"Windows 10 1809 or later, or Windows 11 · x64 & ARM64",
-    linux:"x86_64 · GTK 4 & libadwaita, e.g. Ubuntu 24.04+ · any distro via Flatpak",
+    linux:"x86_64 & ARM64 · GTK 4 & libadwaita, e.g. Ubuntu 24.04+ · any distro via Flatpak",
     other:"macOS, Windows and Linux"
   };
   var uad=navigator.userAgentData, ua=navigator.userAgent||"";
