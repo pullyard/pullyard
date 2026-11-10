@@ -156,6 +156,12 @@ footer{border-top:1px solid var(--line);padding:34px 0 46px;color:var(--dim);fon
 footer .wrap{display:flex;gap:20px;justify-content:space-between;flex-wrap:wrap}
 footer a:hover{color:var(--text)}
 
+.more{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.more a.card{display:block;transition:background .15s ease}
+.more a.card:hover{background:var(--panel2)}
+.more .card h3::after{content:" \2192";color:var(--dim)}
+.more .card p{color:var(--muted);margin:0;font-size:15px}
+@media (max-width:800px){.more{grid-template-columns:1fr}}
 @media (max-width:800px){.pair{grid-template-columns:1fr}}
 @media (max-width:680px){
   .wrap{padding:0 16px}
@@ -273,6 +279,17 @@ footer a:hover{color:var(--text)}
       <details><summary>Can PullYard commit and push like GitHub Desktop?</summary><p>No. PullYard does not stage, commit or push local changes. Keep GitHub Desktop, another git client or the command line for that, and use PullYard for the pull request that follows.</p></details>
       <details><summary>Does PullYard run on Linux?</summary><p>Yes. PullYard has native builds for macOS, Windows and Linux. GitHub Desktop has official builds for macOS and Windows only.</p></details>
       <details><summary>Is PullYard free?</summary><p>Yes. PullYard is free and open source under the MIT license, with no paid tier. GitHub Desktop is also free and open source.</p></details>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>More comparisons</h2>
+      <div class="more">
+        <a class="card" href="gitkraken-alternative.html"><h3>PullYard vs GitKraken</h3><p>A full git client next to a small review app.</p></a>
+        <a class="card" href="pulldog-alternative.html"><h3>PullYard vs Pulldog</h3><p>Two native pull request apps, compared honestly.</p></a>
+        <a class="card" href="stacked-pull-requests.html"><h3>Stacked pull requests</h3><p>See and review a whole stack in one window.</p></a>
+      </div>
     </div>
   </section>
 
