@@ -32,59 +32,20 @@ enum JiraFollowUp {
     }
 }
 
-struct JiraMergeFollowUp: View {
-    let pr: PullRequestDetail
-    @State private var issues: [JiraIssue] = []
-    @State private var transitions: [String: JiraTransition] = [:]
-    @State private var working: String?
-    @State private var error: String?
-    @State private var dismissed = false
-    @Environment(AppModel.self) private var app
+@Observable
+@MainActor
+final class JiraFollowUpLoader {
+    private(set) var issues: [JiraIssue] = []
+    private(set) var transitions: [String: JiraTransition] = [:]
+    var dismissed = false
 
-    var body: some View {
-        let pending = JiraFollowUp.open(issues)
-        Group {
-            if pr.merged, !dismissed, !pending.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(pending) { issue in
-                        HStack(spacing: 8) {
-                            Image(systemName: "ticket").foregroundStyle(Color.sySky)
-                            Text(issue.key).font(.syCallout.monospaced().weight(.semibold))
-                            Text("is still \(issue.status)").font(.syCallout).foregroundStyle(Color.syMuted).lineLimit(1)
-                            Spacer()
-                            if let t = transitions[issue.key] {
-                                Button(working == issue.key ? "Moving…" : "Move to \(t.to)") { move(issue, t) }
-                                    .controlSize(.small)
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(Color.syGreenFill)
-                                    .disabled(working != nil)
-                            }
-                            Button("Open in Jira") { if let u = URL(string: issue.url) { LinkBrowser.open(u) } }
-                                .controlSize(.small)
-                        }
-                    }
-                    HStack {
-                        if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
-                        Spacer()
-                        Button("Not now") {
-                            JiraFollowUp.dismiss(pr.url)
-                            dismissed = true
-                        }
-                        .buttonStyle(.link)
-                        .font(.syCaption)
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.sySky.opacity(0.07)))
-            }
-        }
-        .task(id: "\(pr.url)|\(pr.merged)") { await load() }
-    }
-
-    private func load() async {
+    func load(_ pr: PullRequestDetail) async {
         dismissed = JiraFollowUp.isDismissed(pr.url)
-        guard pr.merged, !dismissed, JiraAccount.shared.isConfigured, let client = JiraAccount.shared.client() else { return }
+        guard pr.merged, !dismissed, JiraAccount.shared.isConfigured, let client = JiraAccount.shared.client() else {
+            issues = []
+            transitions = [:]
+            return
+        }
         var found: [JiraIssue] = []
         for key in JiraTab.keys(for: pr).prefix(5) {
             if let hit = JiraAccount.shared.cachedIssue(key) {
@@ -102,6 +63,56 @@ struct JiraMergeFollowUp: View {
         transitions = moves
     }
 
+    func replace(_ issue: JiraIssue) {
+        issues = issues.map { $0.key == issue.key ? issue : $0 }
+    }
+}
+
+struct JiraMergeFollowUp: View {
+    let pr: PullRequestDetail
+    let loader: JiraFollowUpLoader
+    @State private var working: String?
+    @State private var error: String?
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        let pending = JiraFollowUp.open(loader.issues)
+        if pr.merged, !loader.dismissed, !pending.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(pending) { issue in
+                    HStack(spacing: 8) {
+                        Image(systemName: "ticket").foregroundStyle(Color.sySky)
+                        Text(issue.key).font(.syCallout.monospaced().weight(.semibold))
+                        Text("is still \(issue.status)").font(.syCallout).foregroundStyle(Color.syMuted).lineLimit(1)
+                        Spacer()
+                        if let t = loader.transitions[issue.key] {
+                            Button(working == issue.key ? "Moving…" : "Move to \(t.to)") { move(issue, t) }
+                                .controlSize(.small)
+                                .buttonStyle(.borderedProminent)
+                                .tint(Color.syGreenFill)
+                                .disabled(working != nil)
+                        }
+                        Button("Open in Jira") { if let u = URL(string: issue.url) { LinkBrowser.open(u) } }
+                            .controlSize(.small)
+                    }
+                }
+                HStack {
+                    if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
+                    Spacer()
+                    Button("Not now") {
+                        JiraFollowUp.dismiss(pr.url)
+                        loader.dismissed = true
+                    }
+                    .buttonStyle(.link)
+                    .font(.syCaption)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.sySky.opacity(0.07)))
+        }
+    }
+
     private func move(_ issue: JiraIssue, _ t: JiraTransition) {
         guard let client = JiraAccount.shared.client() else { return }
         working = issue.key
@@ -111,7 +122,7 @@ struct JiraMergeFollowUp: View {
                 try await client.transition(issue.key, to: t.id)
                 if let fresh = try? await client.issue(issue.key) {
                     JiraAccount.shared.remember(fresh)
-                    issues = issues.map { $0.key == fresh.key ? fresh : $0 }
+                    loader.replace(fresh)
                 }
                 app.showToast("\(issue.key) moved to \(t.to)")
             } catch {
