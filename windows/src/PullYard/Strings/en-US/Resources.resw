@@ -579,6 +579,11 @@
   <data name="Jira_Description" xml:space="preserve"><value>Description</value></data>
   <data name="Jira_Disconnect" xml:space="preserve"><value>Disconnect</value></data>
   <data name="Jira_EmailPlaceholder" xml:space="preserve"><value>Atlassian account email (empty for a Data Center token)</value></data>
+  <data name="Jira_FollowUpMove" xml:space="preserve"><value>Move to {0}</value></data>
+  <data name="Jira_FollowUpMoved" xml:space="preserve"><value>{0} moved to {1}</value></data>
+  <data name="Jira_FollowUpMoving" xml:space="preserve"><value>Moving…</value></data>
+  <data name="Jira_FollowUpNotNow" xml:space="preserve"><value>Not now</value></data>
+  <data name="Jira_FollowUpStill" xml:space="preserve"><value>is still {0}</value></data>
   <data name="Jira_Hide" xml:space="preserve"><value>Hide</value></data>
   <data name="Jira_HideOnPr" xml:space="preserve"><value>Hide on this pull request</value></data>
   <data name="Jira_HideTip" xml:space="preserve"><value>Hide this ticket on this pull request</value></data>

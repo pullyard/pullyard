@@ -395,6 +395,7 @@ struct PRHeaderView: View {
     let pr: PullRequestDetail
     let onMerge: () -> Void
     var onRequestReview: () -> Void = {}
+    @State private var jiraFollowUp = JiraFollowUpLoader()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -444,11 +445,13 @@ struct PRHeaderView: View {
             if pr.isOpen {
                 RiskStrip(model: model, risks: model.risks)
             }
+            JiraMergeFollowUp(pr: pr, loader: jiraFollowUp)
             MergeStatusBar(model: model, pr: pr, onMerge: onMerge, onRequestReview: onRequestReview)
         }
         .animation(Motion.smooth, value: model.stackTree)
         .padding(.horizontal, 16)
         .padding(.top, 12)
+        .task(id: "\(pr.url)|\(pr.merged)") { await jiraFollowUp.load(pr) }
     }
 }
 

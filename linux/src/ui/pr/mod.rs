@@ -48,6 +48,7 @@ pub struct PrPage {
     files: RefCell<Option<Rc<files::FilesTab>>>,
     stack_tab: RefCell<Option<Rc<stack_tab::StackTab>>>,
     jira_tab: RefCell<Option<Rc<super::jira::JiraTab>>>,
+    jira_follow_up: Rc<super::jira::MergeFollowUp>,
     rerequested: RefCell<Option<Vec<String>>>,
     sending_rerequest: Cell<bool>,
     replaced: Cell<bool>,
@@ -152,6 +153,7 @@ impl PrPage {
             files: RefCell::new(None),
             stack_tab: RefCell::new(None),
             jira_tab: RefCell::new(None),
+            jira_follow_up: super::jira::MergeFollowUp::new(),
             rerequested: RefCell::new(None),
             sending_rerequest: Cell::new(false),
             replaced: Cell::new(false),
@@ -177,6 +179,8 @@ impl PrPage {
         crate::jira::on_change(move |_| match w.upgrade() {
             Some(me) => {
                 me.render_jira_badge();
+                me.jira_follow_up.reset();
+                me.render_jira_follow_up();
                 true
             }
             None => false,
@@ -788,6 +792,11 @@ impl PrPage {
         self.header_box.append(&slot);
         *self.risk_slot.borrow_mut() = Some(slot);
         self.render_risks();
+        if let Some(parent) = self.jira_follow_up.widget.parent().and_downcast::<gtk::Box>() {
+            parent.remove(&self.jira_follow_up.widget);
+        }
+        self.header_box.append(&self.jira_follow_up.widget);
+        self.render_jira_follow_up();
         if let Some(bar) = merge_status_bar(&self.model, &pr, Rc::new({
             let m = self.model.clone();
             move || sheets::merge(m.clone())
@@ -797,6 +806,13 @@ impl PrPage {
         })) {
             self.header_box.append(&bar);
         }
+    }
+
+    fn render_jira_follow_up(&self) {
+        let pr = self.model.pr.borrow().clone();
+        let Some(pr) = pr else { return };
+        let keys = super::jira::keys(&self.model);
+        self.jira_follow_up.update(&pr.url, pr.merged, keys);
     }
 
     fn render_risks(&self) {

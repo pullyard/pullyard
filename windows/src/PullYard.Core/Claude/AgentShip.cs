@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using PullYard.Core.Git;
+using PullYard.Core.Jira;
 using PullYard.Core.Util;
 
 namespace PullYard.Core.Claude;
@@ -20,6 +21,7 @@ public static partial class AgentShip
         else if (ahead == 0 && !onDefault)
             steps.Add("There are no local changes or unpushed commits. If there is nothing to open a pull request for, say so and stop.");
         steps.Add("Push the branch to origin and set the upstream.");
+        if (!onDefault && JiraFollowUp.ShipStep(branch) is { } jira) steps.Add(jira);
         var target = defaultBranch ?? "the default branch";
         switch (remote?.Kind ?? GitRemoteKind.GitHub)
         {

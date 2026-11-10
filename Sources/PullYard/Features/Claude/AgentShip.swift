@@ -70,6 +70,7 @@ enum AgentShip {
         } else if ahead == 0 && !onDefault {
             steps.append("There are no local changes or unpushed commits. If there is nothing to open a pull request for, say so and stop.")
         }
+        if !onDefault, let jira = JiraFollowUp.shipStep(branch: branch) { steps.append(jira) }
         let target = defaultBranch ?? "the default branch"
         switch remote?.kind ?? .github {
         case .github:

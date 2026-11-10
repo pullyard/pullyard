@@ -475,9 +475,107 @@ fn merge_keys(linked: Vec<String>, detected: Vec<String>, hidden: &[String]) -> 
     out
 }
 
+pub const FOLLOW_UP_LIMIT: usize = 500;
+const DONE_NAMES: [&str; 5] = ["done", "closed", "resolved", "complete", "completed"];
+
+pub fn open_issues(issues: &[JiraIssue]) -> Vec<JiraIssue> {
+    issues.iter().filter(|i| i.status_category.to_lowercase() != "done").cloned().collect()
+}
+
+pub fn done_transition(transitions: &[JiraTransition]) -> Option<JiraTransition> {
+    let done: Vec<&JiraTransition> = transitions.iter().filter(|t| t.to_category.to_lowercase() == "done").collect();
+    done.iter().find(|t| DONE_NAMES.contains(&t.to.to_lowercase().as_str())).or(done.first()).map(|t| (*t).clone())
+}
+
+pub fn with_dismissed(mut list: Vec<String>, pr_url: &str) -> Vec<String> {
+    if !list.iter().any(|u| u == pr_url) {
+        list.push(pr_url.to_string());
+    }
+    let extra = list.len().saturating_sub(FOLLOW_UP_LIMIT);
+    list.drain(..extra);
+    list
+}
+
+pub fn is_follow_up_dismissed(pr_url: &str) -> bool {
+    settings::read(|s| s.jira_follow_up_dismissed.iter().any(|u| u == pr_url))
+}
+
+pub fn dismiss_follow_up(pr_url: &str) {
+    settings::update(|s| s.jira_follow_up_dismissed = with_dismissed(std::mem::take(&mut s.jira_follow_up_dismissed), pr_url));
+}
+
+pub fn ship_step(branch: &str) -> Option<String> {
+    let keys = extract(&[&branch.to_uppercase()]);
+    let first = keys.first()?;
+    let list = keys.join(", ");
+    let noun = if keys.len() == 1 { "issue" } else { "issues" };
+    Some(format!("The branch refers to Jira {noun} {list}. Start the title with {first} and mention {list} in the description."))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn follow_up_issue(key: &str, status: &str, category: &str) -> JiraIssue {
+        JiraIssue {
+            key: key.into(),
+            summary: "s".into(),
+            status: status.into(),
+            status_category: category.into(),
+            kind: None,
+            priority: None,
+            assignee: None,
+            assignee_avatar: None,
+            reporter: None,
+            description: String::new(),
+            url: format!("https://x.atlassian.net/browse/{key}"),
+            updated: None,
+            parent_key: None,
+            parent_summary: None,
+        }
+    }
+
+    fn follow_up_transition(id: &str, name: &str, to: &str, category: &str) -> JiraTransition {
+        JiraTransition { id: id.into(), name: name.into(), to: to.into(), to_category: category.into() }
+    }
+
+    #[test]
+    fn follow_up_keeps_issues_that_are_not_done() {
+        let issues = [follow_up_issue("A-1", "In Review", "indeterminate"), follow_up_issue("A-2", "Done", "DONE"), follow_up_issue("A-3", "To Do", "new")];
+        assert_eq!(open_issues(&issues).iter().map(|i| i.key.as_str()).collect::<Vec<_>>(), vec!["A-1", "A-3"]);
+    }
+
+    #[test]
+    fn follow_up_prefers_done_named_transition() {
+        let transitions = [
+            follow_up_transition("1", "Back to progress", "In Progress", "indeterminate"),
+            follow_up_transition("2", "Ship it", "Released", "done"),
+            follow_up_transition("3", "Finish", "Done", "done"),
+        ];
+        assert_eq!(done_transition(&transitions).map(|t| t.id), Some("3".into()));
+        assert_eq!(done_transition(&transitions[..2]).map(|t| t.id), Some("2".into()));
+        assert_eq!(done_transition(&transitions[..1]), None);
+        assert_eq!(done_transition(&[follow_up_transition("4", "Close", "Closed", "Done"), follow_up_transition("5", "Finish", "Done", "done")]).map(|t| t.id), Some("4".into()));
+    }
+
+    #[test]
+    fn follow_up_dismissals_are_deduped_and_capped() {
+        let once = with_dismissed(vec![], "https://github.com/o/r/pull/1");
+        let twice = with_dismissed(once.clone(), "https://github.com/o/r/pull/1");
+        assert_eq!(twice, vec!["https://github.com/o/r/pull/1".to_string()]);
+        let full: Vec<String> = (0..FOLLOW_UP_LIMIT).map(|i| format!("u{i}")).collect();
+        let capped = with_dismissed(full, "new");
+        assert_eq!(capped.len(), FOLLOW_UP_LIMIT);
+        assert_eq!(capped.first().map(String::as_str), Some("u1"));
+        assert_eq!(capped.last().map(String::as_str), Some("new"));
+    }
+
+    #[test]
+    fn ship_step_mentions_branch_keys() {
+        assert_eq!(ship_step("fix/soc-1235-public-search").as_deref(), Some("The branch refers to Jira issue SOC-1235. Start the title with SOC-1235 and mention SOC-1235 in the description."));
+        assert_eq!(ship_step("feat/web-1-and-ops-2").as_deref(), Some("The branch refers to Jira issues WEB-1, OPS-2. Start the title with WEB-1 and mention WEB-1, OPS-2 in the description."));
+        assert_eq!(ship_step("feature/login"), None);
+    }
 
     #[test]
     fn extracts_keys_with_boundaries_and_ignore_list() {
