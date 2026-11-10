@@ -182,6 +182,7 @@ final class ClaudeWorkspace {
     let sessionRows = RowAppearTracker()
     var showInspector = true
     var ciFixes: [ItemRef: CIFixLaunch] = [:]
+    var reviewFixes: [ItemRef: ReviewFixLaunch] = [:]
 
     var model: ClaudeModelOption {
         get { _ = modelTick; return ClaudeModelOption(rawValue: UserDefaults.standard.string(forKey: "claude.model") ?? "") ?? .standard }

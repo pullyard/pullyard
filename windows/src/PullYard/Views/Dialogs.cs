@@ -294,6 +294,97 @@ public static class Dialogs
         await ShowAsync(d);
     }
 
+    public static async Task CloseLoopThreads(XamlRoot? root, PRDetailViewModel model, IReadOnlyCollection<string> preselected)
+    {
+        if (root is null || model.Pr is not { } pr) return;
+        var threads = CloseLoop.Replyable(pr);
+        var open = threads.Select(t => t.Id).ToHashSet();
+        var selected = preselected.Where(open.Contains).ToHashSet();
+        var resolve = true;
+        var working = false;
+        var panel = Ui.V(10);
+        var text = Editor(L.T("Reply_Placeholder", "Reply (Markdown)"), CloseLoop.DefaultReply(pr.HeadRefOid), minHeight: 56);
+        text.MaxHeight = 110;
+        var d = Create(root, L.T("CloseLoop_Title", "Reply and resolve threads"), panel, "", maxWidth: 680);
+        var intro = Ui.Text("", 13, "muted", wrap: true);
+        panel.Children.Add(intro);
+        var boxes = new List<(CheckBox Box, string Id)>();
+        var errors = new Dictionary<string, TextBlock>();
+        panel.Children.Add(Ui.Columns((Ui.Text(L.T("CloseLoop_OpenThreads", "Open threads"), 12, "muted", FontWeights.SemiBold), Ui.Star),
+            (Ui.H(8, Ui.Link(L.T("Fix_All", "All"), () => SetAll(true)), Ui.Link(L.T("Fix_None", "None"), () => SetAll(false))), Ui.Auto)));
+        var list = Ui.V(4);
+        if (threads.Count == 0) list.Children.Add(Ui.Text(L.T("CloseLoop_NoOpen", "No open threads"), 13, "dim"));
+        foreach (var th in threads)
+        {
+            var label = Ui.H(6, Ui.Text(string.IsNullOrEmpty(th.Path) ? L.T("CloseLoop_Thread", "Thread") : th.Location, 12, "sky", mono: true));
+            if (th.IsOutdated) label.Children.Add(Ui.Chip(L.T("Fix_Outdated", "outdated"), "amber"));
+            var first = th.Comments.Items.FirstOrDefault();
+            label.Children.Add(Ui.Text($"@{first?.Author?.Login ?? "?"}: {first?.Body.Replace("\n", " ")}", 12, "muted"));
+            var cb = new CheckBox { Content = label, IsChecked = selected.Contains(th.Id) };
+            var id = th.Id;
+            cb.Checked += (_, _) => { selected.Add(id); Validate(); };
+            cb.Unchecked += (_, _) => { selected.Remove(id); Validate(); };
+            boxes.Add((cb, id));
+            var error = Ui.Text("", 11, "red", wrap: true);
+            error.Margin = new Thickness(28, 0, 0, 0);
+            error.Visibility = Visibility.Collapsed;
+            errors[id] = error;
+            list.Children.Add(Ui.V(1, cb, error));
+        }
+        void SetAll(bool on)
+        {
+            foreach (var (cb, _) in boxes) cb.IsChecked = on;
+        }
+        panel.Children.Add(new ScrollViewer { Content = list, MaxHeight = 240 });
+        panel.Children.Add(text);
+        var resolveBox = new CheckBox { Content = L.T("CloseLoop_Resolve", "Resolve the threads after replying"), IsChecked = true };
+        resolveBox.Checked += (_, _) => { resolve = true; Validate(); };
+        resolveBox.Unchecked += (_, _) => { resolve = false; Validate(); };
+        panel.Children.Add(resolveBox);
+        void Validate()
+        {
+            intro.Text = resolve
+                ? L.T("CloseLoop_IntroResolve", "Posts the same reply on each selected thread and resolves it. Use it once the fixes are pushed.")
+                : L.T("CloseLoop_Intro", "Posts the same reply on each selected thread. Use it once the fixes are pushed.");
+            d.PrimaryButtonText = working ? L.T("CloseLoop_Working", "Working…")
+                : resolve ? L.F("CloseLoop_ReplyResolveN", "Reply and resolve {0}", selected.Count) : L.F("CloseLoop_ReplyN", "Reply to {0}", selected.Count);
+            d.IsPrimaryButtonEnabled = !working && selected.Count > 0 && text.Text.Trim().Length > 0;
+        }
+        text.TextChanged += (_, _) => Validate();
+        Validate();
+        d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, async () =>
+        {
+            var chosen = threads.Where(t => selected.Contains(t.Id)).ToList();
+            var body = text.Text.Trim();
+            var resolving = resolve;
+            working = true;
+            foreach (var e in errors.Values) e.Visibility = Visibility.Collapsed;
+            Validate();
+            var failures = await model.ReplyAndResolve(chosen, body, resolving);
+            working = false;
+            Validate();
+            foreach (var (id, message) in failures)
+            {
+                if (!errors.TryGetValue(id, out var e)) continue;
+                e.Text = message;
+                e.Visibility = Visibility.Visible;
+            }
+            foreach (var (cb, id) in boxes)
+                if (!failures.ContainsKey(id) && chosen.Any(t => t.Id == id)) cb.IsChecked = false;
+            var done = chosen.Count - failures.Count;
+            if (done > 0)
+            {
+                ShellView.Toast(resolving
+                    ? done == 1 ? L.T("CloseLoop_ResolvedOne", "Replied and resolved 1 thread") : L.F("CloseLoop_ResolvedMany", "Replied and resolved {0} threads", done)
+                    : done == 1 ? L.T("CloseLoop_RepliedOne", "Replied to 1 thread") : L.F("CloseLoop_RepliedMany", "Replied to {0} threads", done));
+            }
+            if (failures.Count > 0) return false;
+            model.ReviewFix = null;
+            return true;
+        }, args);
+        await ShowAsync(d);
+    }
+
     public static async Task InlineComment(XamlRoot? root, PRDetailViewModel model, DiffAnchor anchor)
     {
         if (root is null) return;
@@ -806,6 +897,12 @@ public static class Dialogs
             removeWorktree.IsEnabled = true;
             await RefreshWorktree();
         };
+        void RecordReviewFix(ClaudeTarget t)
+        {
+            if (ci || t == ClaudeTarget.Copy) return;
+            var ids = (useReviewer && found is not null ? threads : threads.Where(x => selected.Contains(x.Id))).Select(x => x.Id).ToList();
+            if (ids.Count > 0) model.ReviewFix = new ReviewFixLaunch(ids, pr.HeadRefOid, DateTimeOffset.Now);
+        }
         d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, async () =>
         {
             var prompt = promptBox.Text;
@@ -827,12 +924,14 @@ public static class Dialogs
                 {
                     var tab = app.Claude.NewSession(launchFolder, prompt, name);
                     if (ci) model.CiFix = new CiFixLaunch(t, tab, pr.HeadRefOid, DateTimeOffset.Now);
+                    RecordReviewFix(t);
                     app.Section = Section.Claude;
                     return true;
                 }
                 var mode = (modes.SelectedItem as ComboBoxItem)?.Tag is ClaudePermissionMode m ? m : ClaudePermissionMode.Standard;
                 ClaudeLauncher.Launch(prompt, launchFolder ?? "", t, mode, name, null, ClaudeProfiles.Shared.ActiveOverride, WindowInterop.Copy);
                 if (ci && t is ClaudeTarget.Terminal or ClaudeTarget.Desktop) model.CiFix = new CiFixLaunch(t, null, pr.HeadRefOid, DateTimeOffset.Now);
+                RecordReviewFix(t);
                 return true;
             }
             catch (Exception e)

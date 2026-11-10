@@ -48,6 +48,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
     [ObservableProperty] private string? scrollTarget;
     [ObservableProperty] private int diffVersion;
     [ObservableProperty] private CiFixLaunch? ciFix;
+    [ObservableProperty] private ReviewFixLaunch? reviewFix;
     [ObservableProperty] private RulesStatus rulesState = RulesStatus.Loading;
     [ObservableProperty] private CodeOwnersStatus codeOwnersState = CodeOwnersStatus.Loading;
     [ObservableProperty] private DiffScope diffScope = DiffScope.All;
@@ -777,6 +778,23 @@ public sealed partial class PRDetailViewModel : ObservableObject
     public Task<bool> Reply(string threadId, string body) => Run(() => Backend.Reply(Ref, threadId, body));
 
     public Task<bool> SetResolved(string threadId, bool resolved) => Run(() => Backend.SetResolved(Ref, threadId, resolved));
+
+    public async Task<Dictionary<string, string>> ReplyAndResolve(IReadOnlyList<ReviewThread> threads, string body, bool resolve)
+    {
+        Busy = true;
+        Dictionary<string, string> failures;
+        try
+        {
+            failures = await CloseLoop.Run(Backend, Ref, threads, body, resolve);
+        }
+        finally
+        {
+            Busy = false;
+        }
+        forcedReason = "mutation";
+        await Load();
+        return failures;
+    }
 
     public async Task<bool> Merge(string method, string? title, string? body, bool deleteBranch)
     {

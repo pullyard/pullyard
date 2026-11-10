@@ -659,3 +659,216 @@ where
         }
     });
 }
+
+pub fn close_loop_banner(model: &Rc<PrModel>, pr: &crate::api::models::PullRequestDetail, on_dismiss: impl Fn() + 'static) -> Option<gtk::Box> {
+    let ws = crate::app::try_get()?.claude.clone();
+    let pending = crate::close_loop::pending(ws.review_fixes.borrow().get(&model.r), pr)?;
+    let b = hbox(8);
+    b.add_css_class("banner-box");
+    b.add_css_class("green");
+    b.set_vexpand(false);
+    b.set_valign(gtk::Align::Start);
+    margins(&b, 6, 16, 0, 16);
+    b.append(&icon_tile("sy-comment-symbolic", "green", 18));
+    b.append(&ellipsized(
+        &format!(
+            "{} since Fix with agent · {}",
+            util::plural(pending.new_commits as i64, "new commit", "new commits"),
+            util::plural(pending.threads.len() as i64, "thread still open", "threads still open")
+        ),
+        &["sy-text"],
+    ));
+    b.append(&spacer());
+    let btn = tinted("Reply and resolve…", "green");
+    btn.add_css_class("banner-button");
+    btn.set_valign(gtk::Align::Center);
+    btn.set_vexpand(false);
+    let m = model.clone();
+    let threads = pending.threads.clone();
+    btn.connect_clicked(move |_| close_loop(m.clone(), threads.clone()));
+    b.append(&btn);
+    let dismiss = icon_button("sy-x-symbolic", "Dismiss");
+    dismiss.add_css_class("flat");
+    dismiss.set_valign(gtk::Align::Center);
+    let r = model.r.clone();
+    dismiss.connect_clicked(move |_| {
+        ws.review_fixes.borrow_mut().remove(&r);
+        on_dismiss();
+    });
+    b.append(&dismiss);
+    Some(b)
+}
+
+pub fn close_loop(model: Rc<PrModel>, preselected: Vec<String>) {
+    let Some(pr) = model.pr.borrow().clone() else { return };
+    let threads: Vec<ReviewThread> = pr.review_threads.nodes.iter().filter(|t| !t.is_resolved && t.viewer_can_reply).cloned().collect();
+    let sheet = Sheet::new("Reply and resolve threads", 620, -1);
+    let open: HashSet<String> = threads.iter().map(|t| t.id.clone()).collect();
+    let selected: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(preselected.into_iter().filter(|id| open.contains(id)).collect()));
+    let resolve = Rc::new(std::cell::Cell::new(true));
+    let working = Rc::new(std::cell::Cell::new(false));
+    let info = wrap_label("", &["sy-muted"]);
+    sheet.body.append(&info);
+    let head = hbox(6);
+    let t = label_with("Open threads", &["sy-muted", "sy-small", "sy-bold"]);
+    t.set_hexpand(true);
+    head.append(&t);
+    let all = link_button("All");
+    let none = link_button("None");
+    head.append(&all);
+    head.append(&none);
+    sheet.body.append(&head);
+    let list = vbox(4);
+    pad(&list, 8);
+    if threads.is_empty() {
+        list.append(&label_with("No open threads", &["sy-dim"]));
+    }
+    let mut rows: Vec<(String, gtk::CheckButton, gtk::Label)> = vec![];
+    for th in &threads {
+        let cell = vbox(1);
+        let cbtn = gtk::CheckButton::new();
+        cbtn.set_active(selected.borrow().contains(&th.id));
+        let row = hbox(6);
+        let loc = if th.path.is_empty() { "Thread".to_string() } else { format!("{}{}", th.path, th.line.or(th.original_line).map(|l| format!(":{l}")).unwrap_or_default()) };
+        let p = label_with(&loc, &["sy-mono", "fg-sky", "sy-small"]);
+        p.set_ellipsize(gtk::pango::EllipsizeMode::Start);
+        p.set_max_width_chars(40);
+        row.append(&p);
+        if th.is_outdated {
+            row.append(&chip("outdated", "amber", None, false));
+        }
+        let first = th.comments.nodes.first();
+        row.append(&ellipsized(
+            &format!("@{}: {}", first.and_then(|c| c.author.as_ref()).map(|a| a.login.as_str()).unwrap_or("?"), first.map(|c| c.body.replace('\n', " ")).unwrap_or_default()),
+            &["sy-muted", "sy-small"],
+        ));
+        cbtn.set_child(Some(&row));
+        cell.append(&cbtn);
+        let err = wrap_label("", &["fg-red", "sy-tiny"]);
+        err.set_margin_start(28);
+        err.set_visible(false);
+        cell.append(&err);
+        list.append(&cell);
+        rows.push((th.id.clone(), cbtn, err));
+    }
+    let scroll = gtk::ScrolledWindow::new();
+    scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
+    scroll.set_child(Some(&list));
+    scroll.set_max_content_height(240);
+    scroll.set_propagate_natural_height(true);
+    sheet.body.append(&frame(&scroll, "sy-card-flat"));
+    let composer = Composer::new("Reply (Markdown)", 56);
+    composer.set_text(&crate::close_loop::default_reply(&pr.head_ref_oid));
+    sheet.body.append(&composer.widget);
+    let resolve_check = gtk::CheckButton::with_label("Resolve the threads after replying");
+    resolve_check.set_active(true);
+    sheet.body.append(&resolve_check);
+    sheet.add_footer_spacer();
+    sheet.cancel_button();
+    let go = tinted("", "green");
+    sheet.footer.append(&go);
+    let update: Rc<dyn Fn()> = {
+        let go = go.clone();
+        let info = info.clone();
+        let selected = selected.clone();
+        let resolve = resolve.clone();
+        let working = working.clone();
+        let comp = composer.clone();
+        Rc::new(move || {
+            let n = selected.borrow().len();
+            info.set_text(&format!("Posts the same reply on each selected thread{}. Use it once the fixes are pushed.", if resolve.get() { " and resolves it" } else { "" }));
+            go.set_label(&if working.get() {
+                "Working…".to_string()
+            } else if resolve.get() {
+                format!("Reply and resolve {n}")
+            } else {
+                format!("Reply to {n}")
+            });
+            go.set_sensitive(!working.get() && n > 0 && !comp.is_blank());
+        })
+    };
+    let rows = Rc::new(rows);
+    for (id, cbtn, _) in rows.iter() {
+        let selected = selected.clone();
+        let update = update.clone();
+        let id = id.clone();
+        cbtn.connect_toggled(move |c| {
+            if c.is_active() {
+                selected.borrow_mut().insert(id.clone());
+            } else {
+                selected.borrow_mut().remove(&id);
+            }
+            update();
+        });
+    }
+    let r = rows.clone();
+    all.connect_clicked(move |_| r.iter().for_each(|(_, c, _)| c.set_active(true)));
+    let r = rows.clone();
+    none.connect_clicked(move |_| r.iter().for_each(|(_, c, _)| c.set_active(false)));
+    {
+        let resolve = resolve.clone();
+        let update = update.clone();
+        resolve_check.connect_toggled(move |c| {
+            resolve.set(c.is_active());
+            update();
+        });
+    }
+    {
+        let update = update.clone();
+        composer.on_changed(move || update());
+    }
+    let submit: Rc<dyn Fn()> = {
+        let d = sheet.dialog.clone();
+        let comp = composer.clone();
+        let update = update.clone();
+        Rc::new(move || {
+            if working.get() || comp.is_blank() || selected.borrow().is_empty() {
+                return;
+            }
+            let chosen: Vec<ReviewThread> = threads.iter().filter(|t| selected.borrow().contains(&t.id)).cloned().collect();
+            let body = comp.text().trim().to_string();
+            let resolve = resolve.get();
+            working.set(true);
+            for (_, _, err) in rows.iter() {
+                err.set_visible(false);
+            }
+            update();
+            let m = model.clone();
+            let d = d.clone();
+            let rows = rows.clone();
+            let working = working.clone();
+            let update = update.clone();
+            crate::rt::spawn_local(async move {
+                let total = chosen.len();
+                let sent: HashSet<String> = chosen.iter().map(|t| t.id.clone()).collect();
+                let failures = m.clone().close_loop(chosen, body, resolve).await;
+                working.set(false);
+                for (id, check, err) in rows.iter() {
+                    if let Some(e) = failures.get(id) {
+                        err.set_text(e);
+                        err.set_visible(true);
+                    } else if sent.contains(id) {
+                        check.set_active(false);
+                        err.set_visible(false);
+                    }
+                }
+                update();
+                let done = total - failures.len();
+                if done > 0 {
+                    let n = util::plural(done as i64, "thread", "threads");
+                    crate::app::toast(&if resolve { format!("Replied and resolved {n}") } else { format!("Replied to {n}") });
+                }
+                if failures.is_empty() {
+                    if let Some(a) = crate::app::try_get() {
+                        a.claude.review_fixes.borrow_mut().remove(&m.r);
+                    }
+                    d.close();
+                }
+            });
+        })
+    };
+    let s = submit.clone();
+    go.connect_clicked(move |_| s());
+    update();
+    sheet.present();
+}

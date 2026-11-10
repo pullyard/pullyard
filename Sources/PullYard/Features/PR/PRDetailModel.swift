@@ -718,6 +718,24 @@ final class PRDetailModel {
         await run { try await backend.reply(ref, thread: threadId, body: body) }
     }
 
+    func closeLoop(_ threads: [ReviewThread], body: String, resolve: Bool) async -> [String: String] {
+        var failures: [String: String] = [:]
+        busy = true
+        for t in threads {
+            do {
+                try await backend.reply(ref, thread: t.id, body: body)
+                if resolve, t.viewerCanResolve {
+                    try await backend.setResolved(ref, thread: t.id, resolved: true)
+                }
+            } catch {
+                failures[t.id] = error.localizedDescription
+            }
+        }
+        busy = false
+        await load()
+        return failures
+    }
+
     func setResolved(_ threadId: String, _ resolved: Bool) async {
         await run { try await backend.setResolved(ref, thread: threadId, resolved: resolved) }
     }

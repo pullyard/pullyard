@@ -294,6 +294,27 @@
   <data name="Claude_UsagePage" xml:space="preserve"><value>Usage page</value></data>
   <data name="Claude_WakeUp" xml:space="preserve"><value>Wake up</value></data>
   <data name="Clipboard_InClipboard" xml:space="preserve"><value>In clipboard: {0}</value></data>
+  <data name="CloseLoop_Banner" xml:space="preserve"><value>{0} since Fix with agent · {1}</value></data>
+  <data name="CloseLoop_Button" xml:space="preserve"><value>Reply and resolve…</value></data>
+  <data name="CloseLoop_Commits" xml:space="preserve"><value>{0} new commits</value></data>
+  <data name="CloseLoop_Intro" xml:space="preserve"><value>Posts the same reply on each selected thread. Use it once the fixes are pushed.</value></data>
+  <data name="CloseLoop_IntroResolve" xml:space="preserve"><value>Posts the same reply on each selected thread and resolves it. Use it once the fixes are pushed.</value></data>
+  <data name="CloseLoop_Menu" xml:space="preserve"><value>Reply and resolve threads…</value></data>
+  <data name="CloseLoop_NoOpen" xml:space="preserve"><value>No open threads</value></data>
+  <data name="CloseLoop_OneCommit" xml:space="preserve"><value>1 new commit</value></data>
+  <data name="CloseLoop_OneOpen" xml:space="preserve"><value>1 thread still open</value></data>
+  <data name="CloseLoop_OpenN" xml:space="preserve"><value>{0} threads still open</value></data>
+  <data name="CloseLoop_OpenThreads" xml:space="preserve"><value>Open threads</value></data>
+  <data name="CloseLoop_RepliedMany" xml:space="preserve"><value>Replied to {0} threads</value></data>
+  <data name="CloseLoop_RepliedOne" xml:space="preserve"><value>Replied to 1 thread</value></data>
+  <data name="CloseLoop_ReplyN" xml:space="preserve"><value>Reply to {0}</value></data>
+  <data name="CloseLoop_ReplyResolveN" xml:space="preserve"><value>Reply and resolve {0}</value></data>
+  <data name="CloseLoop_Resolve" xml:space="preserve"><value>Resolve the threads after replying</value></data>
+  <data name="CloseLoop_ResolvedMany" xml:space="preserve"><value>Replied and resolved {0} threads</value></data>
+  <data name="CloseLoop_ResolvedOne" xml:space="preserve"><value>Replied and resolved 1 thread</value></data>
+  <data name="CloseLoop_Thread" xml:space="preserve"><value>Thread</value></data>
+  <data name="CloseLoop_Title" xml:space="preserve"><value>Reply and resolve threads</value></data>
+  <data name="CloseLoop_Working" xml:space="preserve"><value>Working…</value></data>
   <data name="Code_Binary" xml:space="preserve"><value>Binary file</value></data>
   <data name="Code_Blame" xml:space="preserve"><value>Blame</value></data>
   <data name="Code_BlameHint" xml:space="preserve"><value>Show who last changed each line (Ctrl+Alt+B)</value></data>

@@ -7,6 +7,7 @@ mod blame;
 mod brand;
 mod ci_fix;
 mod claude;
+mod close_loop;
 mod conversation_html;
 mod demo;
 mod diagnostics;

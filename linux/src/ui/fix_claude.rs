@@ -427,9 +427,28 @@ impl State {
         });
     }
 
+    fn record_review_fix(&self) {
+        if self.ci.is_some() {
+            return;
+        }
+        let threads = self.threads();
+        let ids: Vec<String> = if self.use_reviewer.get() && self.found.is_some() {
+            threads.iter().map(|t| t.id.clone()).collect()
+        } else {
+            let selected = self.selected.borrow();
+            threads.iter().filter(|t| selected.contains(&t.id)).map(|t| t.id.clone()).collect()
+        };
+        if ids.is_empty() {
+            return;
+        }
+        let launch = crate::close_loop::ReviewFixLaunch { thread_ids: ids, head_oid: self.pr.head_ref_oid.clone(), at: chrono::Utc::now() };
+        app::get().claude.review_fixes.borrow_mut().insert(self.model.r.clone(), launch);
+    }
+
     fn start(&self, dialog: &adw::Dialog, prompt: String, folder: Option<String>, target: Target, mode: PermissionMode, name: String) {
         if target == Target::App {
             if let Some(f) = folder {
+                self.record_review_fix();
                 let tab = app::get().claude.new_session(&f, Some(prompt), Some(name), None, None);
                 if self.ci.is_some() {
                     CI_SESSIONS.with(|m| m.borrow_mut().insert(self.model.r.title(), Rc::downgrade(&tab)));
@@ -444,6 +463,8 @@ impl State {
             Ok(()) => {
                 if target == Target::Copy {
                     app::toast("Prompt copied");
+                } else {
+                    self.record_review_fix();
                 }
                 dialog.close();
             }
