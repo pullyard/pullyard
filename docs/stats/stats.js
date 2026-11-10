@@ -12,7 +12,9 @@
   const UMAMI_APP = "https://cloud.umami.is/analytics";
   const UMAMI_REGIONS = ["us", "eu"];
   const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  const regionNames = typeof Intl.DisplayNames === "function" ? new Intl.DisplayNames(["en"], { type: "region" }) : null;
+  const LOCALE = (window.PyI18n && window.PyI18n.locale) || "en-US";
+  const regionNames = typeof Intl.DisplayNames === "function" ? new Intl.DisplayNames([LOCALE, "en"], { type: "region" }) : null;
+  const languageNames = typeof Intl.DisplayNames === "function" ? new Intl.DisplayNames([LOCALE, "en"], { type: "language" }) : null;
   const DOWNLOAD_PLATFORMS = [
     { id: "macos", name: "macOS", color: "var(--c1)" },
     { id: "windows", name: "Windows", color: "var(--c2)" },
@@ -53,13 +55,24 @@
   };
   applyTheme(themePref());
 
-  const nf = new Intl.NumberFormat("en-US");
-  const cf = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+  const nf = new Intl.NumberFormat(LOCALE);
+  const cf = new Intl.NumberFormat(LOCALE, { notation: "compact", maximumFractionDigits: 1 });
   const fmt = n => (n >= 10000 ? cf.format(n) : nf.format(n));
   const pct = (a, b) => (b ? Math.round((a / b) * 100) + "%" : "0%");
   const dayKey = d => new Date(d).toISOString().slice(0, 10);
-  const shortDate = d => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-  const longDate = d => new Date(d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  const HY_FALLBACK = LOCALE.startsWith("hy") && !Intl.DateTimeFormat.supportedLocalesOf([LOCALE]).length;
+  const HY_MONTHS = ["հնվ", "փտվ", "մրտ", "ապր", "մյս", "հնս", "հլս", "օգս", "սեպ", "հոկ", "նոյ", "դեկ"];
+  const HY_DAYS = ["կիր", "երկ", "երք", "չրք", "հնգ", "ուր", "շբթ"];
+  const shortDate = d => {
+    const dt = new Date(d);
+    if (HY_FALLBACK) return `${dt.getUTCDate()} ${HY_MONTHS[dt.getUTCMonth()]}`;
+    return dt.toLocaleDateString(LOCALE, { month: "short", day: "numeric", timeZone: "UTC" });
+  };
+  const longDate = d => {
+    const dt = new Date(d);
+    if (HY_FALLBACK) return `${HY_DAYS[dt.getUTCDay()]}, ${dt.getUTCDate()} ${HY_MONTHS[dt.getUTCMonth()]} ${dt.getUTCFullYear()}`;
+    return dt.toLocaleDateString(LOCALE, { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  };
   const ago = t => {
     const s = Math.max(0, Math.round((Date.now() - t) / 1000));
     if (s < 45) return "just now";
@@ -136,12 +149,14 @@
     hide() { if (this.el) this.el.hidden = true; }
   };
 
+  let gradientSeq = 0;
+
   function lineChart(host, cfg) {
     const { labels, series, height = 240, area, ariaLabel, compact, connectGaps } = cfg;
     host.replaceChildren();
     const n = labels.length;
     if (!n) return;
-    const W = Math.max(280, host.clientWidth);
+    const W = compact ? Math.max(60, host.clientWidth || 200) : Math.max(280, host.clientWidth);
     const H = height;
     const showEnd = !compact && series.length > 1 && series.length <= 4;
     const m = compact ? { t: 6, r: 6, b: 6, l: 6 } : { t: 14, r: showEnd ? 92 : 18, b: 28, l: 40 };
@@ -178,13 +193,21 @@
     };
 
     const ends = [];
-    for (const se of series) {
+    const defs = s("defs");
+    root.append(defs);
+    const fillOpacity = series.length === 1 ? 0.32 : 0.16;
+    for (const [si, se] of series.entries()) {
       const segs = segmentsOf(se.values);
-      if (area && series.length === 1) {
+      if (area || (!compact && series.length <= 3)) {
+        const gid = "g" + (++gradientSeq) + "-" + si;
+        defs.append(s("linearGradient", { id: gid, x1: 0, y1: 0, x2: 0, y2: 1 },
+          s("stop", { offset: "0%", style: { "stop-color": se.color, "stop-opacity": fillOpacity } }),
+          s("stop", { offset: "100%", style: { "stop-color": se.color, "stop-opacity": 0 } })));
         for (const seg of segs) {
+          if (seg.length < 2) continue;
           const d = "M" + seg.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join("L") +
             `L${seg[seg.length - 1][0].toFixed(1)},${(m.t + ih).toFixed(1)}L${seg[0][0].toFixed(1)},${(m.t + ih).toFixed(1)}Z`;
-          root.append(s("path", { d, class: "area", style: { fill: se.color } }));
+          root.append(s("path", { d, class: "area", fill: `url(#${gid})` }));
         }
       }
       for (const seg of segs) {
@@ -192,7 +215,7 @@
           root.append(s("circle", { cx: seg[0][0], cy: seg[0][1], r: 3, style: { fill: se.color } }));
           continue;
         }
-        root.append(s("path", { d: "M" + seg.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join("L"), class: "line", style: { stroke: se.color } }));
+        root.append(s("path", { d: "M" + seg.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join("L"), class: "line", pathLength: 1, style: { stroke: se.color } }));
       }
       let last = -1;
       se.values.forEach((v, i) => { if (v != null) last = i; });
@@ -343,8 +366,8 @@
     const max = Math.max(...rows.map(r => r.value), 1);
     host.append(h("ul", { class: "hbars" }, rows.map(r =>
       h("li", { class: "hrow" },
-        h("span", { class: "hlabel" }, r.color ? h("i", { class: "key-rect", style: { background: r.color } }) : null, h("span", { title: r.label }, r.label)),
-        h("span", { class: "htrack" }, h("span", { class: "hfill", style: { width: (r.value / max) * 100 + "%", background: r.color || color } })),
+        h("span", { class: "hlabel" }, r.color ? h("i", { class: "key-rect", style: { background: r.color } }) : null, r.icon ? h("b", { class: "hflag", "aria-hidden": "true" }, r.icon) : null, h("span", { title: r.title || r.label }, r.label), r.tag ? h("em", { class: "htag", title: r.tagTitle || null }, r.tag) : null),
+        h("span", { class: "htrack" }, h("span", { class: "hfill", style: { width: (r.value / max) * 100 + "%", "--bar": r.color || color || "var(--c1)" } })),
         h("span", { class: "hval" }, nf.format(r.value), r.sub ? h("small", null, r.sub) : null)))));
   }
 
@@ -445,7 +468,8 @@
     rate: null,
     loading: false,
     tab: "overview",
-    ws: { range: 30, data: null, loading: false }
+    wsLoc: "country",
+    ws: { range: 30, data: null, loading: false, locAll: false, live: null }
   };
 
   function readToken() {
@@ -550,6 +574,7 @@
     state.data = data;
     state.fetchedAt = Date.now();
     main.classList.add("has-data");
+    animateIn();
     render();
     loadSite();
   }
@@ -646,6 +671,16 @@
     }
   }
 
+  function siteDays(range) {
+    const days = [];
+    const first = new Date(siteWindow(range).startAt);
+    for (let i = 0; i < range; i++) {
+      const dt = new Date(first.getFullYear(), first.getMonth(), first.getDate() + i);
+      days.push(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`);
+    }
+    return days;
+  }
+
   function siteWindow(days) {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -659,6 +694,8 @@
     if (!cfg) {
       state.ws.data = null;
       state.ws.error = null;
+      state.ws.live = null;
+      renderLive();
       renderSite();
       renderOverview();
       return;
@@ -671,13 +708,16 @@
     const win = siteWindow(state.ws.range);
     const metric = (type, limit) => umami(cfg, "/metrics", { ...win, type, limit });
     try {
-      const [stats, series, events, channels, referrers, countries, paths, sources, campaigns, os, browsers, devices] = await Promise.all([
+      const [stats, series, events, channels, referrers, countries, regions, cities, languages, paths, sources, campaigns, os, browsers, devices] = await Promise.all([
         umami(cfg, "/stats", win),
         umami(cfg, "/pageviews", { ...win, unit: "day", timezone: TZ }),
         metric("event", 50),
         metric("channel", 20),
         metric("referrer", 10),
-        metric("country", 10),
+        metric("country", 100),
+        metric("region", 100),
+        metric("city", 100),
+        metric("language", 50),
         metric("path", 10),
         metric("utmSource", 10),
         metric("utmCampaign", 10),
@@ -685,7 +725,8 @@
         metric("browser", 6),
         metric("device", 6)
       ]);
-      state.ws.data = { stats, series, events, channels, referrers, countries, paths, sources, campaigns, os, browsers, devices, range: state.ws.range };
+      state.ws.data = { stats, series, events, channels, referrers, countries, regions, cities, languages, paths, sources, campaigns, os, browsers, devices, range: state.ws.range };
+      loadLive();
       state.ws.error = null;
     } catch (e) {
       state.ws.error = e;
@@ -694,8 +735,34 @@
     state.ws.loading = false;
     panel.setAttribute("aria-busy", "false");
     paintConnections();
+    if (state.tab === "website" || state.tab === "overview") animateIn();
     renderSite();
     renderOverview();
+  }
+
+  async function loadLive() {
+    const cfg = umamiConfig();
+    if (!cfg) {
+      state.ws.live = null;
+      return renderLive();
+    }
+    try {
+      const res = await umami(cfg, "/active", {});
+      state.ws.live = num(res && (res.visitors != null ? res.visitors : res.x));
+    } catch (e) {
+      state.ws.live = null;
+    }
+    renderLive();
+  }
+
+  function renderLive() {
+    const el = document.getElementById("ws-live");
+    const n = state.ws.live;
+    el.hidden = n == null;
+    if (n == null) return;
+    el.dataset.state = n > 0 ? "on" : "off";
+    el.title = "Visitors in the last 5 minutes";
+    el.textContent = n > 0 ? `${nf.format(n)} on the site now` : "No one on the site now";
   }
 
   const num = v => (v && typeof v === "object" ? Number(v.value) : Number(v)) || 0;
@@ -708,6 +775,24 @@
     if (s < 60) return s + "s";
     const m = Math.floor(s / 60);
     return m < 60 ? `${m}m ${s % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
+  };
+
+  const TONES = { blue: "var(--c1)", coral: "var(--c2)", green: "var(--c3)", violet: "var(--c4)", amber: "var(--c5)", cyan: "var(--c6)" };
+  const ICONS = {
+    users: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M22 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75",
+    visits: "M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4 M10 17l5-5-5-5 M15 12H3",
+    eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+    bounce: "M9 14 4 9l5-5 M20 20v-7a4 4 0 0 0-4-4H4",
+    clock: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z M12 6v6l4 2",
+    download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3",
+    click: "M4 4l7 17 2.5-7.5L21 11 4 4z",
+    star: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z",
+    fork: "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M12 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M18 9v1a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9 M12 12v3",
+    clone: "M9 9h11v11H9z M5 15H4V4h11v1",
+    tag: "M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z M7 7h.01",
+    refresh: "M21 3v6h-6 M3 12a9 9 0 0 1 15.5-6.3L21 9 M3 21v-6h6 M21 12a9 9 0 0 1-15.5 6.3L3 15",
+    monitor: "M3 4h18v12H3z M8 20h8 M12 16v4",
+    repo: "M4 19.5V4a2 2 0 0 1 2-2h14v16H6.5A2.5 2.5 0 0 0 4 20.5 M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"
   };
 
   const HELP = {
@@ -741,12 +826,38 @@
     return h("button", { class: "help", type: "button", "data-help": key, "aria-label": "About " + HELP[key][0].toLowerCase() }, "?");
   }
 
+  function icon(name) {
+    const d = ICONS[name];
+    if (!d) return null;
+    return s("svg", { viewBox: "0 0 24 24", class: "ico", "aria-hidden": "true" }, d.split(" M").map((p, i) => s("path", { d: (i ? "M" : "") + p })));
+  }
+
+  function tileIcon(name, tone) {
+    return h("span", { class: "tile-ico", style: { "--tone": TONES[tone] || TONES.blue } }, icon(name));
+  }
+
+  function deltaPill(delta, label) {
+    if (!delta) return null;
+    const kind = delta.good == null ? "flat" : delta.good ? "up" : "down";
+    return [h("span", { class: "delta-pill " + kind }, delta.text), label ? h("span", { class: "delta-label" }, label) : null];
+  }
+
   function miniTiles(container, tiles) {
-    container.replaceChildren(...tiles.map(t =>
-      h("article", { class: "tile" + (t.locked ? " tile-locked" : "") },
-        h("div", { class: "tile-head" }, h("h3", { class: "tile-label" }, t.label), t.help ? helpButton(t.help) : null),
+    const sparks = [];
+    container.replaceChildren(...tiles.map(t => {
+      const spark = t.spark && t.spark.length > 1 ? h("div", { class: "tile-spark" }) : null;
+      if (spark) sparks.push([spark, t]);
+      return h("article", { class: "tile" + (t.locked ? " tile-locked" : ""), style: { "--tone": TONES[t.tone] || TONES.blue } },
+        h("div", { class: "tile-head" },
+          h("div", { class: "tile-title" }, t.icon ? tileIcon(t.icon, t.tone) : null, h("h3", { class: "tile-label" }, t.label)),
+          t.help ? helpButton(t.help) : null),
         h("p", { class: "tile-value" }, t.value),
-        h("p", { class: "tile-sub" }, t.delta ? [h("span", { class: t.delta.good ? "delta" : null }, t.delta.text), " " + (t.deltaLabel || "")] : t.sub || ""))));
+        h("p", { class: "tile-sub" }, t.delta ? deltaPill(t.delta, t.deltaLabel) : t.sub || ""),
+        spark);
+    }));
+    for (const [host, t] of sparks) {
+      lineChart(host, { compact: true, area: true, height: 40, labels: t.spark.map(() => ({ short: "", long: "" })), series: [{ name: t.label, color: TONES[t.tone] || TONES.blue, values: t.spark }] });
+    }
   }
 
   function showEmpty(box, cfg) {
@@ -800,24 +911,19 @@
     const { st, cmp, clicks } = sum;
     const visits = num(st.visits), prevVisits = num(cmp.visits);
     const vs = `vs prior ${d.range} days`;
+    const days = siteDays(d.range);
+    const byDay = list => { const m = {}; for (const p of list || []) m[String(p.x).slice(0, 10)] = num(p.y); return m; };
+    const pv = byDay(d.series.pageviews), ss = byDay(d.series.sessions);
     miniTiles(document.getElementById("ws-kpis"), [
-      { label: "Visitors", help: "siteVisitors", value: nf.format(sum.visitors), delta: deltaText(sum.visitors, num(cmp.visitors)), deltaLabel: vs },
-      { label: "Visits", help: "visits", value: nf.format(visits), delta: deltaText(visits, prevVisits), deltaLabel: vs },
-      { label: "Page views", help: "pageviews", value: nf.format(sum.pageviews), delta: deltaText(sum.pageviews, num(cmp.pageviews)), deltaLabel: vs },
-      { label: "Bounce rate", help: "bounce", value: visits ? Math.round((num(st.bounces) / visits) * 100) + "%" : "–", delta: prevVisits && visits ? deltaText(num(st.bounces) / visits, num(cmp.bounces) / prevVisits, true) : null, deltaLabel: vs },
-      { label: "Average visit", help: "avgVisit", value: visits ? duration(num(st.totaltime) / visits) : "–", delta: prevVisits && visits ? deltaText(num(st.totaltime) / visits, num(cmp.totaltime) / prevVisits) : null, deltaLabel: vs },
-      { label: "Download clicks", help: "downloadClicks", value: nf.format(clicks), sub: sum.visitors ? `${Math.round((clicks / sum.visitors) * 100)} per 100 visitors` : "" }
+      { label: "Visitors", icon: "users", tone: "blue", help: "siteVisitors", value: nf.format(sum.visitors), delta: deltaText(sum.visitors, num(cmp.visitors)), deltaLabel: vs },
+      { label: "Visits", icon: "visits", tone: "violet", help: "visits", value: nf.format(visits), delta: deltaText(visits, prevVisits), deltaLabel: vs, spark: days.map(k => ss[k] || 0) },
+      { label: "Page views", icon: "eye", tone: "cyan", help: "pageviews", value: nf.format(sum.pageviews), delta: deltaText(sum.pageviews, num(cmp.pageviews)), deltaLabel: vs, spark: days.map(k => pv[k] || 0) },
+      { label: "Bounce rate", icon: "bounce", tone: "amber", help: "bounce", value: visits ? Math.round((num(st.bounces) / visits) * 100) + "%" : "–", delta: prevVisits && visits ? deltaText(num(st.bounces) / visits, num(cmp.bounces) / prevVisits, true) : null, deltaLabel: vs },
+      { label: "Average visit", icon: "clock", tone: "green", help: "avgVisit", value: visits ? duration(num(st.totaltime) / visits) : "–", delta: prevVisits && visits ? deltaText(num(st.totaltime) / visits, num(cmp.totaltime) / prevVisits) : null, deltaLabel: vs },
+      { label: "Download clicks", icon: "click", tone: "coral", help: "downloadClicks", value: nf.format(clicks), sub: sum.visitors ? `${Math.round((clicks / sum.visitors) * 100)} per 100 visitors` : "" }
     ]);
 
     const tc = card("ws-traffic");
-    const days = [];
-    const first = new Date(siteWindow(d.range).startAt);
-    for (let i = 0; i < d.range; i++) {
-      const dt = new Date(first.getFullYear(), first.getMonth(), first.getDate() + i);
-      days.push(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`);
-    }
-    const byDay = list => { const m = {}; for (const p of list || []) m[String(p.x).slice(0, 10)] = num(p.y); return m; };
-    const pv = byDay(d.series.pageviews), ss = byDay(d.series.sessions);
     const series = [
       { name: "Page views", color: "var(--c1)", values: days.map(k => pv[k] || 0) },
       { name: "Visits", color: "var(--c2)", values: days.map(k => ss[k] || 0) }
@@ -849,7 +955,7 @@
     const rows = (list, name) => list.filter(e => e.x).map(e => ({ label: name ? name(e.x) : e.x, value: num(e.y) }));
     hbars(card("ws-channels").chart, rows(d.channels, x => CHANNEL_NAMES[x] || words(x)).sort((a, b) => b.value - a.value), "var(--c1)");
     hbars(card("ws-referrers").chart, rows(d.referrers), "var(--c1)");
-    hbars(card("ws-countries").chart, rows(d.countries, countryName), "var(--c1)");
+    renderLocations(d, sum.visitors);
 
     const pc = card("ws-pages");
     if (!d.paths.length) empty(pc.table, "No page views yet");
@@ -878,6 +984,71 @@
 
   function countryName(code) {
     try { return (regionNames && regionNames.of(code)) || code; } catch (e) { return code; }
+  }
+
+  function languageName(code) {
+    try { return (languageNames && languageNames.of(code)) || code; } catch (e) { return code; }
+  }
+
+  const flagOf = code => (/^[A-Z]{2}$/.test(code || "") ? String.fromCodePoint(...[...code].map(c => 127397 + c.charCodeAt(0))) : "");
+
+  const US_STATES = { AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut", DE: "Delaware", DC: "Washington, D.C.", FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming", PR: "Puerto Rico" };
+
+  function regionLabel(code, country) {
+    const cc = country || String(code).slice(0, 2);
+    const sub = String(code).split("-").slice(1).join("-");
+    if (!sub) return countryName(cc);
+    if (cc === "US" && US_STATES[sub]) return US_STATES[sub];
+    return /[A-Z]/.test(sub) ? `${sub}, ${countryName(cc)}` : `${countryName(cc)} · region ${sub}`;
+  }
+
+  const DATA_CENTER_CITIES = new Set(["Ashburn", "Boardman", "Council Bluffs", "Prineville", "The Dalles", "Quincy", "Moncks Corner", "Lenoir", "Pryor", "Altoona", "Papillion", "Forest City", "Middenmeer", "Eemshaven", "Hamina", "Covington"]);
+
+  const LOCATION_LEVELS = {
+    country: { key: "countries", noun: ["country", "countries"], label: e => countryName(e.x), flag: e => flagOf(e.x) },
+    region: { key: "regions", noun: ["region", "regions"], label: e => regionLabel(e.x, e.country), flag: e => flagOf(e.country || String(e.x).slice(0, 2)) },
+    city: { key: "cities", noun: ["city", "cities"], label: e => e.x, title: e => (e.country ? `${e.x}, ${countryName(e.country)}` : e.x), flag: e => flagOf(e.country) },
+    language: { key: "languages", noun: ["language", "languages"], label: e => languageName(e.x), flag: () => "" }
+  };
+  const LOCATION_TOP = 10;
+
+  function renderLocations(d, visitors) {
+    const lc = card("ws-locations");
+    const level = LOCATION_LEVELS[state.wsLoc] || LOCATION_LEVELS.country;
+    const all = (d[level.key] || []).filter(e => e.x).map(e => {
+      const v = num(e.y);
+      return {
+        label: level.label(e),
+        title: level.title ? level.title(e) : null,
+        icon: level.flag(e),
+        value: v,
+        sub: pct(v, visitors),
+        tag: state.wsLoc === "city" && DATA_CENTER_CITIES.has(e.x) ? "servers" : null,
+        tagTitle: "Cloud data-center town. Visits from here are usually bots."
+      };
+    });
+    const shown = state.ws.locAll ? all : all.slice(0, LOCATION_TOP);
+    lc.chart.style.setProperty("--rows", Math.ceil(shown.length / 2));
+    hbars(lc.chart, shown, "var(--c1)");
+
+    const bots = (d.cities || []).filter(e => DATA_CENTER_CITIES.has(e.x)).reduce((a, e) => a + num(e.y), 0);
+    const note = document.getElementById("ws-loc-note");
+    note.hidden = !bots;
+    if (bots) {
+      const towns = [...new Set((d.cities || []).filter(e => DATA_CENTER_CITIES.has(e.x)).map(e => e.x))].slice(0, 3);
+      note.replaceChildren(
+        h("strong", null, `About ${nf.format(bots)} of ${nf.format(visitors)} visitors (${pct(bots, visitors)})`),
+        ` came from cloud data-center towns like ${towns.join(", ")}. They're usually bots, crawlers or link previews, not people.`);
+    }
+
+    const more = document.getElementById("ws-loc-more");
+    more.hidden = all.length <= LOCATION_TOP;
+    if (!more.hidden) {
+      more.replaceChildren(h("button", {
+        class: "btn btn-ghost btn-sm", type: "button", "aria-expanded": String(state.ws.locAll),
+        onclick: () => { state.ws.locAll = !state.ws.locAll; renderLocations(d, visitors); }
+      }, state.ws.locAll ? `Show top ${LOCATION_TOP}` : `Show all ${all.length} ${level.noun[1]}`));
+    }
   }
 
   function setBanner(text) {
@@ -967,7 +1138,12 @@
     if (sum) {
       setText("o-visitors", nf.format(sum.visitors));
       const dv = deltaText(sum.visitors, num(sum.cmp.visitors));
-      setNode("o-visitors-sub", dv ? [h("span", { class: dv.good ? "delta" : null }, dv.text), " vs prior 30 days"] : `${nf.format(sum.pageviews)} page views`);
+      setNode("o-visitors-sub", dv ? deltaPill(dv, "vs prior 30 days") : `${nf.format(sum.pageviews)} page views`);
+      const vSpark = document.getElementById("o-visitors-spark");
+      const sessions = {};
+      for (const p of state.ws.data.series.sessions || []) sessions[String(p.x).slice(0, 10)] = num(p.y);
+      const sDays = siteDays(state.ws.data.range);
+      if (sDays.length > 1) lineChart(vSpark, { compact: true, area: true, height: 40, labels: sDays.map(() => ({ short: "", long: "" })), series: [{ name: "Visits", color: TONES.violet, values: sDays.map(k => sessions[k] || 0) }] });
       setText("o-clicks", nf.format(sum.clicks));
       setText("o-clicks-sub", sum.visitors ? `${Math.round((sum.clicks / sum.visitors) * 100)} per 100 visitors` : "");
     } else {
@@ -1031,11 +1207,12 @@
     const latest = [...rows].reverse().find(r => !r.pre && PLATFORMS.some(p => r.dl[p.id] > 0));
     const shown = rows.filter(r => PLATFORMS.some(p => r.dl[p.id] > 0)).length;
 
+    const snapSpark = (d.snaps || []).map(x => totalFor(x.dl, x.up, mode));
     miniTiles(document.getElementById("d-kpis"), [
-      { label: mode === "net" ? "New installs" : "All downloads", help: mode === "net" ? "newInstalls" : "downloads", value: nf.format(total), sub: `${shown} releases` },
-      { label: "Latest release", help: "latest", value: latest ? nf.format(totalFor(latest.dl, latest.up, mode)) : "–", sub: latest ? `v${latest.tag} · ${ago(Date.parse(latest.date))}` : "" },
-      { label: "Auto-updates", help: "autoUpdates", value: nf.format(updates), sub: "Installed by the app itself" },
-      { label: "Top platform", help: null, value: (() => { const best = PLATFORMS.map(p => [p, countFor(dl, up, p.id, mode)]).sort((a, b) => b[1] - a[1])[0]; return best ? best[0].name : "–"; })(), sub: (() => { const best = PLATFORMS.map(p => countFor(dl, up, p.id, mode)).sort((a, b) => b - a)[0]; return pct(best, total) + " of downloads"; })() }
+      { label: mode === "net" ? "New installs" : "All downloads", icon: "download", tone: "blue", help: mode === "net" ? "newInstalls" : "downloads", value: nf.format(total), sub: `${shown} releases`, spark: snapSpark },
+      { label: "Latest release", icon: "tag", tone: "violet", help: "latest", value: latest ? nf.format(totalFor(latest.dl, latest.up, mode)) : "–", sub: latest ? `v${latest.tag} · ${ago(Date.parse(latest.date))}` : "" },
+      { label: "Auto-updates", icon: "refresh", tone: "green", help: "autoUpdates", value: nf.format(updates), sub: "Installed by the app itself" },
+      { label: "Top platform", icon: "monitor", tone: "amber", help: null, value: (() => { const best = PLATFORMS.map(p => [p, countFor(dl, up, p.id, mode)]).sort((a, b) => b[1] - a[1])[0]; return best ? best[0].name : "–"; })(), sub: (() => { const best = PLATFORMS.map(p => countFor(dl, up, p.id, mode)).sort((a, b) => b - a)[0]; return pct(best, total) + " of downloads"; })() }
     ]);
 
     const pc = card("platforms");
@@ -1147,13 +1324,13 @@
     const recent = d.stars ? d.stars.filter(x => Date.now() - Date.parse(x.starred_at) < 14 * DAY_MS).length : null;
     miniTiles(document.getElementById("g-kpis"), [
       d.traffic
-        ? { label: "Repo visitors · 14 days", help: "repoVisitors", value: nf.format(d.traffic.views.uniques), sub: `${nf.format(d.traffic.views.count)} views` }
-        : { label: "Repo visitors · 14 days", help: "repoVisitors", value: "–", sub: "Needs a token", locked: true },
+        ? { label: "Repo visitors · 14 days", icon: "users", tone: "blue", help: "repoVisitors", value: nf.format(d.traffic.views.uniques), sub: `${nf.format(d.traffic.views.count)} views`, spark: (d.traffic.views.views || []).map(v => v.uniques) }
+        : { label: "Repo visitors · 14 days", icon: "users", tone: "blue", help: "repoVisitors", value: "–", sub: "Needs a token", locked: true },
       d.traffic
-        ? { label: "Unique cloners · 14 days", help: "cloners", value: nf.format(d.traffic.clones.uniques), sub: `${nf.format(d.traffic.clones.count)} clones` }
-        : { label: "Unique cloners · 14 days", help: "cloners", value: "–", sub: "Needs a token", locked: true },
-      { label: "Stars", help: "stars", value: nf.format(repo.stargazers_count || 0), sub: recent == null ? `${nf.format(repo.subscribers_count || 0)} watching` : recent ? `+${recent} in the last 14 days` : "None new in 14 days" },
-      { label: "Forks", help: "forks", value: nf.format(repo.forks_count || 0), sub: `${nf.format(repo.open_issues_count || 0)} open issues` }
+        ? { label: "Unique cloners · 14 days", icon: "clone", tone: "violet", help: "cloners", value: nf.format(d.traffic.clones.uniques), sub: `${nf.format(d.traffic.clones.count)} clones`, spark: (d.traffic.clones.clones || []).map(v => v.uniques) }
+        : { label: "Unique cloners · 14 days", icon: "clone", tone: "violet", help: "cloners", value: "–", sub: "Needs a token", locked: true },
+      { label: "Stars", icon: "star", tone: "amber", help: "stars", value: nf.format(repo.stargazers_count || 0), sub: recent == null ? `${nf.format(repo.subscribers_count || 0)} watching` : recent ? `+${recent} in the last 14 days` : "None new in 14 days" },
+      { label: "Forks", icon: "fork", tone: "green", help: "forks", value: nf.format(repo.forks_count || 0), sub: `${nf.format(repo.open_issues_count || 0)} open issues` }
     ]);
 
     if (!locked) {
@@ -1240,7 +1417,7 @@
     }
     const foot = document.getElementById("foot");
     const parts = ["Data from the GitHub API and Umami."];
-    if (state.rate) parts.push(`GitHub API calls left: ${nf.format(state.rate.remaining)} of ${nf.format(state.rate.limit)}, resets ${new Date(state.rate.reset).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`);
+    if (state.rate) parts.push(`GitHub API calls left: ${nf.format(state.rate.remaining)} of ${nf.format(state.rate.limit)}, resets ${new Date(state.rate.reset).toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" })}.`);
     foot.textContent = parts.join(" ");
   }
 
@@ -1309,19 +1486,94 @@
     }
     if (opts.push !== false && location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
     tip.hide();
+    animateIn();
     render();
+    moveTabInk();
     if (opts.focusTab) document.getElementById("tab-" + name).focus();
     if (opts.focusPanel) document.getElementById("panel-" + name).focus({ preventScroll: true });
     if (opts.scroll) window.scrollTo({ top: 0 });
   }
 
+  const reducedMotion = () => window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let animTimer = 0;
+
+  function animateIn() {
+    if (reducedMotion()) return;
+    const main = document.getElementById("main");
+    main.classList.remove("anim");
+    void main.offsetWidth;
+    main.classList.add("anim");
+    clearTimeout(animTimer);
+    animTimer = setTimeout(() => main.classList.remove("anim"), 1400);
+    requestAnimationFrame(countUp);
+  }
+
+  function countUp() {
+    document.querySelectorAll("#main .panel:not([hidden]) .tile-value").forEach(el => {
+      if (el.children.length) return;
+      const text = el.textContent.trim();
+      const m = text.match(/^([\d,.\s ]+)(%?)$/);
+      if (!m) return;
+      const target = Number(m[1].replace(/[^\d]/g, ""));
+      if (!target || target < 5) return;
+      const start = performance.now(), dur = 700;
+      let shown = text;
+      const step = now => {
+        if (!el.isConnected || el.textContent !== shown) return;
+        const p = Math.min(1, (now - start) / dur);
+        const eased = 1 - Math.pow(1 - p, 3);
+        shown = p < 1 ? nf.format(Math.round(target * eased)) + m[2] : text;
+        el.textContent = shown;
+        if (p < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  function moveSegInk(root) {
+    let ink = root.querySelector(".seg-ink");
+    if (!ink) {
+      ink = h("span", { class: "seg-ink", "aria-hidden": "true" });
+      root.prepend(ink);
+    }
+    const on = root.querySelector('[aria-checked="true"]');
+    if (!on || !on.offsetWidth) return ink.style.setProperty("opacity", "0");
+    const first = ink.style.opacity !== "1";
+    if (first) ink.style.setProperty("transition", "none");
+    ink.style.setProperty("opacity", "1");
+    ink.style.setProperty("width", on.offsetWidth + "px");
+    ink.style.setProperty("transform", `translateX(${on.offsetLeft - 3}px)`);
+    if (first) { void ink.offsetWidth; ink.style.removeProperty("transition"); }
+  }
+
+  function moveTabInk() {
+    const nav = document.getElementById("tabs");
+    let ink = nav.querySelector(".tab-ink");
+    if (!ink) {
+      ink = h("span", { class: "tab-ink", "aria-hidden": "true" });
+      nav.append(ink);
+    }
+    const on = nav.querySelector('[aria-selected="true"]');
+    if (!on) return;
+    ink.style.setProperty("width", Math.max(0, on.offsetWidth - 20) + "px");
+    ink.style.setProperty("transform", `translateX(${on.offsetLeft + 10}px)`);
+  }
+
+  function refreshInks() {
+    document.querySelectorAll(".seg").forEach(moveSegInk);
+    moveTabInk();
+  }
+
   function bindSeg(id, key, cast, after) {
     const root = document.getElementById(id);
     const buttons = [...root.querySelectorAll("button")];
+    requestAnimationFrame(() => moveSegInk(root));
     const select = b => {
       buttons.forEach(x => x.setAttribute("aria-checked", String(x === b)));
       buttons.forEach(x => x.tabIndex = x === b ? 0 : -1);
       state[key] = cast(b.dataset.value);
+      moveSegInk(root);
+      animateIn();
       after();
     };
     buttons.forEach((b, i) => {
@@ -1335,6 +1587,16 @@
         next.focus();
         select(next);
       });
+    });
+  }
+
+  function decorateTiles() {
+    document.querySelectorAll(".tile-head[data-icon]").forEach(head => {
+      const tone = head.dataset.tone;
+      head.closest(".tile").style.setProperty("--tone", TONES[tone] || TONES.blue);
+      const label = head.querySelector(".tile-label");
+      head.replaceChild(h("div", { class: "tile-title" }, tileIcon(head.dataset.icon, tone)), label);
+      head.querySelector(".tile-title").append(label);
     });
   }
 
@@ -1472,6 +1734,7 @@
     document.getElementById("refresh").addEventListener("click", load);
     bindSeg("dl-mode", "dlMode", String, render);
     bindSeg("ws-range", "wsRange", Number, () => { state.ws.range = state.wsRange; loadSite(); });
+    bindSeg("ws-loc", "wsLoc", String, () => { state.ws.locAll = false; if (state.ws.data) renderLocations(state.ws.data, siteSummary().visitors); });
     bindSeg("tr-range", "range", Number, render);
     bindSeg("tr-kind", "kind", String, render);
 
@@ -1493,16 +1756,25 @@
       if (w === lastWidth) return;
       lastWidth = w;
       cancelAnimationFrame(pending);
-      pending = requestAnimationFrame(render);
+      pending = requestAnimationFrame(() => { render(); refreshInks(); });
     }).observe(document.getElementById("main"));
 
     window.addEventListener("scroll", () => tip.hide(), { passive: true });
     setInterval(renderMeta, 30000);
+    setInterval(() => { if (document.visibilityState === "visible" && state.ws.data) loadLive(); }, 60000);
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && state.fetchedAt && Date.now() - state.fetchedAt > STALE_MS) load();
     });
 
+    decorateTiles();
     selectTab(location.hash.slice(1) || "overview", { push: false });
+    const inkWatch = new ResizeObserver(entries => entries.forEach(e => {
+      const seg = e.target.closest(".seg");
+      if (seg) moveSegInk(seg);
+      else moveTabInk();
+    }));
+    document.querySelectorAll(".seg button, #tabs [role='tab']").forEach(b => inkWatch.observe(b));
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(refreshInks);
     skeleton();
     paintConnections();
     renderOverview();
