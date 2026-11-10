@@ -26,6 +26,8 @@ Facts:
 ## Pages
 
 - [Home](https://pullyard.app/): features, screenshots, install and FAQ
+- [About](https://pullyard.app/about.html): who makes PullYard, why it exists, history and contact
+- [Privacy](https://pullyard.app/privacy.html): what the app and the website do and don't collect
 - [PullYard vs GitHub Desktop](https://pullyard.app/github-desktop-alternative.html): what each app does and how they work together
 - [Changelog](https://pullyard.app/changelog.html): every release
 - [Roadmap](https://pullyard.app/roadmap.html): what comes next
