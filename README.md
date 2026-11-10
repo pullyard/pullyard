@@ -138,7 +138,7 @@ The welcome screen has a tab for each service:
 - **Bitbucket Cloud**: your Atlassian account email and an [API token](https://id.atlassian.com/manage-profile/security/api-tokens).
 - **Gitea / Forgejo** (Codeberg or your own server): an access token.
 
-For GitLab, Bitbucket and Gitea PullYard shows your review requests and your own merge or pull requests; open one in the browser to review it. Changed files, comments and review for these services come later.
+GitLab merge requests and Bitbucket pull requests open in the full review view: conversation, inline comments, approvals, pipelines and files. For Gitea and Forgejo PullYard shows your review requests and your own pull requests; open one in the browser to review it.
 
 You can add several accounts and switch between them from the sidebar or Settings. Each account has its own Claude Code sign-in: the first account keeps the Claude Code you already use (`~/.claude`, shared with Terminal), and every account you add later starts with a separate, empty Claude Code profile that you sign in to once. Switching keeps every sign-in; PullYard only shows and runs the Claude Code profiles of the active account. Signing out of an account also signs out its Claude Code profiles and leaves the others alone.
 

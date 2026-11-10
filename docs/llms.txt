@@ -1,6 +1,6 @@
 # PullYard
 
-> PullYard is a free, open-source native desktop client for reviewing pull requests on GitHub, without the browser. It runs on macOS (SwiftUI), Windows (WinUI 3) and Linux (GTK 4), also lists GitLab merge requests and Bitbucket and Gitea pull requests, and has a built-in workspace for AI coding agents that runs the Claude Code CLI.
+> PullYard is a free, open-source native desktop client for reviewing pull requests on GitHub, without the browser. It runs on macOS (SwiftUI), Windows (WinUI 3) and Linux (GTK 4), also reviews GitLab merge requests and Bitbucket pull requests, lists Gitea pull requests, and has a built-in workspace for AI coding agents that runs the Claude Code CLI.
 
 PullYard is for the review side of git work: reading diffs, commenting, approving, requesting changes and merging pull requests. It does not commit, stage or push local changes, so it pairs well with a git client such as GitHub Desktop, GitKraken, Tower or the git command line.
 
@@ -17,7 +17,7 @@ Facts:
 - License: MIT, free, no paid tier. Optional "Buy me a pizza" donation.
 - Platforms: macOS 14+ (universal), Windows 10 1809+ and Windows 11 (x64 and ARM64), Linux x86_64 (.deb, Flatpak, tarball) and ARM64 (.deb, tarball).
 - Install on macOS: `brew install --cask pullyard/tap/pullyard`
-- Services: GitHub and GitHub Enterprise Server with full review. GitLab, Bitbucket Cloud and Gitea/Forgejo show review requests and your own pull or merge requests (macOS).
+- Services: GitHub and GitHub Enterprise Server with every feature. GitLab and Bitbucket Cloud with full review since 2.14.0 (conversation, inline comments, approvals, pipelines, files). Gitea/Forgejo show review requests and your own pull requests.
 - Privacy: the app has no backend and no analytics. It talks to the GitHub API directly; tokens stay in the system keychain. This website (pullyard.app) counts page views with cookieless Umami.
 - Latest version: 2.14.0 (November 10, 2026).
 - Formerly named Shipyard (renamed to PullYard in October 2026).
