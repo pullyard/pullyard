@@ -319,6 +319,51 @@ impl Workspace {
         self.emit(WsEvent::TabState);
     }
 
+    pub fn model_value(&self) -> String {
+        let v = settings::read(|s| s.claude_model.clone());
+        if v == "default" {
+            String::new()
+        } else {
+            v
+        }
+    }
+
+    pub fn set_model_value(&self, value: &str) {
+        let v = if value == "default" { String::new() } else { value.to_string() };
+        settings::update(|s| s.claude_model = v);
+        self.emit(WsEvent::TabState);
+    }
+
+    pub fn remember_composer(&self) -> bool {
+        settings::read(|s| s.claude_remember_composer)
+    }
+
+    pub fn set_remember_composer(&self, on: bool) {
+        settings::update(|s| s.claude_remember_composer = on);
+    }
+
+    pub fn composer_changed_model(&self, value: &str) {
+        if self.remember_composer() {
+            self.set_model_value(value);
+        }
+    }
+
+    pub fn composer_changed_effort(&self, value: &str) {
+        if self.remember_composer() {
+            self.set_effort(value);
+        }
+    }
+
+    pub fn composer_changed_mode(&self, value: &str) {
+        if self.remember_composer() {
+            self.set_mode(ClaudeMode::from_key(value).unwrap_or(ClaudeMode::Standard));
+        }
+    }
+
+    pub fn defaults_key(&self) -> String {
+        format!("{}|{}|{}", self.model_value(), self.effort(), self.mode().key())
+    }
+
     pub fn effort(&self) -> String {
         settings::read(|s| s.claude_effort.clone())
     }
@@ -737,12 +782,13 @@ impl Workspace {
 
     pub fn apply_model_to_current(&self) {
         let Some(tab) = self.selected_tab() else { return };
-        if !tab.running() || self.model() == ModelOption::Default {
+        let model = self.model_value();
+        if !tab.running() || model.is_empty() {
             return;
         }
         match &tab.chat {
-            Some(c) => c.set_model(self.model().key()),
-            None => tab.terminal().feed_child(format!("/model {}\r", self.model().key()).as_bytes()),
+            Some(c) => c.set_model(&model),
+            None => tab.terminal().feed_child(format!("/model {model}\r").as_bytes()),
         }
     }
 
@@ -805,12 +851,12 @@ impl Workspace {
             }
         }));
         let m = mode.unwrap_or_else(|| self.mode());
-        let model = self.model();
+        let model = self.model_value();
         let effort = self.effort();
         chat.start(
             resume,
             fork,
-            if model == ModelOption::Default { None } else { Some(model.key().to_string()) },
+            if model.is_empty() { None } else { Some(model) },
             if effort.is_empty() { None } else { Some(effort) },
             if m == ClaudeMode::Standard { None } else { Some(m.key().to_string()) },
             prompt,
@@ -825,8 +871,9 @@ impl Workspace {
         };
         let mode = mode.unwrap_or_else(|| self.mode());
         let mut args: Vec<String> = vec![];
-        if self.model() != ModelOption::Default {
-            args.extend(["--model".into(), self.model().key().into()]);
+        let model = self.model_value();
+        if !model.is_empty() {
+            args.extend(["--model".into(), model]);
         }
         let effort = self.effort();
         if !effort.is_empty() {

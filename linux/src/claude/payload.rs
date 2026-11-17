@@ -4,9 +4,10 @@ pub const MAX_RESULT_LENGTH: usize = 64_000;
 
 pub fn is_auth_error(text: &str) -> bool {
     let s = text.to_lowercase();
-    ["/login", "log in", "logged in", "not logged", "authentication", "invalid api key", "api key", "oauth", "401", "credential", "token has expired", "token expired"]
-        .iter()
-        .any(|k| s.contains(k))
+    if ["/login", "not logged in", "please log in", "invalid api key", "authentication_error", "oauth token", "token has expired", "token expired", "invalid x-api-key"].iter().any(|k| s.contains(k)) {
+        return true;
+    }
+    s.contains("401") && ["unauthorized", "authentication", "api error"].iter().any(|k| s.contains(k))
 }
 
 fn prefix_bytes(s: &str, max: usize) -> &str {
@@ -67,6 +68,17 @@ mod tests {
         assert!(is_auth_error("API Error: 401 {\"type\":\"error\"}"));
         assert!(!is_auth_error("Claude exited with code 1"));
         assert!(!is_auth_error("Rate limit reached"));
+    }
+
+    #[test]
+    fn auth_heuristic_ignores_unrelated_mentions() {
+        assert!(is_auth_error("API Error: 401 authentication_error"));
+        assert!(is_auth_error("OAuth token has expired"));
+        assert!(is_auth_error("Not logged in · Please run /login"));
+        assert!(is_auth_error("HTTP 401 Unauthorized"));
+        assert!(!is_auth_error("MCP server returned 401 for tool fetch"));
+        assert!(!is_auth_error("Set your api key in the tool config"));
+        assert!(!is_auth_error("Wrote credential helper to disk"));
     }
 
     #[test]

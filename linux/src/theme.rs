@@ -396,6 +396,7 @@ listview.stack-list > row { padding: 0; margin: 1px 0; background: none; }
 .claude-tab { padding: 4px 10px; border-radius: 8px; background-color: alpha(@sy_text, 0.04); border: 1px solid @sy_line; }
 .claude-tab.selected { background-color: alpha(@sy_accent, 0.14); border-color: alpha(@sy_accent, 0.45); }
 .project-column { background-color: @sy_sunken; border-radius: 12px; }
+.chat-drop-zone:drop(active) { box-shadow: inset 0 0 0 2px @sy_accent; background-color: alpha(@sy_accent, 0.06); }
 .project-column.drop-target { background-color: alpha(@sy_accent, 0.10); border: 2px solid @sy_accent; }
 .project-card { background-color: @sy_raised; border-radius: 8px; padding: 10px; }
 .splash-title { font-size: 32px; font-weight: 700; }

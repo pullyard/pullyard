@@ -7,6 +7,7 @@ use super::claude::auth_view;
 use super::dialogs;
 use super::widgets::*;
 use crate::claude::accounts::{self, Status};
+use crate::claude::{prompt_library, usage_ledger, ClaudeMode, ModelOption, TabKind, EFFORTS};
 use crate::git_accounts::{self, GitAccount, GitProvider};
 use crate::{app, auth, settings, theme, updater, util};
 
@@ -237,6 +238,50 @@ fn claude_group(dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
             g.add(&r);
         }
     }
+    let ws = app::get().claude.clone();
+    let kinds = [TabKind::Chat, TabKind::Terminal];
+    let w = ws.clone();
+    g.add(&combo("Open new sessions as", &["Chat", "Terminal"], kinds.iter().position(|k| *k == ws.preferred_kind()).unwrap_or(0), move |i| {
+        w.set_preferred_kind(kinds[i.min(kinds.len() - 1)]);
+    }));
+    let saved_model = ws.model_value();
+    let mut model_keys: Vec<String> = ModelOption::ALL.iter().map(|m| m.key().to_string()).collect();
+    let mut model_titles: Vec<String> = ModelOption::ALL.iter().map(|m| m.title().to_string()).collect();
+    if !model_keys.contains(&saved_model) {
+        model_keys.push(saved_model.clone());
+        model_titles.push(saved_model.clone());
+    }
+    let model_labels: Vec<&str> = model_titles.iter().map(|t| t.as_str()).collect();
+    let w = ws.clone();
+    let selected_model = model_keys.iter().position(|k| *k == saved_model).unwrap_or(0);
+    g.add(&combo("Model for new sessions", &model_labels, selected_model, move |i| {
+        w.set_model_value(&model_keys[i.min(model_keys.len() - 1)]);
+    }));
+    let effort_labels: Vec<&str> = EFFORTS.iter().map(|e| if e.is_empty() { "Default" } else { *e }).collect();
+    let saved_effort = ws.effort();
+    let w = ws.clone();
+    g.add(&combo("Effort for new sessions", &effort_labels, EFFORTS.iter().position(|e| *e == saved_effort).unwrap_or(0), move |i| {
+        w.set_effort(EFFORTS[i.min(EFFORTS.len() - 1)]);
+    }));
+    let mode_labels: Vec<&str> = ClaudeMode::ALL.iter().map(|m| m.title()).collect();
+    let saved_mode = ws.mode();
+    let w = ws.clone();
+    let mode_row = combo("Permission mode for new sessions", &mode_labels, ClaudeMode::ALL.iter().position(|m| *m == saved_mode).unwrap_or(0), move |i| {
+        w.set_mode(ClaudeMode::ALL[i.min(ClaudeMode::ALL.len() - 1)]);
+    });
+    mode_row.set_subtitle(saved_mode.detail());
+    mode_row.set_subtitle_lines(2);
+    mode_row.connect_selected_notify(|r| {
+        r.set_subtitle(ClaudeMode::ALL[(r.selected() as usize).min(ClaudeMode::ALL.len() - 1)].detail());
+    });
+    g.add(&mode_row);
+    let w = ws.clone();
+    g.add(&switch(
+        "Remember changes made in the chat composer",
+        Some("When on, picking a model, effort or mode in a chat also makes it the default for the next chats."),
+        ws.remember_composer(),
+        move |on| w.set_remember_composer(on),
+    ));
     let minutes = [0i64, 5, 15, 30, 60];
     let labels = ["Never", "5 minutes", "15 minutes", "30 minutes", "1 hour"];
     let current = app::get().claude.idle_minutes();
@@ -246,6 +291,71 @@ fn claude_group(dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
     idle.set_subtitle("A sleeping session uses no memory: the claude process stops, the conversation stays, and the next message resumes it.");
     idle.set_subtitle_lines(3);
     g.add(&idle);
+    g
+}
+
+fn saved_prompts_group() -> adw::PreferencesGroup {
+    let g = group("Saved prompts", "sy-star-symbolic", "coral");
+    g.set_description(Some("Save a prompt from the star menu in the chat composer, then pick it there to insert it into a message."));
+    let saved = prompt_library::all();
+    if saved.is_empty() {
+        let row = adw::ActionRow::new();
+        row.set_title("No saved prompts yet");
+        g.add(&row);
+    }
+    for p in saved {
+        let row = adw::ActionRow::new();
+        row.set_use_markup(false);
+        row.set_title(&p.title);
+        row.set_subtitle(&p.text);
+        row.set_subtitle_lines(2);
+        let delete = icon_button("user-trash-symbolic", "Delete prompt");
+        delete.set_valign(gtk::Align::Center);
+        let (group_ref, row_ref) = (g.downgrade(), row.downgrade());
+        delete.connect_clicked(move |_| {
+            prompt_library::remove(&p.id);
+            if let (Some(g), Some(row)) = (group_ref.upgrade(), row_ref.upgrade()) {
+                g.remove(&row);
+            }
+        });
+        row.add_suffix(&delete);
+        g.add(&row);
+    }
+    g
+}
+
+fn usage_group() -> adw::PreferencesGroup {
+    let g = group("Agent usage", "sy-gauge-symbolic", "amber");
+    g.set_description(Some(&format!(
+        "API-equivalent cost reported by Claude Code for chats run in {} on this computer. With a subscription this is not what you are billed.",
+        crate::brand::APP_NAME
+    )));
+    let spans: [(&str, u64); 3] = [("Today", 1), ("Last 7 days", 7), ("Last 30 days", 30)];
+    let mut values: Vec<gtk::Label> = vec![];
+    for (title, days) in spans {
+        let row = adw::ActionRow::new();
+        row.set_title(title);
+        let value = label_with(&usage_ledger::summary(usage_ledger::total(days)), &["sy-muted"]);
+        row.add_suffix(&value);
+        values.push(value);
+        g.add(&row);
+    }
+    let reset = adw::ActionRow::new();
+    reset.set_title("Usage history");
+    reset.set_subtitle("Kept on this computer for the last 120 days with activity.");
+    let clear = button("Clear");
+    clear.set_valign(gtk::Align::Center);
+    clear.set_sensitive(!usage_ledger::is_empty());
+    clear.connect_clicked(move |b| {
+        usage_ledger::clear();
+        let empty = usage_ledger::summary(usage_ledger::Day::default());
+        for v in &values {
+            v.set_text(&empty);
+        }
+        b.set_sensitive(false);
+    });
+    reset.add_suffix(&clear);
+    g.add(&reset);
     g
 }
 
@@ -323,6 +433,8 @@ pub fn show() {
 
     if app::get().state.borrow().phase == app::Phase::LoggedIn {
         page.add(&claude_group(&dialog));
+        page.add(&saved_prompts_group());
+        page.add(&usage_group());
     }
 
     let updates = group("Updates", "sy-download-symbolic", "green");

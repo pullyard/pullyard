@@ -5,6 +5,7 @@ use adw::prelude::*;
 use chrono::{DateTime, Utc};
 
 use crate::api::models::*;
+use crate::claude::git_remote::RemoteKind;
 use crate::claude::ship;
 use crate::claude::workspace::Tab;
 use crate::fix_prompt::{self, FixOptions};
@@ -487,12 +488,13 @@ impl BranchPrs {
                 let agent = tinted("Open PR with agent", "coral");
                 let (tab, br) = (self.tab.clone(), b.clone());
                 agent.connect_clicked(move |_| {
-                    let prompt = ship::open_pr_prompt(&br, None, !tab.git.changes.borrow().is_empty(), tab.git.ahead());
+                    let kind = tab.git.remote.borrow().as_ref().map(|r| r.kind()).unwrap_or(RemoteKind::Github);
+                    let prompt = ship::open_pr_prompt(&br, None, !tab.git.changes.borrow().is_empty(), tab.git.ahead(), kind);
                     app::get().claude.send(&prompt, Some(tab.clone()), true);
                 });
                 row.append(&agent);
                 let create = button("Create PR in browser");
-                let url = format!("https://github.com/{}/pull/new/{b}", repo.full());
+                let url = self.tab.git.remote.borrow().as_ref().map(|r| r.new_request_url(&b, r.kind())).unwrap_or_else(|| format!("https://github.com/{}/pull/new/{b}", repo.full()));
                 create.connect_clicked(move |_| util::open_url(&url));
                 row.append(&create);
                 self.branch_box.append(&row);

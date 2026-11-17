@@ -12,7 +12,7 @@ use crate::claude::chat::{self, ChatImage, ChatItem, ChatSession, ChatText, Even
 use crate::claude::sessions::{self, SessionInfo};
 use crate::claude::tool_groups::{self, relative, tool_summary, tool_title, DisplayItem, ToolStep};
 use crate::claude::workspace::{Tab, WsEvent};
-use crate::claude::{accounts, payload, relogin, rewind, ship, ClaudeMode, TabKind};
+use crate::claude::{accounts, payload, prompt_library, relogin, rewind, ship, ClaudeMode, TabKind};
 use crate::diff::{DiffLine, LineKind};
 use crate::ui::markdown;
 use crate::ui::menu::Menu;
@@ -435,6 +435,20 @@ impl ChatView {
         widget.append(&permission_bar);
         widget.append(&todo_bar);
         widget.append(&composer.widget);
+        widget.add_css_class("chat-drop-zone");
+        let drop = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
+        let drop_composer = Rc::downgrade(&composer);
+        drop.connect_drop(move |_, value, _, _| {
+            let Some(composer) = drop_composer.upgrade() else { return false };
+            let Ok(list) = value.get::<gdk::FileList>() else { return false };
+            for f in list.files() {
+                if let Some(p) = f.path() {
+                    composer.add_image_path(&p);
+                }
+            }
+            true
+        });
+        widget.add_controller(drop);
 
         let me = Rc::new(ChatView {
             widget,
@@ -988,7 +1002,7 @@ impl ChatView {
         let text = vbox(2);
         text.set_hexpand(true);
         text.set_valign(gtk::Align::Center);
-        text.append(&label_with(&format!("Pull request #{} is open", ship::pr_number(&url)), &["sy-bold", "sy-text"]));
+        text.append(&label_with(&format!("{} #{} is open", ship::request_title(&url), ship::pr_number(&url)), &["sy-bold", "sy-text"]));
         let repo = ship::pr_repo(&url);
         if !repo.is_empty() {
             text.append(&label_with(&repo, &["sy-muted", "sy-small"]));
@@ -1077,13 +1091,13 @@ impl ChatView {
         let branch = git.branch.borrow().clone().filter(|b| b != "HEAD");
         let changes = git.changes.borrow().len();
         let ahead = git.ahead();
-        let has_repo = git.repo.borrow().is_some();
+        let remote_kind = git.remote.borrow().as_ref().map(|r| r.kind());
         let sid = self.chat.session_id.borrow().clone().unwrap_or_default();
         let root = sessions::project_root(&self.tab.folder);
         let recent: Vec<SessionInfo> = ws.projects.borrow().iter().find(|p| p.path == root).map(|p| p.sessions.iter().filter(|s| s.id != sid).take(3).cloned().collect()).unwrap_or_default();
         let linked: Option<(i64, String)> = if sid.is_empty() { None } else { ws.find_session(&sid).and_then(|s| Some((s.pr_number?, s.pr_url?))) };
         let key = format!(
-            "{:?}|{changes}|{ahead}|{has_repo}|{:?}|{}",
+            "{:?}|{changes}|{ahead}|{remote_kind:?}|{:?}|{}",
             branch,
             linked,
             recent.iter().map(|s| format!("{}:{}:{}", s.id, s.title, s.modified.timestamp())).collect::<Vec<_>>().join(",")
@@ -1124,8 +1138,8 @@ impl ChatView {
         let mut suggestions: Vec<(&str, String, String)> = vec![];
         if changes > 0 {
             suggestions.push(("sy-eye-symbolic", "Review my uncommitted changes".into(), "Review my uncommitted changes (git diff HEAD). Point out bugs, risky parts and missing tests.".into()));
-            if let (Some(b), true) = (&branch, has_repo) {
-                suggestions.push(("sy-pr-symbolic", "Open a pull request".into(), ship::open_pr_prompt(b, None, true, ahead)));
+            if let (Some(b), Some(kind)) = (&branch, remote_kind) {
+                suggestions.push(("sy-pr-symbolic", format!("Open a {}", kind.request_noun()), ship::open_pr_prompt(b, None, true, ahead, kind)));
             }
         }
         if let Some((n, url)) = &linked {
@@ -1331,7 +1345,7 @@ impl ChatView {
 
     fn item_widget(self: &Rc<Self>, item: &ChatItem) -> gtk::Widget {
         match item {
-            ChatItem::User { text, images, .. } => {
+            ChatItem::User { id, text, images } => {
                 let outer = vbox(4);
                 let b = vbox(8);
                 b.add_css_class("chat-user");
@@ -1369,6 +1383,26 @@ impl ChatView {
                     }
                 }
                 outer.append(&b);
+                if self.chat.is_queued(id) {
+                    b.set_opacity(0.6);
+                    let queued = hbox(6);
+                    queued.set_halign(gtk::Align::End);
+                    queued.append(&label_with("Queued", &["sy-dim", "sy-small"]));
+                    let cancel = link_button("Cancel");
+                    cancel.set_tooltip_text(Some("Remove this message from the queue"));
+                    let (w, queued_id) = (Rc::downgrade(self), id.clone());
+                    cancel.connect_clicked(move |_| {
+                        let Some(me) = w.upgrade() else { return };
+                        if let Some(text) = me.chat.cancel_queued(&queued_id) {
+                            if me.composer.text().trim().is_empty() {
+                                *me.chat.draft.borrow_mut() = Some(text);
+                                me.composer.render_state();
+                            }
+                        }
+                    });
+                    queued.append(&cancel);
+                    outer.append(&queued);
+                }
                 if !text.is_empty() {
                     let actions = actions_row();
                     actions.set_halign(gtk::Align::End);
@@ -2056,19 +2090,6 @@ impl ChatComposer {
                 });
             }
         });
-        let drop = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
-        let w = Rc::downgrade(&me);
-        drop.connect_drop(move |_, value, _, _| {
-            let Some(me) = w.upgrade() else { return false };
-            let Ok(list) = value.get::<gdk::FileList>() else { return false };
-            for f in list.files() {
-                if let Some(p) = f.path() {
-                    me.add_image_path(&p);
-                }
-            }
-            true
-        });
-        me.widget.add_controller(drop);
         let w = Rc::downgrade(&me);
         completion_box.connect_row_activated(move |_, row| {
             if let Some(me) = w.upgrade() {
@@ -2197,10 +2218,12 @@ impl ChatComposer {
             }
             gdk::Key::Tab | gdk::Key::ISO_Left_Tab => {
                 if shift && !completing {
-                    let order = ["default", "acceptEdits", "plan"];
+                    let order = ClaudeMode::ALL;
                     let cur = self.chat.permission_mode.borrow().clone();
-                    let i = order.iter().position(|m| *m == cur).unwrap_or(0);
-                    self.chat.set_permission_mode(order[(i + 1) % order.len()]);
+                    let i = order.iter().position(|m| m.key() == cur).unwrap_or(0);
+                    let next = order[(i + 1) % order.len()].key();
+                    self.chat.set_permission_mode(next);
+                    app::get().claude.composer_changed_mode(next);
                     return glib::Propagation::Stop;
                 }
                 if completing {
@@ -2457,13 +2480,17 @@ impl ChatComposer {
         self.usage.set_tooltip_text(Some(&format!("Context {pct}% — click for usage and limits")));
         let models = c.models.borrow().clone();
         let current = c.model_value.borrow().clone();
+        let ws = app::get().claude.clone();
+        let saved = prompt_library::all();
         let key = format!(
-            "{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}",
+            ws.defaults_key(),
             c.permission_mode.borrow(),
             current,
             c.effort.borrow(),
             c.model.borrow(),
-            models.iter().map(|m| format!("{}:{}", m.value, m.efforts.join(","))).collect::<Vec<_>>().join(";")
+            models.iter().map(|m| format!("{}:{}", m.value, m.efforts.join(","))).collect::<Vec<_>>().join(";"),
+            saved.iter().map(|p| format!("{}:{}", p.id, p.title)).collect::<Vec<_>>().join(";")
         );
         if *self.left_key.borrow() == key {
             return;
@@ -2471,10 +2498,18 @@ impl ChatComposer {
         *self.left_key.borrow_mut() = key;
         clear(&self.left);
         let mode = ClaudeMode::from_key(&c.permission_mode.borrow()).unwrap_or(ClaudeMode::Standard);
-        let mode_menu = Menu::new();
+        let mut mode_menu = Menu::new();
         for m in ClaudeMode::ALL {
             let cc = c.clone();
-            mode_menu.item(&format!("{}{}", if m == mode { "✓ " } else { "" }, m.title()), move || cc.set_permission_mode(m.key()));
+            let w = ws.clone();
+            mode_menu.item(&format!("{}{}", if m == mode { "✓ " } else { "" }, m.title()), move || {
+                cc.set_permission_mode(m.key());
+                w.composer_changed_mode(m.key());
+            });
+        }
+        {
+            let w = ws.clone();
+            defaults_footer(&mut mode_menu, ws.mode() == mode, move || w.set_mode(mode));
         }
         let mb = crate::ui::menu::dropdown_button(mode.title(), Some(mode.icon()), &mode_menu);
         mb.add_css_class("flat");
@@ -2488,11 +2523,21 @@ impl ChatComposer {
                 m
             }
         });
-        let model_menu = Menu::new();
+        let mut model_menu = Menu::new();
         for m in &models {
             let cc = c.clone();
+            let w = ws.clone();
             let v = m.value.clone();
-            model_menu.item(&format!("{}{} — {}", if m.value == current { "✓ " } else { "" }, m.display_name, m.description), move || cc.set_model(&v));
+            model_menu.item(&format!("{}{} — {}", if m.value == current { "✓ " } else { "" }, m.display_name, m.description), move || {
+                cc.set_model(&v);
+                w.composer_changed_model(&v);
+            });
+        }
+        {
+            let w = ws.clone();
+            let v = current.clone();
+            let normalized = if current == "default" { String::new() } else { current.clone() };
+            defaults_footer(&mut model_menu, ws.model_value() == normalized, move || w.set_model_value(&v));
         }
         let modb = crate::ui::menu::dropdown_button(&model_title, Some("sy-memory-symbolic"), &model_menu);
         modb.add_css_class("flat");
@@ -2501,13 +2546,26 @@ impl ChatComposer {
         let efforts = models.iter().find(|m| m.value == current).map(|m| m.efforts.clone()).or_else(|| models.first().map(|m| m.efforts.clone())).unwrap_or_default();
         if !efforts.is_empty() {
             let cur = c.effort.borrow().clone();
-            let em = Menu::new();
+            let mut em = Menu::new();
             let cc = c.clone();
-            em.item(&format!("{}Default", if cur.is_empty() { "✓ " } else { "" }), move || cc.set_effort(""));
+            let w = ws.clone();
+            em.item(&format!("{}Default", if cur.is_empty() { "✓ " } else { "" }), move || {
+                cc.set_effort("");
+                w.composer_changed_effort("");
+            });
             for e in efforts {
                 let cc = c.clone();
+                let w = ws.clone();
                 let ee = e.clone();
-                em.item(&format!("{}{e}", if cur == e { "✓ " } else { "" }), move || cc.set_effort(&ee));
+                em.item(&format!("{}{e}", if cur == e { "✓ " } else { "" }), move || {
+                    cc.set_effort(&ee);
+                    w.composer_changed_effort(&ee);
+                });
+            }
+            {
+                let w = ws.clone();
+                let v = cur.clone();
+                defaults_footer(&mut em, ws.effort() == cur, move || w.set_effort(&v));
             }
             let eb = crate::ui::menu::dropdown_button(if cur.is_empty() { "effort" } else { &cur }, Some("sy-gauge-symbolic"), &em);
             eb.add_css_class("flat");
@@ -2526,6 +2584,39 @@ impl ChatComposer {
             });
         });
         self.left.append(&attach);
+        let mut prompts_menu = Menu::new();
+        for p in &saved {
+            let w = Rc::downgrade(self);
+            let text = p.text.clone();
+            prompts_menu.item(&p.title.replace('_', "__"), move || {
+                if let Some(me) = w.upgrade() {
+                    me.insert_saved(&text);
+                }
+            });
+        }
+        if !saved.is_empty() {
+            prompts_menu.section(None);
+        }
+        let w = Rc::downgrade(self);
+        prompts_menu.item("Save current text as a prompt", move || {
+            if let Some(me) = w.upgrade() {
+                if prompt_library::add(&me.text(), None).is_some() {
+                    me.render_state();
+                }
+            }
+        });
+        prompts_menu.item("Manage saved prompts…", crate::ui::settings::show);
+        let prompts = prompts_menu.button("sy-star-symbolic", "Saved prompts");
+        prompts.add_css_class("flat");
+        self.left.append(&prompts);
+    }
+
+    fn insert_saved(&self, text: &str) {
+        let current = self.text().trim().to_string();
+        let buffer = self.view.buffer();
+        buffer.set_text(&if current.is_empty() { text.to_string() } else { format!("{current}\n\n{text}") });
+        buffer.place_cursor(&buffer.end_iter());
+        self.view.grab_focus();
     }
 
     fn usage_overlay(self: &Rc<Self>) -> gtk::Widget {
@@ -2596,4 +2687,14 @@ impl ChatComposer {
         b.append(&page);
         b.upcast()
     }
+}
+
+fn defaults_footer(menu: &mut Menu, is_default: bool, adopt: impl Fn() + 'static) {
+    menu.section(None);
+    if is_default {
+        menu.disabled("Default for new chats");
+    } else {
+        menu.item("Use for new chats", adopt);
+    }
+    menu.item("Agent Settings…", crate::ui::settings::show);
 }
