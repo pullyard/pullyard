@@ -326,6 +326,49 @@ public static class SettingsDialog
                 }), Ui.Auto)));
                 break;
         }
+        var ws = app.Claude;
+        var kind = new ComboBox { MinWidth = 160 };
+        kind.Items.Add(new ComboBoxItem { Content = L.T("Claude_Chat", "Chat"), Tag = ClaudeTabKind.Chat });
+        kind.Items.Add(new ComboBoxItem { Content = L.T("Claude_Terminal", "Terminal"), Tag = ClaudeTabKind.Terminal });
+        kind.SelectedItem = kind.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (ClaudeTabKind)i.Tag! == ws.PreferredKind);
+        kind.SelectionChanged += (_, _) =>
+        {
+            if ((kind.SelectedItem as ComboBoxItem)?.Tag is ClaudeTabKind k) ws.PreferredKind = k;
+        };
+        panel.Children.Add(Row(L.T("Claude_OpenAs", "Open new sessions as"), kind));
+        var model = new ComboBox { MinWidth = 160 };
+        foreach (var m in Enum.GetValues<ClaudeModelOption>()) model.Items.Add(new ComboBoxItem { Content = m.Title(), Tag = m.Raw() });
+        if (ws.ModelValue.Length > 0 && ws.Model == ClaudeModelOption.Standard) model.Items.Add(new ComboBoxItem { Content = ws.ModelValue, Tag = ws.ModelValue });
+        model.SelectedItem = model.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag! == ws.ModelValue);
+        model.SelectionChanged += (_, _) =>
+        {
+            if ((model.SelectedItem as ComboBoxItem)?.Tag is string v) ws.ModelValue = v;
+        };
+        panel.Children.Add(Row(L.T("Claude_DefaultModel", "Model for new sessions"), model));
+        var effort = new ComboBox { MinWidth = 160 };
+        foreach (var e in Enum.GetValues<ClaudeEffort>()) effort.Items.Add(new ComboBoxItem { Content = e.Title(), Tag = e });
+        effort.SelectedItem = effort.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (ClaudeEffort)i.Tag! == ws.Effort);
+        effort.SelectionChanged += (_, _) =>
+        {
+            if ((effort.SelectedItem as ComboBoxItem)?.Tag is ClaudeEffort e) ws.Effort = e;
+        };
+        panel.Children.Add(Row(L.T("Claude_DefaultEffort", "Effort for new sessions"), effort));
+        var modeHelp = Ui.Text(ws.Mode.Detail(), 12, "muted", wrap: true);
+        var mode = new ComboBox { MinWidth = 160 };
+        foreach (var m in Enum.GetValues<ClaudeMode>()) mode.Items.Add(new ComboBoxItem { Content = m.Title(), Tag = m });
+        mode.SelectedItem = mode.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (ClaudeMode)i.Tag! == ws.Mode);
+        mode.SelectionChanged += (_, _) =>
+        {
+            if ((mode.SelectedItem as ComboBoxItem)?.Tag is not ClaudeMode m) return;
+            ws.Mode = m;
+            modeHelp.Text = m.Detail();
+        };
+        panel.Children.Add(Row(L.T("Claude_DefaultMode", "Permission mode for new sessions"), mode));
+        panel.Children.Add(modeHelp);
+        var remember = new ToggleSwitch { IsOn = ws.RememberComposerChoice, OnContent = "", OffContent = "" };
+        remember.Toggled += (_, _) => ws.RememberComposerChoice = remember.IsOn;
+        panel.Children.Add(Row(L.T("Claude_RememberComposer", "Remember changes made in the chat composer"), remember));
+        panel.Children.Add(Ui.Text(L.T("Claude_RememberComposerHelp", "When on, picking a model, effort or mode in a chat also makes it the default for the next chats."), 12, "muted", wrap: true));
         var idle = new ComboBox { MinWidth = 160 };
         foreach (var (m, t) in new[] { (0, L.T("Claude_Never", "Never")), (5, "5 minutes"), (15, "15 minutes"), (30, "30 minutes"), (60, "1 hour") })
             idle.Items.Add(new ComboBoxItem { Content = t, Tag = m });
@@ -336,6 +379,11 @@ public static class SettingsDialog
         };
         panel.Children.Add(Row(L.T("Claude_SleepAfter", "Sleep idle sessions after"), idle));
         panel.Children.Add(Ui.Text(L.T("Claude_SleepHelp", "A sleeping session uses no memory: the claude process stops, the conversation stays, and the next message resumes it."), 12, "muted", wrap: true));
+        var usageToday = AgentUsageLedger.Shared.Total(1);
+        var usageWeek = AgentUsageLedger.Shared.Total(7);
+        var usageMonth = AgentUsageLedger.Shared.Total(30);
+        panel.Children.Add(Row(L.T("Claude_UsageTotals", "Chat usage on this PC"), Ui.Text(L.F("Claude_UsageCosts", "Today ${0:0.00} · 7 days ${1:0.00} · 30 days ${2:0.00}", usageToday.Cost, usageWeek.Cost, usageMonth.Cost), 13, "muted")));
+        panel.Children.Add(Ui.Text(L.F("Claude_UsageTurns", "Turns: {0} today, {1} in 7 days, {2} in 30 days. Cost is what the claude CLI reports per turn.", usageToday.Turns, usageWeek.Turns, usageMonth.Turns), 12, "muted", wrap: true));
         store.Refresh().Forget();
         return panel;
     }

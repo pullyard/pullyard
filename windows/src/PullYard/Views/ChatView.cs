@@ -292,7 +292,7 @@ public sealed class ChatView : Grid
         var sid = string.IsNullOrEmpty(chat.SessionId) ? tab.SessionId : chat.SessionId;
         var linked = sessions.FirstOrDefault(s => s.PrNumber is not null && (s.Id == sid || (git.Branch is { Length: > 0 } b && b != "HEAD" && s.Branch == b)));
         var suggestions = new JsonArray();
-        foreach (var s in AgentWelcome.Suggestions(git.Changes.Count, git.Branch, git.Repo is not null, git.Ahead, linked?.PrNumber, linked?.PrUrl))
+        foreach (var s in AgentWelcome.Suggestions(git.Changes.Count, git.Branch, git.Repo is not null || git.Remote is not null, git.Ahead, linked?.PrNumber, linked?.PrUrl, git.Remote?.Kind ?? GitRemoteKind.GitHub))
         {
             var (icon, title) = s.Kind switch
             {
@@ -359,6 +359,7 @@ public sealed class ChatView : Grid
             case nameof(ChatSession.ContextPercent):
             case nameof(ChatSession.Context):
             case nameof(ChatSession.TotalCost):
+            case nameof(ChatSession.HasQueuedPrompts):
                 RenderBottomBar();
                 break;
         }
@@ -462,6 +463,7 @@ public sealed class ChatView : Grid
         bottomBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         bottomBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var left = Ui.H(4);
+        var defaults = AppViewModel.Shared.Claude;
         var mode = ClaudeEnums.ParseMode(chat.PermissionMode);
         var modeGlyph = chat.PermissionMode switch
         {
@@ -474,15 +476,17 @@ public sealed class ChatView : Grid
         foreach (var m in Enum.GetValues<ClaudeMode>())
         {
             var raw = m.Raw();
-            modeMenu.Items.Add(Ui.CheckItem(m.Title(), chat.PermissionMode == raw, () => chat.SetPermissionMode(raw)));
+            modeMenu.Items.Add(Ui.CheckItem(m.Title(), chat.PermissionMode == raw, () => PickMode(raw)));
         }
+        AddDefaultsFooter(modeMenu, defaults.Mode.Raw() == chat.PermissionMode, () => defaults.Mode = ClaudeEnums.ParseMode(chat.PermissionMode));
         left.Children.Add(Small(modeGlyph, mode.Title(), modeMenu, L.T("Chat_ModeHelp", "Permission mode (Shift+Tab to cycle)")));
         var modelMenu = new MenuFlyout();
         foreach (var m in chat.Models)
         {
             var value = m.Value;
-            modelMenu.Items.Add(Ui.CheckItem($"{m.DisplayName} — {m.Description}", chat.ModelValue == value, () => chat.SetModel(value)));
+            modelMenu.Items.Add(Ui.CheckItem($"{m.DisplayName} — {m.Description}", chat.ModelValue == value, () => PickModel(value)));
         }
+        AddDefaultsFooter(modelMenu, defaults.ModelValue == (chat.ModelValue == "default" ? "" : chat.ModelValue), () => defaults.ModelValue = chat.ModelValue);
         var modelTitle = chat.Models.FirstOrDefault(m => m.Value == chat.ModelValue)?.DisplayName ?? (chat.Model.Length == 0 ? L.T("Claude_Model", "Model") : chat.Model.Replace("claude-", ""));
         var modelButton = Small("\uE950", modelTitle, modelMenu, L.T("Claude_Model", "Model"));
         modelButton.IsEnabled = chat.Models.Count > 0;
@@ -491,16 +495,38 @@ public sealed class ChatView : Grid
         if (efforts.Count > 0)
         {
             var effortMenu = new MenuFlyout();
-            effortMenu.Items.Add(Ui.CheckItem(L.T("Claude_Default", "Default"), chat.Effort.Length == 0, () => chat.SetEffort("")));
+            effortMenu.Items.Add(Ui.CheckItem(L.T("Claude_Default", "Default"), chat.Effort.Length == 0, () => PickEffort("")));
             foreach (var e in efforts)
             {
                 var level = e;
-                effortMenu.Items.Add(Ui.CheckItem(level, chat.Effort == level, () => chat.SetEffort(level)));
+                effortMenu.Items.Add(Ui.CheckItem(level, chat.Effort == level, () => PickEffort(level)));
             }
+            AddDefaultsFooter(effortMenu, defaults.Effort.Raw() == chat.Effort, () => defaults.Effort = ClaudeEnums.ParseEffort(chat.Effort));
             left.Children.Add(Small("\uEC4A", chat.Effort.Length == 0 ? "effort" : chat.Effort, effortMenu, L.T("Claude_Effort", "Effort")));
         }
         left.Children.Add(Ui.IconButton("\uEB9F", L.T("Chat_AttachImage", "Attach image"), () => PickImages().Forget()));
+        var promptMenu = new MenuFlyout();
+        var removeMenu = new MenuFlyoutSubItem { Text = L.T("Chat_RemovePrompt", "Remove saved prompt") };
+        foreach (var p in PromptLibrary.Shared.Prompts)
+        {
+            var saved = p;
+            promptMenu.Items.Add(Ui.MenuItem(saved.Title, () => InsertText(saved.Text)));
+            removeMenu.Items.Add(Ui.MenuItem(saved.Title, () =>
+            {
+                PromptLibrary.Shared.Remove(saved.Id);
+                RenderBottomBar();
+            }));
+        }
+        if (promptMenu.Items.Count > 0) promptMenu.Items.Add(Ui.Separator());
+        promptMenu.Items.Add(Ui.MenuItem(L.T("Chat_SavePrompt", "Save current message as prompt"), () =>
+        {
+            PromptLibrary.Shared.Add(input.Text);
+            RenderBottomBar();
+        }));
+        if (removeMenu.Items.Count > 0) promptMenu.Items.Add(removeMenu);
+        left.Children.Add(Small("\uE734", L.T("Chat_Prompts", "Prompts"), promptMenu, L.T("Chat_PromptsHelp", "Saved prompts")));
         var right = Ui.H(6, UsageRing());
+        if (chat.HasQueuedPrompts) right.Children.Add(Ui.Button(L.F("Chat_QueuedCount", "{0} queued", chat.QueuedIds.Count), CancelLastQueued, tooltip: L.T("Chat_CancelQueued", "Cancel the last queued message and put it back in the composer")));
         if (chat.Busy) right.Children.Add(Ui.IconButton("\uE71A", L.T("Chat_Stop", "Stop (Esc)"), chat.Interrupt, "red"));
         var send = new Button { Content = Ui.Glyph("\uE724", 13, "text"), Style = (Style)Application.Current.Resources["AccentButtonStyle"], Padding = new Thickness(10, 5, 10, 5) };
         Ui.Tip(send, L.T("Chat_Send", "Send (Enter)"));
@@ -631,9 +657,40 @@ public sealed class ChatView : Grid
 
     private void CycleMode()
     {
-        var order = new[] { "default", "acceptEdits", "plan" };
+        var order = Enum.GetValues<ClaudeMode>().Select(m => m.Raw()).ToArray();
         var i = Array.IndexOf(order, chat.PermissionMode);
-        chat.SetPermissionMode(order[(Math.Max(i, 0) + 1) % order.Length]);
+        PickMode(order[(Math.Max(i, 0) + 1) % order.Length]);
+    }
+
+    private void PickMode(string value)
+    {
+        chat.SetPermissionMode(value);
+        AppViewModel.Shared.Claude.ComposerChangedMode(value);
+    }
+
+    private void PickModel(string value)
+    {
+        chat.SetModel(value);
+        AppViewModel.Shared.Claude.ComposerChangedModel(value);
+    }
+
+    private void PickEffort(string value)
+    {
+        chat.SetEffort(value);
+        AppViewModel.Shared.Claude.ComposerChangedEffort(value);
+    }
+
+    private void AddDefaultsFooter(MenuFlyout menu, bool isDefault, Action adopt)
+    {
+        menu.Items.Add(Ui.Separator());
+        menu.Items.Add(isDefault
+            ? Ui.MenuItem(L.T("Chat_IsDefault", "Default for new chats"), () => { }, enabled: false)
+            : Ui.MenuItem(L.T("Chat_UseForNew", "Use for new chats"), () =>
+            {
+                adopt();
+                RenderBottomBar();
+            }));
+        menu.Items.Add(Ui.MenuItem(L.T("Chat_AgentSettings", "Agent Settings…"), () => SettingsDialog.Show(XamlRoot).Forget()));
     }
 
     private void Submit()
@@ -650,6 +707,19 @@ public sealed class ChatView : Grid
         attached.Clear();
         RenderImages();
         HideCompletion();
+    }
+
+    private void InsertText(string text)
+    {
+        input.Text = input.Text.Trim().Length == 0 ? text : input.Text + "\n" + text;
+        input.SelectionStart = input.Text.Length;
+        input.Focus(FocusState.Programmatic);
+    }
+
+    private void CancelLastQueued()
+    {
+        if (chat.QueuedIds.LastOrDefault() is not { } id || chat.CancelQueued(id) is not { } text) return;
+        InsertText(text);
     }
 
     private void Send(string text, List<ChatImage> imgs)

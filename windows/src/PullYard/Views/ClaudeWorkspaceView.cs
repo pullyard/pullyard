@@ -303,7 +303,7 @@ public sealed class ClaudeWorkspaceView : Grid
     private string ControlBarKey(ClaudeTab tab)
     {
         var chat = tab.Chat;
-        return string.Join("|", tab.Id, tab.Kind, tab.Git.Branch, tab.State, Fmt.Memory(tab.MemoryBytes), tab.Running, tab.SessionId.Length > 0, Ws.Model, Ws.Effort, Ws.Mode,
+        return string.Join("|", tab.Id, tab.Kind, tab.Git.Branch, tab.State, Fmt.Memory(tab.MemoryBytes), tab.Running, tab.SessionId.Length > 0, Ws.ModelValue, Ws.Effort, Ws.Mode,
             chat?.Model, chat is not null && (chat.TotalCost > 0 || chat.SessionId is not null), Ws.ShowInspector);
     }
 
@@ -371,11 +371,11 @@ public sealed class ClaudeWorkspaceView : Grid
         right.Children.Add(OpenInButton(tab.Folder));
         if (tab.Kind == ClaudeTabKind.Terminal)
         {
-            right.Children.Add(ControlMenu("", Ws.Model.Title(), L.T("Claude_Model", "Model"), menu =>
+            right.Children.Add(ControlMenu("", Ws.ModelValue.Length > 0 && Ws.Model == ClaudeModelOption.Standard ? Ws.ModelValue : Ws.Model.Title(), L.T("Claude_Model", "Model"), menu =>
             {
                 foreach (var m in Enum.GetValues<ClaudeModelOption>()) menu.Items.Add(Ui.CheckItem(m.Title(), Ws.Model == m, () => { Ws.Model = m; RenderControlBar(); }));
                 menu.Items.Add(Ui.Separator());
-                menu.Items.Add(Ui.MenuItem(L.T("Claude_ApplyModel", "Apply to current session (/model)"), Ws.ApplyModelToCurrent, enabled: tab.Running && Ws.Model != ClaudeModelOption.Standard));
+                menu.Items.Add(Ui.MenuItem(L.T("Claude_ApplyModel", "Apply to current session (/model)"), Ws.ApplyModelToCurrent, enabled: tab.Running && Ws.ModelValue.Length > 0));
             }));
             right.Children.Add(ControlMenu("", Ws.Effort == ClaudeEffort.Standard ? L.T("Claude_Effort", "Effort") : Ws.Effort.Raw(), L.T("Claude_Effort", "Effort"), menu =>
             {
@@ -504,6 +504,7 @@ public sealed class ClaudeWorkspaceView : Grid
         }, enabled: ClaudeLauncher.Available));
         menu.Items.Add(Ui.MenuItem(L.T("Claude_RevealFolder", "Show in Explorer"), () => Proc.Reveal(tab.Folder)));
         menu.Items.Add(Ui.MenuItem(L.T("Claude_CopyId", "Copy session ID"), () => WindowInterop.Copy(tab.SessionId), enabled: !string.IsNullOrEmpty(tab.SessionId)));
+        menu.Items.Add(Ui.MenuItem(L.T("Claude_CopyMarkdown", "Copy conversation as Markdown"), () => WindowInterop.Copy(tab.Chat?.MarkdownTranscript(tab.Title) ?? ""), enabled: tab.Chat is { Items.Count: > 0 }));
         return menu;
     }
 

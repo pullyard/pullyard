@@ -15,6 +15,7 @@ public sealed partial class GitWorkingCopy : ObservableObject, IDisposable
     [ObservableProperty] private bool isRepo;
     [ObservableProperty] private string? branch;
     [ObservableProperty] private RepoRef? repo;
+    [ObservableProperty] private GitRemote? remote;
     [ObservableProperty] private IReadOnlyList<DiffFile> changes = Array.Empty<DiffFile>();
     [ObservableProperty] private IReadOnlyList<GitCommitLine> unpushed = Array.Empty<GitCommitLine>();
     [ObservableProperty] private int ahead;
@@ -43,6 +44,7 @@ public sealed partial class GitWorkingCopy : ObservableObject, IDisposable
             IsRepo = result.IsRepo;
             Branch = result.Branch;
             Repo = result.Repo;
+            Remote = result.Remote;
             Changes = result.Files;
             Unpushed = result.Commits;
             Ahead = result.Commits.Count;
@@ -58,14 +60,15 @@ public sealed partial class GitWorkingCopy : ObservableObject, IDisposable
         }
     }
 
-    private sealed record LoadResult(bool IsRepo, string? Branch, RepoRef? Repo, List<DiffFile> Files, List<GitCommitLine> Commits);
+    private sealed record LoadResult(bool IsRepo, string? Branch, RepoRef? Repo, List<DiffFile> Files, List<GitCommitLine> Commits, GitRemote? Remote = null);
 
     private static async Task<LoadResult> Load(string dir)
     {
         if (!Directory.Exists(dir) || !(await GitCli.Run(new[] { "rev-parse", "--is-inside-work-tree" }, dir).ConfigureAwait(false)).Ok)
             return new LoadResult(false, null, null, new(), new());
         var branch = (await GitCli.Run(new[] { "rev-parse", "--abbrev-ref", "HEAD" }, dir).ConfigureAwait(false)).Out.Trim();
-        var repo = await GitCli.RemoteRepo(dir).ConfigureAwait(false);
+        var remoteUrl = await GitCli.RemoteUrl(dir).ConfigureAwait(false);
+        var repo = GitCli.ParseRemote(remoteUrl);
         var files = GitCli.ParseUnifiedDiff((await GitCli.Run(new[] { "diff", "HEAD", "--no-color", "--no-ext-diff", "--no-textconv", "-M" }, dir).ConfigureAwait(false)).Out);
         if (files.Count == 0) files = GitCli.ParseUnifiedDiff((await GitCli.Run(new[] { "diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M" }, dir).ConfigureAwait(false)).Out);
         var untracked = (await GitCli.Run(new[] { "ls-files", "--others", "--exclude-standard" }, dir).ConfigureAwait(false)).Out
@@ -104,7 +107,7 @@ public sealed partial class GitWorkingCopy : ObservableObject, IDisposable
                 if (parts.Length == 3) commits.Add(new GitCommitLine(parts[0], parts[1], parts[2]));
             }
         }
-        return new LoadResult(true, branch.Length == 0 ? null : branch, repo, files.Select(f => new DiffFile(f)).ToList(), commits);
+        return new LoadResult(true, branch.Length == 0 ? null : branch, repo, files.Select(f => new DiffFile(f)).ToList(), commits, GitRemote.Parse(remoteUrl));
     }
 
     public void StartWatching()

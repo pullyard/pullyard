@@ -45,8 +45,9 @@ public sealed partial class ChatSession : ObservableObject
     private readonly Dictionary<string, List<TextItem>> messageTexts = new();
     private readonly HashSet<string> dirty = new();
     private bool resetPending = true;
-    private readonly List<(string Text, IReadOnlyList<ChatImage> Images)> queuedPrompts = new();
+    private readonly List<(string Id, string Text, IReadOnlyList<ChatImage> Images)> queuedPrompts = new();
     private int requestCounter;
+    private readonly Dictionary<string, (string Label, Action Undo)> rollbacks = new();
     private readonly Dictionary<string, (string ToolId, string? Previous)> stopRequests = new();
     private bool intentionalStop;
 
@@ -54,6 +55,9 @@ public sealed partial class ChatSession : ObservableObject
     public event Action? OnTurnFinished;
     public event Action? ItemsChanged;
     public event Action? AttentionRequested;
+
+    public AgentUsageLedger? Ledger { get; set; } = AgentUsageLedger.Shared;
+    internal Func<JsonObject, bool>? Transport { get; set; }
 
     public ChatSession(string folder, string? configDir)
     {
@@ -242,20 +246,53 @@ public sealed partial class ChatSession : ObservableObject
 
     public bool HasQueuedPrompts => queuedPrompts.Count > 0;
 
-    private void FlushQueue()
+    public IReadOnlyList<string> QueuedIds => queuedPrompts.Select(q => q.Id).ToList();
+
+    public bool IsQueued(ChatItem item) => item is UserItem && queuedPrompts.Any(q => "u" + q.Id == item.Id);
+
+    public string? CancelQueued(string id)
     {
-        if (queuedPrompts.Count == 0 || !Running) return;
-        var queued = queuedPrompts.ToList();
-        queuedPrompts.Clear();
-        foreach (var (text, images) in queued) Deliver(text, images);
+        var index = queuedPrompts.FindIndex(q => q.Id == id);
+        if (index < 0) return null;
+        var prompt = queuedPrompts[index];
+        queuedPrompts.RemoveAt(index);
+        Items.RemoveAll(i => i.Id == "u" + id);
+        OnPropertyChanged(nameof(HasQueuedPrompts));
+        MarkAllDirty();
+        return prompt.Text;
     }
+
+    private bool FlushQueue()
+    {
+        if (!Running || Busy || queuedPrompts.Count == 0) return false;
+        var next = queuedPrompts[0];
+        queuedPrompts.RemoveAt(0);
+        OnPropertyChanged(nameof(HasQueuedPrompts));
+        var index = Items.FindIndex(i => i.Id == "u" + next.Id);
+        if (index >= 0 && index != Items.Count - 1)
+        {
+            var item = Items[index];
+            Items.RemoveAt(index);
+            Items.Add(item);
+            MarkAllDirty();
+        }
+        else if (index >= 0)
+        {
+            Touch(Items[index]);
+        }
+        Deliver(next.Text, next.Images);
+        return true;
+    }
+
+    private static readonly string[] AuthMarkers = { "/login", "not logged in", "please log in", "invalid api key", "authentication_error", "oauth token", "token has expired", "token expired", "invalid x-api-key" };
+    private static readonly string[] UnauthorizedMarkers = { "unauthorized", "authentication", "api error" };
 
     public static bool IsAuthError(string? text)
     {
         if (string.IsNullOrEmpty(text)) return false;
         var s = text.ToLowerInvariant();
-        return new[] { "/login", "log in", "logged in", "not logged", "authentication", "invalid api key", "api key", "oauth", "401", "credential", "token has expired", "token expired" }
-            .Any(s.Contains);
+        if (AuthMarkers.Any(s.Contains)) return true;
+        return s.Contains("401") && UnauthorizedMarkers.Any(s.Contains);
     }
 
     public bool AuthExpired => IsAuthError(LastError);
@@ -277,8 +314,11 @@ public sealed partial class ChatSession : ObservableObject
         }
     }
 
+    private double costBase;
+
     private void Terminated(Process p, int code)
     {
+        costBase = TotalCost;
         if (!ReferenceEquals(p, process)) return;
         var wasIntentional = intentionalStop;
         intentionalStop = false;
@@ -286,6 +326,7 @@ public sealed partial class ChatSession : ObservableObject
         Busy = false;
         process = null;
         MemoryBytes = 0;
+        rollbacks.Clear();
         p.Dispose();
         foreach (var t in tools.Values.Where(t => t.Status == ToolStatus.Running))
         {
@@ -309,30 +350,34 @@ public sealed partial class ChatSession : ObservableObject
         }
     }
 
-    private void Write(JsonObject obj)
+    private bool Write(JsonObject obj)
     {
-        if (process is null) return;
+        if (Transport is { } transport) return transport(obj);
+        if (process is null) return false;
         try
         {
             process.StandardInput.Write(obj.ToJsonString() + "\n");
             process.StandardInput.Flush();
+            return true;
         }
         catch
         {
+            return false;
         }
     }
 
-    private string Control(string subtype, JsonObject request)
+    private string Control(string subtype, JsonObject request, (string Label, Action Undo)? rollback = null)
     {
         requestCounter++;
         request["subtype"] = subtype;
         var id = $"gl-{requestCounter}-{subtype}";
-        Write(new JsonObject
+        var sent = Write(new JsonObject
         {
             ["type"] = "control_request",
             ["request_id"] = id,
             ["request"] = request
         });
+        if (sent && rollback is { } r) rollbacks[id] = r;
         return id;
     }
 
@@ -342,10 +387,12 @@ public sealed partial class ChatSession : ObservableObject
         var trimmed = text.Trim();
         if (trimmed.Length == 0 && images.Count == 0) return;
         LastActivity = DateTimeOffset.Now;
-        Append(new UserItem(Guid.NewGuid().ToString(), trimmed, images));
-        if (!Running)
+        var id = Guid.NewGuid().ToString();
+        Append(new UserItem(id, trimmed, images));
+        if (!Running || Busy)
         {
-            queuedPrompts.Add((trimmed, images));
+            queuedPrompts.Add((id, trimmed, images));
+            OnPropertyChanged(nameof(HasQueuedPrompts));
             return;
         }
         Deliver(trimmed, images);
@@ -361,7 +408,12 @@ public sealed partial class ChatSession : ObservableObject
                 ["source"] = new JsonObject { ["type"] = "base64", ["media_type"] = img.MediaType, ["data"] = Convert.ToBase64String(img.Data) }
             });
         if (trimmed.Length > 0) content.Add(new JsonObject { ["type"] = "text", ["text"] = trimmed });
-        Write(new JsonObject { ["type"] = "user", ["message"] = new JsonObject { ["role"] = "user", ["content"] = content } });
+        if (!Write(new JsonObject { ["type"] = "user", ["message"] = new JsonObject { ["role"] = "user", ["content"] = content } }))
+        {
+            Append(new NoticeItem(Guid.NewGuid().ToString(), "Message wasn't delivered — the Claude process isn't responding. Reconnect and send it again.", true));
+            Busy = false;
+            return;
+        }
         Busy = true;
         Status = null;
         TurnStartedAt = DateTimeOffset.Now;
@@ -388,20 +440,26 @@ public sealed partial class ChatSession : ObservableObject
 
     public void SetModel(string value)
     {
+        var previous = ModelValue;
         ModelValue = value;
-        Control("set_model", new JsonObject { ["model"] = value });
+        if (!Running) return;
+        Control("set_model", new JsonObject { ["model"] = value }, ("model", () => ModelValue = previous));
     }
 
     public void SetPermissionMode(string mode)
     {
+        var previous = PermissionMode;
         PermissionMode = mode;
-        Control("set_permission_mode", new JsonObject { ["mode"] = mode });
+        if (!Running) return;
+        Control("set_permission_mode", new JsonObject { ["mode"] = mode }, ("permission mode", () => PermissionMode = previous));
     }
 
     public void SetEffort(string level)
     {
+        var previous = Effort;
         Effort = level;
-        Control("apply_flag_settings", new JsonObject { ["settings"] = new JsonObject { ["effortLevel"] = level.Length == 0 ? null : level } });
+        if (!Running) return;
+        Control("apply_flag_settings", new JsonObject { ["settings"] = new JsonObject { ["effortLevel"] = level.Length == 0 ? null : level } }, ("effort", () => Effort = previous));
     }
 
     public PermissionRequest? FindPermission(string id) => PendingPermissions.FirstOrDefault(p => p.Id == id) ?? tools.Values.Select(t => t.Permission).FirstOrDefault(p => p?.Id == id);
@@ -716,7 +774,9 @@ public sealed partial class ChatSession : ObservableObject
     {
         Busy = false;
         Status = null;
-        if (o.Dbl("total_cost_usd") is { } c) TotalCost += c;
+        var before = TotalCost;
+        if (o.Dbl("total_cost_usd") is { } c) TotalCost = costBase + c;
+        Ledger?.Record(TotalCost - before);
         foreach (var t in tools.Values.Where(t => t.Status == ToolStatus.Running && t.ParentToolUseId is null))
         {
             t.Status = ToolStatus.Done;
@@ -730,7 +790,65 @@ public sealed partial class ChatSession : ObservableObject
             else Append(new NoticeItem(Guid.NewGuid().ToString(), text, sub != "error_during_execution"));
         }
         Control("get_context_usage", new JsonObject());
-        OnTurnFinished?.Invoke();
+        TrimItems();
+        if (!FlushQueue()) OnTurnFinished?.Invoke();
+    }
+
+    public void TrimItems(int limit = 2000)
+    {
+        if (Items.Count <= limit) return;
+        var drop = Items.Count - limit * 4 / 5;
+        foreach (var c in Items.Take(drop).OfType<ToolItem>()) tools.Remove(c.ToolId);
+        Items.RemoveRange(0, drop);
+        Items.RemoveAll(i => i.Id == "nolder");
+        Items.Insert(0, new NoticeItem("older", "Showing the latest messages", false));
+        MarkAllDirty();
+    }
+
+    public IReadOnlyList<string> SentPrompts
+    {
+        get
+        {
+            var seen = new List<string>();
+            foreach (var item in Items.OfType<UserItem>())
+                if (item.Text.Length > 0 && (seen.Count == 0 || seen[^1] != item.Text)) seen.Add(item.Text);
+            return seen;
+        }
+    }
+
+    public string MarkdownTranscript(string title)
+    {
+        var lines = new List<string> { "# " + title, "" };
+        foreach (var item in Items)
+        {
+            switch (item)
+            {
+                case UserItem u:
+                    lines.Add("## You");
+                    lines.Add("");
+                    if (u.Text.Length > 0) lines.Add(u.Text);
+                    if (u.Images.Count > 0) lines.Add($"_{u.Images.Count} image{(u.Images.Count == 1 ? "" : "s")} attached_");
+                    lines.Add("");
+                    break;
+                case TextItem { Thinking: false, Text.Length: > 0 } t:
+                    lines.Add("## Claude");
+                    lines.Add("");
+                    lines.Add(t.Text);
+                    lines.Add("");
+                    break;
+                case ToolItem call:
+                    var detail = (call.Str("command") ?? call.Str("file_path") ?? call.Str("pattern") ?? call.Str("description") ?? "").Replace("\r", "").Replace("\n", " ");
+                    if (detail.Length > 160) detail = detail[..160];
+                    lines.Add($"- `{call.Name}`" + (detail.Length == 0 ? "" : " " + detail));
+                    break;
+                case NoticeItem n:
+                    lines.Add("");
+                    lines.Add($"_{n.Text}_");
+                    lines.Add("");
+                    break;
+            }
+        }
+        return string.Join("\n", lines);
     }
 
     private void HandleControlRequest(JsonObject o)
@@ -835,6 +953,15 @@ public sealed partial class ChatSession : ObservableObject
                 stopped.TaskStatus = stop.Previous;
                 TouchTask(stopped);
             }
+            return;
+        }
+        var hasRollback = rollbacks.Remove(rid, out var rollback);
+        if (r.Str("subtype") == "error")
+        {
+            if (!hasRollback) return;
+            rollback.Undo();
+            var reason = r.Str("error") is { } error ? ": " + error : "";
+            Append(new NoticeItem(Guid.NewGuid().ToString(), $"Couldn't change {rollback.Label}{reason}", true));
             return;
         }
         if (r.Obj("response") is not { } body) return;

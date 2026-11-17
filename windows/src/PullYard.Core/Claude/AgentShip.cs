@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using PullYard.Core.Git;
 using PullYard.Core.Util;
 
 namespace PullYard.Core.Claude;
@@ -8,7 +9,7 @@ public static partial class AgentShip
 {
     private static readonly string[] DefaultBranches = { "main", "master", "develop" };
 
-    public static string OpenPRPrompt(string branch, string? defaultBranch, bool hasChanges, int ahead)
+    public static string OpenPRPrompt(string branch, string? defaultBranch, bool hasChanges, int ahead, GitRemoteKind kind = GitRemoteKind.GitHub)
     {
         var onDefault = defaultBranch is not null ? defaultBranch == branch : DefaultBranches.Contains(branch);
         var steps = new List<string>();
@@ -19,15 +20,22 @@ public static partial class AgentShip
         else if (ahead == 0 && !onDefault)
             steps.Add("There are no local changes or unpushed commits. If there is nothing to open a pull request for, say so and stop.");
         steps.Add("Push the branch to origin and set the upstream.");
-        steps.Add("Open a pull request with `gh pr create`. Write a concise title and a description with a short summary, the list of changes and how it was tested.");
-        steps.Add("Reply with the pull request URL on its own line.");
-        return "Open a pull request for this work:\n" + string.Join("\n", steps.Select((s, i) => $"{i + 1}. {s}"));
+        const string details = "Write a concise title and a description with a short summary, the list of changes and how it was tested.";
+        steps.Add(kind switch
+        {
+            GitRemoteKind.GitHub => $"Open a pull request with `gh pr create`. {details}",
+            GitRemoteKind.GitLab => $"Open a merge request with `glab mr create`. If `glab` is not installed, push with `-o merge_request.create` instead. {details}",
+            _ => $"Open a pull request with the CLI for this host if one is installed (for example `tea` or `bb`). If none is available, do not guess: reply with the web URL where it can be created. {details}"
+        });
+        var noun = GitRemote.RequestNoun(kind);
+        steps.Add($"Reply with the {noun} URL on its own line.");
+        return $"Open a {noun} for this work:\n" + string.Join("\n", steps.Select((s, i) => $"{i + 1}. {s}"));
     }
 
     public static string CommitPrompt(int pr) =>
         $"Commit the current changes with a clear message and push them so pull request #{pr} is updated. Reply with a one-line summary.";
 
-    [GeneratedRegex(@"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+/pull/\d+")]
+    [GeneratedRegex(@"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-/]+/(pull|pulls|pull-requests|-/merge_requests)/\d+")]
     private static partial Regex PullUrl();
 
     public static string? PullRequestUrl(string? text) => text is null ? null : PullUrl().Match(text) is { Success: true } m ? m.Value : null;
@@ -54,14 +62,14 @@ public sealed record WelcomeSuggestion(WelcomeSuggestionKind Kind, string Prompt
 
 public static class AgentWelcome
 {
-    public static List<WelcomeSuggestion> Suggestions(int changed, string? branch, bool hasRepo, int ahead, int? prNumber, string? prUrl)
+    public static List<WelcomeSuggestion> Suggestions(int changed, string? branch, bool hasRepo, int ahead, int? prNumber, string? prUrl, GitRemoteKind kind = GitRemoteKind.GitHub)
     {
         var list = new List<WelcomeSuggestion>();
         if (changed > 0)
         {
             list.Add(new(WelcomeSuggestionKind.ReviewChanges, "Review my uncommitted changes (git diff HEAD). Point out bugs, risky parts and missing tests."));
             if (branch is { Length: > 0 } b && b != "HEAD" && hasRepo && prNumber is null)
-                list.Add(new(WelcomeSuggestionKind.OpenPR, AgentShip.OpenPRPrompt(b, null, true, ahead)));
+                list.Add(new(WelcomeSuggestionKind.OpenPR, AgentShip.OpenPRPrompt(b, null, true, ahead, kind)));
         }
         if (prNumber is { } n)
         {

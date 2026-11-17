@@ -166,6 +166,7 @@ public static class Keys
     public const string ClaudeEffort = "claude.effort";
     public const string ClaudeMode = "claude.mode";
     public const string ClaudeIdleMinutes = "claude.idleSleepMinutes";
+    public const string ClaudeRememberComposer = "claude.rememberComposerChoice";
     public const string ClaudeUi = "claude.ui";
     public const string ClaudeProfiles = "claude.profiles";
     public const string ClaudeActiveProfile = "claude.activeProfile";
@@ -188,5 +189,6 @@ public static class Keys
     public const string AgentsNotify = "agents.notify";
     public const string AgentsOpenIn = "agents.openIn";
     public const string AgentsInspectorWidth = "agents.inspectorWidth";
+    public const string AgentsSavedPrompts = "agents.savedPrompts";
     public const string NotifyRecent = "notify.recent";
 }
