@@ -151,7 +151,7 @@ final class ForgeHTTP {
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
-            throw APIError(message: "Failed to parse response from \(service): \(error)")
+            throw APIError.unreadable(service, error)
         }
     }
 
@@ -258,8 +258,12 @@ struct FlexibleLabel: Decodable {
     var info: LabelInfo { LabelInfo(name: name, color: (color ?? "888888").replacingOccurrences(of: "#", with: "")) }
 }
 
+enum ForgeLimits {
+    static let listCap = 100
+}
+
 extension Array where Element == SearchItem {
-    func newestFirst(limit: Int = 100) -> [SearchItem] {
+    func newestFirst(limit: Int = ForgeLimits.listCap) -> [SearchItem] {
         var seen = Set<String>()
         return filter { seen.insert($0.id).inserted }.sorted { $0.updatedAt > $1.updatedAt }.prefix(limit).map { $0 }
     }

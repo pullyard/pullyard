@@ -84,6 +84,7 @@ struct MainView: View {
                 .animation(Motion.fade, value: app.rateLimitedUntil)
                 .animation(Motion.fade, value: app.syncError)
             }
+            .overlay(alignment: .bottomTrailing) { FixTourOverlay().animation(Motion.smooth, value: FixTour.shared.active) }
             .overlay { CommandPaletteOverlay() }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 app.checkClipboard()
@@ -474,7 +475,7 @@ struct SidebarRow: View {
                             .lineLimit(1)
                         Spacer(minLength: 4)
                         if count > 0 {
-                            Text("\(count)").font(.syCallout.monospacedDigit()).foregroundStyle(Color.syMuted)
+                            Text(section == .notifications && count >= GitHubAPI.notificationPageSize ? "\(GitHubAPI.notificationPageSize)+" : "\(count)").font(.syCallout.monospacedDigit()).foregroundStyle(Color.syMuted)
                         }
                     }
                     .padding(.leading, Space.m)

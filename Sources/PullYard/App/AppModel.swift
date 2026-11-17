@@ -90,7 +90,11 @@ enum SidebarSection: Hashable {
 final class AppModel {
     enum Phase { case checking, loggedOut, locked, loggedIn }
 
-    var phase: Phase = .checking
+    var phase: Phase = .checking {
+        didSet { if phase == .loggedIn, oldValue != .loggedIn { replayPending() } }
+    }
+    @ObservationIgnored private var pendingURL: URL?
+    @ObservationIgnored private var pendingTarget: ActivityTarget?
     var api: GitHubAPI?
     var forge: ForgeClient?
     var account: GitAccount?
@@ -146,6 +150,7 @@ final class AppModel {
         DispatchQueue.main.async { [weak self] in
             self?.claude.observeBadge()
             AppDelegate.workspace = self?.claude
+            AppDelegate.flushDrafts = { [weak self] in self?.flushDrafts() }
             ForegroundActivity.start()
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -383,6 +388,7 @@ final class AppModel {
     }
 
     private func resetStacks() {
+        flushDrafts()
         prModels = [:]
         prOrder = []
         StackStore.reset()
@@ -556,6 +562,7 @@ final class AppModel {
     }
 
     func newAgentSession() {
+        guard phase == .loggedIn else { return }
         section = .claude
         if let folder = claude.selectedTab?.folder ?? claude.projects.first(where: \.exists)?.path {
             claude.newSession(folder: folder)
@@ -600,8 +607,23 @@ final class AppModel {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    private func replayPending() {
+        let url = pendingURL
+        let target = pendingTarget
+        pendingURL = nil
+        pendingTarget = nil
+        guard url != nil || target != nil else { return }
+        Task { @MainActor [weak self] in
+            if let url { self?.handle(url: url) }
+            if let target { self?.open(target) }
+        }
+    }
+
     func open(_ target: ActivityTarget) {
-        guard phase == .loggedIn else { return }
+        guard phase == .loggedIn else {
+            pendingTarget = target
+            return
+        }
         guard target.account == nil || target.account == cacheAccount else { return openInBrowser(target.url) }
         if forge != nil {
             guard let item = (reviewRequests + myPRs).first(where: { $0.url == target.url }) else { return openInBrowser(target.url) }
@@ -633,7 +655,10 @@ final class AppModel {
 
     func handle(url: URL) {
         guard let scheme = url.scheme, scheme.hasPrefix("pullyard") || scheme.hasPrefix("shipyard") || scheme.hasPrefix("ghlite") else { return }
-        guard phase == .loggedIn else { return }
+        guard phase == .loggedIn else {
+            pendingURL = url
+            return
+        }
         if url.host == "section" {
             let parts = url.pathComponents.filter { $0 != "/" }
             switch (parts.first, parts.dropFirst().first) {
@@ -693,7 +718,13 @@ final class AppModel {
         if api != nil, let route = GitHubURL.parse(target) {
             open(route)
             if case .pr(let ref) = route, URL(string: target)?.lastPathComponent == "files" { prModel(ref)?.tab = .files }
+        } else if api == nil, GitHubURL.parse(target) != nil {
+            showToast("This link opens a GitHub item. Switch to a GitHub account to view it.", isError: true)
         }
+    }
+
+    func flushDrafts() {
+        for model in prModels.values { model.saveDraftsNow() }
     }
 
     func prModel(_ ref: ItemRef) -> PRDetailModel? {
@@ -705,10 +736,12 @@ final class AppModel {
         }
         let m = PRDetailModel(ref: ref, api: api)
         m.cacheAccount = cacheAccount
+        m.restoreDrafts()
         prModels[ref] = m
         prOrder.append(ref)
         if prOrder.count > 15 {
             let old = prOrder.removeFirst()
+            prModels[old]?.saveDraftsNow()
             prModels[old] = nil
         }
         return m
@@ -730,6 +763,11 @@ final class AppModel {
         showToast("Copied \(link)")
     }
 
+    func dismissToast() {
+        toastTask?.cancel()
+        withAnimation(Motion.fade) { toast = nil }
+    }
+
     func showToast(_ text: String, isError: Bool = false) {
         toastTask?.cancel()
         withAnimation(Motion.quick) {
@@ -738,7 +776,7 @@ final class AppModel {
         }
         AccessibilityNotification.Announcement(text).post()
         toastTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: isError ? 5_000_000_000 : 1_800_000_000)
+            try? await Task.sleep(nanoseconds: isError ? 8_000_000_000 : 1_800_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(Motion.fade) { self?.toast = nil }
         }

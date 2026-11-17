@@ -5,6 +5,7 @@ enum Demo {
 
     static let repo: String? = env["PULLYARD_DEMO_REPO"].flatMap { $0.isEmpty ? nil : $0 }
     static let folder: String? = env["PULLYARD_DEMO_FOLDER"].flatMap { $0.isEmpty ? nil : $0 }
+    static let fixTour = env["PULLYARD_FIX_TOUR"] == "1"
     static var isOn: Bool { repo != nil || folder != nil }
 
     static let user = RESTUser(login: "arivera", name: "Alex Rivera", avatarUrl: nil)

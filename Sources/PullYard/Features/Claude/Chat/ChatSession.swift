@@ -215,6 +215,7 @@ final class ChatSession {
     var droppedItems: [ChatDropItem] = []
     var dropTargeted = false
     @ObservationIgnored private var dropExit: DispatchWorkItem?
+    @ObservationIgnored private var dropIgnoredUntil = Date.distantPast
 
     @ObservationIgnored private var process: Process?
     @ObservationIgnored private var stdin: FileHandle?
@@ -317,16 +318,23 @@ final class ChatSession {
 
     var pendingCount: Int { pendingPermissions.filter { !$0.resolved }.count }
 
-    func setDropHover(_ on: Bool, immediately: Bool = false) {
+    func setDropHover(_ on: Bool, immediately: Bool = false, now: Date = Date()) {
+        if on, now < dropIgnoredUntil { return }
         dropExit?.cancel()
         dropExit = nil
-        if on || immediately {
-            if dropTargeted != on { dropTargeted = on }
+        if !on, immediately {
+            if dropTargeted { dropTargeted = false }
             return
         }
+        if on, !dropTargeted { dropTargeted = true }
         let work = DispatchWorkItem { [weak self] in self?.dropTargeted = false }
         dropExit = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + (on ? 4 : 0.25), execute: work)
+    }
+
+    func finishDrop(now: Date = Date()) {
+        dropIgnoredUntil = now.addingTimeInterval(0.6)
+        setDropHover(false, immediately: true, now: now)
     }
 
     var pid: pid_t { process?.processIdentifier ?? 0 }

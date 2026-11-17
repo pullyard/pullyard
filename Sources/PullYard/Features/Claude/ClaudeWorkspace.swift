@@ -582,6 +582,10 @@ final class ClaudeWorkspace {
         tab.terminal.window?.makeFirstResponder(tab.terminal)
     }
 
+    func openDemoTab(folder: String, title: String) -> ClaudeTab {
+        makeTab(folder: folder, kind: .chat, title: title, sessionId: "")
+    }
+
     private func makeTab(folder: String, kind: ClaudeTabKind, title: String, sessionId: String) -> ClaudeTab {
         let tab = ClaudeTab(folder: folder, kind: kind, title: title, sessionId: sessionId, git: git(for: folder))
         tab.restartChat = { [weak self, weak tab] in

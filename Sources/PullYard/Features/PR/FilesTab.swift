@@ -24,6 +24,16 @@ struct FilesTab: View {
                     }
                     VStack(spacing: 0) {
                         reviewBar
+                        if let e = model.filesError {
+                            diffNotice(icon: "exclamationmark.triangle.fill", color: .syAmber, text: "Couldn't refresh the diff — it may be out of date", help: e, action: "Retry") {
+                                Task { await model.loadFiles(force: true) }
+                            }
+                        }
+                        if model.hiddenThreadCount > 0, let pr = model.pr {
+                            diffNotice(icon: "text.bubble", color: .sySky, text: "Showing the first \(pr.reviewThreads.nodes.count) review threads — \(model.hiddenThreadCount) more are only on the web", help: nil, action: "Open in browser") {
+                                openInBrowser(pr.url + "/files")
+                            }
+                        }
                         if model.diffScope == .sinceReview { interdiffBanner }
                         DiffRefreshHost(model: model) { diff }
                     }
@@ -100,6 +110,21 @@ struct FilesTab: View {
         let path = files[index.map { min(max($0 + step, 0), files.count - 1) } ?? 0].id
         navigator.scroll(to: "h:" + path)
         model.revealFile(path)
+    }
+
+    private func diffNotice(icon: String, color: Color, text: String, help: String?, action: String, run: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).foregroundStyle(color)
+            Text(text).foregroundStyle(Color.syText).lineLimit(2)
+            Spacer(minLength: 8)
+            Button(action, action: run).controlSize(.small)
+        }
+        .font(.syCallout)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(color.opacity(0.08))
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.syLine).frame(height: 1) }
+        .help(help ?? "")
     }
 
     private var reviewBar: some View {
@@ -586,7 +611,7 @@ struct InlineThreadView: View {
                                     Text("· \(Fmt.rel(c.createdAt))").foregroundStyle(Color.syMuted)
                                 }
                                 .font(.syCaption)
-                                MarkdownText(text: c.body).font(.syCallout)
+                                MarkdownView(text: c.body, baseStyle: .callout)
                             }
                             Spacer(minLength: 0)
                         }
@@ -650,7 +675,7 @@ struct PendingCommentView: View {
         HStack(alignment: .top, spacing: 8) {
             Text("pending").font(.syCaption2.weight(.semibold)).padding(.horizontal, 6).padding(.vertical, 1)
                 .background(Capsule().fill(Color.ghYellow.opacity(0.25)))
-            MarkdownText(text: comment.body).font(.syCallout)
+            MarkdownView(text: comment.body, baseStyle: .callout)
             Spacer()
             Button {
                 model.pending.removeAll { $0.id == comment.id }

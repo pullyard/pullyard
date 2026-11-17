@@ -21,8 +21,10 @@ enum Main {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var workspace: ClaudeWorkspace?
+    static var flushDrafts: (() -> Void)?
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        Self.flushDrafts?()
         guard let ws = Self.workspace else { return .terminateNow }
         ws.saveOpenTabs()
         let busy = ws.busyTabCount
@@ -66,6 +68,7 @@ struct PullYardApp: App {
             CommandGroup(after: .toolbar) {
                 Button("Refresh") { app.refresh() }
                     .keyboardShortcut("r")
+                    .disabled(app.phase != .loggedIn)
                 BlameCommand()
                 Divider()
                 TextZoomCommands()
@@ -86,15 +89,19 @@ struct PullYardApp: App {
                 Divider()
                 Button("Go to Session…") { app.showQuickOpen = true }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
+                    .disabled(app.phase != .loggedIn)
                 Button("New Agent Session") { app.newAgentSession() }
                     .keyboardShortcut("n")
+                    .disabled(app.phase != .loggedIn)
                 Button("Close Session") { if let tab = app.claude.selectedTab { app.claude.requestClose(tab) } }
                     .keyboardShortcut("w", modifiers: [.command, .option])
                     .disabled(app.section != .claude || app.claude.selectedTab == nil)
                 Button("Next Session") { app.claude.cycleTab(1) }
                     .keyboardShortcut("]", modifiers: [.command, .shift])
+                    .disabled(app.phase != .loggedIn || app.section != .claude)
                 Button("Previous Session") { app.claude.cycleTab(-1) }
                     .keyboardShortcut("[", modifiers: [.command, .shift])
+                    .disabled(app.phase != .loggedIn || app.section != .claude)
             }
         }
 
@@ -127,6 +134,7 @@ struct GoSectionCommands: View {
 
     var body: some View {
         let forge = app.forge != nil
+        Group {
         Button("Review Requests") { app.section = .prs(.reviewRequested) }
             .keyboardShortcut("1")
             .disabled(forge && !app.forgeSupports(.prs(.reviewRequested)))
@@ -143,6 +151,8 @@ struct GoSectionCommands: View {
             Button("Projects") { app.section = .projects }.keyboardShortcut("5")
         }
         Button("Agents") { app.section = .claude }.keyboardShortcut("6")
+        }
+        .disabled(app.phase != .loggedIn)
     }
 }
 

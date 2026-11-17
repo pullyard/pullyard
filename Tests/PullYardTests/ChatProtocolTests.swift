@@ -97,6 +97,21 @@ final class ChatProtocolTests: XCTestCase {
         XCTAssertEqual(response?["subtype"] as? String, "error")
     }
 
+    func testDropHighlightClearsAfterDropAndIgnoresLateHover() {
+        let chat = makeSession()
+        let now = Date()
+        chat.setDropHover(true, now: now)
+        XCTAssertTrue(chat.dropTargeted)
+        chat.finishDrop(now: now)
+        XCTAssertFalse(chat.dropTargeted)
+        chat.setDropHover(true, now: now.addingTimeInterval(0.1))
+        XCTAssertFalse(chat.dropTargeted)
+        chat.setDropHover(true, now: now.addingTimeInterval(1))
+        XCTAssertTrue(chat.dropTargeted)
+        chat.setDropHover(false, immediately: true)
+        XCTAssertFalse(chat.dropTargeted)
+    }
+
     func testAuthErrorHeuristic() {
         XCTAssertTrue(ChatSession.isAuthError("Invalid API key · Please run /login"))
         XCTAssertTrue(ChatSession.isAuthError("API Error: 401 authentication_error"))

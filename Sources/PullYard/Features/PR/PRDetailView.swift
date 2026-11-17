@@ -134,7 +134,8 @@ struct PRDetailContent: View {
 
     private var commentsBadge: String? {
         let unresolved = pr.reviewThreads.nodes.filter { !$0.isResolved && !$0.isOutdated }.count
-        return unresolved > 0 ? "\(unresolved)" : nil
+        let more = model.hiddenThreadCount > 0 ? "+" : ""
+        return unresolved > 0 || !more.isEmpty ? "\(unresolved)\(more)" : nil
     }
 
     private var checksColor: Color {
@@ -717,15 +718,17 @@ struct ConversationTab: View {
     let model: PRDetailModel
     let pr: PullRequestDetail
     @Environment(AppModel.self) private var app
-    @State private var text = ""
+
+    private var text: String { model.commentDraft }
 
     var body: some View {
+        @Bindable var model = model
         VStack(spacing: 0) {
             HTMLView(html: model.html, scrollToBottomToken: model.scrollToBottomToken, onAction: handle, onLink: openLink)
                 .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, web: true, button: false) { await model.load(full: true) }
             Divider()
             HStack(alignment: .bottom, spacing: 8) {
-                ComposerBox(text: $text, placeholder: "Comment (Markdown) — ⌘↩ to send", minHeight: 56).frame(height: 64)
+                ComposerBox(text: $model.commentDraft, placeholder: "Comment (Markdown) — ⌘↩ to send", minHeight: 56).frame(height: 64)
                 VStack(spacing: 6) {
                     CommentSendButton(text: text, busy: model.busy, action: send)
                 }
@@ -737,7 +740,7 @@ struct ConversationTab: View {
     private func send() {
         let body = text
         Task {
-            if await model.comment(body) { text = "" }
+            if await model.comment(body) { model.commentDraft = "" }
         }
     }
 
@@ -779,6 +782,11 @@ struct CommitsTab: View {
 
     var body: some View {
         List {
+            if (pr.allCommits.totalCount ?? 0) > pr.allCommits.nodes.count {
+                Label("Showing the latest \(pr.allCommits.nodes.count) of \(pr.allCommits.totalCount ?? 0) commits", systemImage: "clock.arrow.circlepath")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+            }
             ForEach(pr.allCommits.nodes.reversed(), id: \.commit.oid) { node in
                 let c = node.commit
                 NavigationLink(value: Route.commit(model.ref.repo, c.oid)) {
@@ -855,6 +863,11 @@ struct ChecksTab: View {
                 }
                 .padding(.vertical, 2)
                 .rowAppear(c.id, model.checkRows)
+            }
+            if model.hiddenCheckCount > 0 {
+                Button("\(model.hiddenCheckCount) more checks are not shown — open in browser") { openInBrowser(pr.url + "/checks") }
+                    .buttonStyle(.link)
+                    .font(.syCaption)
             }
         }
         .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, button: false) { await model.load(full: true) }

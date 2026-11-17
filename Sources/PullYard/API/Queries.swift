@@ -87,16 +87,16 @@ enum Q {
           assignees(first: 10) { nodes { login avatarUrl } }
           reviewRequests(first: 20) { nodes { asCodeOwner requestedReviewer { __typename ... on User { login avatarUrl } ... on Team { name combinedSlug avatarUrl } ... on Mannequin { login avatarUrl } } } }
           latestOpinionatedReviews(first: 20) { nodes { state submittedAt commit { oid } author \(actor) } }
-          lastCommit: commits(last: 1) { nodes { commit { oid committedDate statusCheckRollup { state contexts(first: 100) { nodes { __typename
+          lastCommit: commits(last: 1) { nodes { commit { oid committedDate statusCheckRollup { state contexts(first: 100) { totalCount nodes { __typename
             ... on CheckRun { databaseId name status conclusion detailsUrl startedAt completedAt isRequired(pullRequestNumber: $number) checkSuite { workflowRun { databaseId workflow { name } } } }
             ... on StatusContext { context state targetUrl description isRequired(pullRequestNumber: $number) }
           } } } } } }
-          allCommits: commits(first: 100) { totalCount nodes { commit { oid abbreviatedOid messageHeadline committedDate url author { name avatarUrl user { login } } statusCheckRollup { state } } } }
+          allCommits: commits(last: 100) { totalCount nodes { commit { oid abbreviatedOid messageHeadline committedDate url author { name avatarUrl user { login } } statusCheckRollup { state } } } }
           files(first: 100) { totalCount pageInfo { hasNextPage endCursor } nodes { path viewerViewedState } }
           timelineItems(last: 100, itemTypes: [ISSUE_COMMENT, PULL_REQUEST_REVIEW, PULL_REQUEST_COMMIT, MERGED_EVENT, CLOSED_EVENT, REOPENED_EVENT, HEAD_REF_FORCE_PUSHED_EVENT, HEAD_REF_DELETED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, REVIEW_REQUESTED_EVENT, CROSS_REFERENCED_EVENT, LABELED_EVENT, RENAMED_TITLE_EVENT]) {
             totalCount nodes { __typename \(commonTimeline) \(prTimeline) }
           }
-          reviewThreads(first: 100) { nodes { id isResolved isOutdated path line originalLine diffSide viewerCanResolve viewerCanUnresolve viewerCanReply
+          reviewThreads(first: 100) { totalCount nodes { id isResolved isOutdated path line originalLine diffSide viewerCanResolve viewerCanUnresolve viewerCanReply
             comments(first: 50) { nodes { id author \(actor) body bodyHTML createdAt diffHunk pullRequestReview { id } } } } }
         }
       }

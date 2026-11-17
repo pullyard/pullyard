@@ -129,6 +129,15 @@ struct UnlockView: View {
     }
 
     private func reset() async {
+        if !blocked {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Reset the PIN?"
+            alert.informativeText = "You'll confirm with your Mac password. The PIN is removed and the Agents accounts linked to this account are signed out."
+            alert.addButton(withTitle: "Reset PIN…")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
         busy = true
         defer { busy = false }
         if await app.resetLock(account) {

@@ -7,15 +7,17 @@ struct ForgeInboxView: View {
     @State private var refreshing = false
     @State private var error: String?
     @State private var updated: Date?
+    @State private var selection: String?
 
     var body: some View {
-        List {
+        List(selection: $selection) {
             ForEach(items) { n in
                 ForgeNotificationRow(notification: n) {
                     Task { await markDone(n) }
                 }
                 .contentShape(Rectangle())
-                .onTapGesture { openInBrowser(n.url) }
+                .tag(n.id)
+                .simultaneousGesture(TapGesture(count: 2).onEnded { openInBrowser(n.url) })
                 .contextMenu {
                     Button("Open in Browser") { openInBrowser(n.url) }
                     Button("Copy Link") { copyToPasteboard(n.url) }
@@ -34,11 +36,16 @@ struct ForgeInboxView: View {
                 ListEmptyNote(title: "All caught up", message: "New review requests and mentions show up here.")
             }
         }
+        .onKeyPress(.return) {
+            guard let n = items.first(where: { $0.id == selection }) else { return .ignored }
+            openInBrowser(n.url)
+            return .handled
+        }
         .liveRefresh(updated: updated, refreshing: refreshing, error: items.isEmpty ? nil : error) {
             await load()
         }
         .navigationTitle(app.forgeCaps.inboxTitle ?? "Inbox")
-        .navigationSubtitle(items.isEmpty ? "" : "\(items.count)")
+        .navigationSubtitle(items.isEmpty ? "" : plural(items.count, "item", "items"))
         .task(id: app.account?.id) {
             loading = true
             await load()
@@ -107,6 +114,7 @@ struct ForgeNotificationRow: View {
             }
             .buttonStyle(.borderless)
             .help("Mark as done")
+            .accessibilityLabel("Mark as done")
             .opacity(hovering ? 1 : 0.45)
         }
         .padding(.vertical, 5)
@@ -121,6 +129,7 @@ struct ForgeReposView: View {
     @State private var error: String?
     @State private var text = ""
     @State private var updated: Date?
+    @State private var selection: String?
 
     private var visible: [ForgeRepo] {
         let q = text.trimmingCharacters(in: .whitespaces).lowercased()
@@ -129,11 +138,12 @@ struct ForgeReposView: View {
     }
 
     var body: some View {
-        List {
+        List(selection: $selection) {
             ForEach(visible) { repo in
                 ForgeRepoRow(repo: repo)
                     .contentShape(Rectangle())
-                    .onTapGesture { openInBrowser(repo.url) }
+                    .tag(repo.id)
+                    .simultaneousGesture(TapGesture(count: 2).onEnded { openInBrowser(repo.url) })
                     .contextMenu {
                         Button("Open in Browser") { openInBrowser(repo.url) }
                         Button("Copy Link") { copyToPasteboard(repo.url) }
@@ -152,12 +162,17 @@ struct ForgeReposView: View {
                 ListEmptyNote(title: "No \(app.provider.repositoriesTitle.lowercased())", message: "\(app.provider.repositoriesTitle) you can access show up here.", filter: text.trimmingCharacters(in: .whitespaces)) { text = "" }
             }
         }
+        .onKeyPress(.return) {
+            guard let repo = visible.first(where: { $0.id == selection }) else { return .ignored }
+            openInBrowser(repo.url)
+            return .handled
+        }
         .liveRefresh(updated: updated, refreshing: loading, error: repos.isEmpty ? nil : error) {
             await load()
         }
         .toolbarSearch(text: $text, prompt: "Filter \(app.provider.repositoriesTitle.lowercased())")
         .navigationTitle(app.provider.repositoriesTitle)
-        .navigationSubtitle(repos.isEmpty ? "" : "\(repos.count)")
+        .navigationSubtitle(repos.isEmpty ? "" : plural(repos.count, app.provider == .gitlab ? "project" : "repository", app.provider == .gitlab ? "projects" : "repositories"))
         .task(id: app.account?.id) { await load() }
         .onChange(of: app.refreshTick) { Task { await load() } }
     }

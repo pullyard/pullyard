@@ -157,6 +157,10 @@ struct ClaudeProjectsColumn: View {
         .navigationTitle("Agents")
         .panelToolbar {
             ToolbarItemGroup {
+                if FixTour.isAvailable {
+                    Button { FixTour.shared.start(app: app) } label: { Label("Fixes demo", systemImage: "checkmark.seal") }
+                        .help("Walk through the recent chat fixes with mock data")
+                }
                 Button { openFolder() } label: { Label("Open folder", systemImage: "folder.badge.plus") }
                     .disabled(!ClaudeAccountStore.shared.isLoggedIn)
                     .help("New session in folder…")
@@ -595,9 +599,9 @@ struct ClaudeWorkspaceView: View {
         let ws = app.claude
         let account = ClaudeAccountStore.shared
         Group {
-            if case .loggedOut = account.status {
+            if case .loggedOut = account.status, !FixTour.shared.active {
                 ClaudeAuthView()
-            } else if case .notInstalled = account.status {
+            } else if case .notInstalled = account.status, !FixTour.shared.active {
                 ClaudeAuthView()
             } else if let tab = ws.selectedTab {
                 GeometryReader { geo in

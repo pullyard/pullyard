@@ -4,7 +4,12 @@ struct APIError: LocalizedError {
     let message: String
     var status: Int = 0
     var schemaError = false
+    var detail: String?
     var errorDescription: String? { message }
+
+    static func unreadable(_ service: String, _ error: Error) -> APIError {
+        APIError(message: "\(service) sent a response PullYard couldn't read. Try again; if it keeps happening, check for an update.", detail: String(describing: error))
+    }
 }
 
 private struct GraphQLError: Decodable {
@@ -200,7 +205,7 @@ final class GitHubAPI {
                 throw APIError(message: GitHubAPI.describe(first), schemaError: errs.contains { $0.isSchema })
             }
             if let recordID { Diagnostics.shared.annotate(recordID, error: "parse error") }
-            throw APIError(message: "Failed to parse response: \(error)")
+            throw APIError.unreadable("GitHub", error)
         }
         if let errors = decoded.errors, errors.contains(where: { $0.type == "RATE_LIMITED" }), let http = response as? HTTPURLResponse {
             block("graphql", until: Self.rateLimitEnd(http, nil) ?? Date().addingTimeInterval(60))
@@ -231,7 +236,7 @@ final class GitHubAPI {
         do {
             return try restDecoder.decode(T.self, from: data)
         } catch {
-            throw APIError(message: "Failed to parse response: \(error)")
+            throw APIError.unreadable("GitHub", error)
         }
     }
 
@@ -282,7 +287,7 @@ final class GitHubAPI {
         do {
             value = try restDecoder.decode(T.self, from: data)
         } catch {
-            throw APIError(message: "Failed to parse response: \(error)")
+            throw APIError.unreadable("GitHub", error)
         }
         let entry = PolledEntry(value: value, lastModified: http.value(forHTTPHeaderField: "Last-Modified"), etag: http.value(forHTTPHeaderField: "ETag"), fetchedAt: Date(), pollInterval: interval)
         let current = lock.withLock { () -> Bool in

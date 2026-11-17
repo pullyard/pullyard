@@ -86,7 +86,7 @@ struct MenuBarView: View {
                                     IconTile(systemImage: "bell.fill", color: .syAmber, size: 16)
                                     Text(app.forgeCaps.inboxTitle.flatMap { app.forge == nil ? nil : $0 } ?? "Notifications").foregroundStyle(Color.syText)
                                     Spacer()
-                                    if app.unreadCount > 0 { ChipView(text: app.unreadCount >= 50 ? "50+" : "\(app.unreadCount)", color: .syAmber) }
+                                    if app.unreadCount > 0 { ChipView(text: app.unreadCount >= GitHubAPI.notificationPageSize ? "\(GitHubAPI.notificationPageSize)+" : "\(app.unreadCount)", color: .syAmber) }
                                 }
                                 .contentShape(Rectangle())
                             }
@@ -179,13 +179,14 @@ struct MenuBarView: View {
     private func open(_ item: SearchItem) {
         guard app.forge != nil else { return show(item.route) }
         openWindow(id: "main")
+        if app.section == .claude || app.section == nil { app.section = .prs(app.forgeCaps.pullFilters.first ?? .mine) }
         app.forgeSelection = item
         NSApp.activate(ignoringOtherApps: true)
     }
 
     private func show(_ route: Route?) {
         openWindow(id: "main")
-        if let route { app.select(route) }
+        if let route { app.open(route) }
         NSApp.activate(ignoringOtherApps: true)
     }
 }

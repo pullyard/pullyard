@@ -98,9 +98,21 @@ enum DeviceFlow {
         return obj
     }
 
+    static func friendly(_ code: String, description: String?) -> String {
+        switch code {
+        case "access_denied": return "Sign-in was cancelled in the browser."
+        case "expired_token": return "The sign-in code expired. Request a new code and try again."
+        case "incorrect_client_credentials", "invalid_client", "unauthorized_client": return "The client ID was not accepted. Check it in Settings → Advanced."
+        case "device_flow_disabled": return "Device sign-in is turned off for this OAuth app. Enable it in the app's settings or sign in with a token."
+        case "incorrect_device_code", "invalid_grant": return "The sign-in code is no longer valid. Request a new code and try again."
+        default: return description ?? code.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
     static func start(clientID: String, endpoint: Endpoint = github()) async throws -> DeviceCode {
         let obj = try await post(endpoint.codeURL, ["client_id": clientID, "scope": endpoint.scopes], service: endpoint.service)
-        if let e = obj["error_description"] as? String ?? obj["error"] as? String { throw APIError(message: e) }
+        if let e = obj["error"] as? String { throw APIError(message: friendly(e, description: obj["error_description"] as? String)) }
+        if let e = obj["error_description"] as? String { throw APIError(message: e) }
         guard let dc = obj["device_code"] as? String, let uc = obj["user_code"] as? String, let uri = obj["verification_uri"] as? String else {
             throw APIError(message: "Device flow is not available for this Client ID")
         }
@@ -123,11 +135,11 @@ enum DeviceFlow {
             switch obj["error"] as? String {
             case "authorization_pending": continue
             case "slow_down": interval += 5
-            case let e?: throw APIError(message: obj["error_description"] as? String ?? e)
+            case let e?: throw APIError(message: DeviceFlow.friendly(e, description: obj["error_description"] as? String))
             default: throw APIError(message: "Unexpected response from \(endpoint.service)")
             }
         }
-        throw APIError(message: "Timed out")
+        throw APIError(message: "The sign-in code expired before it was confirmed. Request a new code and try again.")
     }
 
     static func refresh(clientID: String, refreshToken: String, endpoint: Endpoint) async throws -> DeviceToken {

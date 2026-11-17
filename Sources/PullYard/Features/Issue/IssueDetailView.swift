@@ -79,6 +79,10 @@ struct IssueDetailView: View {
     @State private var model: IssueDetailModel?
     @State private var text = ""
 
+    private var draftKey: String {
+        DraftStore.key(account: app.cacheAccount, host: app.api?.host ?? "github.com", repo: ref.repo.full, number: ref.number, kind: "issue")
+    }
+
     var body: some View {
         Group {
             if let model {
@@ -99,9 +103,11 @@ struct IssueDetailView: View {
             guard let api = app.api else { return }
             let m = IssueDetailModel(ref: ref, api: api)
             model = m
+            text = DraftStore.shared.text(draftKey)
             await m.load()
         }
         .onChange(of: app.refreshTick) { Task { await model?.load() } }
+        .onChange(of: text) { _, value in DraftStore.shared.setText(value, key: draftKey) }
         .onLiveTick { await model?.load() }
     }
 

@@ -24,7 +24,7 @@ struct ChatDropDelegate: DropDelegate {
     func dropExited(info: DropInfo) { chat.setDropHover(false) }
 
     func performDrop(info: DropInfo) -> Bool {
-        chat.setDropHover(false, immediately: true)
+        chat.finishDrop()
         let providers = info.itemProviders(for: Self.types)
         guard !providers.isEmpty else { return false }
         let chat = chat

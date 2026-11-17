@@ -78,17 +78,24 @@ struct ReviewSheet: View {
     let model: PRDetailModel
     let pr: PullRequestDetail
     @Environment(\.dismiss) private var dismiss
-    @State private var text = ""
     @State private var event = "COMMENT"
     @State private var confirmDiscard = false
 
+    private var text: String { model.summaryDraft }
+
     var body: some View {
+        @Bindable var model = model
         SheetFrame(title: "Review #\(pr.number)", model: model) {
+            if model.restoredDrafts {
+                Label("Restored from your last session", systemImage: "clock.arrow.circlepath")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+            }
             if !model.pending.isEmpty {
                 Label("Inline comments to be submitted: \(model.pending.count)", systemImage: "text.bubble")
                     .foregroundStyle(Color.syMuted)
             }
-            ComposerBox(text: $text, placeholder: "Review summary (optional when approving)", minHeight: 140)
+            ComposerBox(text: $model.summaryDraft, placeholder: "Review summary (optional when approving)", minHeight: 140)
                 .frame(maxHeight: 260)
             Picker("", selection: $event) {
                 Text("Comment — without approval").tag("COMMENT")
@@ -327,7 +334,12 @@ struct ReplySheet: View {
     let model: PRDetailModel
     let thread: ReviewThread
     @Environment(\.dismiss) private var dismiss
-    @State private var text = ""
+
+    private var text: String { model.replyDrafts[thread.id] ?? "" }
+
+    private var draft: Binding<String> {
+        Binding(get: { model.replyDrafts[thread.id] ?? "" }, set: { model.replyDrafts[thread.id] = $0.isEmpty ? nil : $0 })
+    }
 
     var body: some View {
         SheetFrame(title: "Reply to thread", model: model) {
@@ -340,7 +352,7 @@ struct ReplySheet: View {
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.5)))
             }
-            ComposerBox(text: $text, placeholder: "Reply (Markdown)", minHeight: 120).frame(maxHeight: 240)
+            ComposerBox(text: draft, placeholder: "Reply (Markdown)", minHeight: 120).frame(maxHeight: 240)
             HStack {
                 if thread.viewerCanResolve, !thread.isResolved {
                     Button("Reply and resolve") { send(resolve: true) }
@@ -361,6 +373,7 @@ struct ReplySheet: View {
         let id = thread.id
         Task {
             if await model.reply(id, body: body) {
+                model.replyDrafts[id] = nil
                 if resolve { await model.setResolved(id, true) }
                 dismiss()
             }
