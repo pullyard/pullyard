@@ -45,6 +45,15 @@ struct MenuBarView: View {
                     .padding(.vertical, 6)
                 Rectangle().fill(Color.syLine).frame(height: 1)
             }
+            if let error = app.syncError, app.rateLimitedUntil == nil {
+                Label("Can't refresh — showing the last known data", systemImage: "wifi.exclamationmark")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .help(error)
+                Rectangle().fill(Color.syLine).frame(height: 1)
+            }
             if let version = Updater.shared.availableVersion {
                 Button {
                     openWindow(id: "update")

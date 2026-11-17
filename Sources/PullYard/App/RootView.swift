@@ -77,10 +77,12 @@ struct MainView: View {
                 VStack(spacing: 8) {
                     ToastBanner()
                     RateLimitBanner()
+                    SyncErrorBanner()
                     ClipboardBanner()
                 }
                 .animation(Motion.smooth, value: app.clipboardRoute)
                 .animation(Motion.fade, value: app.rateLimitedUntil)
+                .animation(Motion.fade, value: app.syncError)
             }
             .overlay { CommandPaletteOverlay() }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -689,6 +691,30 @@ struct RateLimitBanner: View {
             .overlay(Capsule().stroke(Color(nsColor: .separatorColor)))
             .padding(.bottom, app.clipboardRoute == nil ? 16 : 0)
             .allowsHitTesting(false)
+            .transition(.opacity)
+        }
+    }
+}
+
+struct SyncErrorBanner: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        if let error = app.syncError, app.rateLimitedUntil == nil {
+            HStack(spacing: 6) {
+                Image(systemName: "wifi.exclamationmark").foregroundStyle(Color.syAmber)
+                Text("Can't refresh — showing the last known data").foregroundStyle(Color.syMuted).lineLimit(1)
+                Button("Retry") { Task { await app.refreshBadges() } }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Color.sySky)
+            }
+            .font(.syCaption)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().stroke(Color(nsColor: .separatorColor)))
+            .padding(.bottom, app.clipboardRoute == nil ? 16 : 0)
+            .help(error)
             .transition(.opacity)
         }
     }

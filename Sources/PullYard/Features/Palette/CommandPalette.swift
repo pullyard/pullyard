@@ -385,6 +385,10 @@ struct CommandPalette: View {
         out.append(PaletteCommand(id: "go-settings", section: .goTo, icon: "gearshape.fill", tint: .sySlate, title: "Settings", detail: "PullYard", shortcut: "⌘,", keywords: "preferences") {
             openSettings()
         })
+        out.append(PaletteCommand(id: "go-agent-settings", section: .goTo, icon: "terminal.fill", tint: .syCoral, title: "Agent Settings", detail: "Model, mode and effort for new chats", shortcut: nil, keywords: "preferences claude model effort permission ask auto plan default") {
+            UserDefaults.standard.set("agents", forKey: "settings.tab")
+            openSettings()
+        })
         return out
     }
 

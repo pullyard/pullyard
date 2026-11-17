@@ -27,6 +27,9 @@ struct SettingsView: View {
             accountsForm
                 .tabItem { Label("Accounts", systemImage: "person.crop.circle") }
                 .tag("accounts")
+            AgentSettingsForm()
+                .tabItem { Label("Agents", systemImage: "terminal") }
+                .tag("agents")
             integrationsForm
                 .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
                 .tag("integrations")
@@ -180,18 +183,11 @@ struct SettingsView: View {
                             }
                         }
                     }
-                    Picker("Sleep idle sessions after", selection: Binding(get: { app.claude.idleMinutes }, set: { app.claude.idleMinutes = $0 })) {
-                        Text("Never").tag(0)
-                        Text("5 minutes").tag(5)
-                        Text("15 minutes").tag(15)
-                        Text("30 minutes").tag(30)
-                        Text("1 hour").tag(60)
-                    }
-                    Text("A sleeping session uses no memory: the claude process stops, the conversation stays, and the next message resumes it.")
+                    Text("Model, permission mode and sleep settings are in the Agents tab.")
                         .font(.syCaption)
                         .foregroundStyle(Color.syMuted)
                 } header: {
-                    SettingsHeader(title: "Agents", icon: "terminal.fill", color: .syCoral)
+                    SettingsHeader(title: "Claude Code", icon: "terminal.fill", color: .syCoral)
                 }
             }
         }
@@ -265,6 +261,128 @@ struct SettingsView: View {
     }
 }
 
+struct AgentSettingsForm: View {
+    @State private var confirmReset = false
+    private var defaults: AgentDefaults { AgentDefaults.shared }
+
+    var body: some View {
+        @Bindable var d = AgentDefaults.shared
+        Form {
+            Section {
+                Picker("Open new sessions as", selection: $d.kind) {
+                    Text("Chat").tag(ClaudeTabKind.chat)
+                    Text("Terminal").tag(ClaudeTabKind.terminal)
+                }
+                .pickerStyle(.segmented)
+                Picker("Model", selection: $d.model) {
+                    Text("Default").tag("")
+                    ForEach(d.modelChoices) { m in
+                        Text(m.description.isEmpty ? m.displayName : "\(m.displayName) — \(m.description)").tag(m.value)
+                    }
+                }
+                Picker("Effort", selection: $d.effort) {
+                    ForEach(ClaudeEffort.allCases) { Text($0.title).tag($0) }
+                }
+                Picker("Permission mode", selection: $d.mode) {
+                    ForEach(ClaudeMode.allCases) { Text($0.title).tag($0) }
+                }
+                Text(d.mode.detail)
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+                if d.knownModels.isEmpty {
+                    Text("Open a chat once to load the full model list from Claude Code.")
+                        .font(.syCaption)
+                        .foregroundStyle(Color.syMuted)
+                }
+            } header: {
+                SettingsHeader(title: "New sessions", icon: "sparkles", color: .syViolet)
+            } footer: {
+                Text("Used for every new chat and terminal session. You can still change them per chat from the composer.")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+            }
+            Section {
+                Toggle("Remember changes made in the chat composer", isOn: $d.rememberComposerChoice)
+                Text("When on, picking a model, effort or mode in a chat also makes it the default for the next chats.")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+            } header: {
+                SettingsHeader(title: "Composer", icon: "text.cursor", color: .syIndigo)
+            }
+            Section {
+                Picker("Sleep idle sessions after", selection: $d.idleMinutes) {
+                    Text("Never").tag(0)
+                    Text("5 minutes").tag(5)
+                    Text("15 minutes").tag(15)
+                    Text("30 minutes").tag(30)
+                    Text("1 hour").tag(60)
+                }
+                Text("A sleeping session uses no memory: the claude process stops, the conversation stays, and the next message resumes it.")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+                Toggle("Reopen sessions from last time", isOn: $d.restoreTabs)
+                Toggle("Warn before quitting while agents are working", isOn: $d.confirmQuit)
+            } header: {
+                SettingsHeader(title: "Running sessions", icon: "moon.zzz.fill", color: .syTeal)
+            }
+            Section {
+                ForEach(PromptLibrary.shared.prompts) { prompt in
+                    SavedPromptRow(prompt: prompt)
+                }
+                if PromptLibrary.shared.prompts.isEmpty {
+                    Text("Save a prompt from the bookmark menu in the chat composer, or add one here.")
+                        .font(.syCaption)
+                        .foregroundStyle(Color.syMuted)
+                }
+                Button("Add Prompt") { PromptLibrary.shared.add(text: "Describe what the agent should do", title: "New prompt") }
+            } header: {
+                SettingsHeader(title: "Saved prompts", icon: "bookmark.fill", color: .syCoral)
+            }
+            Section {
+                usageRow("Today", days: 1)
+                usageRow("Last 7 days", days: 7)
+                usageRow("Last 30 days", days: 30)
+                HStack {
+                    Text("API-equivalent cost reported by Claude Code for chats run in PullYard on this Mac. With a subscription this is not what you are billed.")
+                        .font(.syCaption)
+                        .foregroundStyle(Color.syMuted)
+                    Spacer()
+                    Button("Clear") { AgentUsageLedger.shared.clear() }
+                        .disabled(AgentUsageLedger.shared.days.isEmpty)
+                }
+            } header: {
+                SettingsHeader(title: "Usage", icon: "chart.bar.fill", color: .syAmber)
+            }
+            Section {
+                HStack {
+                    Text("Restore the default model, effort, mode and sleep settings.")
+                        .font(.syCaption)
+                        .foregroundStyle(Color.syMuted)
+                    Spacer()
+                    Button("Reset…") { confirmReset = true }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .surface(.panel)
+        .confirmationDialog("Reset agent settings?", isPresented: $confirmReset) {
+            Button("Reset", role: .destructive) { defaults.reset() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Open sessions keep their current settings.")
+        }
+    }
+
+    private func usageRow(_ title: String, days: Int) -> some View {
+        let total = AgentUsageLedger.shared.total(lastDays: days)
+        return LabeledContent(title) {
+            Text(total.turns == 0 ? "—" : String(format: "$%.2f · %d turn%@", total.cost, total.turns, total.turns == 1 ? "" : "s"))
+                .monospacedDigit()
+                .foregroundStyle(Color.syMuted)
+        }
+    }
+}
+
 struct SettingsHeader: View {
     let title: String
     let icon: String
@@ -311,5 +429,42 @@ struct LicensesSheet: View {
         .padding(20)
         .frame(width: 560, height: 480)
         .surface(.panel)
+    }
+}
+
+struct SavedPromptRow: View {
+    let prompt: SavedPrompt
+    @State private var title = ""
+    @State private var text = ""
+    @State private var open = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $open) {
+            TextField("Title", text: $title)
+                .onSubmit(save)
+            TextEditor(text: $text)
+                .font(.syBody)
+                .frame(minHeight: 70, maxHeight: 160)
+                .scrollContentBackground(.hidden)
+            HStack {
+                Button("Delete", role: .destructive) { PromptLibrary.shared.remove(prompt.id) }
+                Spacer()
+                Button("Save", action: save)
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (title == prompt.title && text == prompt.text))
+            }
+        } label: {
+            Text(prompt.title).lineLimit(1)
+        }
+        .onAppear {
+            title = prompt.title
+            text = prompt.text
+        }
+    }
+
+    private func save() {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return }
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        PromptLibrary.shared.update(SavedPrompt(id: prompt.id, title: name.isEmpty ? PromptLibrary.title(for: body) : name, text: body))
     }
 }

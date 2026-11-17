@@ -121,6 +121,8 @@ final class AppModel {
     var myPRCount = 0
     var unreadCount = 0
     var lastBadgeRefresh: Date?
+    var syncError: String?
+    private var syncFailures = 0
     var rateLimitedUntil: Date?
     private var lastLiveRefresh = Date()
     private var liveStale = false
@@ -143,6 +145,7 @@ final class AppModel {
         Diagnostics.shared.start()
         DispatchQueue.main.async { [weak self] in
             self?.claude.observeBadge()
+            AppDelegate.workspace = self?.claude
             ForegroundActivity.start()
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -807,20 +810,31 @@ final class AppModel {
             unreadCount = 12
             return
         }
-        let b = try? await api.badges()
+        var failure: Error?
+        var b: BadgeResponse?
+        do { b = try await api.badges() } catch { failure = error }
+        guard self.api === api else { return }
         if let b {
             reviewRequests = b.rr.nodes
             reviewRequestCount = b.rr.issueCount
             myPRs = b.mine.nodes
             myPRCount = b.mine.issueCount
         }
-        if self.api === api {
-            ActivityNotifier.shared.observe(account: cacheAccount, reviews: b?.rr.nodes, reviewTotal: b?.rr.issueCount ?? 0, mine: b?.mine.nodes)
+        ActivityNotifier.shared.observe(account: cacheAccount, reviews: b?.rr.nodes, reviewTotal: b?.rr.issueCount ?? 0, mine: b?.mine.nodes)
+        do { unreadCount = try await api.unreadNotificationCount(live: live) } catch { failure = failure ?? error }
+        recordSync(failure)
+    }
+
+    private func recordSync(_ failure: Error?) {
+        guard let failure else {
+            syncFailures = 0
+            syncError = nil
+            lastBadgeRefresh = Date()
+            return
         }
-        if let n = try? await api.unreadNotificationCount(live: live) {
-            unreadCount = n
-        }
-        lastBadgeRefresh = Date()
+        if failure is CancellationError || liveRefreshPaused { return }
+        syncFailures += 1
+        if syncFailures >= 2 { syncError = failure.localizedDescription }
     }
 
     func forgeSupports(_ section: SidebarSection?) -> Bool {
@@ -839,24 +853,36 @@ final class AppModel {
         let supported = forgeCaps.pullFilters
         var seenReviews: [SearchItem]?
         var seenMine: [SearchItem]?
-        if supported.contains(.reviewRequested), let rr = try? await forge.pullRequests(.reviewRequested, state: .open), self.forge === forge {
-            reviewRequests = Array(rr.prefix(10))
-            reviewRequestCount = rr.count
-            seenReviews = rr
+        var failure: Error?
+        if supported.contains(.reviewRequested) {
+            do {
+                let rr = try await forge.pullRequests(.reviewRequested, state: .open)
+                guard self.forge === forge else { return }
+                reviewRequests = Array(rr.prefix(10))
+                reviewRequestCount = rr.count
+                seenReviews = rr
+            } catch { failure = error }
         }
-        if supported.contains(.mine), let mine = try? await forge.pullRequests(.mine, state: .open), self.forge === forge {
-            myPRs = Array(mine.prefix(10))
-            myPRCount = mine.count
-            seenMine = mine
+        if supported.contains(.mine) {
+            do {
+                let mine = try await forge.pullRequests(.mine, state: .open)
+                guard self.forge === forge else { return }
+                myPRs = Array(mine.prefix(10))
+                myPRCount = mine.count
+                seenMine = mine
+            } catch { failure = failure ?? error }
         }
-        if self.forge === forge {
-            ActivityNotifier.shared.observe(account: cacheAccount, reviews: seenReviews, reviewTotal: seenReviews?.count ?? 0, mine: seenMine)
-        }
-        if forgeCaps.hasInbox, let inbox = try? await forge.notifications(), self.forge === forge {
-            unreadCount = inbox.filter(\.unread).count
-        } else if !forgeCaps.hasInbox {
+        guard self.forge === forge else { return }
+        ActivityNotifier.shared.observe(account: cacheAccount, reviews: seenReviews, reviewTotal: seenReviews?.count ?? 0, mine: seenMine)
+        if forgeCaps.hasInbox {
+            do {
+                let inbox = try await forge.notifications()
+                guard self.forge === forge else { return }
+                unreadCount = inbox.filter(\.unread).count
+            } catch { failure = failure ?? error }
+        } else {
             unreadCount = 0
         }
-        lastBadgeRefresh = Date()
+        recordSync(failure)
     }
 }

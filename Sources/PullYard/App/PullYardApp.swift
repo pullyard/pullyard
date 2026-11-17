@@ -18,7 +18,27 @@ enum Main {
     }
 }
 
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    static weak var workspace: ClaudeWorkspace?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let ws = Self.workspace else { return .terminateNow }
+        ws.saveOpenTabs()
+        let busy = ws.busyTabCount
+        guard busy > 0, AgentDefaults.shared.confirmQuit else { return .terminateNow }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = busy == 1 ? "An agent is still working" : "\(busy) agents are still working"
+        alert.informativeText = "Quitting stops them mid-task. Their conversations are saved and reopen next time, but unfinished work is interrupted."
+        alert.addButton(withTitle: "Quit Anyway")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
+}
+
 struct PullYardApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var app = AppModel()
 
     var body: some Scene {
@@ -68,6 +88,9 @@ struct PullYardApp: App {
                     .keyboardShortcut("k", modifiers: [.command, .shift])
                 Button("New Agent Session") { app.newAgentSession() }
                     .keyboardShortcut("n")
+                Button("Close Session") { if let tab = app.claude.selectedTab { app.claude.requestClose(tab) } }
+                    .keyboardShortcut("w", modifiers: [.command, .option])
+                    .disabled(app.section != .claude || app.claude.selectedTab == nil)
                 Button("Next Session") { app.claude.cycleTab(1) }
                     .keyboardShortcut("]", modifiers: [.command, .shift])
                 Button("Previous Session") { app.claude.cycleTab(-1) }

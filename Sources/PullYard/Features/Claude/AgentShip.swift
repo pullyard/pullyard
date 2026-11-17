@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum AgentShip {
-    static func openPRPrompt(branch: String, defaultBranch: String?, hasChanges: Bool, ahead: Int) -> String {
+    static func openPRPrompt(branch: String, defaultBranch: String?, hasChanges: Bool, ahead: Int, kind: GitRemote.Kind = .github) -> String {
         let onDefault = defaultBranch.map { $0 == branch } ?? ["main", "master", "develop"].contains(branch)
         var steps: [String] = []
         if onDefault {
@@ -13,9 +13,18 @@ enum AgentShip {
             steps.append("There are no local changes or unpushed commits. If there is nothing to open a pull request for, say so and stop.")
         }
         steps.append("Push the branch to origin and set the upstream.")
-        steps.append("Open a pull request with `gh pr create`. Write a concise title and a description with a short summary, the list of changes and how it was tested.")
-        steps.append("Reply with the pull request URL on its own line.")
-        return "Open a pull request for this work:\n" + steps.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+        let details = "Write a concise title and a description with a short summary, the list of changes and how it was tested."
+        switch kind {
+        case .github:
+            steps.append("Open a pull request with `gh pr create`. \(details)")
+        case .gitlab:
+            steps.append("Open a merge request with `glab mr create`. If `glab` is not installed, push with `-o merge_request.create` instead. \(details)")
+        case .bitbucket, .other:
+            steps.append("Open a pull request with the CLI for this host if one is installed (for example `tea` or `bb`). If none is available, do not guess: reply with the web URL where it can be created. \(details)")
+        }
+        let noun = kind == .gitlab ? "merge request" : "pull request"
+        steps.append("Reply with the \(noun) URL on its own line.")
+        return "Open a \(noun) for this work:\n" + steps.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
     }
 
     static func commitPrompt(pr: Int) -> String {
@@ -23,7 +32,7 @@ enum AgentShip {
     }
 
     static func pullRequestURL(in text: String) -> String? {
-        guard let r = text.range(of: #"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+/pull/\d+"#, options: .regularExpression) else { return nil }
+        guard let r = text.range(of: #"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-/]+/(pull|pulls|pull-requests|-/merge_requests)/\d+"#, options: .regularExpression) else { return nil }
         return String(text[r])
     }
 }
