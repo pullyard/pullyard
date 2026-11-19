@@ -621,7 +621,7 @@ impl RefreshStatus {
         self.text.set_text(&text);
         self.retry.set_visible(error.is_some() && !refreshing && resume.is_none());
         self.widget.set_tooltip_text(Some(&match (&resume, &error) {
-            (Some(at), _) => format!("GitHub rate limit reached. Live updates and loading resume at {at}; your changes still go through."),
+            (Some(at), _) => format!("{} rate limit reached. Live updates and loading resume at {at}; your changes still go through.", crate::app::provider().title()),
             (None, Some(e)) => format!("Last refresh failed: {e}"),
             (None, None) => "Refresh (Ctrl+R)".to_string(),
         }));
@@ -684,15 +684,17 @@ pub fn on_click_widget<W: IsA<gtk::Widget>>(w: &W, f: impl Fn() + 'static) {
     w.set_cursor_from_name(Some("pointer"));
 }
 
-pub fn branch_chip(name: &str, color: &str) -> gtk::Box {
-    let c = chip(name, color, None, true);
-    c.set_tooltip_text(Some("Click to copy"));
+pub fn branch_chip(name: &str, color: &str) -> gtk::Button {
+    let b = gtk::Button::new();
+    b.add_css_class("flat");
+    b.add_css_class("chip-button");
+    b.set_child(Some(&chip(name, color, None, true)));
+    b.set_valign(gtk::Align::Center);
+    b.set_tooltip_text(Some("Copy branch name"));
+    set_label(&b, &format!("Branch {name}, copy the branch name"));
     let n = name.to_string();
-    on_click_widget(&c, move || {
-        util::copy(&n);
-        crate::app::toast("Copied branch name");
-    });
-    c
+    b.connect_clicked(move |_| crate::app::copy(&n, &format!("Copied {n}")));
+    b
 }
 
 pub fn branch_tag(name: &str) -> gtk::Box {

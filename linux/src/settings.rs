@@ -100,6 +100,13 @@ pub struct Settings {
     pub inspector_width: Option<i32>,
     pub diff_wrap: bool,
     pub diff_split: bool,
+    pub nav_section: String,
+    pub nav_route: Option<String>,
+    pub list_state: HashMap<String, String>,
+    pub list_sort: HashMap<String, String>,
+    pub files_show_list: bool,
+    pub sidebar_width: i32,
+    pub clipboard_watch: bool,
 }
 
 impl Default for Settings {
@@ -157,6 +164,13 @@ impl Default for Settings {
             inspector_width: None,
             diff_wrap: true,
             diff_split: false,
+            nav_section: String::new(),
+            nav_route: None,
+            list_state: HashMap::new(),
+            list_sort: HashMap::new(),
+            files_show_list: true,
+            sidebar_width: 0,
+            clipboard_watch: true,
         }
     }
 }

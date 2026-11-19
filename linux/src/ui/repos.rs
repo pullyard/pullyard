@@ -10,7 +10,7 @@ use super::code_view::CodeView;
 use super::dialogs::Sheet;
 use super::html::HtmlView;
 use super::item_row::{describe_row, item_menu, item_row};
-use super::lists::{state_toggles, SearchModel, StateFilter};
+use super::lists::{footer_row, load_more_error_row, loading_more_row, state_toggles, SearchModel, StateFilter};
 use super::menu::{context_menu, Menu};
 use super::tabstrip::{TabItem, TabStrip};
 use super::widgets::*;
@@ -24,6 +24,8 @@ struct ReposList {
     cursor: RefCell<Option<String>>,
     has_more: Cell<bool>,
     loading: Cell<bool>,
+    loading_more: Cell<bool>,
+    load_more_error: RefCell<Option<String>>,
     error: RefCell<Option<String>>,
     text: RefCell<String>,
     hide_archived: Cell<bool>,
@@ -147,13 +149,26 @@ impl ReposList {
                 let u = rr.url.clone();
                 m.item("Open in browser", move || util::open_url(&u));
                 let u = rr.url.clone();
-                m.item("Copy link", move || util::copy(&u));
+                m.item("Copy link", move || app::copy(&u, "Copied link"));
                 let c = format!("gh repo clone {}", rr.name_with_owner);
-                m.item("Copy “gh repo clone”", move || util::copy(&c));
+                m.item("Copy “gh repo clone”", move || app::copy(&c, "Copied clone command"));
                 m
             });
             self.list.append(&row);
             keys.push(r.repo().unwrap_or_else(|| RepoRef::new("", "")));
+        }
+        let more_error = self.load_more_error.borrow().clone();
+        if let Some(e) = more_error {
+            let weak = Rc::downgrade(self);
+            self.list.append(&footer_row(&load_more_error_row(&e, move || {
+                if let Some(me) = weak.upgrade() {
+                    crate::rt::spawn_local(async move {
+                        me.load_more().await;
+                    });
+                }
+            })));
+        } else if self.loading_more.get() {
+            self.list.append(&footer_row(&loading_more_row()));
         }
         *self.keys.borrow_mut() = keys;
         let route = app::get().state.borrow().route.clone();
@@ -192,6 +207,7 @@ impl ReposList {
                     remember_repos(&me.repos.borrow());
                     me.updated.set(Some(Utc::now()));
                     *me.error.borrow_mut() = None;
+                    *me.load_more_error.borrow_mut() = None;
                 }
                 Err(e) => *me.error.borrow_mut() = Some(e.message),
             }
@@ -201,14 +217,23 @@ impl ReposList {
 
     async fn load_more(self: Rc<Self>) -> bool {
         let Some(api) = app::api() else { return false };
-        if !self.has_more.get() || self.loading.get() {
+        if !self.has_more.get() || self.loading.get() || self.loading_more.get() {
             return false;
         }
-        self.loading.set(true);
+        self.loading_more.set(true);
+        *self.load_more_error.borrow_mut() = None;
+        self.render();
         let cursor = self.cursor.borrow().clone();
         let res = crate::rt::run(async move { api.repos(cursor).await }).await;
-        self.loading.set(false);
-        let Ok(r) = res else { return false };
+        self.loading_more.set(false);
+        let r = match res {
+            Ok(r) => r,
+            Err(e) => {
+                *self.load_more_error.borrow_mut() = Some(e.message);
+                self.render();
+                return false;
+            }
+        };
         let known: std::collections::HashSet<String> = self.repos.borrow().iter().map(|r| r.name_with_owner.clone()).collect();
         let added: Vec<RepoSummary> = r.nodes.into_iter().filter(|n| !known.contains(&n.name_with_owner)).collect();
         self.repos.borrow_mut().extend(added);
@@ -261,6 +286,8 @@ pub fn list() -> gtk::Widget {
         cursor: RefCell::new(None),
         has_more: Cell::new(false),
         loading: Cell::new(false),
+        loading_more: Cell::new(false),
+        load_more_error: RefCell::new(None),
         error: RefCell::new(None),
         text: RefCell::new(String::new()),
         hide_archived: Cell::new(true),
@@ -285,9 +312,11 @@ pub fn list() -> gtk::Widget {
     scroll.connect_edge_reached(move |_, pos| {
         if pos == gtk::PositionType::Bottom {
             if let Some(me) = w.upgrade() {
-                crate::rt::spawn_local(async move {
-                    me.load_more().await;
-                });
+                if me.load_more_error.borrow().is_none() {
+                    crate::rt::spawn_local(async move {
+                        me.load_more().await;
+                    });
+                }
             }
         }
     });
@@ -1193,7 +1222,7 @@ impl CodeBrowser {
             context_menu(&row, move || {
                 let menu = Menu::ctx();
                 let p = ee.path.clone();
-                menu.item("Copy path", move || util::copy(&p));
+                menu.item("Copy path", move || app::copy(&p, "Copied path"));
                 let url = format!("https://github.com/{}/{}/{}/{}", repo.full(), if ee.is_dir() { "tree" } else { "blob" }, mm.git_ref.borrow(), ee.path);
                 menu.item("Open in browser", move || util::open_url(&url));
                 menu
@@ -1437,16 +1466,16 @@ impl CodeBrowser {
         }
         let menu = Menu::new();
         let p = path.to_string();
-        menu.item("Copy path", move || util::copy(&p));
+        menu.item("Copy path", move || app::copy(&p, "Copied path"));
         match file {
             Some(FileContent::Text(s, _)) | Some(FileContent::Markdown(_, s)) => {
                 let s = s.clone();
-                menu.item("Copy contents", move || util::copy(&s));
+                menu.item("Copy contents", move || app::copy(&s, "Copied contents"));
             }
             _ => {}
         }
         let m = self.model.clone();
-        menu.item("Copy link", move || util::copy(&m.web_url()));
+        menu.item("Copy link", move || app::copy(&m.web_url(), "Copied link"));
         let m = self.model.clone();
         menu.item("Open in browser", move || util::open_url(&m.web_url()));
         b.append(&menu.button("view-more-symbolic", "More"));
@@ -1883,7 +1912,7 @@ pub fn detail_page(repo: &RepoRef) -> adw::NavigationPage {
     list_col.append(&footer(&status));
     list_stack.set_vexpand(true);
     content.add_named(&list_col, Some("list"));
-    let (toggles, state) = state_toggles(|_| {});
+    let (toggles, state) = state_toggles(StateFilter::Open, |_| {});
     toggles.set_visible(false);
     let me = Rc::new(RepoDetail {
         repo: repo.clone(),
@@ -1977,8 +2006,7 @@ pub fn detail_page(repo: &RepoRef) -> adw::NavigationPage {
     let clone_btn = icon_button("sy-terminal-symbolic", "Copy “gh repo clone”");
     let full = repo.full();
     clone_btn.connect_clicked(move |_| {
-        util::copy(&format!("gh repo clone {full}"));
-        app::toast("Copied clone command");
+        app::copy(&format!("gh repo clone {full}"), &format!("Copied “gh repo clone {full}”"));
     });
     let browser_btn = icon_button("sy-external-symbolic", "Open in browser");
     let cm = me.code_model.clone();

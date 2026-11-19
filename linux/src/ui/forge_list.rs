@@ -106,6 +106,7 @@ struct ForgeList {
     rendered: RefCell<String>,
     search: gtk::SearchEntry,
     status_key: RefCell<String>,
+    cap_note: gtk::Label,
     me: RefCell<std::rc::Weak<ForgeList>>,
 }
 
@@ -159,7 +160,9 @@ impl ForgeList {
     fn render(&self) {
         let text = self.text.borrow().clone();
         let items: Vec<SearchItem> = self.items.borrow().iter().filter(|i| matches(i, &text)).cloned().collect();
-        self.title.set_subtitle(&if items.is_empty() { String::new() } else { items.len().to_string() });
+        let capped = self.items.borrow().len() >= crate::forge::LIST_CAP;
+        self.title.set_subtitle(&if items.is_empty() { String::new() } else { format!("{}{}", items.len(), if capped { " (latest)" } else { "" }) });
+        self.cap_note.set_visible(capped && !items.is_empty());
         let loading = self.loading.get();
         self.spinner.set_visible(self.refreshing.get() && !items.is_empty());
         let err = self.error.borrow().clone();
@@ -296,7 +299,12 @@ pub fn build(kind: Kind) -> gtk::Widget {
     spinner.set_visible(false);
     let stack = gtk::Stack::new();
     let search = gtk::SearchEntry::new();
-    let (toggles, state) = state_toggles(|_| {});
+    let state_kind = if matches!(kind, Kind::Issues(_)) { "issue" } else { "pr" };
+    let (toggles, state) = state_toggles(StateFilter::stored(state_kind), |_| {});
+    let host = app::account().map(|a| a.host).filter(|h| !h.is_empty()).unwrap_or_else(|| "the web".into());
+    let cap_note = wrap_label(&format!("Showing the {} most recently updated. Older ones are on {host}.", crate::forge::LIST_CAP), &["sy-muted", "sy-small"]);
+    margins(&cap_note, 6, 12, 6, 12);
+    cap_note.set_visible(false);
     let holder: Rc<RefCell<Option<std::rc::Weak<ForgeList>>>> = Rc::new(RefCell::new(None));
     let h = holder.clone();
     let status = RefreshStatus::new(false, move || {
@@ -324,6 +332,7 @@ pub fn build(kind: Kind) -> gtk::Widget {
         rendered: RefCell::new(String::new()),
         search: search.clone(),
         status_key: RefCell::new(String::new()),
+        cap_note: cap_note.clone(),
         me: RefCell::new(std::rc::Weak::new()),
     });
     *holder.borrow_mut() = Some(Rc::downgrade(&me));
@@ -336,6 +345,7 @@ pub fn build(kind: Kind) -> gtk::Widget {
             t.connect_toggled(move |t| {
                 if t.is_active() {
                     if let Some(me) = weak.upgrade() {
+                        me.state.get().store(state_kind);
                         glib::idle_add_local_once(move || me.reload(false));
                     }
                 }
@@ -388,6 +398,7 @@ pub fn build(kind: Kind) -> gtk::Widget {
     content.append(&toggles_bar);
     content.append(&line());
     content.append(&stack);
+    content.append(&cap_note);
     content.append(&footer(&me.status));
 
     let tv = adw::ToolbarView::new();

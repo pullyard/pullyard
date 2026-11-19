@@ -185,7 +185,7 @@ impl ForgeHttp {
 
     pub async fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&'static str, String)]) -> ApiResult<T> {
         let body = self.call(Method::GET, path, query).await?;
-        serde_json::from_slice(&body).map_err(|e| ApiError::new(format!("Failed to parse response from {}: {e}", self.service)))
+        serde_json::from_slice(&body).map_err(|e| ApiError::unreadable(&self.service, &e))
     }
 
     pub async fn post(&self, method: Method, path: &str, query: &[(&'static str, String)]) -> ApiResult<()> {
@@ -420,11 +420,13 @@ pub fn label(name: String, color: Option<String>) -> LabelInfo {
     LabelInfo { name, color: color.unwrap_or_else(|| "888888".into()).trim_start_matches('#').to_string() }
 }
 
+pub const LIST_CAP: usize = 100;
+
 pub fn newest_first(items: Vec<SearchItem>) -> Vec<SearchItem> {
     let mut seen = HashSet::new();
     let mut unique: Vec<SearchItem> = items.into_iter().filter(|i| seen.insert(i.url.clone())).collect();
     unique.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    unique.truncate(100);
+    unique.truncate(LIST_CAP);
     unique
 }
 

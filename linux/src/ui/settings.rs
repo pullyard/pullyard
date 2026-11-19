@@ -69,15 +69,47 @@ fn account_group(dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
             if provider.is_github() && auth::gh_available() {
                 let refresh = button("Refresh token from gh");
                 refresh.set_valign(gtk::Align::Center);
-                refresh.connect_clicked(|b| {
+                let status_row = actions.downgrade();
+                refresh.connect_clicked(move |b| {
                     b.set_sensitive(false);
+                    b.set_label("Refreshing…");
+                    if let Some(row) = status_row.upgrade() {
+                        row.set_subtitle("");
+                    }
                     let b = b.clone();
+                    let status_row = status_row.clone();
                     crate::rt::spawn_local(async move {
-                        app::get().refresh_token_from_gh().await;
+                        let failure = app::get().refresh_token_from_gh().await;
+                        b.set_label("Refresh token from gh");
                         b.set_sensitive(true);
+                        if let Some(row) = status_row.upgrade() {
+                            row.set_subtitle(&match failure {
+                                Some(e) => format!("Couldn’t read the token from gh: {}", util::markup_esc(&e)),
+                                None => "Token refreshed from gh.".to_string(),
+                            });
+                        }
                     });
                 });
                 actions.add_suffix(&refresh);
+            }
+            if let Some(acc) = account.clone() {
+                let lock = button("Lock Now");
+                lock.set_valign(gtk::Align::Center);
+                lock.set_visible(false);
+                let d = dialog.clone();
+                lock.connect_clicked(move |_| {
+                    d.close();
+                    app::get().lock_now();
+                });
+                let shown = lock.downgrade();
+                crate::rt::spawn_local(async move {
+                    if crate::account_lock::is_protected(&acc.id).await {
+                        if let Some(lock) = shown.upgrade() {
+                            lock.set_visible(true);
+                        }
+                    }
+                });
+                actions.add_suffix(&lock);
             }
             let add = button("Add account…");
             add.set_valign(gtk::Align::Center);
@@ -149,6 +181,7 @@ fn pin_row(account: GitAccount) -> adw::SwitchRow {
             g.set(true);
             row.set_active(on);
             g.set(false);
+            app::get().refresh_lockable();
         });
         if want {
             let done = settle.clone();
@@ -383,6 +416,14 @@ pub fn show() {
         settings::update(|s| s.appearance = modes[i.min(2)].to_string());
         theme::apply();
     }));
+    let levels: Vec<String> = crate::text_zoom::LEVELS.iter().map(|l| if (l - 1.0).abs() < 0.001 { "100% (default)".to_string() } else { format!("{}%", (l * 100.0).round() as i64) }).collect();
+    let level_refs: Vec<&str> = levels.iter().map(|s| s.as_str()).collect();
+    let scale = crate::text_zoom::scale();
+    let text_size = combo("Text size", &level_refs, crate::text_zoom::LEVELS.iter().position(|l| (l - scale).abs() < 0.001).unwrap_or(2), |i| {
+        crate::text_zoom::set_scale(crate::text_zoom::LEVELS[i.min(crate::text_zoom::LEVELS.len() - 1)]);
+    });
+    text_size.set_subtitle("Also Ctrl++ and Ctrl+− in the main window");
+    appearance.add(&text_size);
     page.add(&appearance);
     page.add(&account_group(&dialog));
 
@@ -403,13 +444,14 @@ pub fn show() {
         browser_row.set_sensitive(false);
     }
     links.add(&browser_row);
+    links.add(&switch("Offer to open a copied pull request or issue link", None, settings::read(|s| s.clipboard_watch), |v| settings::update(|s| s.clipboard_watch = v)));
     page.add(&links);
 
     let refresh = group("Refresh", "view-refresh-symbolic", "green");
     let intervals = [15.0, 30.0, 60.0, 120.0, 300.0, 900.0];
     let ilabels = ["Every 15 seconds", "Every 30 seconds", "Every minute", "Every 2 minutes", "Every 5 minutes", "Every 15 minutes"];
     let cur = settings::read(|s| s.poll_interval);
-    refresh.add(&combo("Auto-refresh pull requests", &ilabels, intervals.iter().position(|v| (*v - cur).abs() < 0.5).unwrap_or(1), move |i| {
+    refresh.add(&combo("Auto-refresh lists", &ilabels, intervals.iter().position(|v| (*v - cur).abs() < 0.5).unwrap_or(1), move |i| {
         settings::update(|s| s.poll_interval = intervals[i.min(intervals.len() - 1)]);
         app::get().start_polling();
     }));

@@ -28,7 +28,7 @@ pub fn encode_query(s: &str) -> String {
 impl GitHubApi {
     pub async fn current_user(&self) -> ApiResult<(RestUser, Vec<String>)> {
         let (bytes, headers) = self.rest_raw(Method::GET, "/user", None).await?;
-        let user: RestUser = serde_json::from_slice(&bytes).map_err(|e| ApiError::new(format!("Failed to parse response: {e}")))?;
+        let user: RestUser = serde_json::from_slice(&bytes).map_err(|e| ApiError::unreadable("GitHub", &e))?;
         let scopes = headers
             .get("x-oauth-scopes")
             .and_then(|v| v.to_str().ok())
@@ -341,13 +341,13 @@ impl GitHubApi {
         if crate::demo::is_on() {
             return Ok(vec![]);
         }
-        let bytes = self.rest_polled(&format!("/notifications?all={all}&per_page=50"), force).await?;
-        serde_json::from_slice(&bytes).map_err(|e| ApiError::new(format!("Failed to parse response: {e}")))
+        let bytes = self.rest_polled(&format!("/notifications?all={all}&per_page={}", super::NOTIFICATION_PAGE_SIZE), force).await?;
+        serde_json::from_slice(&bytes).map_err(|e| ApiError::unreadable("GitHub", &e))
     }
 
     pub async fn unread_notification_count(&self, force: bool) -> ApiResult<usize> {
-        let bytes = self.rest_polled("/notifications?per_page=50", force).await?;
-        let list: Vec<Value> = serde_json::from_slice(&bytes).map_err(|e| ApiError::new(format!("Failed to parse response: {e}")))?;
+        let bytes = self.rest_polled(&format!("/notifications?per_page={}", super::NOTIFICATION_PAGE_SIZE), force).await?;
+        let list: Vec<Value> = serde_json::from_slice(&bytes).map_err(|e| ApiError::unreadable("GitHub", &e))?;
         Ok(list.len())
     }
 

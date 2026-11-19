@@ -292,6 +292,7 @@ list.sy-sidebar-list > row:selected { background-color: alpha(@sy_text, 0.07); b
 .sy-count { color: @sy_muted; font-feature-settings: "tnum"; }
 .chip { padding: 1px 7px; border-radius: 999px; font-size: 0.82em; font-weight: 500; }
 .chip.mono { font-family: monospace; font-weight: 400; }
+button.chip-button { padding: 0; min-height: 0; min-width: 0; border-radius: 999px; }
 .state-dot { min-width: 22px; min-height: 22px; border-radius: 999px; }
 .state-pill { padding: 3px 10px; border-radius: 999px; font-weight: 600; color: @sy_on_accent; }
 .icon-tile { border-radius: 6px; }

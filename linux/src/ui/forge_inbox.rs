@@ -110,7 +110,7 @@ fn notification_row(n: &ForgeNotification, on_done: impl Fn() + 'static) -> gtk:
 impl Inbox {
     fn render(self: &Rc<Self>) {
         let items = self.items.borrow().clone();
-        self.title.set_subtitle(&if items.is_empty() { String::new() } else { items.len().to_string() });
+        self.title.set_subtitle(&if items.is_empty() { String::new() } else { util::plural(items.len() as i64, "item", "items") });
         let err = self.error.borrow().clone();
         self.status.update(self.updated.get(), self.refreshing.get(), if items.is_empty() { None } else { err.clone() });
         let weak = Rc::downgrade(self);
@@ -136,6 +136,18 @@ impl Inbox {
                         me.mark_done(target.clone());
                     }
                 })));
+                let mut spoken = vec![];
+                if n.unread {
+                    spoken.push("Unread".to_string());
+                }
+                spoken.push(n.title.clone());
+                spoken.push(n.reason.clone());
+                if !n.repo.is_empty() {
+                    spoken.push(n.repo.clone());
+                }
+                spoken.push(util::rel(Some(n.updated_at)));
+                set_label(&row, &spoken.join(", "));
+                row.set_tooltip_text(Some("Press Enter or double-click to open in the browser"));
                 let weak = Rc::downgrade(self);
                 let target = n.clone();
                 context_menu(&row, move || {
@@ -143,7 +155,7 @@ impl Inbox {
                     let url = target.url.clone();
                     menu.item("Open in Browser", move || util::open_url(&url));
                     let url = target.url.clone();
-                    menu.item("Copy Link", move || util::copy(&url));
+                    menu.item("Copy Link", move || app::copy(&url, "Copied link"));
                     let weak = weak.clone();
                     let t = target.clone();
                     menu.item("Mark as Done", move || {
@@ -196,7 +208,7 @@ impl Inbox {
                     app::get().set_unread(unread);
                     me.render();
                 }
-                Err(e) => app::toast(&e.message),
+                Err(e) => app::toast_error(&e.message),
             }
         });
     }
@@ -206,8 +218,8 @@ pub fn inbox() -> gtk::Widget {
     let caps = app::forge_caps();
     let list = gtk::ListBox::new();
     list.add_css_class("sy-list");
-    list.set_selection_mode(gtk::SelectionMode::None);
-    list.set_activate_on_single_click(true);
+    list.set_selection_mode(gtk::SelectionMode::Single);
+    list.set_activate_on_single_click(false);
     let title = adw::WindowTitle::new(caps.inbox_title.unwrap_or("Inbox"), "");
     let stack = gtk::Stack::new();
     let holder: Rc<RefCell<Option<std::rc::Weak<Inbox>>>> = Rc::new(RefCell::new(None));
@@ -338,15 +350,20 @@ impl Repos {
             for r in &visible {
                 let row = gtk::ListBoxRow::new();
                 row.set_child(Some(&repo_row(r)));
+                set_label(&row, &match &r.description {
+                    Some(d) if !d.is_empty() => format!("{}, {d}", r.full_name),
+                    _ => r.full_name.clone(),
+                });
+                row.set_tooltip_text(Some("Press Enter or double-click to open in the browser"));
                 let target = r.clone();
                 context_menu(&row, move || {
                     let menu = Menu::ctx();
                     let url = target.url.clone();
                     menu.item("Open in Browser", move || util::open_url(&url));
                     let url = target.url.clone();
-                    menu.item("Copy Link", move || util::copy(&url));
+                    menu.item("Copy Link", move || app::copy(&url, "Copied link"));
                     let name = target.full_name.clone();
-                    menu.item("Copy Name", move || util::copy(&name));
+                    menu.item("Copy Name", move || app::copy(&name, &format!("Copied {name}")));
                     menu
                 });
                 self.list.append(&row);
@@ -384,7 +401,8 @@ pub fn repos() -> gtk::Widget {
     let provider = app::provider();
     let list = gtk::ListBox::new();
     list.add_css_class("sy-list");
-    list.set_selection_mode(gtk::SelectionMode::None);
+    list.set_selection_mode(gtk::SelectionMode::Single);
+    list.set_activate_on_single_click(false);
     let title = adw::WindowTitle::new(provider.repositories_title(), "");
     let stack = gtk::Stack::new();
     let search = gtk::SearchEntry::new();

@@ -103,10 +103,11 @@ pub fn install(app: &adw::Application) {
     app.add_action(&action);
 }
 
-fn open(account: &str, url: &str) {
+pub fn open(account: &str, url: &str) {
     let Some(a) = app::try_get() else { return };
     a.present();
     if a.state.borrow().phase != app::Phase::LoggedIn {
+        a.queue_activity(account, url);
         return;
     }
     if !account.is_empty() && account != app::cache_account() {

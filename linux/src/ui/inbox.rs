@@ -49,8 +49,7 @@ fn section(container: &gtk::Box, popover: &gtk::Popover, title: &str, count: i64
         let p = popover.clone();
         b.connect_clicked(move |_| {
             p.popdown();
-            app::select(Some(route.clone()));
-            app::get().present();
+            app::open(route.clone(), false);
         });
         container.append(&b);
     }
@@ -97,7 +96,8 @@ fn fill(container: &gtk::Box, popover: &gtk::Popover) {
     l.set_hexpand(true);
     row.append(&l);
     if unread > 0 {
-        row.append(&chip(&if unread >= 50 { "50+".to_string() } else { unread.to_string() }, "amber", None, false));
+        let shown = if provider.is_github() { crate::list_sort::capped(unread, crate::api::NOTIFICATION_PAGE_SIZE) } else { unread.to_string() };
+        row.append(&chip(&shown, "amber", None, false));
     }
     n.set_child(Some(&row));
     let p = popover.clone();
@@ -127,10 +127,24 @@ pub fn button() -> gtk::MenuButton {
     header.append(&user);
     header.append(&spacer());
     let refresh = icon_button("view-refresh-symbolic", "Refresh");
-    refresh.connect_clicked(|_| {
+    let busy = spinner(14);
+    busy.set_visible(false);
+    busy.update_property(&[gtk::accessible::Property::Label("Refreshing")]);
+    let progress = busy.clone();
+    refresh.connect_clicked(move |b| {
         let a = app::get();
-        crate::rt::spawn_local(async move { a.refresh_badges(true).await });
+        let (b, progress) = (b.clone(), progress.clone());
+        b.set_visible(false);
+        progress.set_visible(true);
+        progress.set_spinning(true);
+        crate::rt::spawn_local(async move {
+            a.refresh_badges(true).await;
+            progress.set_spinning(false);
+            progress.set_visible(false);
+            b.set_visible(true);
+        });
     });
+    header.append(&busy);
     header.append(&refresh);
     col.append(&header);
     col.append(&line());
@@ -147,9 +161,12 @@ pub fn button() -> gtk::MenuButton {
     let p = popover.clone();
     let it = items.clone();
     let u = user.clone();
+    user.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
     popover.connect_show(move |_| {
-        if let Some(login) = app::get().state.borrow().user.as_ref().map(|u| u.login.clone()) {
-            u.set_text(&format!("@{login}"));
+        let login = app::get().state.borrow().user.as_ref().map(|u| format!("@{}", u.login));
+        if let Some(subtitle) = app::account().map(|a| a.subtitle()).or(login) {
+            u.set_text(&subtitle);
+            u.set_tooltip_text(Some(&format!("{} — {subtitle}", app::provider().title())));
         }
         fill(&it, &p);
     });

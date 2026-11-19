@@ -21,6 +21,8 @@ struct View {
     mark_all: gtk::Button,
     empty: gtk::Box,
     rendered: RefCell<String>,
+    open_bar: gtk::Box,
+    cap_note: gtk::Label,
 }
 
 fn icon_for(kind: &str) -> (&'static str, &'static str) {
@@ -136,7 +138,13 @@ impl View {
         let items = self.items.borrow().clone();
         self.status.update(self.updated.get(), self.loading.get(), if items.is_empty() { None } else { self.error.borrow().clone() });
         self.mark_all.set_sensitive(items.iter().any(|n| n.unread));
+        let capped = items.len() >= crate::api::NOTIFICATION_PAGE_SIZE;
+        if capped {
+            self.cap_note.set_text(&format!("Showing the latest {} notifications. Mark some as done to see older ones.", items.len()));
+        }
+        self.cap_note.set_visible(capped);
         if items.is_empty() {
+            self.open_bar.set_visible(false);
             self.list.remove_all();
             self.rendered.borrow_mut().clear();
             if self.loading.get() {
@@ -204,6 +212,29 @@ impl View {
             });
             self.list.append(&r);
         }
+    }
+
+    fn selected(&self) -> Option<NotificationThread> {
+        let index = self.list.selected_row()?.index();
+        self.items.borrow().get(index.max(0) as usize).cloned()
+    }
+
+    fn open_external(self: &Rc<Self>, n: NotificationThread) {
+        util::open_url(&n.web_url());
+        if n.unread {
+            self.mark_read(n);
+        }
+    }
+
+    fn confirm_mark_all(self: &Rc<Self>) {
+        let capped = self.items.borrow().len() >= crate::api::NOTIFICATION_PAGE_SIZE;
+        let body = if capped { "This also marks notifications that aren't loaded in this list." } else { "Every unread notification in your inbox is marked as read." };
+        let weak = Rc::downgrade(self);
+        super::dialogs::confirm("Mark all notifications as read?", Some(body), "Mark All as Read", false, move || {
+            if let Some(me) = weak.upgrade() {
+                me.mark_all();
+            }
+        });
     }
 
     fn load(self: &Rc<Self>, force: bool) {
@@ -288,6 +319,20 @@ impl View {
 pub fn build() -> gtk::Widget {
     let list = gtk::ListBox::new();
     list.add_css_class("sy-list");
+    list.set_activate_on_single_click(false);
+    let open_bar = hbox(8);
+    open_bar.add_css_class("sy-bar-top");
+    margins(&open_bar, 6, 12, 6, 12);
+    open_bar.append(&colored_icon("sy-external-symbolic", 14, "muted"));
+    let open_text = ellipsized("This notification opens in the browser", &["sy-muted", "sy-small"]);
+    open_text.set_hexpand(true);
+    open_bar.append(&open_text);
+    let open_button = button("Open");
+    open_bar.append(&open_button);
+    open_bar.set_visible(false);
+    let cap_note = wrap_label("", &["sy-muted", "sy-small"]);
+    margins(&cap_note, 6, 12, 6, 12);
+    cap_note.set_visible(false);
     let stack = gtk::Stack::new();
     stack.add_named(&scrolled(&list), Some("list"));
     stack.add_named(&loading(), Some("loading"));
@@ -313,6 +358,8 @@ pub fn build() -> gtk::Widget {
         mark_all: mark_all.clone(),
         empty,
         rendered: RefCell::new(String::new()),
+        open_bar: open_bar.clone(),
+        cap_note: cap_note.clone(),
     });
     *holder.borrow_mut() = Some(Rc::downgrade(&view));
 
@@ -340,24 +387,38 @@ pub fn build() -> gtk::Widget {
     bar.append(&toggles);
 
     let v = Rc::downgrade(&view);
-    list.connect_row_activated(move |_, row| {
+    list.connect_row_selected(move |_, row| {
         let Some(v) = v.upgrade() else { return };
-        let idx = row.index();
-        let n = v.items.borrow().get(idx.max(0) as usize).cloned();
-        if let Some(n) = n {
-            match n.route() {
-                Some(r) => app::select(Some(r)),
-                None => util::open_url(&n.web_url()),
-            }
+        let n = row.and_then(|r| v.items.borrow().get(r.index().max(0) as usize).cloned());
+        let route = n.as_ref().and_then(|n| n.route());
+        v.open_bar.set_visible(n.is_some() && route.is_none());
+        let (Some(n), Some(route)) = (n, route) else { return };
+        gtk::glib::idle_add_local_once(move || {
+            app::select(Some(route));
             if n.unread {
                 v.mark_read(n);
             }
+        });
+    });
+    let v = Rc::downgrade(&view);
+    list.connect_row_activated(move |_, row| {
+        let Some(v) = v.upgrade() else { return };
+        let n = v.items.borrow().get(row.index().max(0) as usize).cloned();
+        if let Some(n) = n.filter(|n| n.route().is_none()) {
+            v.open_external(n);
+        }
+    });
+    let v = Rc::downgrade(&view);
+    open_button.connect_clicked(move |_| {
+        let Some(v) = v.upgrade() else { return };
+        if let Some(n) = v.selected().filter(|n| n.route().is_none()) {
+            v.open_external(n);
         }
     });
     let v = Rc::downgrade(&view);
     mark_all.connect_clicked(move |_| {
         if let Some(v) = v.upgrade() {
-            v.mark_all();
+            v.confirm_mark_all();
         }
     });
 
@@ -365,6 +426,8 @@ pub fn build() -> gtk::Widget {
     content.append(&bar);
     content.append(&line());
     content.append(&view.stack);
+    content.append(&cap_note);
+    content.append(&open_bar);
     content.append(&footer(&view.status));
     let tv = adw::ToolbarView::new();
     let hb = adw::HeaderBar::new();

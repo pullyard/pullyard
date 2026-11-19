@@ -43,7 +43,7 @@ impl GitProvider {
 
     pub fn short_title(&self) -> &'static str {
         match self {
-            GitProvider::GithubEnterprise => "GHE",
+            GitProvider::GithubEnterprise => "GH Enterprise",
             GitProvider::Gitea => "Gitea",
             _ => self.title(),
         }

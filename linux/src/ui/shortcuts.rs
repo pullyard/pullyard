@@ -12,7 +12,9 @@ const GROUPS: &[Group] = &[
             ("Open by link", "<Control>l"),
             ("Refresh", "<Control>r"),
             ("Back", "<Alt>Left"),
+            ("Forward", "<Alt>Right"),
             ("Copy short link", "<Control><Shift>c"),
+            ("Lock now", "<Control><Shift>l"),
             ("Preferences", "<Control>comma"),
             ("Keyboard shortcuts", "<Control>question"),
             ("Quit", "<Control>q"),
@@ -39,6 +41,16 @@ const GROUPS: &[Group] = &[
             ("Send message", "Return"),
             ("New line", "<Shift>Return"),
             ("Stop the agent", "Escape"),
+        ],
+    ),
+    (
+        "Pull request",
+        &[
+            ("Write review", "<Control><Shift>r"),
+            ("Approve", "<Control><Shift>a"),
+            ("Merge", "<Control><Shift>m"),
+            ("Copy short link", "<Control><Shift>c"),
+            ("Send comment", "<Control>Return"),
         ],
     ),
     (
