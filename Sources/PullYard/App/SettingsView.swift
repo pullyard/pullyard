@@ -14,6 +14,10 @@ struct SettingsView: View {
     @State private var pendingSwitch: GitAccount?
     @State private var confirmSignOut = false
     @State private var showLicenses = false
+    @State private var tokenStatus: String?
+    @State private var tokenFailed = false
+    @State private var refreshingToken = false
+    @AppStorage("clipboard.watch") private var watchClipboard = true
     @AppStorage("settings.tab") private var tab = "general"
     @AppStorage(Updater.autoCheckKey) private var autoCheckUpdates = true
     @AppStorage(Diagnostics.enabledKey) private var diagnosticsEnabled = false
@@ -42,7 +46,7 @@ struct SettingsView: View {
         .sheet(isPresented: $showLicenses) { LicensesSheet() }
         .modifier(AccountDialogs(pendingSwitch: $pendingSwitch, confirmSignOut: $confirmSignOut, showAdd: $showAddAccount))
         .confirmationDialog("Sign out of Claude Code?", isPresented: $confirmClaudeLogout) {
-            Button("Sign out", role: .destructive) {
+            Button("Sign Out", role: .destructive) {
                 loggingOut = true
                 Task {
                     app.claude.sleepAll()
@@ -68,6 +72,13 @@ struct SettingsView: View {
                     ForEach(AppearanceMode.allCases) { Text($0.title).tag($0.rawValue) }
                 }
                 .pickerStyle(.segmented)
+                Picker("Text size", selection: Binding(get: { Double(TextZoom.shared.scale) }, set: { TextZoom.shared.setScale(CGFloat($0)) })) {
+                    ForEach(TextZoom.levels, id: \.self) { level in
+                        Text(abs(level - 1) < 0.001 ? "100% (default)" : "\(Int((level * 100).rounded()))%").tag(Double(level))
+                    }
+                }
+                .help("Also ⌘+ and ⌘− in the main window")
+                Toggle("Show PullYard in the menu bar", isOn: Binding(get: { app.showMenuBar }, set: { app.showMenuBar = $0 }))
             } header: {
                 SettingsHeader(title: "Appearance", icon: "paintpalette.fill", color: .syViolet)
             }
@@ -77,11 +88,13 @@ struct SettingsView: View {
                     ForEach(LinkBrowser.installed) { Text($0.name).tag($0.id) }
                 }
                 .id(browserTick)
+                Toggle("Offer to open a copied pull request or issue link", isOn: $watchClipboard)
+                    .onChange(of: watchClipboard) { app.checkClipboard() }
             } header: {
                 SettingsHeader(title: "Links", icon: "link", color: .syIndigo)
             }
             Section {
-                Picker("Auto-refresh pull requests", selection: $pollInterval) {
+                Picker("Auto-refresh lists", selection: $pollInterval) {
                     Text("Every 15 seconds").tag(15.0)
                     Text("Every 30 seconds").tag(30.0)
                     Text("Every minute").tag(60.0)
@@ -139,12 +152,28 @@ struct SettingsView: View {
                         }
                         .fixedSize()
                         if app.provider.isGitHub, GHCLI.binary != nil {
-                            Button("Refresh token from gh") {
-                                Task { await app.refreshTokenFromGH() }
+                            Button(refreshingToken ? "Refreshing…" : "Refresh token from gh") {
+                                refreshingToken = true
+                                tokenStatus = nil
+                                Task {
+                                    let failure = await app.refreshTokenFromGH()
+                                    refreshingToken = false
+                                    tokenFailed = failure != nil
+                                    tokenStatus = failure.map { "Couldn’t read the token from gh: \($0)" } ?? "Token refreshed from gh."
+                                }
                             }
+                            .disabled(refreshingToken)
                         }
                         Spacer()
-                        Button("Sign out…", role: .destructive) { confirmSignOut = true }
+                        if app.canLock {
+                            Button("Lock Now") { app.lockNow() }
+                        }
+                        Button("Sign Out…", role: .destructive) { confirmSignOut = true }
+                    }
+                    if let tokenStatus {
+                        Label(tokenStatus, systemImage: tokenFailed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .font(.syCaption)
+                            .foregroundStyle(tokenFailed ? Color.syRed : Color.syMuted)
                     }
                 } else {
                     Text("Not signed in").foregroundStyle(Color.syMuted)
@@ -213,7 +242,7 @@ struct SettingsView: View {
                 Toggle("Record network diagnostics", isOn: $diagnosticsEnabled)
                     .onChange(of: diagnosticsEnabled) { Diagnostics.shared.setEnabled(diagnosticsEnabled) }
                 HStack {
-                    Text("Keeps the last 1000 GitHub requests in memory: timing, size, status and rate limit. No tokens or request bodies.")
+                    Text("Keeps the last 1000 API requests in memory: timing, size, status and rate limit. No tokens or request bodies.")
                         .font(.syCaption)
                         .foregroundStyle(Color.syMuted)
                     Spacer()

@@ -64,7 +64,7 @@ struct TabStrip<ID: Hashable>: View {
                 .buttonStyle(.plain)
                 .onHover { h in withAnimation(Motion.fade) { hovered = h ? item.id : (hovered == item.id ? nil : hovered) } }
                 .modifier(OptionalShortcut(key: shortcuts && index < 9 ? Character("\(index + 1)") : nil))
-                .help(shortcuts && index < 9 ? "\(item.title) (⌃\(index + 1))" : item.title)
+                .help(shortcuts && index < 9 ? "\(item.title) (⌥⌘\(index + 1))" : item.title)
                 .accessibilityLabel(item.badgeLabel.map { "\(item.title), \($0)" } ?? item.badge.map { "\(item.title), \($0)" } ?? item.title)
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
@@ -79,7 +79,7 @@ struct OptionalShortcut: ViewModifier {
 
     func body(content: Content) -> some View {
         if let key {
-            content.keyboardShortcut(KeyEquivalent(key), modifiers: .control)
+            content.keyboardShortcut(KeyEquivalent(key), modifiers: [.command, .option])
         } else {
             content
         }

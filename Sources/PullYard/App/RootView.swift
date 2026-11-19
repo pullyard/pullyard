@@ -101,6 +101,7 @@ struct AppShell: View {
     @Environment(AppModel.self) private var app
     @AppStorage("agents.sidebarHidden") private var hidden = false
     @AppStorage("shell.listWidth") private var listWidth: Double = 360
+    @AppStorage("shell.sidebarWidth") private var sidebarStored: Double = 220
     @State private var windowWidth: CGFloat = 0
 
     static let compactBelow: CGFloat = 1180
@@ -108,7 +109,7 @@ struct AppShell: View {
     static let railWidth: CGFloat = 60
 
     private var compact: Bool { windowWidth > 0 && windowWidth < Self.compactBelow }
-    private var sidebarWidth: CGFloat { compact ? Self.railWidth : Self.sidebarWidth }
+    private var sidebarWidth: CGFloat { compact ? Self.railWidth : CGFloat(sidebarStored) }
     private var effectiveListWidth: CGFloat { compact ? min(CGFloat(listWidth), 320) : CGFloat(listWidth) }
 
     var body: some View {
@@ -118,7 +119,11 @@ struct AppShell: View {
                     SidebarView(compact: compact)
                         .frame(width: sidebarWidth)
                         .surface(.sidebar)
-                    Rectangle().fill(Color.syLine).frame(width: 1)
+                    if compact {
+                        Rectangle().fill(Color.syLine).frame(width: 1)
+                    } else {
+                        ColumnResizeHandle(width: $sidebarStored, range: 180...320, edge: .leading, reset: Double(Self.sidebarWidth))
+                    }
                     ContentColumn()
                         .frame(width: effectiveListWidth)
                         .frame(maxHeight: .infinity)
@@ -183,7 +188,7 @@ struct DetailColumn: View {
                                 IconTile(systemImage: "arrow.triangle.pull", color: .syViolet, size: 56)
                                     .opacity(0.9)
                                 Text("Select a pull request, issue or project").foregroundStyle(Color.syMuted)
-                                Text("⌘L to open by link · ⌘K for the command palette").font(.syCaption).foregroundStyle(Color.syMuted)
+                                Text("⌘L to open by link · ⌘K for the command palette · ⌘/ for all shortcuts").font(.syCaption).foregroundStyle(Color.syMuted)
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .transition(.opacity)
@@ -312,7 +317,7 @@ struct SidebarView: View {
         }
         SidebarGroup(app.provider.requestsTitle) {
             ForEach(caps.pullFilters) { f in
-                SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0))
+                SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0), group: app.provider.requestsTitle)
             }
             if caps.pullFilters.contains(.mine) {
                 SidebarRow(section: .myPRsByRepo, title: "My \(app.provider.requestShort)s by project", icon: "folder.fill", color: .syCoral)
@@ -321,7 +326,7 @@ struct SidebarView: View {
         if !caps.issueFilters.isEmpty {
             SidebarGroup("Issues") {
                 ForEach(caps.issueFilters) { f in
-                    SidebarRow(section: .issues(f), title: f.title, icon: f.tileIcon, color: f.tint)
+                    SidebarRow(section: .issues(f), title: f.title, icon: f.tileIcon, color: f.tint, group: "Issues")
                 }
             }
         }
@@ -339,14 +344,14 @@ struct SidebarView: View {
         }
         SidebarGroup("Pull requests") {
             ForEach(PRFilter.allCases) { f in
-                SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0))
+                SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0), group: "Pull requests")
             }
             SidebarRow(section: .myPRsByRepo, title: "My PRs by project", icon: "folder.fill", color: .syCoral)
             SidebarRow(section: .stacks, title: "Stacks", icon: "square.stack.3d.up.fill", color: .syIndigo)
         }
         SidebarGroup("Issues") {
             ForEach(IssueFilter.allCases) { f in
-                SidebarRow(section: .issues(f), title: f.title, icon: f.tileIcon, color: f.tint)
+                SidebarRow(section: .issues(f), title: f.title, icon: f.tileIcon, color: f.tint, group: "Issues")
             }
         }
         SidebarGroup("Code") {
@@ -443,7 +448,10 @@ struct SidebarRow: View {
     let icon: String
     let color: Color
     var count = 0
+    var group: String?
     @State private var hovering = false
+
+    private var spoken: String { group.map { "\($0): \(title)" } ?? title }
 
     var body: some View {
         let selected = app.section == section
@@ -496,8 +504,8 @@ struct SidebarRow: View {
         .onHover { hovering = $0 }
         .animation(Motion.fade, value: selected)
         .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))
-        .help(compact ? (count > 0 ? "\(title) (\(count))" : title) : "")
-        .accessibilityLabel(title)
+        .help(count > 0 ? "\(spoken) (\(count))" : spoken)
+        .accessibilityLabel(spoken)
         .accessibilityValue(count > 0 ? "\(count)" : "")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -681,7 +689,7 @@ struct RateLimitBanner: View {
         if let until = app.rateLimitedUntil {
             HStack(spacing: 6) {
                 Image(systemName: "hourglass").foregroundStyle(Color.syAmber)
-                Text("GitHub rate limit — live updates paused until \(until.formatted(date: .omitted, time: .shortened))")
+                Text("\(app.provider.title) rate limit — live updates paused until \(until.formatted(date: .omitted, time: .shortened))")
                     .foregroundStyle(Color.syMuted)
                     .lineLimit(1)
             }

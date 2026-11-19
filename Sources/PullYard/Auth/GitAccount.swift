@@ -17,7 +17,7 @@ enum GitProvider: String, Codable, CaseIterable, Identifiable {
 
     var shortTitle: String {
         switch self {
-        case .githubEnterprise: return "GHE"
+        case .githubEnterprise: return "GH Enterprise"
         case .gitea: return "Gitea"
         default: return title
         }

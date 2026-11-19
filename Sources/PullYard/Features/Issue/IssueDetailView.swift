@@ -78,6 +78,7 @@ struct IssueDetailView: View {
     @Environment(AppModel.self) private var app
     @State private var model: IssueDetailModel?
     @State private var text = ""
+    @State private var confirmClose = false
 
     private var draftKey: String {
         DraftStore.key(account: app.cacheAccount, host: app.api?.host ?? "github.com", repo: ref.repo.full, number: ref.number, kind: "issue")
@@ -131,7 +132,7 @@ struct IssueDetailView: View {
                 .font(.syCallout)
                 .lineLimit(1)
                 if !issue.labels.nodes.isEmpty || !issue.assignees.nodes.isEmpty {
-                    HStack(spacing: 6) {
+                    FlowLayout(spacing: 6, lineSpacing: 6) {
                         ForEach(issue.labels.nodes, id: \.name) { LabelChip(label: $0) }
                         if !issue.assignees.nodes.isEmpty {
                             Text("Assignees:").font(.syCaption).foregroundStyle(Color.syMuted).padding(.leading, issue.labels.nodes.isEmpty ? 0 : 6)
@@ -169,7 +170,7 @@ struct IssueDetailView: View {
                 }
                 if issue.viewerCanUpdate {
                     if issue.issueState == "OPEN" {
-                        Button { Task { await model.setOpen(false) } } label: { Label("Close", systemImage: "checkmark.circle") }
+                        Button { confirmClose = true } label: { Label("Close", systemImage: "checkmark.circle") }
                             .labelStyle(.titleAndIcon)
                             .help("Close issue")
                     } else {
@@ -179,16 +180,25 @@ struct IssueDetailView: View {
                     }
                 }
                 ControlGroup {
-                    Button { copyToPasteboard(issue.url) } label: { Label("Copy Link", systemImage: "link") }
+                    Button {
+                        copyToPasteboard(issue.url, announce: false)
+                        app.showToast("Copied link")
+                    } label: { Label("Copy Link", systemImage: "link") }
                         .help("Copy link")
                     Button { openInBrowser(issue.url) } label: { Label("Open in Browser", systemImage: "safari") }
-                        .help("Open on github.com")
+                        .help("Open in browser")
                 } label: {
                     Label("Share", systemImage: "link")
                 }
             }
         }
-        .alert("Error", isPresented: Binding(get: { model.actionError != nil }, set: { if !$0 { model.actionError = nil } })) {
+        .confirmationDialog("Close issue #\(issue.number)?", isPresented: $confirmClose) {
+            Button("Close issue", role: .destructive) { Task { await model.setOpen(false) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You can reopen it later.")
+        }
+        .alert("Couldn’t complete the action", isPresented: Binding(get: { model.actionError != nil }, set: { if !$0 { model.actionError = nil } })) {
             Button("OK") {}
         } message: {
             Text(model.actionError ?? "")

@@ -44,6 +44,7 @@ struct PRDetailContent: View {
     @Bindable var model: PRDetailModel
     let pr: PullRequestDetail
     @Environment(AppModel.self) private var app
+    @Environment(\.liveFront) private var front
     @State private var showReview = false
     @State private var showMerge = false
     @State private var showEdit = false
@@ -78,6 +79,7 @@ struct PRDetailContent: View {
         .navigationTitle(pr.title)
         .navigationSubtitle("\(model.ref.repo.full) #\(pr.number)")
         .task(id: pr.url) { app.noteCanonical(model.ref, url: pr.url) }
+        .background { if front { reviewShortcuts } }
         .panelToolbar(id: "pr-detail") { toolbar }
         .sheet(isPresented: $showReview) { ReviewSheet(model: model, pr: pr) }
         .sheet(isPresented: $showMerge) { MergeSheet(model: model, pr: pr) }
@@ -96,6 +98,23 @@ struct PRDetailContent: View {
             Button(confirmButton(c), role: c == .approve || c == .rerunFailed ? nil : .destructive) { perform(c) }
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    private var reviewShortcuts: some View {
+        Group {
+            Button("Write review") { showReview = true }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(!pr.isOpen)
+            Button("Approve") { confirm = .approve }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+                .disabled(!pr.isOpen || pr.viewerDidAuthor)
+            Button("Merge") { showMerge = true }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+                .disabled(!canMerge)
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -237,7 +256,7 @@ struct PRDetailContent: View {
                     showReview = true
                 }
                 .labelStyle(.titleAndIcon)
-                .help(model.pending.isEmpty ? "Write a review" : "Submit review with \(plural(model.pending.count, "pending comment", "pending comments"))")
+                .help(model.pending.isEmpty ? "Write a review (⇧⌘R)" : "Submit review with \(plural(model.pending.count, "pending comment", "pending comments")) (⇧⌘R)")
             }
             ToolbarItem(id: "pr.requestReview", placement: .primaryAction, showsByDefault: false) {
                 Button { showReviewers = true } label: { Label("Request review", systemImage: "person.crop.circle.badge.plus") }
@@ -255,13 +274,13 @@ struct PRDetailContent: View {
             ToolbarItem(id: "pr.merge", placement: .primaryAction) {
                 Button { showMerge = true } label: { Label("Merge", systemImage: "arrow.triangle.merge") }
                     .labelStyle(.titleAndIcon)
-                    .help("Merge pull request")
+                    .help("Merge pull request (⇧⌘M)")
             }
         }
         ToolbarItem(id: "pr.more", placement: .primaryAction) {
             ControlGroup {
                 Button { openInBrowser(pr.url) } label: { Label("Open in browser", systemImage: "safari") }
-                    .help("Open on github.com")
+                    .help("Open in browser")
                 Menu {
                     moreMenu
                 } label: {
@@ -276,10 +295,10 @@ struct PRDetailContent: View {
 
     @ViewBuilder
     private var moreMenu: some View {
-        Button("Copy link") { copyToPasteboard(pr.url) }
+        Button("Copy link") { copy(pr.url, "Copied link") }
         Button("Copy short link") { app.copyShortLink(ShortLink.ref(url: pr.url) ?? model.ref) }
-        Button("Copy “gh pr checkout \(pr.number)”") { copyToPasteboard("gh pr checkout \(pr.number) -R \(model.ref.repo.full)") }
-        Button("Copy branch name") { copyToPasteboard(pr.headRefName) }
+        Button("Copy “gh pr checkout \(pr.number)”") { copy("gh pr checkout \(pr.number) -R \(model.ref.repo.full)", "Copied checkout command") }
+        Button("Copy branch name") { copy(pr.headRefName, "Copied \(pr.headRefName)") }
         Divider()
         if pr.viewerCanUpdate {
             Button("Edit title and description…") { showEdit = true }
@@ -311,6 +330,13 @@ struct PRDetailContent: View {
         if !pr.isOpen, pr.headRef != nil, model.canWrite {
             Button("Delete branch \(pr.headRefName)…") { confirm = .deleteBranch }
         }
+    }
+}
+
+extension PRDetailContent {
+    fileprivate func copy(_ value: String, _ message: String) {
+        copyToPasteboard(value, announce: false)
+        app.showToast(message)
     }
 }
 
@@ -387,7 +413,7 @@ struct PRHeaderView: View {
             .font(.syCallout)
             .lineLimit(1)
             if !pr.labels.nodes.isEmpty || !model.reviewers.isEmpty || !pr.assignees.nodes.isEmpty {
-                HStack(spacing: 6) {
+                FlowLayout(spacing: 6, lineSpacing: 6) {
                     ForEach(pr.labels.nodes, id: \.name) { LabelChip(label: $0) }
                     if !model.reviewers.isEmpty {
                         Text("Reviewers:").font(.syCaption).foregroundStyle(Color.syMuted).padding(.leading, pr.labels.nodes.isEmpty ? 0 : 6)
@@ -494,16 +520,25 @@ struct StackStrip: View {
 struct BranchChip: View {
     let name: String
     var color: Color = .sySky
+    @Environment(AppModel.self) private var app
 
     var body: some View {
-        Text(name)
-            .font(.syCaption.monospaced())
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(color.opacity(0.12)))
-            .foregroundStyle(color)
-            .onTapGesture { copyToPasteboard(name) }
-            .help("Click to copy")
+        Button {
+            copyToPasteboard(name, announce: false)
+            app.showToast("Copied \(name)")
+        } label: {
+            Text(name)
+                .font(.syCaption.monospaced())
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(color.opacity(0.12)))
+                .foregroundStyle(color)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Copy branch name")
+        .accessibilityLabel("Branch \(name)")
+        .accessibilityHint("Copies the branch name")
     }
 }
 
@@ -779,6 +814,7 @@ struct ConversationTab: View {
 struct CommitsTab: View {
     let model: PRDetailModel
     let pr: PullRequestDetail
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         List {
@@ -805,7 +841,10 @@ struct CommitsTab: View {
                     .rowAppear(c.oid, model.commitRows)
                 }
                 .contextMenu {
-                    Button("Copy SHA") { copyToPasteboard(c.oid) }
+                    Button("Copy SHA") {
+                        copyToPasteboard(c.oid, announce: false)
+                        app.showToast("Copied \(c.abbreviatedOid)")
+                    }
                     Button("Open in browser") { openInBrowser(c.url) }
                 }
             }

@@ -83,6 +83,60 @@ enum SidebarSection: Hashable {
     case repos
     case projects
     case claude
+
+    var storageKey: String {
+        switch self {
+        case .notifications: return "notifications"
+        case .prs(let f): return "prs/\(f.rawValue)"
+        case .myPRsByRepo: return "prs/byProject"
+        case .stacks: return "stacks"
+        case .issues(let f): return "issues/\(f.rawValue)"
+        case .repos: return "repos"
+        case .projects: return "projects"
+        case .claude: return "claude"
+        }
+    }
+
+    init?(storageKey: String) {
+        let parts = storageKey.split(separator: "/").map(String.init)
+        switch (parts.first, parts.dropFirst().first) {
+        case ("notifications", _): self = .notifications
+        case ("prs", "byProject"): self = .myPRsByRepo
+        case ("prs", let f?): self = .prs(PRFilter(rawValue: f) ?? .reviewRequested)
+        case ("stacks", _): self = .stacks
+        case ("issues", let f?): self = .issues(IssueFilter(rawValue: f) ?? .assigned)
+        case ("repos", _): self = .repos
+        case ("projects", _): self = .projects
+        case ("claude", _): self = .claude
+        default: return nil
+        }
+    }
+}
+
+enum NavigationMemory {
+    static let sectionKey = "nav.section"
+    static let routeKey = "nav.route"
+
+    static func encode(_ route: Route, account: String?) -> String? {
+        let owner = account ?? ""
+        switch route {
+        case .pr(let ref): return "\(owner)|pr|\(ref.repo.full)|\(ref.number)"
+        case .issue(let ref): return "\(owner)|issue|\(ref.repo.full)|\(ref.number)"
+        case .repo(let repo): return "\(owner)|repo|\(repo.full)|0"
+        default: return nil
+        }
+    }
+
+    static func decode(_ stored: String, account: String?) -> Route? {
+        let parts = stored.components(separatedBy: "|")
+        guard parts.count == 4, parts[0] == (account ?? ""), let repo = RepoRef(full: parts[2]) else { return nil }
+        switch parts[1] {
+        case "pr": return Int(parts[3]).map { .pr(ItemRef(repo: repo, number: $0)) }
+        case "issue": return Int(parts[3]).map { .issue(ItemRef(repo: repo, number: $0)) }
+        case "repo": return .repo(repo)
+        default: return nil
+        }
+    }
 }
 
 @Observable
@@ -91,7 +145,11 @@ final class AppModel {
     enum Phase { case checking, loggedOut, locked, loggedIn }
 
     var phase: Phase = .checking {
-        didSet { if phase == .loggedIn, oldValue != .loggedIn { replayPending() } }
+        didSet {
+            guard phase == .loggedIn, oldValue != .loggedIn else { return }
+            restoreRoute()
+            replayPending()
+        }
     }
     @ObservationIgnored private var pendingURL: URL?
     @ObservationIgnored private var pendingTarget: ActivityTarget?
@@ -105,9 +163,71 @@ final class AppModel {
     var unlockRequest: GitAccount?
     var user: RESTUser?
     var scopes: [String] = []
-    var section: SidebarSection? = .prs(.reviewRequested)
-    var detailRoot: Route?
-    var detailPath: [Route] = []
+    var section: SidebarSection? = AppModel.storedSection {
+        didSet {
+            guard section != oldValue, let section else { return }
+            if let oldValue, oldValue != .claude { lastListSection = oldValue }
+            if !Demo.isOn { UserDefaults.standard.set(section.storageKey, forKey: NavigationMemory.sectionKey) }
+        }
+    }
+    @ObservationIgnored private var lastListSection: SidebarSection?
+    var detailRoot: Route? {
+        didSet {
+            guard detailRoot != oldValue, phase == .loggedIn, !Demo.isOn else { return }
+            let stored = detailRoot.flatMap { NavigationMemory.encode($0, account: cacheAccount) }
+            UserDefaults.standard.set(stored, forKey: NavigationMemory.routeKey)
+        }
+    }
+    var detailPath: [Route] = [] {
+        didSet {
+            guard detailPath != oldValue else { return }
+            if detailPath.count < oldValue.count, Array(oldValue.prefix(detailPath.count)) == detailPath {
+                forwardRoutes += oldValue.suffix(oldValue.count - detailPath.count).reversed()
+            } else if detailPath.count == oldValue.count + 1, Array(detailPath.dropLast()) == oldValue, detailPath.last == forwardRoutes.last {
+                forwardRoutes.removeLast()
+            } else {
+                forwardRoutes = []
+            }
+        }
+    }
+    private(set) var forwardRoutes: [Route] = []
+    var showMenuBar = UserDefaults.standard.object(forKey: "menuBar.show") as? Bool ?? true {
+        didSet { if showMenuBar != oldValue { UserDefaults.standard.set(showMenuBar, forKey: "menuBar.show") } }
+    }
+
+    private static var storedSection: SidebarSection {
+        guard !Demo.isOn, let key = UserDefaults.standard.string(forKey: NavigationMemory.sectionKey) else { return .prs(.reviewRequested) }
+        return SidebarSection(storageKey: key) ?? .prs(.reviewRequested)
+    }
+
+    func goBack() {
+        if !detailPath.isEmpty { detailPath.removeLast() }
+    }
+
+    func goForward() {
+        if let next = forwardRoutes.last { detailPath.append(next) }
+    }
+
+    private func restoreRoute() {
+        guard !Demo.isOn, api != nil, detailRoot == nil, section != .claude,
+              let stored = UserDefaults.standard.string(forKey: NavigationMemory.routeKey),
+              let route = NavigationMemory.decode(stored, account: cacheAccount) else { return }
+        detailRoot = route
+        remember(route)
+    }
+
+    func lockNow() {
+        guard phase == .loggedIn, let account, AccountLock.shared.isProtected(account.id) else { return }
+        flushDrafts()
+        pollTask?.cancel()
+        lockedAccount = account
+        ClaudeProfiles.shared.scope = ""
+        phase = .locked
+    }
+
+    var canLock: Bool {
+        phase == .loggedIn && account.map { AccountLock.shared.isProtected($0.id) } == true
+    }
     var refreshTick = 0
     var liveTick = 0
     var showOpenLink = false
@@ -158,6 +278,12 @@ final class AppModel {
                 guard let self, self.section == .claude, let tab = self.claude.selectedTab else { return }
                 tab.unread = false
                 SessionSeen.shared.mark(tab.sessionId)
+            }
+        }
+        NotificationCenter.default.addObserver(forName: .didCopyToPasteboard, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.phase == .loggedIn else { return }
+                self.showToast("Copied")
             }
         }
         NotificationCenter.default.addObserver(forName: .openActivity, object: nil, queue: .main) { [weak self] note in
@@ -279,12 +405,16 @@ final class AppModel {
         }
     }
 
-    func refreshTokenFromGH() async {
+    func refreshTokenFromGH() async -> String? {
         let provider = account?.provider ?? .github
-        guard provider.isGitHub else { return }
+        guard provider.isGitHub else { return nil }
         let host = account?.host ?? GitProvider.github.defaultHost
-        if let t = try? await GHCLI.token(host: host) {
-            try? await addAccount(provider, host: host, credential: GitCredential(token: t))
+        do {
+            let t = try await GHCLI.token(host: host)
+            try await addAccount(provider, host: host, credential: GitCredential(token: t))
+            return nil
+        } catch {
+            return error.localizedDescription
         }
     }
 
@@ -521,6 +651,7 @@ final class AppModel {
         } else {
             Keychain.delete()
         }
+        if let next = GitAccounts.shared.accounts.first { requestSwitch(to: next.id) }
     }
 
     private func revoked() {
@@ -591,7 +722,7 @@ final class AppModel {
 
     func open(_ route: Route, push: Bool = false) {
         if section == .claude || section == nil {
-            section = .prs(.mine)
+            section = lastListSection ?? .prs(.mine)
             detailPath = []
             detailRoot = route
             remember(route)
@@ -759,7 +890,7 @@ final class AppModel {
 
     func copyShortLink(_ ref: ItemRef) {
         let link = ShortLink.make(ref)
-        copyToPasteboard(link)
+        copyToPasteboard(link, announce: false)
         showToast("Copied \(link)")
     }
 
@@ -788,6 +919,10 @@ final class AppModel {
     }
 
     func checkClipboard() {
+        guard UserDefaults.standard.object(forKey: "clipboard.watch") as? Bool ?? true else {
+            clipboardRoute = nil
+            return
+        }
         guard let s = NSPasteboard.general.string(forType: .string), s != lastClipboard else { return }
         lastClipboard = s
         guard api != nil, account?.provider ?? .github == .github, s.count < 300, s.contains("github.com"), let route = GitHubURL.parse(s, allowShort: false) else { return }

@@ -50,7 +50,7 @@ struct ToastBanner: View {
                 Text(text).foregroundStyle(Color.syText).lineLimit(app.toastIsError ? 6 : 1)
                 if app.toastIsError {
                     Button {
-                        copyToPasteboard(text)
+                        copyToPasteboard(text, announce: false)
                         app.dismissToast()
                     } label: { Image(systemName: "doc.on.doc") }
                         .buttonStyle(.borderless)
