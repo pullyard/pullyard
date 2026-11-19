@@ -42,7 +42,7 @@ public sealed class DiagnosticsWindow : Window
         Title = L.F("Diagnostics_WindowTitle", "{0} Diagnostics", AppInfo.DisplayName);
         try
         {
-            SystemBackdrop = new MicaBackdrop();
+            if (Microsoft.UI.Composition.SystemBackdrops.MicaController.IsSupported()) SystemBackdrop = new MicaBackdrop();
         }
         catch
         {
@@ -130,7 +130,7 @@ public sealed class DiagnosticsWindow : Window
         };
         root.RequestedTheme = root.ActualTheme == ElementTheme.Dark ? ElementTheme.Light : ElementTheme.Dark;
         root.RequestedTheme = target;
-        root.Background = ThemeService.IsBrand ? Palette.Brush("window") : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        root.Background = Palette.Brush("window");
     }
 
     private void Render(bool force, bool rebuild = false)

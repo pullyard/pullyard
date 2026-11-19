@@ -95,11 +95,28 @@ public static class DeviceFlow
         throw new ApiException($"Invalid response from {service}", (int)response.StatusCode);
     }
 
+    public static string Friendly(string code, string? description) => code switch
+    {
+        "access_denied" => "Sign-in was cancelled in the browser.",
+        "expired_token" => "The sign-in code expired. Request a new code and try again.",
+        "incorrect_client_credentials" or "invalid_client" or "unauthorized_client" => "The client ID was not accepted. Check it in Settings → Advanced.",
+        "device_flow_disabled" => "Device sign-in is turned off for this OAuth app. Enable it in the app's settings or sign in with a token.",
+        "incorrect_device_code" or "invalid_grant" => "The sign-in code is no longer valid. Request a new code and try again.",
+        _ => string.IsNullOrWhiteSpace(description) ? Humanize(code) : description
+    };
+
+    private static string Humanize(string code)
+    {
+        var words = code.Replace('_', ' ').Trim();
+        return words.Length == 0 ? code : char.ToUpperInvariant(words[0]) + words[1..];
+    }
+
     public static async Task<DeviceCode> Start(string clientId, DeviceEndpoint? endpoint = null, CancellationToken ct = default)
     {
         var e = endpoint ?? GitHub();
         var o = await Post(SharedHttp, e.CodeUrl, new() { ["client_id"] = clientId, ["scope"] = e.Scopes }, e.Service, ct).ConfigureAwait(false);
-        if ((o.Str("error_description") ?? o.Str("error")) is { } error) throw new ApiException(error);
+        if (o.Str("error") is { } code) throw new ApiException(Friendly(code, o.Str("error_description")));
+        if (o.Str("error_description") is { } error) throw new ApiException(error);
         if (o.Str("device_code") is not { } dc || o.Str("user_code") is not { } uc || o.Str("verification_uri") is not { } uri)
             throw new ApiException("Device flow is not available for this Client ID");
         return new DeviceCode(dc, uc, uri, o.Int("expires_in") ?? 900, o.Int("interval") ?? 5);
@@ -128,12 +145,12 @@ public static class DeviceFlow
                     interval += 5;
                     continue;
                 case { } error:
-                    throw new ApiException(o.Str("error_description") ?? error);
+                    throw new ApiException(Friendly(error, o.Str("error_description")));
                 default:
                     throw new ApiException($"Unexpected response from {e.Service}");
             }
         }
-        throw new ApiException("Timed out");
+        throw new ApiException("The sign-in code expired before it was confirmed. Request a new code and try again.");
     }
 
     public static async Task<DeviceToken> Refresh(string clientId, string refreshToken, DeviceEndpoint endpoint, HttpClient? http = null, CancellationToken ct = default)

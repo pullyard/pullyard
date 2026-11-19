@@ -206,6 +206,10 @@ public sealed class UnlockView : Grid
 
     private async Task Reset()
     {
+        var consequences = WindowsHello.Available
+            ? L.T("Lock_ResetConfirmHello", "You'll confirm with Windows Hello. The PIN is removed and the Agents accounts linked to this account are signed out.")
+            : L.T("Lock_ResetConfirmNoHello", "Windows Hello isn't available on this PC, so the PIN can't be reset on its own. The PIN is removed, the Agents accounts linked to this account are signed out, and this account is signed out too. You'll need to sign in again with a token or the CLI.");
+        if (!sheet && !await Dialogs.Confirm(XamlRoot, L.T("Lock_ResetConfirmTitle", "Reset the PIN?"), L.T("Lock_ResetConfirmButton", "Reset PIN…"), true, consequences)) return;
         busy.Visibility = Visibility.Visible;
         try
         {

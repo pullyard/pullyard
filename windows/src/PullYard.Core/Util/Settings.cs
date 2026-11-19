@@ -191,4 +191,12 @@ public static class Keys
     public const string AgentsInspectorWidth = "agents.inspectorWidth";
     public const string AgentsSavedPrompts = "agents.savedPrompts";
     public const string NotifyRecent = "notify.recent";
+    public const string NavSection = "nav.section";
+    public const string NavRoute = "nav.route";
+    public const string ListStatePrefix = "list.state.";
+    public const string ListSortPrefix = "list.sort.";
+    public const string FilesShowList = "pr.files.showList";
+    public const string SidebarWidth = "shell.sidebarWidth";
+    public const string TrayShow = "tray.show";
+    public const string ClipboardWatch = "clipboard.watch";
 }

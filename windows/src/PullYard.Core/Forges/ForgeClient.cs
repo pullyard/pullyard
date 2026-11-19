@@ -109,7 +109,7 @@ public sealed class ForgeHttp
         }
         catch (JsonException e)
         {
-            throw new ApiException($"Failed to parse response from {Service}: {e.Message}");
+            throw ApiException.Unreadable(Service, e);
         }
     }
 
@@ -137,7 +137,7 @@ public sealed class ForgeHttp
         if (status is < 200 or >= 300)
         {
             if (status == 401) throw new ApiException("Token is invalid or revoked (401)", 401);
-            throw new ApiException($"{Service} {status}: {Message(data) ?? ((HttpStatusCode)status).ToString()}", status);
+            throw ApiException.Http(Service, status, Message(data));
         }
         return data;
     }
@@ -227,7 +227,7 @@ public static class ForgeItems
         };
     }
 
-    public static List<SearchItem> NewestFirst(this IEnumerable<SearchItem> items, int limit = 100)
+    public static List<SearchItem> NewestFirst(this IEnumerable<SearchItem> items, int limit = ForgeLimits.ListCap)
     {
         var seen = new HashSet<string>();
         return items.Where(i => seen.Add(i.Id)).OrderByDescending(i => i.UpdatedAt).Take(limit).ToList();
@@ -259,4 +259,9 @@ public sealed class ForgeLabelConverter : JsonConverter<ForgeLabel>
         if (value.Color is { } color) writer.WriteString("color", color);
         writer.WriteEndObject();
     }
+}
+
+public static class ForgeLimits
+{
+    public const int ListCap = 100;
 }

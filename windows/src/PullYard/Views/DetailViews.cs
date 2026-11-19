@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using PullYard.Controls;
 using PullYard.Core.Api;
+using PullYard.Core.Drafts;
 using PullYard.Core.Html;
 using PullYard.Core.Util;
 using PullYard.Services;
@@ -154,7 +155,14 @@ public sealed class IssueDetailView : LiveDetail, IShortcutHost
             html.LinkClicked += url => HtmlView.OpenLink(url);
             SetRow(html, 1);
             grid.Children.Add(html);
-            var composer = PRContent.Composer(L.T("PR_CommentPlaceholder", "Comment (Markdown) — Ctrl+Enter to send"), L.T("PR_Comment", "Comment"), model.Comment);
+            IssueDetailViewModel issueModel = model;
+            var draftKey = DraftStore.Key(App.Account, issueModel.Api.Host, itemRef.Repo.Full, itemRef.Number, "issue");
+            var composer = PRContent.Composer(L.T("PR_CommentPlaceholder", "Comment (Markdown) — Ctrl+Enter to send"), L.T("PR_Comment", "Comment"), async body =>
+            {
+                var sent = await issueModel.Comment(body);
+                if (sent) DraftStore.Shared.SetText("", draftKey);
+                return sent;
+            }, DraftStore.Shared.Text(draftKey), draft => DraftStore.Shared.SetText(draft, draftKey));
             SetRow(composer, 2);
             grid.Children.Add(composer);
             host.Content = grid;
@@ -188,19 +196,19 @@ public sealed class IssueDetailView : LiveDetail, IShortcutHost
         if (issue.ViewerCanUpdate)
         {
             tools.Children.Add(issue.IssueState == "OPEN"
-                ? Ui.Button(L.T("Issue_CloseShort", "Close"), () => model.SetOpen(false).Forget(), glyph: "\uE930", tooltip: L.T("Issue_Close", "Close issue"))
+                ? Ui.Button(L.T("Issue_CloseShort", "Close"), () => ConfirmClose(itemRef.Number).Forget(), glyph: "\uE930", tooltip: L.T("Issue_Close", "Close issue"))
                 : Ui.Button(L.T("Issue_ReopenShort", "Reopen"), () => model.SetOpen(true).Forget(), glyph: "\uE7A7", tooltip: L.T("Issue_Reopen", "Reopen issue")));
         }
         tools.Children.Add(Ui.RefreshButton(() => model?.Load() ?? Task.CompletedTask));
         var share = Ui.H(0,
-            Ui.IconButton("\uE71B", L.T("Menu_CopyLink", "Copy Link"), () => WindowInterop.Copy(issue.Url), "text"),
+            Ui.IconButton("\uE71B", L.T("Menu_CopyLink", "Copy Link"), () => ShellView.Copied(issue.Url, L.T("Toast_CopiedLink", "Copied link")), "text"),
             Ui.IconButton("\uE8C8", L.T("Menu_CopyShortLinkHint", "Copy short link (Ctrl+Shift+C)"), () => ShellView.CopyShortLink(ShortLink.Of(itemRef)), "text"),
             Ui.IconButton("\uE774", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(issue.Url), "text"));
         var shareHost = new Border
         {
             Child = share,
             CornerRadius = new CornerRadius(6),
-            BorderBrush = Palette.Brush("text", ThemeService.IsDark ? 0.14 : 0.12),
+            BorderBrush = Palette.Brush("lineStrong"),
             BorderThickness = new Thickness(1),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(4, 0, 0, 0)
@@ -209,6 +217,13 @@ public sealed class IssueDetailView : LiveDetail, IShortcutHost
         tools.Children.Add(shareHost);
         RenderHtml();
         status.Update(model.LastUpdated, model.Loading, model.RefreshError);
+    }
+
+    private async Task ConfirmClose(int number)
+    {
+        if (model is not { } current) return;
+        if (!await Dialogs.Confirm(XamlRoot, L.F("Issue_CloseConfirm", "Close issue #{0}?", number), L.T("Issue_Close", "Close issue"), true, L.T("Issue_CloseConfirmMessage", "You can reopen it later."))) return;
+        await current.SetOpen(false);
     }
 
     private void RenderHtml()
@@ -266,7 +281,7 @@ public sealed class CommitDetailView : LiveDetail
         if (c.Stats is { } s) meta.Children.Add(Ui.DiffStat(s.Additions, s.Deletions));
         header.Children.Add(meta);
         var tools = Toolbar(
-            Ui.IconButton("", L.T("Commit_CopySha", "Copy SHA"), () => WindowInterop.Copy(sha), "text"),
+            Ui.IconButton("", L.T("Commit_CopySha", "Copy SHA"), () => ShellView.Copied(sha, L.F("Toast_CopiedValue", "Copied {0}", sha[..Math.Min(7, sha.Length)])), "text"),
             Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(c.HtmlUrl), "text"));
         var top = Ui.Columns((header, Ui.Star), (tools, Ui.Auto));
         top.Padding = new Thickness(16);
@@ -275,7 +290,7 @@ public sealed class CommitDetailView : LiveDetail
         var collapsed = files.Where(f => f.Lines.Count > 1500).Select(f => f.Id).ToHashSet();
         html.ActionInvoked += (type, id) =>
         {
-            if (type == "copy") WindowInterop.Copy(id);
+            if (type == "copy") ShellView.Copied(id, L.T("Toast_CopiedPath", "Copied path"));
             if (type == "expand" && files.FirstOrDefault(f => f.Id == id) is { } file)
                 html.Send(new System.Text.Json.Nodes.JsonObject { ["op"] = "fileBody", ["path"] = id, ["html"] = DiffHtml.Body(file, new DiffRenderOptions { Wrap = Settings.Shared.GetBool(DiffPrefs.WrapKey, true) }) });
         };
@@ -497,7 +512,7 @@ public sealed class ProjectBoardView : LiveDetail
         var top = Ui.Columns((stateIcon, Ui.Auto), (Ui.Caption(repoText), Ui.Star), (avatars, Ui.Auto));
         top.ColumnSpacing = 5;
         var title = Ui.Text(c?.Title ?? "—", 13, "text", FontWeights.Medium, maxLines: 3);
-        var card = new Border { Background = Palette.Brush("raised"), CornerRadius = new CornerRadius(8), Padding = new Thickness(10), Child = Ui.V(5, top, title), CanDrag = model?.FieldId is not null };
+        var card = new Border { Background = Palette.Brush("raised"), BorderBrush = Palette.Brush("cardLine"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(10), Child = Ui.V(5, top, title), CanDrag = model?.FieldId is not null };
         card.DragStarting += (_, e) =>
         {
             e.Data.SetText(item.Id);
@@ -516,7 +531,7 @@ public sealed class ProjectBoardView : LiveDetail
         if (c?.Url is { } url)
         {
             menu.Items.Add(Ui.MenuItem(L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(url)));
-            menu.Items.Add(Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => WindowInterop.Copy(url)));
+            menu.Items.Add(Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => ShellView.Copied(url, L.T("Toast_CopiedLink", "Copied link"))));
             if (ShortLink.Of(c?.Route) is { } shortLink) menu.Items.Add(Ui.MenuItem(L.T("Menu_CopyShortLink", "Copy Short Link"), () => ShellView.CopyShortLink(shortLink)));
         }
         card.ContextFlyout = menu;

@@ -128,6 +128,12 @@ public sealed class PRContent : Grid, IShortcutHost
     private readonly ContentControl interdiffBanner = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, IsTabStop = false };
     private bool splitFits;
     private bool syncingReviewBar;
+    private readonly StackPanel filesNotices = Ui.V(0);
+    private readonly ContentControl filesEmpty = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch, IsTabStop = false, Visibility = Visibility.Collapsed };
+    private Grid? filesGrid;
+    private FrameworkElement? filesSide;
+    private FrameworkElement? filesSideLine;
+    private Button? fileListToggle;
 
     public PRContent(PRDetailViewModel model)
     {
@@ -150,6 +156,9 @@ public sealed class PRContent : Grid, IShortcutHost
         SetRow(header, 1);
         SetColumnSpan(header, 2);
         top.Children.Add(header);
+        var band = new Border { Background = Palette.Brush("bar") };
+        SetRowSpan(band, 3);
+        Children.Add(band);
         Children.Add(top);
         banners.Padding = new Thickness(16, 6, 16, 0);
         SetRow(banners, 1);
@@ -207,6 +216,28 @@ public sealed class PRContent : Grid, IShortcutHost
             KeyboardAccelerators.Add(acc);
             index++;
         }
+        void Review(VirtualKey key, Action action)
+        {
+            var acc = new KeyboardAccelerator { Key = key, Modifiers = VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift };
+            acc.Invoked += (_, e) =>
+            {
+                e.Handled = true;
+                if (model.Pr is not null && !model.Busy) action();
+            };
+            KeyboardAccelerators.Add(acc);
+        }
+        Review(VirtualKey.R, () =>
+        {
+            if (Pr.IsOpen) Dialogs.Review(XamlRoot, model).Forget();
+        });
+        Review(VirtualKey.A, () =>
+        {
+            if (Pr.IsOpen && !Pr.ViewerDidAuthor) ConfirmApprove().Forget();
+        });
+        Review(VirtualKey.M, () =>
+        {
+            if (Pr.IsOpen && !Pr.IsDraft && model.CanWrite) Dialogs.Merge(XamlRoot, model).Forget();
+        });
     }
 
     private bool TabAvailable(PRTab t) => t switch
@@ -298,6 +329,9 @@ public sealed class PRContent : Grid, IShortcutHost
             case nameof(PRDetailViewModel.PendingCount):
                 RenderToolbar();
                 break;
+            case nameof(PRDetailViewModel.ComposerAnchor):
+                RenderFilesNotices();
+                break;
             case nameof(PRDetailViewModel.CiFix):
                 RenderBanners();
                 break;
@@ -313,6 +347,7 @@ public sealed class PRContent : Grid, IShortcutHost
         RenderTabs();
         ShowTab();
         RenderConversation();
+        if (diff is not null) RenderFilesNotices();
         if (tabViews.ContainsKey(PRTab.Commits)) tabViews[PRTab.Commits] = BuildCommits(tabViews[PRTab.Commits]);
         if (tabViews.ContainsKey(PRTab.Checks)) tabViews[PRTab.Checks] = BuildChecks(tabViews[PRTab.Checks]);
         status.Update(model.LastUpdated, model.Loading, model.RefreshError);
@@ -359,12 +394,22 @@ public sealed class PRContent : Grid, IShortcutHost
         if (MergeStatusBar(model, app, () => Dialogs.Merge(XamlRoot, model).Forget(), () => Dialogs.Reviewers(XamlRoot, model).Forget()) is { } bar) header.Children.Add(bar);
     }
 
-    public static Border BranchChip(string name, string color)
+    public static Button BranchChip(string name, string color)
     {
-        var chip = Ui.Chip(name, color, null, mono: true);
-        chip.Tapped += (_, _) => WindowInterop.Copy(name);
-        Ui.Tip(chip, L.T("Common_ClickToCopy", "Click to copy"));
-        return chip;
+        var button = new Button
+        {
+            Content = Ui.Chip(name, color, null, mono: true),
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
+            MinWidth = 0,
+            MinHeight = 0,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        button.Click += (_, _) => ShellView.Copied(name, L.F("Toast_CopiedValue", "Copied {0}", name));
+        Ui.Tip(button, L.T("PR_CopyBranch", "Copy branch name"));
+        Ui.Named(button, L.F("PR_BranchName", "Branch {0}", name), L.T("PR_CopyBranchHint", "Copies the branch name"));
+        return button;
     }
 
     public static FrameworkElement ReviewerBadge(ReviewerInfo r)
@@ -660,9 +705,7 @@ public sealed class PRContent : Grid, IShortcutHost
         var actions = Ui.H(6);
         if (model.CanWrite && model.FailedRuns > 0) actions.Children.Add(Ui.Button(L.T("Checks_RerunShort", "Re-run failed"), rerun));
         var button = Ui.Button(L.T("Fix_Button", "Fix with agent"), fix, accent: true);
-        var (coral, onCoral) = Palette.Filled("coral");
-        button.Background = coral;
-        button.Foreground = onCoral;
+        Ui.Tint(button, "coral");
         actions.Children.Add(button);
         var grid = Ui.Columns((row, Ui.Star), (actions, Ui.Auto));
         return new Border { Background = Palette.Brush("red", 0.08), CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 6, 8, 6), Child = grid };
@@ -715,9 +758,7 @@ public sealed class PRContent : Grid, IShortcutHost
             row.Children.Add(Ui.Text(L.F("Fix_PromptBy", "Fix prompt by @{0}", found.Author) + (found.Date is { } d ? " · " + Fmt.Rel(d) : ""), 13, "muted"));
         }
         var button = Ui.Button(L.T("Fix_Button", "Fix with agent"), action, accent: true);
-        var (fill, text) = Palette.Filled("coral");
-        button.Background = fill;
-        button.Foreground = text;
+        Ui.Tint(button, "coral");
         var grid = Ui.Columns((row, Ui.Star), (button, Ui.Auto));
         return new Border { Background = Palette.Brush("coral", 0.08), CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 6, 8, 6), Child = grid };
     }
@@ -740,14 +781,15 @@ public sealed class PRContent : Grid, IShortcutHost
             flyout.Items.Add(Ui.Separator());
             flyout.Items.Add(Ui.MenuItem(L.T("PR_RequestReviewMenu", "Request review…"), () => Dialogs.Reviewers(XamlRoot, model).Forget(), ""));
             review.Flyout = flyout;
-            Ui.Tip(review, L.T("PR_SubmitReview", "Submit review"));
+            Ui.Tip(review, L.T("PR_SubmitReviewHint", "Submit review (Ctrl+Shift+R)"));
+            AutomationProperties.SetAcceleratorKey(review, "Ctrl+Shift+R");
             Ui.Named(review, reviewText, L.T("PR_SubmitReview", "Submit review"));
             toolbar.Children.Add(review);
         }
         var fix = Ui.Button(L.T("Fix_Button", "Fix with agent"), () => Dialogs.FixWithClaude(XamlRoot, model).Forget(), glyph: "", tooltip: L.T("PR_FixWithAgent", "Send review comments to a new agent session"));
         toolbar.Children.Add(fix);
         if (pr.IsOpen && !pr.IsDraft && model.CanWrite)
-            toolbar.Children.Add(Ui.Button(L.T("PR_MergeButton", "Merge"), () => Dialogs.Merge(XamlRoot, model).Forget(), glyph: "", tooltip: L.T("PR_Merge", "Merge pull request")));
+            toolbar.Children.Add(Ui.Button(L.T("PR_MergeButton", "Merge"), () => Dialogs.Merge(XamlRoot, model).Forget(), glyph: "", tooltip: L.T("PR_MergeHint", "Merge pull request (Ctrl+Shift+M)")));
         toolbar.Children.Add(Ui.RefreshButton(() => model.Load(true)));
         var more = Ui.IconButton("", L.T("Common_MoreActions", "More actions"), () => { }, "text");
         more.Flyout = MoreMenu();
@@ -759,7 +801,7 @@ public sealed class PRContent : Grid, IShortcutHost
         {
             Child = group,
             CornerRadius = new CornerRadius(6),
-            BorderBrush = Palette.Brush("text", ThemeService.IsDark ? 0.14 : 0.12),
+            BorderBrush = Palette.Brush("lineStrong"),
             BorderThickness = new Thickness(1),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(4, 0, 0, 0)
@@ -783,10 +825,10 @@ public sealed class PRContent : Grid, IShortcutHost
         var menu = Ui.Menu(
             Ui.MenuItem(L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(pr.Url), "\uE774"),
             Ui.Separator(),
-            Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => WindowInterop.Copy(pr.Url), ""),
+            Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => ShellView.Copied(pr.Url, L.T("Toast_CopiedLink", "Copied link")), ""),
             Ui.MenuItem(L.T("Menu_CopyShortLink", "Copy Short Link"), CopyShortLink, "\uE8C8"),
-            Ui.MenuItem(L.F("PR_CopyCheckout", "Copy “gh pr checkout {0}”", pr.Number), () => WindowInterop.Copy($"gh pr checkout {pr.Number} -R {model.Ref.Repo.Full}"), ""),
-            Ui.MenuItem(L.T("PR_CopyBranch", "Copy branch name"), () => WindowInterop.Copy(pr.HeadRefName), ""),
+            Ui.MenuItem(L.F("PR_CopyCheckout", "Copy “gh pr checkout {0}”", pr.Number), () => ShellView.Copied($"gh pr checkout {pr.Number} -R {model.Ref.Repo.Full}", L.T("Toast_CopiedCheckout", "Copied checkout command")), ""),
+            Ui.MenuItem(L.T("PR_CopyBranch", "Copy branch name"), () => ShellView.Copied(pr.HeadRefName, L.F("Toast_CopiedValue", "Copied {0}", pr.HeadRefName)), ""),
             Ui.Separator());
         if (pr.ViewerCanUpdate) menu.Items.Add(Ui.MenuItem(L.T("PR_Edit", "Edit title and description…"), () => Dialogs.EditPR(XamlRoot, model).Forget(), ""));
         if (pr.IsOpen)
@@ -835,6 +877,7 @@ public sealed class PRContent : Grid, IShortcutHost
     {
         var pr = Pr;
         var unresolved = pr.ReviewThreads.Items.Count(t => !t.IsResolved && !t.IsOutdated);
+        var moreThreads = model.HiddenThreadCount > 0 ? "+" : "";
         var checks = pr.Checks;
         var failed = checks.Count(c => c.Outcome == CheckOutcome.Failure);
         var pending = checks.Count(c => c.Outcome == CheckOutcome.Pending);
@@ -842,7 +885,7 @@ public sealed class PRContent : Grid, IShortcutHost
         var color = failed > 0 ? "red" : pending > 0 ? "amber" : checks.Count == 0 ? "muted" : "green";
         tabs.SetTabs(new TabSpec[]
         {
-            new TabSpec(nameof(PRTab.Conversation), L.T("PR_TabConversation", "Conversation"), "", unresolved > 0 ? unresolved.ToString() : null),
+            new TabSpec(nameof(PRTab.Conversation), L.T("PR_TabConversation", "Conversation"), "", unresolved > 0 || moreThreads.Length > 0 ? unresolved + moreThreads : null),
             new TabSpec(nameof(PRTab.Commits), L.T("PR_TabCommits", "Commits"), "", (pr.AllCommits.TotalCount ?? pr.AllCommits.Items.Count).ToString()),
             new TabSpec(nameof(PRTab.Checks), L.T("PR_TabChecks", "Checks"), "", summary, color),
             new TabSpec(nameof(PRTab.Files), L.T("PR_TabFiles", "Files changed"), "", pr.ChangedFiles.ToString())
@@ -882,16 +925,16 @@ public sealed class PRContent : Grid, IShortcutHost
         conversation.LinkClicked += url => HtmlView.OpenLink(url);
         conversation.ActionInvoked += OnConversationAction;
         grid.Children.Add(conversation);
-        var composer = Composer(L.T("PR_CommentPlaceholder", "Comment (Markdown) — Ctrl+Enter to send"), L.T("PR_Comment", "Comment"), model.Comment);
+        var composer = Composer(L.T("PR_CommentPlaceholder", "Comment (Markdown) — Ctrl+Enter to send"), L.T("PR_Comment", "Comment"), model.Comment, model.CommentDraft, model.SetCommentDraft);
         SetRow(composer, 1);
         grid.Children.Add(composer);
         RenderConversation();
         return grid;
     }
 
-    public static FrameworkElement Composer(string placeholder, string buttonText, Func<string, Task<bool>> send)
+    public static FrameworkElement Composer(string placeholder, string buttonText, Func<string, Task<bool>> send, string initialText = "", Action<string>? onTextChanged = null)
     {
-        var box = new TextBox { PlaceholderText = placeholder, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 64, MaxHeight = 200 };
+        var box = new TextBox { PlaceholderText = placeholder, Text = initialText, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 64, MaxHeight = 200 };
         ScrollViewer.SetVerticalScrollBarVisibility(box, ScrollBarVisibility.Auto);
         Ui.Named(box, buttonText, placeholder);
         var button = TextZoom.Track(new Button { VerticalAlignment = VerticalAlignment.Bottom }, 14);
@@ -909,9 +952,10 @@ public sealed class PRContent : Grid, IShortcutHost
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(button, tip);
         }
         Sync();
-        var wasEmpty = true;
+        var wasEmpty = box.Text.Trim().Length == 0;
         box.TextChanged += (_, _) =>
         {
+            onTextChanged?.Invoke(box.Text);
             var empty = box.Text.Trim().Length == 0;
             if (empty == wasEmpty) return;
             wasEmpty = empty;
@@ -1005,13 +1049,15 @@ public sealed class PRContent : Grid, IShortcutHost
                 if ((args.OriginalSource as FrameworkElement)?.DataContext is not CommitRowItem c) return;
                 args.Handled = true;
                 Ui.Menu(
-                    Ui.MenuItem(L.T("Commit_CopySha", "Copy SHA"), () => WindowInterop.Copy(c.Commit.Oid)),
+                    Ui.MenuItem(L.T("Commit_CopySha", "Copy SHA"), () => ShellView.Copied(c.Commit.Oid, L.F("Toast_CopiedValue", "Copied {0}", c.Commit.AbbreviatedOid))),
                     Ui.MenuItem(L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(c.Commit.Url))).ShowAt((FrameworkElement)args.OriginalSource);
             };
         }
         if (model.Pr is { } pr)
         {
             var items = pr.AllCommits.Items.AsEnumerable().Reverse().Select(c => (object)new CommitRowItem(c.Commit)).ToList();
+            if ((pr.AllCommits.TotalCount ?? 0) > pr.AllCommits.Items.Count)
+                items.Insert(0, new TextRowItem(L.F("PR_LatestCommits", "Showing the latest {0} of {1} commits", pr.AllCommits.Items.Count, pr.AllCommits.TotalCount ?? 0)));
             if ((pr.AllCommits.TotalCount ?? 0) > pr.AllCommits.Items.Count)
                 items.Add(new ActionRowItem(L.F("PR_AllCommits", "Show all {0} commits in browser", pr.AllCommits.TotalCount ?? 0), () => LinkBrowser.Open(pr.Url + "/commits")));
             list.ItemsSource = items;
@@ -1041,19 +1087,106 @@ public sealed class PRContent : Grid, IShortcutHost
                 void Fix() => Dialogs.FixCi(XamlRoot, model, c).Forget();
                 items.Add(new CheckRowItem(c, () => Dialogs.JobLog(XamlRoot, model.Api, model.Ref.Repo, c, log => Dialogs.FixCi(XamlRoot, model, c, log).Forget()).Forget(), CiFailures.IsFixable(c) ? new Action(Fix) : null));
             }
+            if (model.HiddenCheckCount > 0)
+                items.Add(new ActionRowItem(L.F("Checks_Hidden", "{0} more checks are not shown — open in browser", model.HiddenCheckCount), () => LinkBrowser.Open(pr.Url + "/checks")));
             list.ItemsSource = items;
         }
         return list;
     }
 
+    private static bool ShowFileList => Settings.Shared.GetBool(Keys.FilesShowList, true);
+
+    private void ApplyFileListVisibility()
+    {
+        if (filesGrid is null || filesSide is null || filesSideLine is null) return;
+        var show = ShowFileList;
+        var column = filesGrid.ColumnDefinitions[0];
+        column.MinWidth = show ? 180 : 0;
+        column.MaxWidth = show ? 300 : 0;
+        column.Width = show ? new GridLength(0.3, GridUnitType.Star) : new GridLength(0);
+        filesSide.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        filesSideLine.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (fileListToggle is null) return;
+        var label = show ? L.T("Files_HideList", "Hide file list") : L.T("Files_ShowList", "Show file list");
+        ToolTipService.SetToolTip(fileListToggle, label);
+        AutomationProperties.SetName(fileListToggle, label);
+    }
+
+    private FrameworkElement FilesNotice(string glyph, string color, string text, string? help, string action, Action run)
+    {
+        var message = Ui.Text(text, 13, "text", wrap: true, maxLines: 2);
+        var row = Ui.Columns((Ui.Glyph(glyph, 13, color), Ui.Auto), (message, Ui.Star), (Ui.Button(action, run), Ui.Auto));
+        row.ColumnSpacing = 8;
+        row.Padding = new Thickness(12, 5, 12, 5);
+        var line = Ui.Line();
+        line.VerticalAlignment = VerticalAlignment.Bottom;
+        var host = new Grid { Background = Palette.Brush(color, 0.08) };
+        host.Children.Add(row);
+        host.Children.Add(line);
+        if (!string.IsNullOrEmpty(help)) Ui.Tip(host, help);
+        return host;
+    }
+
+    private void RenderFilesNotices()
+    {
+        filesNotices.Children.Clear();
+        if (model.Pr is not { } pr) return;
+        if (model.FilesLoaded && model.FilesError is { } error)
+            filesNotices.Children.Add(FilesNotice("\uE7BA", "amber", L.T("Files_RefreshFailed", "Couldn't refresh the diff — it may be out of date"), error, L.T("Common_Retry", "Retry"), () => model.LoadFiles(true).Forget()));
+        if (model.HiddenThreadCount > 0)
+            filesNotices.Children.Add(FilesNotice("\uE8F2", "sky", L.F("Files_HiddenThreads", "Showing the first {0} review threads — {1} more are only on the web", pr.ReviewThreads.Items.Count, model.HiddenThreadCount), null, L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(pr.Url + "/files")));
+        if (model.HasUnfinishedComposer && model.ComposerAnchor is { } anchor && pr.IsOpen)
+            filesNotices.Children.Add(FilesNotice("\uE70F", "violet", L.F("Files_UnfinishedComment", "Unfinished comment on {0}:{1}", anchor.Path, anchor.Line), null, L.T("Files_ContinueComment", "Continue"), () => Dialogs.InlineComment(XamlRoot, model, anchor).Forget()));
+        filesNotices.Visibility = filesNotices.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void RenderFilesEmpty(int shown, int visible, string filter)
+    {
+        if (diff is null) return;
+        var interdiff = model.DiffScope == DiffScope.SinceReview;
+        FrameworkElement? note = null;
+        if (shown == 0 && !(interdiff && model.InterdiffLoading) && (interdiff || model.FilesLoaded))
+        {
+            note = interdiff
+                ? Ui.EmptyState(L.T("Files_NoChangesSince", "No changes since your review"), L.T("Files_NoChangesSinceHint", "Switch to All changes to see the whole diff."))
+                : Ui.EmptyState(L.T("Files_NoFiles", "No files changed"), L.T("Files_NoFilesHint", "This pull request does not change any files."));
+        }
+        else if (shown > 0 && visible == 0)
+        {
+            note = Ui.EmptyState(L.T("Files_NoMatch", "No files match"), L.T("Files_NoMatchHint", "No changed file matches the filter."), filter, () =>
+            {
+                if (fileFilter is not null) fileFilter.Text = "";
+            });
+        }
+        filesEmpty.Content = note;
+        filesEmpty.Visibility = note is null ? Visibility.Collapsed : Visibility.Visible;
+        diff.Visibility = note is null ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async Task ConfirmDeletePending(Guid id)
+    {
+        if (await Dialogs.Confirm(XamlRoot, L.T("Pending_DeleteQ", "Delete this pending comment?"), L.T("Common_Delete", "Delete"))) model.RemovePending(id);
+    }
+
+    private void EditPending(Guid id)
+    {
+        if (model.HasUnfinishedComposer && model.ComposerAnchor is { } open)
+        {
+            ShellView.Toast(L.F("Pending_FinishFirst", "Finish or cancel the comment on line {0} first", open.Line), true);
+            return;
+        }
+        if (model.EditPending(id) && model.ComposerAnchor is { } anchor) Dialogs.InlineComment(XamlRoot, model, anchor).Forget();
+    }
+
     private FrameworkElement BuildFiles()
     {
         var grid = new Grid();
+        filesGrid = grid;
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.3, GridUnitType.Star), MinWidth = 180, MaxWidth = 300 });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.7, GridUnitType.Star) });
 
-        var side = new Grid { Background = ThemeService.IsBrand ? Palette.Brush("list") : null };
+        var side = new Grid { Background = Palette.Brush("list") };
         side.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         side.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         fileFilter = new TextBox { PlaceholderText = L.T("Files_Filter", "Filter files") };
@@ -1082,18 +1215,28 @@ public sealed class PRContent : Grid, IShortcutHost
         SetRow(fileList, 1);
         side.Children.Add(fileList);
         grid.Children.Add(side);
+        filesSide = side;
 
         var line = Ui.Line(vertical: true);
         SetColumn(line, 1);
         grid.Children.Add(line);
+        filesSideLine = line;
 
         var right = new Grid();
         right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         right.Children.Add(ReviewBar());
-        SetRow(interdiffBanner, 1);
+        if (filesNotices.Parent is Panel previousNotices) previousNotices.Children.Remove(filesNotices);
+        SetRow(filesNotices, 1);
+        right.Children.Add(filesNotices);
+        if (interdiffBanner.Parent is Panel previousBanner) previousBanner.Children.Remove(interdiffBanner);
+        SetRow(interdiffBanner, 2);
         right.Children.Add(interdiffBanner);
+        if (filesEmpty.Parent is Panel previousEmpty) previousEmpty.Children.Remove(filesEmpty);
+        SetRow(filesEmpty, 3);
+        right.Children.Add(filesEmpty);
         RenderInterdiffBanner();
         diff = new HtmlView();
         diff.LinkClicked += url => HtmlView.OpenLink(url);
@@ -1106,10 +1249,11 @@ public sealed class PRContent : Grid, IShortcutHost
             SyncReviewBar();
             RenderFiles();
         };
-        SetRow(diff, 2);
+        SetRow(diff, 3);
         right.Children.Add(diff);
         SetColumn(right, 2);
         grid.Children.Add(right);
+        ApplyFileListVisibility();
         renderedDiffVersion = -1;
         RenderFiles();
         return grid;
@@ -1147,7 +1291,11 @@ public sealed class PRContent : Grid, IShortcutHost
         {
             if (!syncingReviewBar && layoutBox.SelectedIndex >= 0 && splitFits) Settings.Shared.Set(DiffPrefs.SplitKey, layoutBox.SelectedIndex == 1);
         };
+        fileListToggle = Ui.IconButton("\uE8A0", L.T("Files_HideList", "Hide file list"), () => Settings.Shared.Set(Keys.FilesShowList, !ShowFileList), "text");
+        fileListToggle.Padding = new Thickness(7, 4, 7, 4);
         var nav = Ui.H(2,
+            fileListToggle,
+            Ui.Line(vertical: true),
             Nav("\uE70E", L.T("Files_PrevFile", "Previous file"), "P", "p"),
             Nav("\uE70D", L.T("Files_NextFile", "Next file"), "N", "n"),
             Ui.Line(vertical: true),
@@ -1255,6 +1403,11 @@ public sealed class PRContent : Grid, IShortcutHost
 
     private void OnSettings(string key)
     {
+        if (key == Keys.FilesShowList)
+        {
+            DispatcherQueue.TryEnqueue(ApplyFileListVisibility);
+            return;
+        }
         if (key is not (DiffPrefs.WrapKey or DiffPrefs.SplitKey)) return;
         DispatcherQueue.TryEnqueue(() =>
         {
@@ -1307,9 +1460,11 @@ public sealed class PRContent : Grid, IShortcutHost
     private void RenderFiles()
     {
         if (diff is null || fileList is null) return;
+        RenderFilesNotices();
         var interdiff = model.DiffScope == DiffScope.SinceReview;
         if (!model.FilesLoaded && !interdiff)
         {
+            RenderFilesEmpty(1, 1, "");
             if (model.FilesError is { } e) diff.Render($"<div class=\"tl\"><p class=\"empty\">{ConversationHtml.Esc(e)}</p></div>");
             return;
         }
@@ -1320,6 +1475,7 @@ public sealed class PRContent : Grid, IShortcutHost
         fileList.ItemsSource = visible.Select(f => new FileListItem(f, model.ViewedPaths.Contains(f.Id), model.ThreadCount(f.Id))).ToList();
         if (selected is not null) fileList.SelectedItem = (fileList.ItemsSource as List<FileListItem>)?.FirstOrDefault(f => f.File.Id == selected);
         if (viewedCount is not null) viewedCount.Text = $"{model.ViewedPaths.Intersect(shown.Select(f => f.Id)).Count()}/{shown.Count}";
+        RenderFilesEmpty(shown.Count, visible.Count, filter);
         var layout = $"{WrapPref}|{SplitActive}|{model.DiffScope}";
         if (renderedDiffVersion == model.DiffVersion && renderedFilter == filter && renderedLayout == layout) return;
         var first = renderedDiffVersion < 0;
@@ -1348,7 +1504,7 @@ public sealed class PRContent : Grid, IShortcutHost
                 model.ToggleViewed(id).Forget();
                 break;
             case "copy":
-                WindowInterop.Copy(id);
+                ShellView.Copied(id, L.T("Toast_CopiedPath", "Copied path"));
                 break;
             case "blame":
                 if (model.Pr is { } pr) RepoDetailView.OpenFile(model.Ref.Repo, pr.HeadRefOid.Length > 0 ? pr.HeadRefOid : $"refs/pull/{model.Ref.Number}/head", id, true);
@@ -1368,7 +1524,10 @@ public sealed class PRContent : Grid, IShortcutHost
                 model.RevealFile(id);
                 break;
             case "deletePending":
-                if (Guid.TryParse(id, out var gid)) model.RemovePending(gid);
+                if (Guid.TryParse(id, out var gid)) ConfirmDeletePending(gid).Forget();
+                break;
+            case "editPending":
+                if (Guid.TryParse(id, out var pid)) EditPending(pid);
                 break;
             case "reply":
                 if (Pr.ReviewThreads.Items.FirstOrDefault(t => t.Id == id) is { } thread) Dialogs.Reply(XamlRoot, model, thread).Forget();

@@ -35,6 +35,11 @@ public sealed class ShellView : Grid
     private readonly Dictionary<string, NavigationViewItem> navItems = new();
     private readonly Dictionary<string, string> navTitles = new();
     private readonly List<(Route Route, FrameworkElement View)> stack = new();
+    private readonly RouteHistory history = new();
+    private static (string Text, bool IsError)? pendingToast;
+    private const double SidebarDefault = 236;
+    private const double SidebarMin = 180;
+    private const double SidebarMax = 340;
     private ClaudeWorkspaceView? claudeView;
     private bool syncingSelection;
 
@@ -66,12 +71,23 @@ public sealed class ShellView : Grid
         RenderFooter();
         if (app.DetailRoot is { } root) OnRoute(root, false);
         else ShowEmptyDetail();
+        Loaded += (_, _) =>
+        {
+            if (pendingToast is not { } queued) return;
+            pendingToast = null;
+            ShowToast(queued.Text, queued.IsError);
+        };
     }
 
     private void OnAddAccount() => AccountDialogs.Add(XamlRoot).Forget();
 
+    private bool shownHighContrast = ThemeService.IsHighContrast;
+
     private void OnTheme()
     {
+        var highContrast = ThemeService.IsHighContrast;
+        if (highContrast == shownHighContrast) return;
+        shownHighContrast = highContrast;
         DispatcherQueue.TryEnqueue(() =>
         {
             BuildNavItems();
@@ -83,15 +99,15 @@ public sealed class ShellView : Grid
                 stack.Clear();
                 OnRoute(top, false);
             }
-            UpdateBackground();
         });
     }
 
     private void UpdateBackground()
     {
-        listBackground.Background = ThemeService.IsBrand ? Palette.Brush("list") : null;
-        detailArea.Background = ThemeService.IsBrand ? Palette.Brush("panel") : null;
-        nav.Resources["NavigationViewExpandedPaneBackground"] = ThemeService.IsBrand ? Palette.Brush("sidebar") : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        listBackground.Background = Palette.Brush("list");
+        detailArea.Background = Palette.Brush("panel");
+        nav.Resources["NavigationViewExpandedPaneBackground"] = Palette.Brush("sidebar");
+        nav.Resources["NavigationViewContentBackground"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
     }
 
     private void BuildNav()
@@ -101,7 +117,7 @@ public sealed class ShellView : Grid
         nav.ExpandedModeThresholdWidth = 1180;
         nav.IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
         nav.IsSettingsVisible = false;
-        nav.OpenPaneLength = 236;
+        nav.OpenPaneLength = Math.Clamp(Settings.Shared.GetDouble(Keys.SidebarWidth, SidebarDefault), SidebarMin, SidebarMax);
         nav.IsPaneToggleButtonVisible = true;
         nav.IsTitleBarAutoPaddingEnabled = false;
         nav.SelectionChanged += (_, e) =>
@@ -119,7 +135,12 @@ public sealed class ShellView : Grid
         nav.MenuItems.Clear();
         navItems.Clear();
         navTitles.Clear();
-        void Header(string text) => nav.MenuItems.Add(new NavigationViewItemHeader { Content = text });
+        var group = "";
+        void Header(string text)
+        {
+            group = text;
+            nav.MenuItems.Add(new NavigationViewItemHeader { Content = text });
+        }
         void Item(Section s, string title, string glyph)
         {
             var item = new NavigationViewItem
@@ -129,7 +150,7 @@ public sealed class ShellView : Grid
                 Icon = new FontIcon { Glyph = glyph, FontFamily = Ui.Icons }
             };
             navItems[s.Key] = item;
-            navTitles[s.Key] = title;
+            navTitles[s.Key] = s.Kind is SectionKind.Prs or SectionKind.Issues && group.Length > 0 ? $"{group}: {title}" : title;
             nav.MenuItems.Add(item);
         }
         if (app.Forge is not null)
@@ -196,13 +217,20 @@ public sealed class ShellView : Grid
             }
             else
             {
-                var (fill, text) = attention ? Palette.Filled("accent") : (Palette.Brush("text", ThemeService.IsDark ? 0.16 : 0.10), Palette.Brush("text"));
+                var (fill, text) = attention ? Palette.Filled("accent") : (Palette.Brush("text", 0.12), Palette.Brush("text"));
                 item.InfoBadge = new InfoBadge { Value = count, Background = fill, Foreground = text };
             }
             var title = navTitles.GetValueOrDefault(key, "");
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(item, count > 0 ? $"{title}, {spoken}" : title);
+            ToolTipService.SetToolTip(item, count > 0 ? $"{title} ({spoken})" : title);
         }
-        Badge(Section.Notifications.Key, app.UnreadCount, false, L.F("Nav_UnreadCount", "{0} unread", app.UnreadCount));
+        foreach (var (key, item) in navItems)
+        {
+            var title = navTitles.GetValueOrDefault(key, "");
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(item, title);
+            ToolTipService.SetToolTip(item, title);
+        }
+        Badge(Section.Notifications.Key, app.UnreadCount, false, L.F("Nav_UnreadCountLabel", "{0} unread", app.Forge is null ? GitHubApi.CountLabel(app.UnreadCount) : app.UnreadCount.ToString()));
         Badge(Section.Prs(PRFilter.ReviewRequested).Key, app.ReviewRequestCount, true, L.F("Nav_WaitingCount", "{0} waiting", app.ReviewRequestCount));
         Badge(Section.Prs(PRFilter.Mine).Key, app.MyPRCount, false, L.F("Nav_OpenCount", "{0} open", app.MyPRCount));
         var attention = app.Claude.AttentionCount;
@@ -234,7 +262,7 @@ public sealed class ShellView : Grid
             var row = Ui.Columns((Ui.Glyph("\uE823", 13, "amber"), Ui.Auto), (text, Ui.Star));
             row.ColumnSpacing = 8;
             row.Margin = new Thickness(14, 0, 10, 8);
-            Ui.Tip(row, L.T("RateLimit_Hint", "GitHub rate limit reached. Live polling and refreshes are paused until the limit resets."));
+            Ui.Tip(row, L.F("RateLimit_ProviderHint", "{0} rate limit reached. Live polling and refreshes are paused until the limit resets.", app.Provider.Title()));
             footer.Children.Add(row);
         }
         if (app.User is { } user)
@@ -254,7 +282,50 @@ public sealed class ShellView : Grid
         body.Children.Add(listBackground);
         body.Children.Add(listHost);
 
-        var splitter = new Border { Background = Palette.Brush("text", 0.08), Width = 1 };
+        var paneGrip = new Border { Width = 8, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(-4, 0, 0, 0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        Canvas.SetZIndex(paneGrip, 5);
+        Ui.Tip(paneGrip, L.T("Sidebar_ResizeHint", "Drag to resize the sidebar. Double-click to reset."));
+        body.Children.Add(paneGrip);
+        double paneStart = 0, paneStartX = 0;
+        var paneDragging = false;
+        bool PaneResizable() => nav.DisplayMode == NavigationViewDisplayMode.Expanded && nav.IsPaneOpen;
+        paneGrip.PointerEntered += (_, _) =>
+        {
+            if (PaneResizable()) ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeWestEast);
+        };
+        paneGrip.PointerExited += (_, _) =>
+        {
+            if (!paneDragging) ProtectedCursor = null;
+        };
+        paneGrip.PointerPressed += (_, e) =>
+        {
+            if (!PaneResizable()) return;
+            paneDragging = true;
+            paneStart = nav.OpenPaneLength;
+            paneStartX = e.GetCurrentPoint(this).Position.X;
+            paneGrip.CapturePointer(e.Pointer);
+        };
+        paneGrip.PointerMoved += (_, e) =>
+        {
+            if (!paneDragging) return;
+            nav.OpenPaneLength = Math.Clamp(paneStart + e.GetCurrentPoint(this).Position.X - paneStartX, SidebarMin, SidebarMax);
+        };
+        paneGrip.PointerReleased += (_, e) =>
+        {
+            if (!paneDragging) return;
+            paneDragging = false;
+            paneGrip.ReleasePointerCapture(e.Pointer);
+            ProtectedCursor = null;
+            Settings.Shared.Set(Keys.SidebarWidth, nav.OpenPaneLength);
+        };
+        paneGrip.DoubleTapped += (_, _) =>
+        {
+            if (!PaneResizable()) return;
+            nav.OpenPaneLength = SidebarDefault;
+            Settings.Shared.Set(Keys.SidebarWidth, SidebarDefault);
+        };
+
+        var splitter = new Border { Background = Palette.Brush("line"), Width = 1 };
         var grip = new Border { Width = 9, Margin = new Thickness(-4, 0, -4, 0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
         Grid.SetColumn(splitter, 1);
         Grid.SetColumn(grip, 1);
@@ -293,6 +364,7 @@ public sealed class ShellView : Grid
         detailArea.Children.Add(clipboardBanner);
         toast.VerticalAlignment = VerticalAlignment.Bottom;
         toast.HorizontalAlignment = HorizontalAlignment.Center;
+        toast.MaxWidth = 560;
         toast.IsHitTestVisible = false;
         toast.Opacity = 0;
         toast.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) };
@@ -438,7 +510,7 @@ public sealed class ShellView : Grid
         tile.Opacity = 0.9;
         var a = Ui.Text(L.T("Detail_Empty", "Select a pull request, issue or project"), 13, "muted");
         a.HorizontalAlignment = HorizontalAlignment.Center;
-        var b = Ui.Text(L.T("Detail_EmptyHint", "Ctrl+L — open by link"), 12, "dim");
+        var b = Ui.Text(L.T("Detail_EmptyHints", "Ctrl+L to open by link · Ctrl+K for the command palette · Ctrl+/ for all shortcuts"), 12, "dim");
         b.HorizontalAlignment = HorizontalAlignment.Center;
         var panel = Ui.V(12, tile, a, b);
         panel.HorizontalAlignment = HorizontalAlignment.Center;
@@ -451,6 +523,7 @@ public sealed class ShellView : Grid
         if (app.Section.Kind == SectionKind.Claude || app.Forge is not null) return;
         if (!push) stack.Clear();
         if (stack.Count > 0 && stack[^1].Route == route) return;
+        if (!goingForward) history.Navigated();
         var view = CreateDetail(route);
         stack.Add((route, view));
         if (stack.Count > 12) stack.RemoveAt(0);
@@ -469,9 +542,28 @@ public sealed class ShellView : Grid
 
     public bool CanGoBackAfterPush() => stack.Count > 0;
 
+    private bool goingForward;
+
+    public bool CanGoForward => history.CanGoForward && stack.Count > 0 && app.Section.Kind != SectionKind.Claude && app.Forge is null;
+
+    public void GoForward()
+    {
+        if (!CanGoForward || history.TakeForward() is not { } next) return;
+        goingForward = true;
+        try
+        {
+            OnRoute(next, true);
+        }
+        finally
+        {
+            goingForward = false;
+        }
+    }
+
     public void GoBack()
     {
-        if (stack.Count <= 1) return;
+        if (stack.Count <= 1 || app.Section.Kind == SectionKind.Claude) return;
+        history.WentBack(stack[^1].Route);
         stack.RemoveAt(stack.Count - 1);
         TextZoom.ApplyWhenLoaded(stack[^1].View);
         detailHost.Content = stack[^1].View;
@@ -499,15 +591,51 @@ public sealed class ShellView : Grid
         Toast(L.F("Toast_CopiedShortLink", "Copied {0}", link));
     }
 
-    public static void Toast(string text) => Current?.ShowToast(text);
-
-    private void ShowToast(string text)
+    public static void Copied(string value, string message)
     {
-        toast.Child = Ui.H(8, Ui.Glyph("\uE73E", 13, "green"), Ui.Text(text, 13));
+        WindowInterop.Copy(value);
+        Toast(message);
+    }
+
+    public static void Toast(string text, bool isError = false)
+    {
+        if (Current is { } shell) shell.ShowToast(text, isError);
+        else if (isError) pendingToast = (text, true);
+    }
+
+    private void DismissToast()
+    {
+        toastTimer?.Stop();
+        toast.Opacity = 0;
+        toast.IsHitTestVisible = false;
+    }
+
+    private void ShowToast(string text, bool isError = false)
+    {
+        if (isError)
+        {
+            var message = Ui.Text(text, 13, "text", wrap: true, maxLines: 6, select: true);
+            var copy = Ui.IconButton("\uE8C8", L.T("Toast_CopyAndDismiss", "Copy the message and dismiss"), () =>
+            {
+                WindowInterop.Copy(text);
+                DismissToast();
+            });
+            var dismiss = Ui.IconButton("\uE711", L.T("Common_Dismiss", "Dismiss"), DismissToast);
+            var row = Ui.Columns((Ui.Glyph("\uE7BA", 13, "red"), Ui.Auto), (message, Ui.Star), (copy, Ui.Auto), (dismiss, Ui.Auto));
+            row.ColumnSpacing = 8;
+            toast.Child = row;
+        }
+        else
+        {
+            toast.Child = Ui.H(8, Ui.Glyph("\uE73E", 13, "green"), Ui.Text(text, 13));
+        }
+        toast.IsHitTestVisible = isError;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toast, text);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(toast, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         toast.Padding = new Thickness(14, 7, 16, 7);
         toast.CornerRadius = new CornerRadius(20);
-        toast.Background = Palette.Brush("raised");
-        toast.BorderBrush = Palette.Brush("text", 0.12);
+        toast.Background = Palette.Brush("overlay");
+        toast.BorderBrush = isError ? Palette.Brush("red", 0.5) : Palette.Brush("lineStrong");
         toast.BorderThickness = new Thickness(1);
         toast.Shadow = new ThemeShadow();
         toast.Translation = new System.Numerics.Vector3(0, 0, 16);
@@ -515,14 +643,18 @@ public sealed class ShellView : Grid
         toast.Opacity = 1;
         toastTimer ??= DispatcherQueue.CreateTimer();
         toastTimer.Stop();
-        toastTimer.Interval = TimeSpan.FromMilliseconds(1800);
+        toastTimer.Interval = TimeSpan.FromMilliseconds(isError ? 8000 : 1800);
         toastTimer.IsRepeating = false;
         toastTimer.Tick -= HideToast;
         toastTimer.Tick += HideToast;
         toastTimer.Start();
     }
 
-    private void HideToast(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args) => toast.Opacity = 0;
+    private void HideToast(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
+    {
+        toast.Opacity = 0;
+        toast.IsHitTestVisible = false;
+    }
 
     private void RenderClipboard()
     {
@@ -541,8 +673,8 @@ public sealed class ShellView : Grid
         clipboardBanner.Child = Ui.H(10, Ui.Glyph("", 14), Ui.Text(L.F("Clipboard_InClipboard", "In clipboard: {0}", title), 13), open, close);
         clipboardBanner.Padding = new Thickness(14, 6, 6, 6);
         clipboardBanner.CornerRadius = new CornerRadius(20);
-        clipboardBanner.Background = Palette.Brush("raised");
-        clipboardBanner.BorderBrush = Palette.Brush("text", 0.12);
+        clipboardBanner.Background = Palette.Brush("overlay");
+        clipboardBanner.BorderBrush = Palette.Brush("lineStrong");
         clipboardBanner.BorderThickness = new Thickness(1);
         clipboardBanner.Shadow = new ThemeShadow();
         clipboardBanner.Translation = new System.Numerics.Vector3(0, 0, 16);
@@ -556,6 +688,10 @@ public sealed class DetailFrame : Grid
     {
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        if (content is PRDetailView)
+        {
+            Children.Add(new Border { Background = Palette.Brush("bar") });
+        }
         if (shell.CanGoBackAfterPush())
         {
             var back = Ui.IconButton("", L.T("Common_BackHint", "Back (Alt+Left)"), shell.GoBack);

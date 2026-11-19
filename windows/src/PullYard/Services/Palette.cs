@@ -2,40 +2,23 @@ using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using PullYard.Core.Api;
+using PullYard.Core.Theming;
 using Windows.UI;
+using Windows.UI.ViewManagement;
 using VisualState = PullYard.Core.Api.VisualState;
 
 namespace PullYard.Services;
 
 public static class Palette
 {
-    private static readonly Dictionary<string, (uint Light, uint Dark)> Brand = new()
-    {
-        ["window"] = (0xF7F5F0, 0x0C1220),
-        ["sidebar"] = (0xEFECE5, 0x0A0F1B),
-        ["list"] = (0xF3F1EC, 0x0E1526),
-        ["panel"] = (0xFDFCFA, 0x101828),
-        ["raised"] = (0xFFFFFF, 0x152036),
-        ["sunken"] = (0xF1EEE8, 0x0A101C),
-        ["bar"] = (0xF5F3EE, 0x111A2C),
-        ["text"] = (0x1A2333, 0xE6EBF2),
-        ["muted"] = (0x5F6B7E, 0x8693A8),
-        ["dim"] = (0x7C8494, 0x6B778C),
-        ["accent"] = (0x2A8BC8, 0x5BB8EC),
-        ["sky"] = (0x1F7FB8, 0x5BB8EC),
-        ["violet"] = (0x6B55D6, 0x9D8CF0),
-        ["coral"] = (0xD8513F, 0xEE6F5F),
-        ["green"] = (0x2E8A57, 0x5DBE8A),
-        ["red"] = (0xC2412F, 0xE8746A),
-        ["amber"] = (0xB7791F, 0xE8B44C),
-        ["teal"] = (0x23877A, 0x56C2B0),
-        ["indigo"] = (0x4E5BC4, 0x8C97E8),
-        ["slate"] = (0x6B7486, 0x939CB0),
-        ["orange"] = (0xC7651A, 0xF0954A),
-        ["gutter"] = (0x9AA2B0, 0x4A5670)
-    };
+    private static readonly Dictionary<(string Key, byte Alpha), SolidColorBrush> Brushes = new();
+    private static UISettings? uiSettings;
+    private static SystemAccent? accent;
+    private static bool watchingAccent;
 
     public static bool IsDark => ThemeService.IsDark;
+
+    public static bool MicaActive { get; set; }
 
     public static Color Hex(uint rgb, byte alpha = 255) => Color.FromArgb(alpha, (byte)((rgb >> 16) & 0xFF), (byte)((rgb >> 8) & 0xFF), (byte)(rgb & 0xFF));
 
@@ -49,51 +32,112 @@ public static class Palette
     public static Color Get(string key, byte alpha = 255)
     {
         if (ThemeService.IsHighContrast) return HighContrast(key, alpha);
-        if (!Brand.TryGetValue(key, out var pair)) pair = Brand["muted"];
-        return Hex(IsDark ? pair.Dark : pair.Light, alpha);
+        var system = ThemeService.Style == ThemeStyle.System;
+        var argb = ThemeTokens.Resolve(key, system, IsDark, system ? Accent() : null);
+        var a = (int)(argb >> 24);
+        if (system && MicaActive && key == "window") a = 0;
+        return Color.FromArgb((byte)((a * alpha + 127) / 255), (byte)((argb >> 16) & 0xFF), (byte)((argb >> 8) & 0xFF), (byte)(argb & 0xFF));
     }
 
-    public static SolidColorBrush Brush(string key, double opacity = 1) => new(Get(key, (byte)Math.Round(255 * opacity)));
-
-    public static (SolidColorBrush Fill, SolidColorBrush Text) Filled(string key)
+    public static uint Argb(string key)
     {
-        if (ThemeService.IsHighContrast) return (new(SystemColor(Windows.UI.ViewManagement.UIElementType.Highlight)), new(SystemColor(Windows.UI.ViewManagement.UIElementType.HighlightText)));
-        return (Brush(key), new SolidColorBrush(Microsoft.UI.Colors.White));
+        var c = Get(key);
+        return ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
     }
+
+    public static SolidColorBrush Brush(string key, double opacity = 1)
+    {
+        var alpha = (byte)Math.Round(255 * Math.Clamp(opacity, 0, 1));
+        if (Brushes.TryGetValue((key, alpha), out var brush)) return brush;
+        brush = new SolidColorBrush(Get(key, alpha));
+        Brushes[(key, alpha)] = brush;
+        return brush;
+    }
+
+    public static SolidColorBrush TextBrush(string key) => Brush(ThemeTokens.TextKey(key));
+
+    public static void Refresh()
+    {
+        foreach (var pair in Brushes)
+        {
+            var color = Get(pair.Key.Key, pair.Key.Alpha);
+            if (!pair.Value.Color.Equals(color)) pair.Value.Color = color;
+        }
+    }
+
+    public static (SolidColorBrush Fill, SolidColorBrush Text) Filled(string key) => (Brush(ThemeTokens.FillKey(key)), Brush("onFill"));
 
     public static SolidColorBrush HexBrush(string? hex, double opacity = 1) => new(Hex(hex, (byte)Math.Round(255 * opacity)));
 
-    public static string CssHex(string key)
+    public static string CssHex(string key) => ThemeTokens.Css(Argb(key));
+
+    private static uint Pack(Color c) => 0xFF000000 | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
+
+    private static SystemAccent ReadAccent()
     {
-        var c = Get(key);
-        return $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+        try
+        {
+            uiSettings ??= new UISettings();
+            return new SystemAccent(
+                Pack(uiSettings.GetColorValue(UIColorType.AccentDark1)),
+                Pack(uiSettings.GetColorValue(UIColorType.AccentDark2)),
+                Pack(uiSettings.GetColorValue(UIColorType.AccentLight2)),
+                Pack(uiSettings.GetColorValue(UIColorType.AccentLight3)));
+        }
+        catch
+        {
+            return SystemAccent.Default;
+        }
     }
 
-    private static Windows.UI.ViewManagement.UISettings? uiSettings;
+    private static SystemAccent Accent() => accent ??= ReadAccent();
+
+    public static void WatchAccent(Microsoft.UI.Dispatching.DispatcherQueue queue, Action changed)
+    {
+        if (watchingAccent) return;
+        try
+        {
+            uiSettings ??= new UISettings();
+            uiSettings.ColorValuesChanged += (_, _) => queue.TryEnqueue(() =>
+            {
+                var next = ReadAccent();
+                if (accent is { } known && known == next) return;
+                accent = next;
+                changed();
+            });
+            watchingAccent = true;
+        }
+        catch
+        {
+        }
+    }
 
     private static Color HighContrast(string key, byte alpha)
     {
+        if (key == "hover") return SystemColor(UIElementType.Window, 0);
         var type = key switch
         {
-            "window" or "sidebar" or "list" or "panel" or "raised" or "sunken" or "bar" => Windows.UI.ViewManagement.UIElementType.Window,
-            "dim" or "gutter" => Windows.UI.ViewManagement.UIElementType.GrayText,
-            "accent" or "sky" => Windows.UI.ViewManagement.UIElementType.Hotlight,
-            _ => Windows.UI.ViewManagement.UIElementType.WindowText
+            "window" or "sidebar" or "list" or "panel" or "raised" or "overlay" or "sunken" or "bar" or "sub" or "code" or "button" => UIElementType.Window,
+            "dim" or "gutter" or "line" => UIElementType.GrayText,
+            "accent" or "sky" or "link" => UIElementType.Hotlight,
+            "selected" or "accentFill" or "greenFill" or "violetFill" or "redFill" or "slateFill" or "coralFill" => UIElementType.Highlight,
+            "onFill" => UIElementType.HighlightText,
+            _ => UIElementType.WindowText
         };
         return SystemColor(type, alpha);
     }
 
-    private static Color SystemColor(Windows.UI.ViewManagement.UIElementType type, byte alpha = 255)
+    private static Color SystemColor(UIElementType type, byte alpha = 255)
     {
         try
         {
-            uiSettings ??= new Windows.UI.ViewManagement.UISettings();
+            uiSettings ??= new UISettings();
             var c = uiSettings.UIElementColor(type);
             return Color.FromArgb(alpha, c.R, c.G, c.B);
         }
         catch
         {
-            var dark = type is Windows.UI.ViewManagement.UIElementType.Window or Windows.UI.ViewManagement.UIElementType.HighlightText;
+            var dark = type is UIElementType.Window or UIElementType.HighlightText;
             return Hex(dark ? 0x000000u : 0xFFFFFFu, alpha);
         }
     }

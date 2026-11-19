@@ -121,6 +121,9 @@ public sealed class ForgeListView : ListPane
         CountText.Text = visible.Count > 0 ? visible.Count + CountSuffix : "";
         SetLoading(vm.Loading, vm.Items.Count > 0);
         Footer.Update(vm.LastUpdated, vm.Refreshing && !vm.Loading, vm.Items.Count == 0 ? null : vm.Error);
+        var capped = vm.Items.Count >= ForgeLimits.ListCap;
+        SetNotice(capped ? "capped" : "",
+            capped ? NoteRow(L.F("Forge_ListCapped", "Showing the {0} most recently updated. Older ones are on {1}.", ForgeLimits.ListCap, Model.Forge?.Host ?? L.T("Forge_TheWeb", "the web"))) : null);
         if (visible.Count == 0)
         {
             if (vm.Loading && vm.Items.Count == 0) ShowOverlay(Ui.Loading());
@@ -188,8 +191,8 @@ public sealed class ForgeListView : ListPane
 
     public static MenuFlyout ItemMenu(SearchItem item) => Ui.Menu(
         Ui.MenuItem(L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(item.Url), "\uE774"),
-        Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => WindowInterop.Copy(item.Url), "\uE71B"),
-        item.BaseRefName is { } baseRef ? Ui.MenuItem(L.T("Menu_CopyTargetBranch", "Copy Target Branch"), () => WindowInterop.Copy(baseRef), "\uE8C8") : null);
+        Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => ShellView.Copied(item.Url, L.T("Toast_CopiedLink", "Copied link")), "\uE71B"),
+        item.BaseRefName is { } baseRef ? Ui.MenuItem(L.T("Menu_CopyTargetBranch", "Copy Target Branch"), () => ShellView.Copied(baseRef, L.F("Toast_CopiedValue", "Copied {0}", baseRef)), "\uE8C8") : null);
 }
 
 public sealed record ForgeNotificationItem(ForgeNotification Notification, Action Done) : IRowContent
@@ -253,15 +256,19 @@ public sealed class ForgeInboxView : ListPane
     private bool loading;
     private string? error;
     private DateTimeOffset? lastUpdated;
+    private string? selectedId;
+    private bool syncing;
 
     public ForgeInboxView(string title) : base(title, "GenericRowTemplate")
     {
-        List.IsItemClickEnabled = true;
-        List.SelectionMode = ListViewSelectionMode.None;
-        List.ItemClick += (_, e) =>
+        List.SelectionChanged += (_, _) =>
         {
-            if (e.ClickedItem is ForgeNotificationItem n) LinkBrowser.Open(n.Notification.Url);
+            if (!syncing) selectedId = (List.SelectedItem as ForgeNotificationItem)?.Notification.Id;
         };
+        OnRowOpen(item =>
+        {
+            if (item is ForgeNotificationItem n) LinkBrowser.Open(n.Notification.Url);
+        });
         List.ContextRequested += (_, args) =>
         {
             if ((args.OriginalSource as FrameworkElement)?.DataContext is not ForgeNotificationItem row) return;
@@ -269,7 +276,7 @@ public sealed class ForgeInboxView : ListPane
             var n = row.Notification;
             Ui.Menu(
                 Ui.MenuItem(L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(n.Url), "\uE774"),
-                Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => WindowInterop.Copy(n.Url), "\uE71B"),
+                Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => ShellView.Copied(n.Url, L.T("Toast_CopiedLink", "Copied link")), "\uE71B"),
                 Ui.MenuItem(L.T("Forge_MarkDone", "Mark as done"), () => MarkDone(n).Forget(), "\uE73E")).ShowAt((FrameworkElement)args.OriginalSource);
         };
     }
@@ -323,7 +330,13 @@ public sealed class ForgeInboxView : ListPane
 
     private void Render()
     {
-        List.ItemsSource = items.Select(n => new ForgeNotificationItem(n, () => MarkDone(n).Forget())).ToList();
+        syncing = true;
+        var rows = items.Select(n => new ForgeNotificationItem(n, () => MarkDone(n).Forget())).ToList();
+        List.ItemsSource = rows;
+        var selected = selectedId is null ? null : rows.FirstOrDefault(r => r.Notification.Id == selectedId);
+        List.SelectedItem = selected;
+        if (selected is null) selectedId = null;
+        syncing = false;
         CountText.Text = items.Count > 0 ? items.Count.ToString() : "";
         Footer.Update(lastUpdated, false, items.Count == 0 ? null : error);
         if (items.Count > 0) ShowOverlay(null);
@@ -341,6 +354,8 @@ public sealed class ForgeReposView : ListPane
     private string? error;
     private DateTimeOffset? lastUpdated;
     private readonly TextBox filterBox;
+    private string? selectedName;
+    private bool syncing;
 
     public ForgeReposView(string title) : base(title, "GenericRowTemplate")
     {
@@ -350,12 +365,14 @@ public sealed class ForgeReposView : ListPane
             Render();
         }, 150);
         FilterRow.Children.Add(filterBox);
-        List.IsItemClickEnabled = true;
-        List.SelectionMode = ListViewSelectionMode.None;
-        List.ItemClick += (_, e) =>
+        List.SelectionChanged += (_, _) =>
         {
-            if (e.ClickedItem is ForgeRepoItem r) LinkBrowser.Open(r.Repo.Url);
+            if (!syncing) selectedName = (List.SelectedItem as ForgeRepoItem)?.Repo.FullName;
         };
+        OnRowOpen(item =>
+        {
+            if (item is ForgeRepoItem r) LinkBrowser.Open(r.Repo.Url);
+        });
         List.ContextRequested += (_, args) =>
         {
             if ((args.OriginalSource as FrameworkElement)?.DataContext is not ForgeRepoItem row) return;
@@ -363,8 +380,8 @@ public sealed class ForgeReposView : ListPane
             var r = row.Repo;
             Ui.Menu(
                 Ui.MenuItem(L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(r.Url), "\uE774"),
-                Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => WindowInterop.Copy(r.Url), "\uE71B"),
-                Ui.MenuItem(L.T("Forge_CopyName", "Copy Name"), () => WindowInterop.Copy(r.FullName), "\uE8C8")).ShowAt((FrameworkElement)args.OriginalSource);
+                Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => ShellView.Copied(r.Url, L.T("Toast_CopiedLink", "Copied link")), "\uE71B"),
+                Ui.MenuItem(L.T("Forge_CopyName", "Copy Name"), () => ShellView.Copied(r.FullName, L.F("Toast_CopiedValue", "Copied {0}", r.FullName)), "\uE8C8")).ShowAt((FrameworkElement)args.OriginalSource);
         };
     }
 
@@ -399,7 +416,13 @@ public sealed class ForgeReposView : ListPane
     private void Render()
     {
         var visible = text.Length == 0 ? repos : repos.Where(r => r.FullName.Contains(text, StringComparison.OrdinalIgnoreCase) || (r.Description?.Contains(text, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
-        List.ItemsSource = visible.Select(r => new ForgeRepoItem(r)).ToList();
+        syncing = true;
+        var rows = visible.Select(r => new ForgeRepoItem(r)).ToList();
+        List.ItemsSource = rows;
+        var selected = selectedName is null ? null : rows.FirstOrDefault(r => r.Repo.FullName == selectedName);
+        List.SelectedItem = selected;
+        if (selected is null && text.Length == 0) selectedName = null;
+        syncing = false;
         CountText.Text = repos.Count > 0 ? repos.Count.ToString() : "";
         Footer.Update(lastUpdated, false, repos.Count == 0 ? null : error);
         if (visible.Count > 0) ShowOverlay(null);
@@ -434,8 +457,7 @@ public sealed class ForgeDetailView : Grid
         var open = Ui.Button(L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(item.Url), accent: true, glyph: "\uE774");
         var copy = Ui.Button(L.T("Menu_CopyLink", "Copy Link"), () =>
         {
-            WindowInterop.Copy(item.Url);
-            ShellView.Toast(L.T("Toast_CopiedLink", "Copied link"));
+            ShellView.Copied(item.Url, L.T("Toast_CopiedLink", "Copied link"));
         });
         var buttons = Ui.H(8, open, copy);
         buttons.Margin = new Thickness(0, 4, 0, 0);
@@ -456,8 +478,17 @@ public sealed class ForgeDetailView : Grid
         var tile = Ui.IconTile(provider.Glyph(), "violet", 56);
         tile.HorizontalAlignment = HorizontalAlignment.Center;
         tile.Opacity = 0.9;
-        var text = Ui.Text(L.F("Forge_Select", "Select a {0}", provider.RequestTitle()), 13, "muted");
+        var message = AppViewModel.Shared.Section.Kind switch
+        {
+            SectionKind.Notifications => L.T("Forge_InboxOpensInBrowser", "Inbox items open in the browser — press Enter or double-click a row"),
+            SectionKind.Repos => L.F("Forge_ReposOpenInBrowser", "{0} open in the browser — press Enter or double-click a row", provider.RepositoriesTitle()),
+            SectionKind.Issues => L.T("Forge_SelectIssue", "Select an issue"),
+            _ => L.F("Forge_Select", "Select a {0}", provider.RequestTitle())
+        };
+        var text = Ui.Text(message, 13, "muted", wrap: true);
+        text.TextAlignment = TextAlignment.Center;
         text.HorizontalAlignment = HorizontalAlignment.Center;
+        text.MaxWidth = 320;
         var panel = Ui.V(12, tile, text);
         panel.HorizontalAlignment = HorizontalAlignment.Center;
         panel.VerticalAlignment = VerticalAlignment.Center;

@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using PullYard.Controls;
 using PullYard.Core.Claude;
+using PullYard.Core.Theming;
 using PullYard.Core.Util;
 using PullYard.Services;
 using PullYard.ViewModels;
@@ -84,22 +85,19 @@ public sealed class TerminalView : Grid, IDisposable
     private void SendTheme()
     {
         if (!ready) return;
-        string bg, fg, cursor, selection;
-        if (ThemeService.IsBrand)
-        {
-            bg = Palette.CssHex("panel");
-            fg = Palette.CssHex("text");
-            cursor = Palette.CssHex("accent");
-            selection = ThemeService.IsDark ? "rgba(91,184,236,0.30)" : "rgba(42,139,200,0.25)";
-        }
-        else
-        {
-            bg = ThemeService.IsDark ? "#1c1c1f" : "#fcfcfc";
-            fg = ThemeService.IsDark ? "#e6e6e6" : "#1f1f1f";
-            cursor = Palette.CssHex("accent");
-            selection = ThemeService.IsDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.18)";
-        }
+        var surface = Surface();
+        var bg = ThemeTokens.Css(surface);
+        var fg = ThemeTokens.Css(ThemeTokens.Over(Palette.Argb("text"), surface));
+        var cursor = Palette.CssHex("accent");
+        var selection = ThemeTokens.Css(ThemeTokens.Fade(Palette.Argb("accent"), ThemeService.IsDark ? 0.30 : 0.25));
         web.Send(new JsonObject { ["op"] = "theme", ["theme"] = new JsonObject { ["background"] = bg, ["foreground"] = fg, ["cursor"] = cursor, ["selection"] = selection } });
+    }
+
+    private static uint Surface()
+    {
+        if (ThemeService.IsBrand || ThemeService.IsHighContrast) return Palette.Argb(ThemeService.IsBrand ? "panel" : "window");
+        var backdrop = ThemeTokens.Resolve("window", true, ThemeService.IsDark);
+        return ThemeTokens.Over(Palette.Argb("panel"), backdrop);
     }
 
     private void Attach()
@@ -173,7 +171,9 @@ public sealed class TerminalView : Grid, IDisposable
         overlay.Child = Ui.V(10, message, Ui.H(8, resume, close));
         overlay.Padding = new Thickness(16);
         overlay.CornerRadius = new CornerRadius(12);
-        overlay.Background = Palette.Brush("raised");
+        overlay.Background = Palette.Brush("overlay");
+        overlay.BorderBrush = Palette.Brush("cardLine");
+        overlay.BorderThickness = new Thickness(1);
         overlay.Visibility = Visibility.Visible;
     }
 

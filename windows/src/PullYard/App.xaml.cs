@@ -34,6 +34,8 @@ public partial class App : Application
 
     public static bool Quitting => quitting;
 
+    public static bool TrayVisible => tray is { Visible: true };
+
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         Notifications.Invoked += action => MainWindow?.DispatcherQueue.TryEnqueue(() =>
@@ -96,11 +98,16 @@ public partial class App : Application
         try
         {
             var icon = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
-            tray = new TrayIcon(icon, AppInfo.DisplayName) { MenuProvider = TrayMenu };
+            tray = new TrayIcon(icon, AppInfo.DisplayName, Settings.Shared.GetBool(Keys.TrayShow, true)) { MenuProvider = TrayMenu };
             var model = AppViewModel.Shared;
             model.PropertyChanged += (_, e) =>
             {
                 if (e.PropertyName is nameof(AppViewModel.ReviewRequestCount) or nameof(AppViewModel.UnreadCount)) UpdateTrayTooltip();
+            };
+            Settings.Shared.Changed += key =>
+            {
+                if (key != Keys.TrayShow) return;
+                MainWindow?.DispatcherQueue.TryEnqueue(() => tray?.SetVisible(Settings.Shared.GetBool(Keys.TrayShow, true)));
             };
             UpdateTrayTooltip();
         }
@@ -121,18 +128,23 @@ public partial class App : Application
     private static List<TrayMenuItem> TrayMenu()
     {
         var m = AppViewModel.Shared;
+        var signedIn = m.Phase == Phase.LoggedIn;
+        var who = !signedIn ? ""
+            : m.GitAccount?.Subtitle is { Length: > 0 } subtitle ? $"  {m.Provider.Title()} · {subtitle}"
+            : m.User is { } u ? $"  @{u.Login}"
+            : "";
         var items = new List<TrayMenuItem>
         {
-            new() { Text = AppInfo.DisplayName + (m.User is { } u ? $"  @{u.Login}" : ""), Disabled = true, Bold = true }
+            new() { Text = AppInfo.DisplayName + who, Disabled = true, Bold = true }
         };
         if (m.Updater.AvailableVersion is { } v)
         {
             items.Add(new() { Text = L.F("Update_To", "Update to {0}", v), Action = () => { ShowMainWindow(); m.Updater.Present(); } });
         }
         items.Add(new() { Separator = true });
-        if (m.Phase != Phase.LoggedIn)
+        if (!signedIn)
         {
-            items.Add(new() { Text = L.T("Tray_SignIn", "Sign in…"), Action = ShowMainWindow });
+            items.Add(new() { Text = m.Phase == Phase.Locked ? L.T("Tray_Unlock", "Unlock…") : L.T("Tray_SignIn", "Sign in…"), Action = ShowMainWindow });
         }
         else
         {
@@ -165,7 +177,7 @@ public partial class App : Application
                         }
                         else
                         {
-                            m.Select(route);
+                            m.Open(route);
                         }
                     } });
                 }
@@ -180,13 +192,16 @@ public partial class App : Application
             AddSection(m.Provider.UsesMergeRequests() ? L.T("Tray_MyOpenMRs", "My open MRs") : L.T("Tray_MyOpenPRs", "My open PRs"), m.MyPRCount, m.MyPRs, PRFilter.Mine, m.Provider.UsesMergeRequests() ? L.T("Tray_NoOpenMRs", "No open MRs") : L.T("Tray_NoOpenPRs", "No open PRs"));
             if (!forge || m.ForgeCaps.HasInbox)
             {
-                var unread = m.UnreadCount >= 50 ? "50+" : m.UnreadCount.ToString();
+                var unread = GitHubApi.CountLabel(m.UnreadCount);
                 items.Add(new() { Text = (forge ? m.ForgeCaps.Inbox.Title() : L.T("Section_Notifications", "Notifications")) + (m.UnreadCount > 0 ? $"  ({unread})" : ""), Action = () => { m.Section = Section.Notifications; ShowMainWindow(); } });
             }
-            items.Add(new() { Text = L.T("Common_Refresh", "Refresh"), Action = () => m.RefreshBadges().Forget() });
+            if (m.BadgesRefreshing) items.Add(new() { Text = L.T("Tray_Refreshing", "Refreshing…"), Disabled = true });
+            else items.Add(new() { Text = L.T("Common_Refresh", "Refresh"), Action = () => m.RefreshBadges().Forget() });
+            if (m.CanLock) items.Add(new() { Text = L.T("Lock_Now", "Lock Now"), Action = m.LockNow });
         }
         items.Add(new() { Separator = true });
         items.Add(new() { Text = L.F("Tray_Open", "Open {0}", AppInfo.DisplayName), Action = ShowMainWindow });
+        items.Add(new() { Text = L.T("Shortcuts_Title", "Keyboard Shortcuts"), Action = () => { ShowMainWindow(); Views.ShortcutsDialog.Show(MainWindow?.Content?.XamlRoot).Forget(); } });
         items.Add(new() { Text = L.T("Menu_CheckForUpdates", "Check for Updates…"), Action = () => { ShowMainWindow(); m.Updater.Check(true).Forget(); } });
         items.Add(new() { Text = L.T("Tray_Pizza", "Buy Me a Pizza…"), Action = LinkBrowser.OpenDonation });
         items.Add(new() { Text = L.T("Tray_Quit", "Quit"), Action = Quit });
@@ -196,6 +211,13 @@ public partial class App : Application
     public static void Quit()
     {
         quitting = true;
+        try
+        {
+            AppViewModel.Shared.FlushDrafts();
+        }
+        catch
+        {
+        }
         try
         {
             AppViewModel.Shared.Claude?.CloseAllForProfileSwitch();

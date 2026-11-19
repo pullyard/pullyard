@@ -77,7 +77,7 @@ code,pre,kbd{font-family:"Cascadia Mono","Cascadia Code",Consolas,monospace;font
 button.b{font:12.5px "Segoe UI",sans-serif;padding:4px 12px;border-radius:6px;border:1px solid var(--border);background:var(--button);color:var(--fg);cursor:pointer}
 button.b:hover{border-color:var(--muted)}
 button.b.primary{background:var(--accent);color:var(--onaccent);border-color:transparent}
-button.b.coral{background:var(--coral);color:#fff;border-color:transparent}
+button.b.coral{background:var(--coralfill,var(--coral));color:#fff;border-color:transparent}
 button.b.small{padding:2px 10px;font-size:12px}
 input[type=text]{font:13px "Segoe UI",sans-serif;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--sunken);color:var(--fg);outline:none}
 input[type=text]:focus{border-color:var(--accent)}

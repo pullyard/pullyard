@@ -31,6 +31,8 @@ public sealed class RepoDetailView : LiveDetail
     private ListView? itemsList;
     private RowAppear? itemsAppear;
     private readonly ContentControl itemsOverlay = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch, IsTabStop = false };
+    private readonly ContentControl itemsNotice = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, IsTabStop = false, Visibility = Visibility.Collapsed };
+    private string itemsNoticeKey = "";
     private readonly RefreshFooter footer = new();
     private static readonly Dictionary<string, (string Ref, string Path, bool Blame)> pendingFiles = new(StringComparer.OrdinalIgnoreCase);
     private static event Action<string>? FileRequested;
@@ -58,7 +60,7 @@ public sealed class RepoDetailView : LiveDetail
 
         var tools = Toolbar(
             Ui.RefreshButton(OnRefresh),
-            Ui.IconButton("", L.T("Repos_CopyClone", "Copy “gh repo clone”"), () => WindowInterop.Copy($"gh repo clone {repo.Full}"), "text"),
+            Ui.IconButton("", L.T("Repos_CopyClone", "Copy “gh repo clone”"), () => SearchListView.CopyCommand($"gh repo clone {repo.Full}"), "text"),
             Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(code?.WebUrl ?? $"https://github.com/{repo.Full}"), "text"));
         var card = Ui.Card(headerCard, 12, "raised", 12);
         var top = Ui.Columns((card, Ui.Star), (tools, Ui.Auto));
@@ -230,12 +232,16 @@ public sealed class RepoDetailView : LiveDetail
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         if (itemsList.Parent is Panel p) p.Children.Remove(itemsList);
         if (footer.Parent is Panel fp) fp.Children.Remove(footer);
         if (itemsOverlay.Parent is Panel op) op.Children.Remove(itemsOverlay);
+        if (itemsNotice.Parent is Panel np) np.Children.Remove(itemsNotice);
         grid.Children.Add(itemsList);
         grid.Children.Add(itemsOverlay);
-        SetRow(footer, 1);
+        SetRow(itemsNotice, 1);
+        grid.Children.Add(itemsNotice);
+        SetRow(footer, 2);
         grid.Children.Add(footer);
         footer.Retry = () => LoadItems().Forget();
         body.Content = grid;
@@ -254,6 +260,18 @@ public sealed class RepoDetailView : LiveDetail
         }
         footer.Update(listModel.LastUpdated, listModel.Refreshing, listModel.Items.Count == 0 ? null : listModel.Error);
         if (e.PropertyName is nameof(SearchListViewModel.Items) or nameof(SearchListViewModel.Loading) or nameof(SearchListViewModel.Error) or nameof(SearchListViewModel.CheckingCache)) UpdateItemsOverlay();
+        if (e.PropertyName is nameof(SearchListViewModel.Items) or nameof(SearchListViewModel.LoadingMore) or nameof(SearchListViewModel.LoadMoreError)) UpdateItemsNotice();
+    }
+
+    private void UpdateItemsNotice()
+    {
+        var moreError = listModel.Items.Count > 0 ? listModel.LoadMoreError : null;
+        var more = listModel.Items.Count > 0 && moreError is null && listModel.LoadingMore;
+        var key = $"{more}|{moreError}";
+        if (key == itemsNoticeKey) return;
+        itemsNoticeKey = key;
+        itemsNotice.Content = moreError is not null ? ListPane.LoadMoreErrorRow(moreError, () => listModel.LoadMore(App.Api).Forget()) : more ? ListPane.LoadingMoreRow() : null;
+        itemsNotice.Visibility = itemsNotice.Content is null ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void UpdateItemsOverlay()
@@ -292,7 +310,7 @@ public sealed class RepoCodeView : Grid, IShortcutHost
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.68, GridUnitType.Star) });
 
-        var side = new Grid { Background = ThemeService.IsBrand ? Palette.Brush("list") : null };
+        var side = new Grid { Background = Palette.Brush("list") };
         side.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         side.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         side.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -323,7 +341,7 @@ public sealed class RepoCodeView : Grid, IShortcutHost
             if ((args.OriginalSource as FrameworkElement)?.DataContext is not EntryItem item) return;
             args.Handled = true;
             Ui.Menu(
-                Ui.MenuItem(L.T("Code_CopyPath", "Copy path"), () => WindowInterop.Copy(item.Entry.Path)),
+                Ui.MenuItem(L.T("Code_CopyPath", "Copy path"), () => ShellView.Copied(item.Entry.Path, L.T("Toast_CopiedPath", "Copied path"))),
                 Ui.MenuItem(L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open($"https://github.com/{model.Repo.Full}/{(item.Entry.IsDir ? "tree" : "blob")}/{model.CurrentRef}/{item.Entry.Path}"))).ShowAt((FrameworkElement)args.OriginalSource);
         };
         SetRow(entries, 2);
@@ -564,9 +582,9 @@ public sealed class RepoCodeView : Grid, IShortcutHost
             right.Children.Add(w);
         }
         var more = Ui.IconButton("", L.T("Common_More", "More"), () => { }, "text");
-        var menu = Ui.Menu(Ui.MenuItem(L.T("Code_CopyPath", "Copy path"), () => WindowInterop.Copy(path)));
-        if (model.File is { Kind: FileContentKind.Text or FileContentKind.Markdown } f) menu.Items.Add(Ui.MenuItem(L.T("Code_CopyContents", "Copy contents"), () => WindowInterop.Copy(f.Text)));
-        menu.Items.Add(Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => WindowInterop.Copy(model.WebUrl)));
+        var menu = Ui.Menu(Ui.MenuItem(L.T("Code_CopyPath", "Copy path"), () => ShellView.Copied(path, L.T("Toast_CopiedPath", "Copied path"))));
+        if (model.File is { Kind: FileContentKind.Text or FileContentKind.Markdown } f) menu.Items.Add(Ui.MenuItem(L.T("Code_CopyContents", "Copy contents"), () => ShellView.Copied(f.Text, L.T("Toast_CopiedContents", "Copied contents"))));
+        menu.Items.Add(Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => ShellView.Copied(model.WebUrl, L.T("Toast_CopiedLink", "Copied link"))));
         menu.Items.Add(Ui.MenuItem(L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(model.WebUrl)));
         more.Flyout = menu;
         right.Children.Add(more);

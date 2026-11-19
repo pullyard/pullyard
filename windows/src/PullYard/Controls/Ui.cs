@@ -24,7 +24,7 @@ public static class Ui
         var t = new TextBlock
         {
             Text = text ?? "",
-            Foreground = Palette.Brush(color),
+            Foreground = Palette.TextBrush(color),
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextWrapping = wrap || maxLines > 1 ? TextWrapping.WrapWholeWords : TextWrapping.NoWrap,
             IsTextSelectionEnabled = select,
@@ -195,7 +195,7 @@ public static class Ui
             Width = size + 1,
             Height = size + 1,
             CornerRadius = new CornerRadius((size + 1) / 2),
-            BorderBrush = Palette.Brush("text", ThemeService.IsDark ? 0.22 : 0.16),
+            BorderBrush = Palette.Brush("lineStrong"),
             BorderThickness = new Thickness(0.5),
             Child = p,
             VerticalAlignment = VerticalAlignment.Center
@@ -231,10 +231,44 @@ public static class Ui
     public static Border Card(UIElement child, double radius = 10, string fill = "raised", double padding = 12) => new()
     {
         Background = Palette.Brush(fill),
+        BorderBrush = Palette.Brush("cardLine"),
+        BorderThickness = new Thickness(1),
         CornerRadius = new CornerRadius(radius),
         Padding = new Thickness(padding),
         Child = child
     };
+
+    public static void FillResources(ResourceDictionary resources, string key, bool accentOnly = false)
+    {
+        if (ThemeService.IsHighContrast) return;
+        var fillKey = PullYard.Core.Theming.ThemeTokens.FillKey(key);
+        var fill = Palette.Brush(fillKey);
+        var hover = Palette.Brush(fillKey, 0.9);
+        var pressed = Palette.Brush(fillKey, 0.8);
+        var disabled = Palette.Brush(fillKey, 0.4);
+        var text = Palette.Brush("onFill");
+        var textDisabled = Palette.Brush("onFill", 0.7);
+        foreach (var prefix in accentOnly ? new[] { "AccentButton" } : new[] { "AccentButton", "Button" })
+        {
+            resources[prefix + "Background"] = fill;
+            resources[prefix + "BackgroundPointerOver"] = hover;
+            resources[prefix + "BackgroundPressed"] = pressed;
+            resources[prefix + "BackgroundDisabled"] = disabled;
+            resources[prefix + "Foreground"] = text;
+            resources[prefix + "ForegroundPointerOver"] = text;
+            resources[prefix + "ForegroundPressed"] = text;
+            resources[prefix + "ForegroundDisabled"] = textDisabled;
+        }
+    }
+
+    public static Button Tint(Button button, string key)
+    {
+        var (fill, text) = Palette.Filled(key);
+        FillResources(button.Resources, key);
+        button.Background = fill;
+        button.Foreground = text;
+        return button;
+    }
 
     public static Button Button(string text, Action onClick, bool accent = false, string? glyph = null, string? tooltip = null)
     {
@@ -277,7 +311,7 @@ public static class Ui
 
     public static Microsoft.UI.Xaml.Shapes.Rectangle Line(bool vertical = false)
     {
-        var r = new Microsoft.UI.Xaml.Shapes.Rectangle { Fill = Palette.Brush("text", ThemeService.IsDark ? 0.10 : 0.08) };
+        var r = new Microsoft.UI.Xaml.Shapes.Rectangle { Fill = Palette.Brush("line") };
         if (vertical) r.Width = 1;
         else r.Height = 1;
         return r;

@@ -486,8 +486,8 @@ public sealed class StackNotesPanel : Grid
         Width = 340;
         Padding = new Thickness(14);
         CornerRadius = new CornerRadius(10);
-        Background = Palette.Brush("raised");
-        BorderBrush = Palette.Brush("text", 0.16);
+        Background = Palette.Brush("overlay");
+        BorderBrush = Palette.Brush("lineStrong");
         BorderThickness = new Thickness(1);
         Shadow = new ThemeShadow();
         Translation = new System.Numerics.Vector3(0, 0, 24);

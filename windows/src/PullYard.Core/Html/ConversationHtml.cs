@@ -225,22 +225,12 @@ public static class ConversationHtml
 
     public static string Wrap(string content) => $"<div class=\"tl\">{content}</div>";
 
-    public static string Css => Brand ? BrandVars + BaseCss + BrandOverrides : SystemVars + BaseCss;
+    public static string? Vars { get; set; }
 
-    private const string SystemVars = """
-    :root{--fg:#1f2328;--muted:#59636e;--border:#d1d9e0;--sub:#f6f8fa;--card:transparent;--link:#0969da;--green:#1a7f37;--red:#d1242f;--purple:#8250df;--amber:#9a6700;--add:#dafbe1;--del:#ffebe9;--hunkbg:rgba(9,105,218,.08);--mine:#ddf4ff;--code:#fff;--raised:#ffffff;--gutter:#8c959f;color-scheme:light dark}
-    @media (prefers-color-scheme: dark){:root{--fg:#e6edf3;--muted:#9198a1;--border:#3d444d;--sub:#151b23;--link:#4493f8;--green:#3fb950;--red:#f85149;--purple:#ab7df8;--amber:#d29922;--add:rgba(46,160,67,.18);--del:rgba(248,81,73,.18);--hunkbg:rgba(56,139,253,.12);--mine:rgba(56,139,253,.12);--code:transparent;--raised:#1c2128;--gutter:#6e7681}}
-
-    """;
-
-    private const string BrandVars = """
-    :root{--fg:#1a2333;--muted:#5f6b7e;--border:rgba(26,35,51,.09);--sub:#f3f1ec;--card:#ffffff;--link:#1f7fb8;--green:#2e8a57;--red:#c2412f;--purple:#6b55d6;--amber:#b7791f;--add:rgba(46,138,87,.11);--del:rgba(194,65,47,.10);--hunkbg:rgba(31,127,184,.08);--mine:rgba(31,127,184,.07);--code:#f7f5f0;--raised:#ffffff;--gutter:#9aa2b0;color-scheme:light dark}
-    @media (prefers-color-scheme: dark){:root{--fg:#e6ebf2;--muted:#8693a8;--border:rgba(160,174,196,.10);--sub:#111a2c;--card:#152036;--link:#5bb8ec;--green:#5dbe8a;--red:#e8746a;--purple:#9d8cf0;--amber:#e8b44c;--add:rgba(93,190,138,.10);--del:rgba(232,116,106,.11);--hunkbg:rgba(91,184,236,.08);--mine:rgba(91,184,236,.07);--code:#0a101c;--raised:#152036;--gutter:#4a5670}}
-
-    """;
+    public static string Css => (Vars ?? Theming.ThemeTokens.CssVars(!Brand, false)) + "\n" + BaseCss + (Brand ? BrandOverrides : "");
 
     private const string BrandOverrides = """
-    .box,.thread,.hunk,.event .ic,.pill,button,.md pre{border:0}
+    .hunk,.event .ic,.pill,button,.md pre{border:0}
     .head{border-bottom:0}
     .pill{background:var(--sub)}
     button:hover{background:var(--border)}
@@ -275,14 +265,13 @@ public static class ConversationHtml
     .md ul.contains-task-list{list-style:none;padding-left:1.1em}
     .md summary{cursor:pointer}
     .md .user-mention,.md .team-mention{font-weight:600;color:var(--fg)}
-    .md .pl-k,.md .pl-s1 .pl-k{color:#cf222e}.md .pl-s,.md .pl-pds{color:#0a3069}.md .pl-c{color:#6e7781}.md .pl-en,.md .pl-e{color:#8250df}.md .pl-c1,.md .pl-v{color:#0550ae}.md .pl-smi{color:inherit}
-    @media (prefers-color-scheme: dark){.md .pl-k{color:#ff7b72}.md .pl-s,.md .pl-pds{color:#a5d6ff}.md .pl-c{color:#8b949e}.md .pl-en,.md .pl-e{color:#d2a8ff}.md .pl-c1,.md .pl-v{color:#79c0ff}}
+    .md .pl-k,.md .pl-s1 .pl-k{color:var(--k)}.md .pl-s,.md .pl-pds{color:var(--green)}.md .pl-c{color:var(--muted)}.md .pl-en,.md .pl-e{color:var(--purple)}.md .pl-c1,.md .pl-v{color:var(--link)}.md .pl-smi{color:inherit}
     .md .blob-num,.md .blob-code{font:12px "Cascadia Mono",Consolas,monospace}
     .empty{color:var(--muted);font-style:italic}
     .event{display:flex;align-items:center;gap:7px;margin:0 0 12px 44px;color:var(--muted);font-size:12px;flex-wrap:wrap}
     .event b{color:var(--fg)}
     .event .ic{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--sub);border:1px solid var(--border);font-size:11px;flex:none;color:var(--fg)}
-    .event .ic.ok{background:var(--green);color:#fff;border-color:transparent}.event .ic.bad{background:var(--red);color:#fff;border-color:transparent}.event .ic.merged{background:var(--purple);color:#fff;border-color:transparent}
+    .event .ic.ok{background:var(--greenfill);color:#fff;border-color:transparent}.event .ic.bad{background:var(--redfill);color:#fff;border-color:transparent}.event .ic.merged{background:var(--purplefill);color:#fff;border-color:transparent}
     .event .t{margin-left:2px}
     .label{display:inline-block;padding:0 7px;border-radius:10px;border:1px solid;font-size:11px;font-weight:500;color:var(--fg)}
     .thread{margin:10px 12px;border:1px solid var(--border);border-radius:9px;overflow:hidden;background:var(--sub)}
@@ -298,7 +287,7 @@ public static class ConversationHtml
     .actions{padding:6px 10px;display:flex;gap:6px;flex-wrap:wrap}
     button{font:12px "Segoe UI",sans-serif;padding:3px 10px;border-radius:7px;border:1px solid var(--border);background:var(--sub);color:var(--fg);cursor:pointer}
     button:hover{border-color:var(--muted)}button.ghost{background:transparent;color:var(--muted)}
-    button.primary{background:var(--link);color:#fff;border-color:transparent}
+    button.primary{background:var(--fill);color:#fff;border-color:transparent}
     h3.sec{margin:24px 0 8px 44px;font-size:13px;color:var(--muted)}
 
     """;

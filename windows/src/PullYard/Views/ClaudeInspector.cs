@@ -31,7 +31,7 @@ public sealed class ClaudeInspector : Grid
     public ClaudeInspector(ClaudeTab tab)
     {
         this.tab = tab;
-        Background = ThemeService.IsBrand ? Palette.Brush("panel") : null;
+        Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         expandButton = Ui.IconButton("\uE740", L.T("Inspector_ExpandHint", "Expand over the chat"), () => ToggleExpand?.Invoke());
@@ -345,7 +345,7 @@ public sealed class TasksPanel : Grid
                 {
                     Child = MonoScroll("$ " + command, "text", 160),
                     Background = Palette.Brush("sunken"),
-                    BorderBrush = Palette.Brush("text", 0.1),
+                    BorderBrush = Palette.Brush("line"),
                     BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(6),
                     Padding = new Thickness(8)

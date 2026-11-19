@@ -17,6 +17,9 @@ public static class Shortcuts
 {
     public const string ShortLink = "shortLink";
     public const string Blame = "blame";
+    public const string WriteReview = "writeReview";
+    public const string Approve = "approve";
+    public const string Merge = "merge";
 
     private static DateTimeOffset last;
     private static string lastId = "";

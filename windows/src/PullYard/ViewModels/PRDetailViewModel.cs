@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using PullYard.Core.Api;
 using PullYard.Core.Claude;
+using PullYard.Core.Drafts;
 using PullYard.Core.Html;
 using PullYard.Core.Stacks;
 using PullYard.Core.Util;
@@ -95,6 +96,133 @@ public sealed partial class PRDetailViewModel : ObservableObject
     public bool CanWrite => Repo?.CanWrite ?? false;
 
     public int PendingCount => Pending.Count;
+
+    [ObservableProperty] private bool restoredDrafts;
+    [ObservableProperty] private DiffAnchor? composerAnchor;
+
+    public string ComposerDraft { get; private set; } = "";
+    public string CommentDraft { get; private set; } = "";
+    public string SummaryDraft { get; private set; } = "";
+    public Dictionary<string, string> ReplyDrafts { get; } = new();
+    public DraftStore Drafts { get; set; } = DraftStore.Shared;
+
+    private bool draftsLoaded;
+    private CancellationTokenSource? draftSave;
+    private string threadsSignature = "";
+
+    private string DraftKey => DraftStore.Key(CacheAccount, Api.Host, Ref.Repo.Full, Ref.Number);
+
+    public ReviewDraft CurrentDraft => new()
+    {
+        Pending = Pending.Select(p => new DraftComment(p.Path, p.Line, p.Side, p.Body)).ToList(),
+        Composer = ComposerAnchor is { } a ? new DraftComment(a.Path, a.Line, a.Side, ComposerDraft) : null,
+        Replies = ReplyDrafts.Where(p => !string.IsNullOrWhiteSpace(p.Value)).ToDictionary(p => p.Key, p => p.Value),
+        Comment = CommentDraft,
+        Summary = SummaryDraft
+    };
+
+    public void RestoreDrafts()
+    {
+        if (draftsLoaded) return;
+        if (!Demo.IsOn && Drafts.Review(DraftKey) is { } saved)
+        {
+            Pending.AddRange(saved.Pending.Select(c => new PendingComment { Path = c.Path, Line = c.Line, Side = c.Side, Body = c.Body }));
+            if (saved.Composer is { } open && !string.IsNullOrWhiteSpace(open.Body))
+            {
+                ComposerDraft = open.Body;
+                ComposerAnchor = new DiffAnchor(open.Path, open.Line, open.Side);
+            }
+            foreach (var (id, text) in saved.Replies) ReplyDrafts[id] = text;
+            CommentDraft = saved.Comment;
+            SummaryDraft = saved.Summary;
+            RestoredDrafts = saved.Pending.Count > 0;
+            if (saved.Pending.Count > 0) OnPropertyChanged(nameof(PendingCount));
+        }
+        draftsLoaded = true;
+    }
+
+    public void SaveDraftsNow()
+    {
+        draftSave?.Cancel();
+        draftSave = null;
+        if (!draftsLoaded || Demo.IsOn) return;
+        Drafts.Save(CurrentDraft, DraftKey);
+    }
+
+    private void DraftsChanged()
+    {
+        if (!draftsLoaded) return;
+        draftSave?.Cancel();
+        var cts = new CancellationTokenSource();
+        draftSave = cts;
+        SaveDraftsLater(cts.Token).Forget();
+    }
+
+    private async Task SaveDraftsLater(CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(400, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        if (!ct.IsCancellationRequested) SaveDraftsNow();
+    }
+
+    public void SetCommentDraft(string text)
+    {
+        if (text == CommentDraft) return;
+        CommentDraft = text;
+        DraftsChanged();
+    }
+
+    public void SetSummaryDraft(string text)
+    {
+        if (text == SummaryDraft) return;
+        SummaryDraft = text;
+        DraftsChanged();
+    }
+
+    public string ReplyDraft(string threadId) => ReplyDrafts.TryGetValue(threadId, out var text) ? text : "";
+
+    public void SetReplyDraft(string threadId, string text)
+    {
+        if (ReplyDraft(threadId) == text) return;
+        if (text.Length == 0) ReplyDrafts.Remove(threadId);
+        else ReplyDrafts[threadId] = text;
+        DraftsChanged();
+    }
+
+    public string ComposerText(DiffAnchor anchor) => ComposerAnchor == anchor ? ComposerDraft : "";
+
+    public void SetComposer(DiffAnchor? anchor, string text)
+    {
+        if (ComposerAnchor == anchor && ComposerDraft == text) return;
+        ComposerDraft = anchor is null ? "" : text;
+        ComposerAnchor = anchor;
+        DraftsChanged();
+    }
+
+    public bool HasUnfinishedComposer => ComposerAnchor is not null && !string.IsNullOrWhiteSpace(ComposerDraft);
+
+    public bool EditPending(Guid id)
+    {
+        if (Pending.FirstOrDefault(p => p.Id == id) is not { } comment) return false;
+        if (HasUnfinishedComposer) return false;
+        Pending.Remove(comment);
+        OnPropertyChanged(nameof(PendingCount));
+        DiffVersion++;
+        ComposerDraft = comment.Body;
+        ComposerAnchor = new DiffAnchor(comment.Path, comment.Line, comment.Side);
+        DraftsChanged();
+        return true;
+    }
+
+    public int HiddenThreadCount => Pr is { } pr ? PullRequestSignature.Hidden(pr.ReviewThreads.TotalCount, pr.ReviewThreads.Items.Count) : 0;
+
+    public int HiddenCheckCount => Pr?.Rollup?.Contexts is { } contexts ? PullRequestSignature.Hidden(contexts.TotalCount, contexts.Items.Count) : 0;
 
     public ReviewedCommit? LastReviewed => Pr is { } pr ? Interdiff.LastReviewed(pr, ViewerLogin) : null;
 
@@ -325,7 +453,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
             LoadMoreViewed(pr.Files?.NextCursor);
             LoadRules(pr, forced == "refresh");
             LoadCodeOwners(pr);
-            IndexThreads(pr.ReviewThreads.Items);
+            var threadsChanged = IndexThreads(pr.ReviewThreads.Items);
             signature = PullRequestSignature.Of(pr);
             lastFullFetch = DateTimeOffset.Now;
             if (FilesLoaded) filesOid ??= pr.HeadRefOid;
@@ -354,7 +482,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
             }
             ScheduleMergeRecheck(pr);
             if (FilesVisible && (filesOutdated || !FilesLoaded)) LoadFiles(filesOutdated).Forget();
-            else if (FilesLoaded) DiffVersion++;
+            else if (FilesLoaded && threadsChanged) DiffVersion++;
         }
         catch (OperationCanceledException)
         {
@@ -580,8 +708,11 @@ public sealed partial class PRDetailViewModel : ObservableObject
         }
     }
 
-    private void IndexThreads(IEnumerable<ReviewThread> threads)
+    private bool IndexThreads(List<ReviewThread> threads)
     {
+        var fingerprint = PullRequestSignature.Threads(threads);
+        if (fingerprint == threadsSignature) return false;
+        threadsSignature = fingerprint;
         var idx = new Dictionary<string, List<ReviewThread>>();
         var outdated = new Dictionary<string, List<ReviewThread>>();
         foreach (var t in threads)
@@ -600,6 +731,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
         }
         threadIndex = idx;
         outdatedByPath = outdated;
+        return true;
     }
 
     public DiffRenderOptions RenderOptions(string filter, bool wrap = true, bool split = false)
@@ -663,7 +795,12 @@ public sealed partial class PRDetailViewModel : ObservableObject
     {
         if (Pr is not { } pr) return false;
         var ok = await Run(() => Api.AddComment(pr.Id, body));
-        if (ok) ScrollToBottomToken++;
+        if (ok)
+        {
+            ScrollToBottomToken++;
+            CommentDraft = "";
+            SaveDraftsNow();
+        }
         return ok;
     }
 
@@ -675,9 +812,12 @@ public sealed partial class PRDetailViewModel : ObservableObject
         if (ok)
         {
             Pending.Clear();
+            SummaryDraft = "";
+            RestoredDrafts = false;
             OnPropertyChanged(nameof(PendingCount));
             DiffVersion++;
             ScrollToBottomToken++;
+            SaveDraftsNow();
         }
         return ok;
     }
@@ -688,11 +828,19 @@ public sealed partial class PRDetailViewModel : ObservableObject
         if (immediately)
         {
             if (Pr is not { } pr) return false;
-            return await Run(() => Api.AddReview(pr.Id, "COMMENT", null, new[] { c }));
+            var sent = await Run(() => Api.AddReview(pr.Id, "COMMENT", null, new[] { c }));
+            if (sent && ComposerAnchor == anchor) SetComposer(null, "");
+            return sent;
         }
         Pending.Add(c);
+        if (ComposerAnchor == anchor)
+        {
+            ComposerDraft = "";
+            ComposerAnchor = null;
+        }
         OnPropertyChanged(nameof(PendingCount));
         DiffVersion++;
+        DraftsChanged();
         return true;
     }
 
@@ -702,17 +850,25 @@ public sealed partial class PRDetailViewModel : ObservableObject
         {
             OnPropertyChanged(nameof(PendingCount));
             DiffVersion++;
+            DraftsChanged();
         }
     }
 
     public void ClearPending()
     {
         Pending.Clear();
+        RestoredDrafts = false;
         OnPropertyChanged(nameof(PendingCount));
         DiffVersion++;
+        DraftsChanged();
     }
 
-    public Task<bool> Reply(string threadId, string body) => Run(() => Api.Mutate(Q.ReplyThread, GitHubApiVars.Of(("id", threadId), ("b", body))));
+    public async Task<bool> Reply(string threadId, string body)
+    {
+        var ok = await Run(() => Api.Mutate(Q.ReplyThread, GitHubApiVars.Of(("id", threadId), ("b", body))));
+        if (ok) SetReplyDraft(threadId, "");
+        return ok;
+    }
 
     public Task<bool> SetResolved(string threadId, bool resolved) =>
         Run(() => Api.Mutate(resolved ? Q.ResolveThread : Q.UnresolveThread, GitHubApiVars.Of(("id", threadId))));

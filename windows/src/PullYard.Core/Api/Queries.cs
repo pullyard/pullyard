@@ -66,16 +66,16 @@ fragment IssueItem on Issue { number title url issueState: state stateReason cre
       assignees(first: 10) {{ nodes {{ login avatarUrl }} }}
       reviewRequests(first: 20) {{ nodes {{ asCodeOwner requestedReviewer {{ __typename ... on User {{ login avatarUrl }} ... on Team {{ name combinedSlug avatarUrl }} ... on Mannequin {{ login avatarUrl }} }} }} }}
       latestOpinionatedReviews(first: 20) {{ nodes {{ state submittedAt commit {{ oid }} author {Actor} }} }}
-      lastCommit: commits(last: 1) {{ nodes {{ commit {{ oid committedDate statusCheckRollup {{ state contexts(first: 100) {{ nodes {{ __typename
+      lastCommit: commits(last: 1) {{ nodes {{ commit {{ oid committedDate statusCheckRollup {{ state contexts(first: 100) {{ totalCount nodes {{ __typename
         ... on CheckRun {{ databaseId name status conclusion detailsUrl startedAt completedAt isRequired(pullRequestNumber: $number) checkSuite {{ workflowRun {{ databaseId workflow {{ name }} }} }} }}
         ... on StatusContext {{ context state targetUrl description isRequired(pullRequestNumber: $number) }}
       }} }} }} }} }} }}
-      allCommits: commits(first: 100) {{ totalCount nodes {{ commit {{ oid abbreviatedOid messageHeadline committedDate url author {{ name avatarUrl user {{ login }} }} statusCheckRollup {{ state }} }} }} }}
+      allCommits: commits(last: 100) {{ totalCount nodes {{ commit {{ oid abbreviatedOid messageHeadline committedDate url author {{ name avatarUrl user {{ login }} }} statusCheckRollup {{ state }} }} }} }}
       files(first: 100) {{ totalCount pageInfo {{ hasNextPage endCursor }} nodes {{ path viewerViewedState }} }}
       timelineItems(last: 100, itemTypes: {PrTimelineTypes}) {{
         totalCount nodes {{ __typename {CommonTimeline} {PrTimeline} }}
       }}
-      reviewThreads(first: 100) {{ nodes {{ id isResolved isOutdated path line originalLine diffSide viewerCanResolve viewerCanUnresolve viewerCanReply {ThreadEditMarks}
+      reviewThreads(first: 100) {{ totalCount nodes {{ id isResolved isOutdated path line originalLine diffSide viewerCanResolve viewerCanUnresolve viewerCanReply {ThreadEditMarks}
         comments(first: 50) {{ nodes {{ id author {Actor} body bodyHTML createdAt diffHunk pullRequestReview {{ id }} }} }} }} }}
     }}
   }}

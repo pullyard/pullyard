@@ -34,6 +34,7 @@ public sealed class LoginView : Grid
     private GitProvider provider;
     private GitAccount? prefill;
     private CancellationTokenSource? deviceCts;
+    private bool deviceStarting;
 
     private bool OneClick => OAuthApp.OneClick(provider, OAuthApp.Bundled);
 
@@ -82,10 +83,10 @@ public sealed class LoginView : Grid
             RenderProvider();
         };
         controls.Children.Add(picker);
+        controls.Children.Add(errorBar);
         controls.Children.Add(providerArea);
 
         controls.Children.Add(busyRing);
-        controls.Children.Add(errorBar);
 
         tokenBox.KeyDown += (_, e) =>
         {
@@ -356,7 +357,14 @@ public sealed class LoginView : Grid
             var button = Ui.Button(L.T("Login_OneClickTitle", "Sign in with GitHub"), () => StartDevice(OAuthApp.Bundled), accent: true, glyph: "\uE8A7");
             button.HorizontalAlignment = HorizontalAlignment.Stretch;
             button.MinHeight = 40;
+            button.IsEnabled = !deviceStarting;
             oneClickPanel.Children.Add(button);
+            if (deviceStarting)
+            {
+                var starting = Ui.Spinner(16);
+                starting.HorizontalAlignment = HorizontalAlignment.Center;
+                oneClickPanel.Children.Add(starting);
+            }
             return;
         }
         AddCodeRow(oneClickPanel, code);
@@ -367,7 +375,9 @@ public sealed class LoginView : Grid
         devicePanel.Children.Clear();
         if (code is null)
         {
-            devicePanel.Children.Add(Ui.Button(L.T("Login_GetCode", "Get code"), () => StartDevice()));
+            var start = Ui.Button(L.T("Login_GetCode", "Get code"), () => StartDevice());
+            start.IsEnabled = !deviceStarting;
+            devicePanel.Children.Add(Ui.H(10, start, deviceStarting ? Ui.Spinner(16) : null));
             return;
         }
         AddCodeRow(devicePanel, code);
@@ -398,6 +408,11 @@ public sealed class LoginView : Grid
     {
         errorBar.Message = message ?? "";
         errorBar.IsOpen = message is not null;
+        if (message is null) return;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (errorBar.IsOpen && errorBar.XamlRoot is not null) errorBar.StartBringIntoView();
+        });
     }
 
     private async void RunLogin(Func<Task> op)
@@ -462,6 +477,7 @@ public sealed class LoginView : Grid
 
     private async void StartDevice(string? clientOverride = null)
     {
+        if (deviceStarting) return;
         var id = clientOverride ?? clientIdBox.Text.Trim();
         var p = provider;
         var host = Host;
@@ -476,9 +492,20 @@ public sealed class LoginView : Grid
         deviceCts?.Cancel();
         var cts = new CancellationTokenSource();
         deviceCts = cts;
+        deviceStarting = true;
+        RenderDevice(null);
+        RenderOneClick(null);
         try
         {
-            var code = await DeviceFlow.Start(id, endpoint, cts.Token);
+            DeviceCode code;
+            try
+            {
+                code = await DeviceFlow.Start(id, endpoint, cts.Token);
+            }
+            finally
+            {
+                deviceStarting = false;
+            }
             if (clientOverride is not null) RenderOneClick(code);
             else RenderDevice(code);
             WindowInterop.Copy(code.UserCode);

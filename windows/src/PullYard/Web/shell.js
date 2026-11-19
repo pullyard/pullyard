@@ -248,12 +248,47 @@
     return false;
   }
 
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  if (window.marked) {
+    marked.use({
+      gfm: true,
+      breaks: true,
+      renderer: {
+        html: function (token) {
+          return escapeHtml(typeof token === "object" ? (token.text || token.raw || "") : token);
+        }
+      }
+    });
+  }
+
+  function renderMarkdown(scope) {
+    if (!window.marked || !scope) return;
+    var nodes = scope.querySelectorAll("[data-md]");
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      var source = node.textContent || "";
+      node.removeAttribute("data-md");
+      try {
+        node.innerHTML = marked.parse(source);
+        node.classList.add("rendered");
+      } catch (e) {
+        node.textContent = source;
+      }
+    }
+  }
+
   function render(msg) {
     var root = document.getElementById("root");
     var y = window.scrollY;
     document.getElementById("dyn").textContent = msg.css || "";
     document.body.className = msg.bodyClass || "";
     root.innerHTML = msg.html || "";
+    renderMarkdown(root);
     var collapsed = root.querySelectorAll("section.file.collapsed .fbody");
     for (var i = 0; i < collapsed.length; i++) collapsed[i].style.display = "none";
     if (msg.scroll === "bottom") {
@@ -289,6 +324,7 @@
             var body = sections[i].querySelector(".fbody");
             if (body) {
               body.innerHTML = msg.html;
+              renderMarkdown(body);
               body.style.display = "";
             }
           }

@@ -38,8 +38,7 @@ public sealed class ClaudeWorkspaceView : Grid
 
     public ClaudeWorkspaceView()
     {
-        Background = ThemeService.IsBrand ? Palette.Brush("panel") : null;
-        ThemeService.Changed += () => Background = ThemeService.IsBrand ? Palette.Brush("panel") : null;
+        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         Children.Add(host);
         Loaded += (_, _) =>
         {
@@ -184,9 +183,9 @@ public sealed class ClaudeWorkspaceView : Grid
         main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         main.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         var barScroll = new ScrollViewer { Content = tabBar, HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalScrollMode = ScrollMode.Enabled, VerticalScrollMode = ScrollMode.Disabled };
-        var barHost = new Border { Child = barScroll, Padding = new Thickness(10, 6, 10, 6), Background = ThemeService.IsBrand ? Palette.Brush("bar") : null, BorderBrush = Palette.Brush("text", 0.08), BorderThickness = new Thickness(0, 0, 0, 1) };
+        var barHost = new Border { Child = barScroll, Padding = new Thickness(10, 6, 10, 6), Background = Palette.Brush("bar"), BorderBrush = Palette.Brush("line"), BorderThickness = new Thickness(0, 0, 0, 1) };
         main.Children.Add(barHost);
-        var controlHost = new Border { Child = controlBar, Padding = new Thickness(12, 6, 8, 6), Background = ThemeService.IsBrand ? Palette.Brush("bar") : null, BorderBrush = Palette.Brush("text", 0.08), BorderThickness = new Thickness(0, 0, 0, 1) };
+        var controlHost = new Border { Child = controlBar, Padding = new Thickness(12, 6, 8, 6), Background = Palette.Brush("bar"), BorderBrush = Palette.Brush("line"), BorderThickness = new Thickness(0, 0, 0, 1) };
         SetRow(controlHost, 1);
         main.Children.Add(controlHost);
         SetRow(tabContent, 2);
@@ -329,7 +328,7 @@ public sealed class ClaudeWorkspaceView : Grid
                 Padding = new Thickness(10, 3, 4, 3),
                 CornerRadius = new CornerRadius(8),
                 Background = selected ? Palette.Brush("accent", 0.14) : Palette.Brush("text", 0.04),
-                BorderBrush = selected ? Palette.Brush("accent", 0.45) : Palette.Brush("text", 0.08),
+                BorderBrush = selected ? Palette.Brush("accent", 0.45) : Palette.Brush("line"),
                 BorderThickness = new Thickness(1)
             };
             b.Click += (_, _) => Ws.SelectedTab = tab;

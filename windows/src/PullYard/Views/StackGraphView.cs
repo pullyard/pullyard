@@ -179,8 +179,8 @@ public sealed class StackGraphView : Grid
                 Width = StackMetrics.PillWidth,
                 Height = StackMetrics.PillHeight,
                 CornerRadius = new CornerRadius(StackMetrics.PillHeight / 2),
-                Background = Palette.Brush("raised"),
-                BorderBrush = Palette.Brush("text", 0.16),
+                Background = Palette.Brush("overlay"),
+                BorderBrush = Palette.Brush("lineStrong"),
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(12, 0, 12, 0),
                 Child = Ui.H(6, StackUi.Fixed("⎇", 13, "muted"), StackUi.Fixed(tree.Base, 13, "text", mono: true))
@@ -473,8 +473,8 @@ public sealed class StackGraphView : Grid
             Child = row,
             Padding = new Thickness(4, 2, 4, 2),
             CornerRadius = new CornerRadius(8),
-            Background = Palette.Brush("raised"),
-            BorderBrush = Palette.Brush("text", 0.16),
+            Background = Palette.Brush("overlay"),
+            BorderBrush = Palette.Brush("lineStrong"),
             BorderThickness = new Thickness(1)
         };
         border.PointerPressed += (_, e) => e.Handled = true;
@@ -554,8 +554,8 @@ public sealed class StackGraphView : Grid
             Height = geometry!.CardHeight,
             Padding = CardPadding,
             CornerRadius = new CornerRadius(10),
-            Background = Palette.Brush("raised"),
-            BorderBrush = current ? Palette.Brush("indigo") : Palette.Brush("text", 0.16),
+            Background = Palette.Brush("overlay"),
+            BorderBrush = current ? Palette.Brush("indigo") : Palette.Brush("lineStrong"),
             BorderThickness = new Thickness(current ? 2 : 1),
             Opacity = onPath ? 1 : 0.6,
             Child = stack
@@ -666,8 +666,8 @@ public sealed class StackGraphView : Grid
             Width = StackMetrics.CardWidth,
             Height = geometry.CardHeight,
             CornerRadius = new CornerRadius(12),
-            Background = Palette.Brush("raised"),
-            BorderBrush = current ? Palette.Brush("indigo") : Palette.Brush("text", 0.16),
+            Background = Palette.Brush("overlay"),
+            BorderBrush = current ? Palette.Brush("indigo") : Palette.Brush("lineStrong"),
             BorderThickness = new Thickness(current ? 8 : 3),
             Opacity = tree.OnPath(node.Number) ? 1 : 0.6,
             Child = grid

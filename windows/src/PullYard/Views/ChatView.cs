@@ -86,6 +86,9 @@ public sealed class ChatView : Grid
         ThemeService.Changed += SendVars;
         Loaded += (_, _) =>
         {
+            ThemeService.Changed -= SendVars;
+            ThemeService.Changed += SendVars;
+            if (sentVars is not null && sentVars != ThemeService.WebVars()) SendVars();
             tab.Git.PropertyChanged -= OnContext;
             tab.Git.PropertyChanged += OnContext;
             AppViewModel.Shared.Claude.PropertyChanged -= OnContext;
@@ -160,7 +163,13 @@ public sealed class ChatView : Grid
 
     private void OnUsage(object? sender, PropertyChangedEventArgs e) => DispatcherQueue.TryEnqueue(RenderBottomBar);
 
-    private void SendVars() => web.Send(new JsonObject { ["op"] = "vars", ["css"] = ThemeService.WebVars() });
+    private string? sentVars;
+
+    private void SendVars()
+    {
+        sentVars = ThemeService.WebVars();
+        web.Send(new JsonObject { ["op"] = "vars", ["css"] = sentVars });
+    }
 
     private void OnWebMessage(JsonObject msg)
     {
@@ -427,7 +436,7 @@ public sealed class ChatView : Grid
         input.Drop += async (_, e) => await DropItems(e.DataView);
 
         var panel = Ui.V(6, completionHost, images, input, bottomBar);
-        var card = new Border { Child = panel, Background = Palette.Brush("raised"), CornerRadius = new CornerRadius(12), Padding = new Thickness(10), Margin = new Thickness(12) };
+        var card = new Border { Child = panel, Background = Palette.Brush("raised"), BorderBrush = Palette.Brush("cardLine"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), Padding = new Thickness(10), Margin = new Thickness(12) };
         card.AllowDrop = true;
         card.DragOver += (_, e) => e.AcceptedOperation = DataPackageOperation.Copy;
         card.Drop += async (_, e) => await DropItems(e.DataView);
