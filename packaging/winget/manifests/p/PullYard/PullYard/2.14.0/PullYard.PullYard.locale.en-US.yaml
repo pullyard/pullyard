@@ -1,0 +1,23 @@
+PackageIdentifier: PullYard.PullYard
+PackageVersion: 2.14.0
+PackageLocale: en-US
+Publisher: PullYard
+PublisherUrl: https://pullyard.app/
+PublisherSupportUrl: https://github.com/pullyard/pullyard/issues
+PackageName: PullYard
+PackageUrl: https://pullyard.app/
+License: MIT
+LicenseUrl: https://github.com/pullyard/pullyard/blob/main/LICENSE
+ShortDescription: A free native app for reviewing, fixing and merging pull requests.
+Description: PullYard is a free, MIT-licensed desktop app for pull requests on GitHub, with native builds for macOS, Windows and Linux. Read big diffs, comment, approve and merge without the browser, and hand review comments to an AI agent (Claude Code) with one click.
+Moniker: pullyard
+Tags:
+- github
+- pull-requests
+- code-review
+- git
+- claude-code
+- developer-tools
+ReleaseNotesUrl: https://pullyard.app/changelog.html#v2.14.0
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

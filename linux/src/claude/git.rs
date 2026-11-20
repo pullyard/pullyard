@@ -45,7 +45,7 @@ pub fn snapshot(dir: String) -> Snapshot {
     }
     let branch = run(&["rev-parse", "--abbrev-ref", "HEAD"], &dir).0.trim().to_string();
     let remote = remote(&dir);
-    let repo = remote.as_ref().and_then(|r| r.repo());
+    let repo = remote.as_ref().and_then(|r| r.github_repo());
     let mut files: Vec<PrFile> = diff::parse_unified(&run(&["diff", "HEAD", "--no-ext-diff", "--no-textconv", "--no-color", "-M"], &dir).0);
     if files.is_empty() {
         files = diff::parse_unified(&run(&["diff", "--no-ext-diff", "--no-textconv", "--no-color", "-M"], &dir).0);

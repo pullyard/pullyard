@@ -32,7 +32,9 @@ pub fn inject_stack(m: &PrModel, extra: usize) -> usize {
     let repo = m.r.repo.full();
     let nodes = crate::fixtures::stack_around(&current, &repo, extra);
     current.head_repo = Some(repo.clone());
-    crate::stack::store::seed(&m.api, &m.r.repo, nodes.clone());
+    if let Some(api) = &m.api {
+        crate::stack::store::seed(api, &m.r.repo, nodes.clone());
+    }
     let tree = crate::stack::StackTree::build(&current, &nodes, &repo, crate::stack::NODE_LIMIT);
     let count = tree.as_ref().map(|t| t.count()).unwrap_or(0);
     *m.stack.borrow_mut() = tree;
@@ -354,7 +356,10 @@ pub fn run(_app: Rc<App>) {
         let m = pr();
         let c = m.pr.borrow().as_ref().map(|p| p.checks()[0].clone());
         if let Some(c) = c {
-            crate::ui::pr::sheets::job_log(m.api.clone(), m.r.repo.clone(), c, Some(std::rc::Rc::new(|_: Option<String>| {})));
+            let backend = m.backend.clone();
+            let r = m.r.clone();
+            let check = c.clone();
+            crate::ui::pr::sheets::job_log(async move { backend.job_log(&r, &check).await }, c, Some(std::rc::Rc::new(|_: Option<String>| {})));
         }
     });
     step(next(300), "fix ci sheet", move || crate::ui::fix_claude::show_ci(pr(), None));

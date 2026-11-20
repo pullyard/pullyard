@@ -200,6 +200,9 @@ final class ChatSession {
     var mcpServers: [MCPServerStatus] = []
     var pendingPermissions: [PermissionRequest] = []
     var totalCost: Double = 0
+    var budgetPaused = false
+    @ObservationIgnored private var costBase: Double = 0
+    @ObservationIgnored private var budgetAllowance: Double = 0
     var contextPercent: Int?
     var context: ContextUsage?
     var lastError: String?
@@ -230,7 +233,6 @@ final class ChatSession {
     var queuedIDs: [String] = []
     @ObservationIgnored private var requestCounter = 0
     @ObservationIgnored private var rollbacks: [String: (label: String, undo: () -> Void)] = [:]
-    @ObservationIgnored private var costBase: Double = 0
     @ObservationIgnored var transport: (([String: Any]) -> Bool)?
     @ObservationIgnored private var todoCache: (count: Int, todos: [[String: Any]]) = (-1, [])
     @ObservationIgnored private var displayCache: (key: DisplayKey, items: [ChatDisplayItem])?
@@ -363,6 +365,7 @@ final class ChatSession {
             if ClaudeLauncher.claudeBinary == nil { lastError = "claude CLI not found" }
             return
         }
+        costBase = totalCost
         var args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                     "--include-partial-messages", "--permission-prompts", "host", "--permission-prompt-tool", "stdio"]
         if let model, !model.isEmpty { args += ["--model", model]; modelValue = model }
@@ -492,7 +495,7 @@ final class ChatSession {
         lastActivity = Date()
         let id = UUID().uuidString
         items.append(.user(id: id, text: trimmed, images: images))
-        guard running, !busy else {
+        guard running, !busy, !budgetPaused else {
             queuedPrompts.append((id, trimmed, images))
             queuedIDs.append(id)
             return
@@ -523,9 +526,15 @@ final class ChatSession {
         turnStartedAt = Date()
     }
 
+    func continuePastBudget() {
+        budgetAllowance = SessionCost.nextAllowance(cost: totalCost, budget: SessionCost.budget)
+        budgetPaused = false
+        flushQueue()
+    }
+
     @discardableResult
     private func flushQueue() -> Bool {
-        guard running, !busy, !queuedPrompts.isEmpty else { return false }
+        guard running, !busy, !budgetPaused, !queuedPrompts.isEmpty else { return false }
         let next = queuedPrompts.removeFirst()
         queuedIDs.removeAll { $0 == next.id }
         if let index = items.firstIndex(where: { $0.id == "u" + next.id }), index != items.count - 1 {
@@ -789,7 +798,7 @@ final class ChatSession {
                 tool.backgrounded = true
             }
             if !tool.backgrounded { tool.finishedAt = Date() }
-            if tool.name == "Bash", (tool.input["command"] as? String)?.contains("gh pr create") == true,
+            if tool.name == "Bash", let command = tool.input["command"] as? String, AgentShip.createCommands.contains(where: { command.contains($0) }),
                let url = tool.resultText.flatMap(AgentShip.pullRequestURL) {
                 createdPR = url
             }
@@ -870,7 +879,10 @@ final class ChatSession {
         busy = false
         status = nil
         let before = totalCost
-        if let c = o["total_cost_usd"] as? Double { totalCost = costBase + c }
+        if let c = o["total_cost_usd"] as? Double {
+            totalCost = SessionCost.total(base: costBase, reported: c)
+            if SessionCost.overBudget(cost: totalCost, budget: SessionCost.budget, allowance: budgetAllowance) { budgetPaused = true }
+        }
         ledger?.record(cost: totalCost - before)
         for t in tools.values where t.status == .running { t.status = .done }
         if o["is_error"] as? Bool == true {

@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use super::models::{CheckContext, CheckOutcome, PullRequestDetail};
+use super::models::{CheckContext, CheckOutcome, ForgeMergeInfo, PullRequestDetail};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityState {
@@ -154,6 +154,7 @@ pub enum RequirementKind {
     Checks,
     OptionalChecks,
     Conversations,
+    MergeQueue,
     Rules,
     OtherRules,
 }
@@ -240,6 +241,9 @@ pub fn requirements(pr: &PullRequestDetail, status: &RulesStatus) -> Vec<MergeRe
     if !pr.is_open() {
         return out;
     }
+    if let Some(merge) = &pr.forge_merge {
+        return if merge.provider.as_deref() == Some("bitbucket") { bitbucket(pr, merge) } else { gitlab(pr, merge) };
+    }
     let rules = status.rules();
     let loading = *status == RulesStatus::Loading;
     let base = &pr.base_ref_name;
@@ -262,11 +266,183 @@ pub fn requirements(pr: &PullRequestDetail, status: &RulesStatus) -> Vec<MergeRe
     check_requirements(pr, rules, &mut out);
     conversation_requirement(pr, rules, loading, &mut out);
 
+    if let Some(entry) = &pr.merge_queue_entry {
+        let failing = entry.failing();
+        out.push(req(K::MergeQueue, if failing { S::Missing } else { S::Pending }, entry.summary(), failing.then(|| "Fix the failing checks or conflicts and add it again".into()), None));
+    } else if pr.is_merge_queue_enabled == Some(true) {
+        out.push(req(K::MergeQueue, S::Advisory, "Merges through a merge queue", Some("Add it from the merge sheet with “Add to merge queue”".into()), None));
+    }
+
     if *status == RulesStatus::Failed {
         out.push(req(K::Rules, S::Unknown, "Branch rules couldn’t be read", Some("Showing what GitHub reports for this pull request".into()), None));
     }
     if pr.merge_state_status.as_deref() == Some("BLOCKED") && !out.iter().any(|r| r.state.blocks()) {
         out.push(req(K::OtherRules, S::Unknown, "Blocked by a rule PullYard can’t see", Some("For example deployments, signed commits or a merge queue. Check the pull request on GitHub".into()), None));
+    }
+    out
+}
+
+pub fn train_wording(summary: &str) -> String {
+    summary.replace("Merge queue", "Merge train").replace("Queued to merge", "In the merge train")
+}
+
+fn more_approvals(left: i64) -> String {
+    if left == 1 {
+        "Needs 1 more approval".to_string()
+    } else {
+        format!("Needs {left} more approvals")
+    }
+}
+
+pub fn bitbucket(pr: &PullRequestDetail, merge: &ForgeMergeInfo) -> Vec<MergeRequirement> {
+    use RequirementAction as A;
+    use RequirementKind as K;
+    use RequirementState as S;
+    let mut out = vec![];
+    let base = &pr.base_ref_name;
+    if pr.is_draft {
+        out.push(req(K::Draft, S::Missing, "Draft pull request", Some("Mark it ready for review before merging".into()), Some(A::ReadyForReview)));
+    }
+    if pr.mergeable == "CONFLICTING" {
+        out.push(req(K::Conflicts, S::Missing, format!("Conflicts with {base}"), Some("Resolve them before merging".into()), None));
+    } else {
+        out.push(req(K::Conflicts, S::Satisfied, format!("No conflicts with {base}"), None, None));
+    }
+    let reviews = &pr.latest_opinionated_reviews.nodes;
+    let blockers: Vec<String> = reviews.iter().filter(|r| r.state == "CHANGES_REQUESTED").filter_map(|r| r.author.as_ref().map(|a| a.login.clone())).collect();
+    let approvals = reviews.iter().filter(|r| r.state == "APPROVED").count();
+    if !blockers.is_empty() {
+        out.push(req(K::ChangesRequested, S::Advisory, "Changes requested", Some(format!("By {}", blockers.join(", "))), None));
+    }
+    if approvals > 0 {
+        let title = if approvals == 1 { "Approved".to_string() } else { format!("Approved by {approvals} reviewers") };
+        out.push(req(K::Approvals, S::Satisfied, title, None, None));
+    } else {
+        out.push(req(K::Approvals, S::Advisory, "No approvals yet", Some("Branch restrictions may require them".into()), None));
+    }
+    let checks = pr.checks();
+    let failed: Vec<String> = checks.iter().filter(|c| c.outcome() == CheckOutcome::Failure).map(|c| c.title()).collect();
+    let running: Vec<String> = checks.iter().filter(|c| c.outcome() == CheckOutcome::Pending).map(|c| c.title()).collect();
+    if !failed.is_empty() {
+        out.push(req(K::Checks, S::Advisory, format!("{} failed", count(failed.len(), "build")), Some(names(&failed)), Some(A::ShowChecks)));
+    } else if !running.is_empty() {
+        out.push(req(K::Checks, S::Pending, format!("Waiting for {}", count(running.len(), "build")), Some(names(&running)), Some(A::ShowChecks)));
+    } else if !checks.is_empty() {
+        let title = if checks.len() == 1 { "1 build passed".to_string() } else { format!("All {} builds passed", checks.len()) };
+        out.push(req(K::Checks, S::Satisfied, title, None, Some(A::ShowChecks)));
+    }
+    if let Some(tasks) = merge.open_tasks.filter(|t| *t > 0) {
+        out.push(req(K::Conversations, S::Advisory, count(tasks as usize, "open task"), Some("Merge checks may require resolving them".into()), Some(A::ShowConversation)));
+    }
+    out.push(req(K::OtherRules, S::Unknown, "Merge checks aren’t visible", Some("Bitbucket rejects the merge if a required check fails".into()), None));
+    out
+}
+
+pub fn gitlab(pr: &PullRequestDetail, merge: &ForgeMergeInfo) -> Vec<MergeRequirement> {
+    use RequirementAction as A;
+    use RequirementKind as K;
+    use RequirementState as S;
+    let mut out = vec![];
+    let base = &pr.base_ref_name;
+    let status = merge.status.as_str();
+    if pr.is_draft {
+        out.push(req(K::Draft, S::Missing, "Draft merge request", Some("Mark it as ready before merging".into()), Some(A::ReadyForReview)));
+    }
+    match status {
+        "conflict" | "broken_status" => out.push(req(K::Conflicts, S::Missing, format!("Conflicts with {base}"), Some("Resolve them before merging".into()), None)),
+        "checking" | "unchecked" | "preparing" | "approvals_syncing" => out.push(req(K::Conflicts, S::Pending, "Checking for conflicts…", None, None)),
+        _ => out.push(req(K::Conflicts, S::Satisfied, format!("No conflicts with {base}"), None, None)),
+    }
+    if status == "need_rebase" {
+        out.push(req(K::Behind, S::Missing, format!("Needs a rebase onto {base}"), Some("The project allows only fast-forward merges".into()), Some(A::UpdateBranch)));
+    }
+
+    let approvers = pr.latest_opinionated_reviews.nodes.iter().filter(|r| r.state == "APPROVED").count() as i64;
+    if status == "requested_changes" {
+        out.push(req(K::ChangesRequested, S::Missing, "Changes requested", Some("A reviewer asked for changes".into()), None));
+    }
+    match merge.approvals_required {
+        Some(required) if required > 0 => {
+            let left = merge.approvals_left.unwrap_or((required - approvers).max(0));
+            let given = (required - left).max(0);
+            let title = format!("{given} of {required} required approvals");
+            if left == 0 {
+                out.push(req(K::Approvals, S::Satisfied, title, None, None));
+            } else {
+                out.push(req(K::Approvals, S::Missing, title, Some(more_approvals(left)), None));
+            }
+        }
+        _ if status == "not_approved" => out.push(req(K::Approvals, S::Missing, "Approval required", merge.approvals_left.map(more_approvals), None)),
+        Some(_) => {
+            let title = match approvers {
+                0 => "No approvals required".to_string(),
+                1 => "Approved".to_string(),
+                n => format!("Approved by {n} reviewers"),
+            };
+            out.push(req(K::Approvals, S::Satisfied, title, None, None));
+        }
+        None => {}
+    }
+
+    let checks = pr.checks();
+    let failed: Vec<&CheckContext> = checks.iter().filter(|c| c.outcome() == CheckOutcome::Failure).collect();
+    let running: Vec<String> = checks.iter().filter(|c| c.outcome() == CheckOutcome::Pending).map(|c| c.title()).collect();
+    match status {
+        "ci_must_pass" | "ci_still_running" => {
+            if !failed.is_empty() {
+                out.push(req(K::Checks, S::Missing, format!("{} failed", count(failed.len(), "job")), Some("The pipeline must succeed".into()), Some(A::ShowChecks)));
+            } else if checks.is_empty() && status == "ci_must_pass" {
+                out.push(req(K::Checks, S::Missing, "A pipeline must run and succeed", None, Some(A::ShowChecks)));
+            } else {
+                let detail = if running.is_empty() { None } else { Some(format!("Running: {}", names(&running))) };
+                out.push(req(K::Checks, S::Pending, "Pipeline is still running", detail, Some(A::ShowChecks)));
+            }
+        }
+        _ => {
+            if !failed.is_empty() {
+                out.push(req(K::Checks, S::Advisory, format!("{} failed", count(failed.len(), "job")), Some("Doesn’t block merging".into()), Some(A::ShowChecks)));
+            } else if !running.is_empty() {
+                out.push(req(K::Checks, S::Pending, "Pipeline is running", Some(format!("Running: {}", names(&running))), Some(A::ShowChecks)));
+            } else if !checks.is_empty() {
+                out.push(req(K::Checks, S::Satisfied, "Pipeline passed", None, Some(A::ShowChecks)));
+            }
+        }
+    }
+
+    let open = pr.review_threads.nodes.iter().filter(|t| !t.is_resolved).count();
+    let threads = if open == 1 { "1 unresolved thread".to_string() } else { format!("{open} unresolved threads") };
+    if status == "discussions_not_resolved" {
+        let title = if open > 0 { threads } else { "All threads must be resolved".to_string() };
+        out.push(req(K::Conversations, S::Missing, title, Some("The project requires resolving them".into()), Some(A::ShowConversation)));
+    } else if open > 0 {
+        out.push(req(K::Conversations, S::Advisory, threads, Some("Not required to merge".into()), Some(A::ShowConversation)));
+    }
+
+    if let Some(entry) = &pr.merge_queue_entry {
+        out.push(req(K::MergeQueue, S::Pending, train_wording(&entry.summary()), None, None));
+    } else if pr.is_merge_queue_enabled == Some(true) {
+        out.push(req(K::MergeQueue, S::Advisory, "Merges through a merge train", Some("Merging starts or joins the train".into()), None));
+    }
+
+    const COVERED: [&str; 15] = [
+        "mergeable",
+        "conflict",
+        "broken_status",
+        "need_rebase",
+        "checking",
+        "unchecked",
+        "preparing",
+        "approvals_syncing",
+        "draft_status",
+        "not_open",
+        "not_approved",
+        "requested_changes",
+        "ci_must_pass",
+        "ci_still_running",
+        "discussions_not_resolved",
+    ];
+    if !COVERED.contains(&status) {
+        out.push(req(K::OtherRules, S::Missing, pr.merge_blocker.clone().unwrap_or_else(|| "Blocked by a project rule".into()), Some("Reported by GitLab".into()), None));
     }
     out
 }
@@ -539,6 +715,65 @@ mod tests {
         assert_eq!(find(&requirements(&threads, &RulesStatus::Loaded(strict)), RequirementKind::Conversations).state, RequirementState::Missing);
     }
 
+    fn gitlab_reqs(status: &str, required: Option<i64>, left: Option<i64>, overrides: Value) -> Vec<MergeRequirement> {
+        let mut p = pr(overrides);
+        p.forge_merge = Some(ForgeMergeInfo { status: status.into(), approvals_required: required, approvals_left: left, ..Default::default() });
+        requirements(&p, &RulesStatus::Loading)
+    }
+
+    fn review(login: &str, state: &str) -> Value {
+        json!({ "state": state, "author": { "login": login, "avatarUrl": "" } })
+    }
+
+    #[test]
+    fn gitlab_requirements_from_detailed_status() {
+        let ready = gitlab_reqs("mergeable", Some(2), Some(0), json!({ "latestOpinionatedReviews": { "nodes": [review("a", "APPROVED"), review("b", "APPROVED")] } }));
+        assert_eq!(ready.iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), vec!["No conflicts with main", "2 of 2 required approvals"]);
+        assert!(!ready.iter().any(|r| r.state.blocks()));
+
+        let list = gitlab_reqs("not_approved", Some(2), Some(1), json!({}));
+        let approvals = find(&list, RequirementKind::Approvals);
+        assert_eq!(approvals.title, "1 of 2 required approvals");
+        assert_eq!(approvals.detail.as_deref(), Some("Needs 1 more approval"));
+        assert_eq!(approvals.state, RequirementState::Missing);
+        assert!(approvals.action.is_none());
+
+        assert_eq!(gitlab_reqs("conflict", None, None, json!({}))[0].state, RequirementState::Missing);
+        assert_eq!(gitlab_reqs("checking", None, None, json!({}))[0].state, RequirementState::Pending);
+        assert_eq!(find(&gitlab_reqs("need_rebase", None, None, json!({})), RequirementKind::Behind).action, Some(RequirementAction::UpdateBranch));
+        assert!(!gitlab_reqs("mergeable", None, None, json!({})).iter().any(|r| r.kind == RequirementKind::Rules || r.kind == RequirementKind::OtherRules));
+    }
+
+    #[test]
+    fn gitlab_pipeline_and_threads() {
+        let failing = gitlab_reqs("ci_must_pass", None, None, checks(json!([run("test", Some("FAILURE"), None)])));
+        let ci = find(&failing, RequirementKind::Checks);
+        assert_eq!(ci.title, "1 job failed");
+        assert_eq!(ci.state, RequirementState::Missing);
+        assert_eq!(find(&gitlab_reqs("ci_must_pass", None, None, json!({})), RequirementKind::Checks).title, "A pipeline must run and succeed");
+        assert_eq!(find(&gitlab_reqs("ci_still_running", None, None, checks(json!([run("build", None, None)]))), RequirementKind::Checks).state, RequirementState::Pending);
+        assert_eq!(find(&gitlab_reqs("mergeable", None, None, checks(json!([run("lint", Some("FAILURE"), None)]))), RequirementKind::Checks).state, RequirementState::Advisory);
+
+        let thread = json!({ "id": "t", "isResolved": false, "isOutdated": false, "path": "a", "line": 1, "diffSide": "RIGHT",
+            "viewerCanResolve": true, "viewerCanUnresolve": false, "viewerCanReply": true, "comments": { "nodes": [] } });
+        let blocking = gitlab_reqs("discussions_not_resolved", None, None, json!({ "reviewThreads": { "nodes": [thread.clone()] } }));
+        let row = find(&blocking, RequirementKind::Conversations);
+        assert_eq!(row.title, "1 unresolved thread");
+        assert_eq!(row.state, RequirementState::Missing);
+        assert_eq!(find(&gitlab_reqs("mergeable", None, None, json!({ "reviewThreads": { "nodes": [thread] } })), RequirementKind::Conversations).state, RequirementState::Advisory);
+    }
+
+    #[test]
+    fn gitlab_unknown_blocker_is_shown() {
+        let mut p = pr(json!({ "mergeStateStatus": "BLOCKED" }));
+        p.merge_blocker = Some("Title or description must reference a Jira issue".into());
+        p.forge_merge = Some(ForgeMergeInfo { status: "jira_association_missing".into(), approvals_required: None, approvals_left: None, ..Default::default() });
+        let list = requirements(&p, &RulesStatus::Loading);
+        let other = find(&list, RequirementKind::OtherRules);
+        assert_eq!(other.title, "Title or description must reference a Jira issue");
+        assert_eq!(other.state, RequirementState::Missing);
+    }
+
     #[test]
     fn files_page_and_legacy_query() {
         let page: super::super::models::FileViewedPage = serde_json::from_value(json!({ "pageInfo": { "hasNextPage": true, "endCursor": "c1" }, "nodes": [{ "path": "a", "viewerViewedState": "VIEWED" }, { "path": "b", "viewerViewedState": "UNVIEWED" }, null] })).unwrap();
@@ -548,5 +783,62 @@ mod tests {
         let legacy = super::super::queries::pull_request_legacy();
         assert!(q.contains("isRequired(pullRequestNumber: $number)"));
         assert!(!legacy.contains("isRequired") && !legacy.contains("asCodeOwner") && !legacy.contains("combinedSlug"));
+    }
+
+    #[test]
+    fn merge_queue_status() {
+        use super::super::models::MergeQueueEntry;
+        use crate::ui::pr::merge_status;
+        let entry = |position: i64, state: &str, eta: Option<i64>| MergeQueueEntry { position: Some(position), state: Some(state.into()), estimated_time_to_merge: eta, ..Default::default() };
+        assert_eq!(entry(3, "QUEUED", Some(290)).summary(), "Queued to merge · #3 in line · about 5 min");
+        assert_eq!(entry(1, "QUEUED", None).summary(), "Queued to merge · next in line");
+        assert_eq!(entry(2, "AWAITING_CHECKS", None).summary(), "Merge queue: waiting for checks · #2 in line");
+        assert!(entry(1, "UNMERGEABLE", None).failing());
+
+        let enabled = pr(json!({ "isMergeQueueEnabled": true, "mergeStateStatus": "CLEAN" }));
+        let note = find(&requirements(&enabled, &RulesStatus::Loading), RequirementKind::MergeQueue).clone();
+        assert_eq!(note.state, RequirementState::Advisory);
+        assert_eq!(note.title, "Merges through a merge queue");
+
+        let queued = pr(json!({ "isMergeQueueEnabled": true, "isInMergeQueue": true, "mergeQueueEntry": { "position": 2, "state": "QUEUED", "estimatedTimeToMerge": 600 } }));
+        let list = requirements(&queued, &RulesStatus::Loading);
+        assert_eq!(find(&list, RequirementKind::MergeQueue).state, RequirementState::Pending);
+        let status = merge_status(&queued, &list);
+        assert_eq!(status.text, "Queued to merge · #2 in line · about 10 min");
+        assert!(!status.ready);
+
+        let removed = pr(json!({ "mergeQueueEntry": { "position": 1, "state": "UNMERGEABLE" } }));
+        let list = requirements(&removed, &RulesStatus::Loading);
+        assert_eq!(find(&list, RequirementKind::MergeQueue).state, RequirementState::Missing);
+        assert_eq!(merge_status(&removed, &list).color, "red");
+        assert!(!requirements(&pr(json!({})), &RulesStatus::Loading).iter().any(|r| r.kind == RequirementKind::MergeQueue));
+    }
+
+    #[test]
+    fn legacy_query_drops_merge_queue_fields() {
+        assert!(super::super::queries::pull_request().contains("mergeQueueEntry { position state enqueuedAt estimatedTimeToMerge }"));
+        let legacy = super::super::queries::pull_request_legacy();
+        assert!(!legacy.contains("mergeQueue"));
+        assert!(!legacy.contains("isInMergeQueue"));
+        assert!(super::super::queries::pull_request_light().contains("mergeQueueEntry { position state }"));
+        assert!(!super::super::queries::pull_request_light_legacy().contains("mergeQueue"));
+    }
+
+    #[test]
+    fn gitlab_merge_train() {
+        use super::super::models::MergeQueueEntry;
+        use crate::forge::gitlab_review::{train_entry, TrainCar};
+        assert_eq!(train_entry(None), None);
+        let car = |raw: &str| serde_json::from_str::<TrainCar>(raw).unwrap();
+        assert_eq!(train_entry(Some(&car(r#"{"status":"fresh","pipeline":{"id":1,"status":"running"}}"#))).and_then(|e| e.state).as_deref(), Some("AWAITING_CHECKS"));
+        assert_eq!(train_entry(Some(&car(r#"{"status":"merging"}"#))).and_then(|e| e.state).as_deref(), Some("MERGEABLE"));
+        assert_eq!(train_entry(Some(&car(r#"{"status":"merged"}"#))), None);
+
+        let mut p = pr(json!({}));
+        p.forge_merge = Some(ForgeMergeInfo { status: "mergeable".into(), ..Default::default() });
+        p.is_merge_queue_enabled = Some(true);
+        assert_eq!(find(&requirements(&p, &RulesStatus::Loading), RequirementKind::MergeQueue).title, "Merges through a merge train");
+        p.merge_queue_entry = Some(MergeQueueEntry { state: Some("QUEUED".into()), ..Default::default() });
+        assert_eq!(find(&requirements(&p, &RulesStatus::Loading), RequirementKind::MergeQueue).title, "In the merge train");
     }
 }

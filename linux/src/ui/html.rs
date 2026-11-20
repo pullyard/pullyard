@@ -4,11 +4,15 @@ use std::rc::Rc;
 use adw::prelude::*;
 use webkit6::prelude::*;
 
+pub const FOCUS_THREAD_SCRIPT: &str = "(function(){var t=[].slice.call(document.querySelectorAll('details.thread[data-unresolved]'));if(!t.length)return 0;var y=window.scrollY+20;var n=t.find(function(e){return e.getBoundingClientRect().top+window.scrollY>y;})||t[0];n.open=true;n.scrollIntoView({block:'start',behavior:'smooth'});t.forEach(function(e){e.classList.remove('focus');});n.classList.add('focus');setTimeout(function(){n.classList.remove('focus');},1600);return t.length;})()";
+
 pub struct HtmlView {
     pub view: webkit6::WebView,
     html: RefCell<String>,
     restore_y: Cell<Option<f64>>,
     scroll_bottom: Cell<bool>,
+    loading: Cell<bool>,
+    focus_pending: Cell<bool>,
     on_action: RefCell<Option<Rc<dyn Fn(String, String)>>>,
     on_link: RefCell<Option<Rc<dyn Fn(String)>>>,
 }
@@ -39,6 +43,8 @@ impl HtmlView {
             html: RefCell::new(String::new()),
             restore_y: Cell::new(None),
             scroll_bottom: Cell::new(false),
+            loading: Cell::new(false),
+            focus_pending: Cell::new(false),
             on_action: RefCell::new(None),
             on_link: RefCell::new(None),
         });
@@ -97,6 +103,10 @@ impl HtmlView {
             } else if let Some(y) = me.restore_y.take() {
                 view.evaluate_javascript(&format!("window.scrollTo(0, {y})"), None, None, None::<&gtk::gio::Cancellable>, |_| {});
             }
+            me.loading.set(false);
+            if me.focus_pending.replace(false) {
+                view.evaluate_javascript(FOCUS_THREAD_SCRIPT, None, None, None::<&gtk::gio::Cancellable>, |_| {});
+            }
         });
         me
     }
@@ -115,6 +125,7 @@ impl HtmlView {
         }
         let first = self.html.borrow().is_empty();
         *self.html.borrow_mut() = html.to_string();
+        self.loading.set(true);
         if first {
             self.view.load_html(html, Some("https://github.com/"));
             return;
@@ -132,5 +143,13 @@ impl HtmlView {
 
     pub fn scroll_to_bottom_after_load(&self) {
         self.scroll_bottom.set(true);
+    }
+
+    pub fn focus_next_unresolved(&self) {
+        if self.loading.get() || self.html.borrow().is_empty() {
+            self.focus_pending.set(true);
+            return;
+        }
+        self.view.evaluate_javascript(FOCUS_THREAD_SCRIPT, None, None, None::<&gtk::gio::Cancellable>, |_| {});
     }
 }

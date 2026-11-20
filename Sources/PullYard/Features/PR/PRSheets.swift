@@ -85,7 +85,7 @@ struct ReviewSheet: View {
 
     var body: some View {
         @Bindable var model = model
-        SheetFrame(title: "Review #\(pr.number)", model: model) {
+        SheetFrame(title: "Review \(model.provider.numberPrefix)\(pr.number)", model: model) {
             if model.restoredDrafts {
                 Label("Restored from your last session", systemImage: "clock.arrow.circlepath")
                     .font(.syCaption)
@@ -99,8 +99,10 @@ struct ReviewSheet: View {
                 .frame(maxHeight: 260)
             Picker("", selection: $event) {
                 Text("Comment — without approval").tag("COMMENT")
-                Text("Approve").tag("APPROVE").disabled(pr.viewerDidAuthor)
-                Text("Request changes").tag("REQUEST_CHANGES").disabled(pr.viewerDidAuthor)
+                Text("Approve").tag("APPROVE").disabled(!(pr.viewerCanApprove ?? !pr.viewerDidAuthor) || pr.viewerApproved == true)
+                if model.features.requestChanges {
+                    Text("Request changes").tag("REQUEST_CHANGES").disabled(pr.viewerDidAuthor)
+                }
             }
             .pickerStyle(.radioGroup)
             .labelsHidden()
@@ -132,6 +134,11 @@ struct MergeSheet: View {
     let model: PRDetailModel
     let pr: PullRequestDetail
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppModel.self) private var app
+
+    private var usesQueue: Bool {
+        model.features.mergeQueue && pr.isMergeQueueEnabled == true && pr.mergeQueueEntry == nil
+    }
     @State private var method: MergeMethod = .MERGE
     @State private var title = ""
     @State private var message = ""
@@ -151,7 +158,7 @@ struct MergeSheet: View {
     var body: some View {
         let readiness = MergeStatusBar.status(pr, requirements: model.requirements)
         let blocked = !readiness.ready && pr.mergeStateStatus != nil && pr.mergeStateStatus != "UNKNOWN"
-        SheetFrame(title: "Merge #\(pr.number) into \(pr.baseRefName)", model: model) {
+        SheetFrame(title: "Merge \(model.provider.numberPrefix)\(pr.number) into \(pr.baseRefName)", model: model) {
             Label(readiness.text, systemImage: readiness.icon)
                 .font(.syCallout)
                 .foregroundStyle(readiness.ready ? Color.syText : readiness.color)
@@ -159,12 +166,21 @@ struct MergeSheet: View {
                 .padding(.vertical, Space.s)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: Radius.m).fill(readiness.color.opacity(Tint.banner)))
+            if usesQueue {
+                HStack(spacing: 6) {
+                    Image(systemName: "tray.full").foregroundStyle(Color.syMuted)
+                    Text("\(pr.baseRefName) uses a \(model.features.queueTitle). Add the \(model.provider.requestTitle) to it and it merges once the required checks pass; merging directly may be rejected.")
+                        .font(.syCaption)
+                        .foregroundStyle(Color.syMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             Picker("Method", selection: $method) {
-                ForEach(allowed) { Text($0.title).tag($0) }
+                ForEach(allowed) { Text($0 == .MERGE && model.provider == .gitlab ? "Merge" : $0.title).tag($0) }
             }
             .onChange(of: method) { _, m in prefill(m) }
             if method != .REBASE {
-                TextField("Commit title (GitHub default)", text: $title)
+                TextField("Commit title (\(model.features.serviceTitle) default)", text: $title)
                 ComposerBox(text: $message, placeholder: "Commit description (optional)", minHeight: 80)
                     .frame(maxHeight: 160)
             }
@@ -176,11 +192,24 @@ struct MergeSheet: View {
                     Button("Enable auto-merge") {
                         Task { if await model.enableAutoMerge(method: method.rawValue) { dismiss() } }
                     }
-                    .help("Merge automatically when checks and reviews pass")
+                    .help(model.provider == .gitlab ? "Merge automatically when the pipeline succeeds" : "Merge automatically when checks and reviews pass")
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(blocked ? "Merge anyway" : "Merge") {
+                if usesQueue {
+                    Button("Add to \(model.features.queueTitle)") {
+                        Task {
+                            if await model.simple(.enqueue) {
+                                app.showToast("Added to the \(model.features.queueTitle)")
+                                dismiss()
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.syGreenFill)
+                    .disabled(model.busy)
+                }
+                Button(usesQueue ? "Merge directly" : blocked ? "Merge anyway" : "Merge") {
                     let t = title.trimmingCharacters(in: .whitespaces)
                     let b = message.trimmingCharacters(in: .whitespacesAndNewlines)
                     let del = deleteBranch && !(model.repo?.deleteBranchOnMerge ?? false) && pr.headRepository?.nameWithOwner == model.ref.repo.full
@@ -189,7 +218,7 @@ struct MergeSheet: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(blocked ? Color.syRedFill : Color.syGreenFill)
+                .tint(usesQueue ? Color.sySlate : blocked ? Color.syRedFill : Color.syGreenFill)
                 .help(blocked ? "GitHub may reject this merge: \(readiness.text)" : "Merge pull request")
                 .disabled(model.busy || allowed.isEmpty)
             }
@@ -203,7 +232,7 @@ struct MergeSheet: View {
 
     private func prefill(_ m: MergeMethod) {
         switch m {
-        case .SQUASH: title = "\(pr.title) (#\(pr.number))"
+        case .SQUASH: title = model.provider.isGitHub ? "\(pr.title) (#\(pr.number))" : pr.title
         case .MERGE: title = ""
         case .REBASE: title = ""
         }
@@ -218,7 +247,7 @@ struct EditPRSheet: View {
     @State private var text = ""
 
     var body: some View {
-        SheetFrame(title: "Edit #\(pr.number)", model: model) {
+        SheetFrame(title: "Edit \(model.provider.numberPrefix)\(pr.number)", model: model) {
             TextField("Title", text: $title).textFieldStyle(.roundedBorder)
             ComposerBox(text: $text, placeholder: "Description (Markdown)", minHeight: 260)
                 .frame(maxHeight: 420)
@@ -247,6 +276,7 @@ struct ReviewersSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var logins = ""
     @State private var selected: Set<String> = []
+    @State private var load: [String: Int] = [:]
 
     private var candidates: [PRReviewer] {
         model.reviewers.filter { $0.login != model.viewerLogin && !$0.login.hasSuffix("[bot]") && ($0.isTeam || !$0.login.contains("/")) }
@@ -285,6 +315,7 @@ struct ReviewersSheet: View {
                                 if r.codeOwner {
                                     Text("code owner").font(.syCaption).foregroundStyle(Color.syViolet)
                                 }
+                                loadLabel(r.login)
                                 if model.reviewersToReRequest.contains(r.login) {
                                     Text("reviewed before latest push").font(.syCaption).foregroundStyle(Color.syAmber)
                                 } else if r.state == "PENDING" {
@@ -307,6 +338,7 @@ struct ReviewersSheet: View {
                                     Text("team").font(.syCaption).foregroundStyle(Color.syMuted)
                                 }
                                 Text("not requested").font(.syCaption).foregroundStyle(Color.syMuted)
+                                loadLabel(o.handle)
                             }
                         }
                         .toggleStyle(.checkbox)
@@ -327,6 +359,20 @@ struct ReviewersSheet: View {
             }
         }
         .onAppear { selected = Set(model.reviewersToReRequest) }
+        .task {
+            guard let api = model.api else { return }
+            load = await ReviewLoadStore.shared.load(candidates.map(\.login) + ownerSuggestions.map(\.handle), api: api)
+        }
+    }
+
+    @ViewBuilder
+    private func loadLabel(_ handle: String) -> some View {
+        if let n = load[handle.lowercased()] {
+            Text("· " + ReviewLoad.label(n))
+                .font(.syCaption.monospacedDigit())
+                .foregroundStyle(ReviewLoad.busy(n) ? Color.syAmber : Color.syDim)
+                .help("Open pull requests waiting for \(handle)'s review, among those you can see")
+        }
     }
 }
 
@@ -382,8 +428,7 @@ struct ReplySheet: View {
 }
 
 struct JobLogSheet: View {
-    let api: GitHubAPI
-    let repo: RepoRef
+    let load: () async throws -> String
     let check: CheckContext
     var onFix: ((String?) -> Void)?
     @Environment(\.dismiss) private var dismiss
@@ -419,12 +464,8 @@ struct JobLogSheet: View {
         }
         .frame(width: 980, height: 640)
         .task {
-            guard let id = check.databaseId else {
-                error = "This check has no job log. Open it on GitHub to see its output."
-                return
-            }
             do {
-                let raw = try await api.jobLog(repo: repo, jobId: id)
+                let raw = try await load()
                 log = await Task.detached { Self.clean(raw) }.value
             } catch {
                 if isCancellation(error) { return }

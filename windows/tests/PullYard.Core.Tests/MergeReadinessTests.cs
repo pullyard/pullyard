@@ -200,4 +200,127 @@ public class MergeReadinessTests
         Assert.Equal(CapabilityState.Unsupported, ForgeCapabilities.Initial.PullRequestReview);
         Assert.Equal(CapabilityState.Unsupported, ForgeCapabilities.Initial.MergeRequirements);
     }
+    private static List<MergeRequirement> GitLab(string status, int? required = null, int? left = null, JsonObject? overrides = null)
+    {
+        var p = Pr(overrides);
+        p.ForgeMerge = new ForgeMergeInfo { Status = status, ApprovalsRequired = required, ApprovalsLeft = left };
+        return MergeReadiness.Requirements(p, RulesStatus.Loading);
+    }
+
+    [Fact]
+    public void GitLabRequirementsFromDetailedStatus()
+    {
+        var ready = GitLab("mergeable", 2, 0, new JsonObject { ["latestOpinionatedReviews"] = new JsonObject { ["nodes"] = new JsonArray(Review("a", "APPROVED"), Review("b", "APPROVED")) } });
+        Assert.Equal(new[] { "No conflicts with main", "2 of 2 required approvals" }, ready.Select(r => r.Title));
+        Assert.DoesNotContain(ready, r => r.Blocks);
+
+        var approvals = GitLab("not_approved", 2, 1).First(r => r.Kind == RequirementKind.Approvals);
+        Assert.Equal("1 of 2 required approvals", approvals.Title);
+        Assert.Equal("Needs 1 more approval", approvals.Detail);
+        Assert.Equal(RequirementState.Missing, approvals.State);
+        Assert.Null(approvals.Action);
+
+        Assert.Equal(RequirementState.Missing, GitLab("conflict")[0].State);
+        Assert.Equal(RequirementState.Pending, GitLab("checking")[0].State);
+        Assert.Equal(RequirementAction.UpdateBranch, GitLab("need_rebase").First(r => r.Kind == RequirementKind.Behind).Action);
+        Assert.DoesNotContain(GitLab("mergeable"), r => r.Kind is RequirementKind.Rules or RequirementKind.OtherRules);
+    }
+
+    [Fact]
+    public void GitLabPipelineAndThreads()
+    {
+        var ci = GitLab("ci_must_pass", overrides: Checks(Run("test", "FAILURE"))).First(r => r.Kind == RequirementKind.Checks);
+        Assert.Equal("1 job failed", ci.Title);
+        Assert.Equal(RequirementState.Missing, ci.State);
+        Assert.Equal("A pipeline must run and succeed", GitLab("ci_must_pass").First(r => r.Kind == RequirementKind.Checks).Title);
+        Assert.Equal(RequirementState.Pending, GitLab("ci_still_running", overrides: Checks(Run("build", null))).First(r => r.Kind == RequirementKind.Checks).State);
+        Assert.Equal(RequirementState.Advisory, GitLab("mergeable", overrides: Checks(Run("lint", "FAILURE"))).First(r => r.Kind == RequirementKind.Checks).State);
+
+        JsonObject Threads() => new()
+        {
+            ["reviewThreads"] = new JsonObject
+            {
+                ["nodes"] = new JsonArray(new JsonObject
+                {
+                    ["id"] = "t", ["isResolved"] = false, ["isOutdated"] = false, ["path"] = "a", ["line"] = 1, ["diffSide"] = "RIGHT",
+                    ["viewerCanResolve"] = true, ["viewerCanUnresolve"] = false, ["viewerCanReply"] = true, ["comments"] = new JsonObject { ["nodes"] = new JsonArray() }
+                })
+            }
+        };
+        var blocking = GitLab("discussions_not_resolved", overrides: Threads()).First(r => r.Kind == RequirementKind.Conversations);
+        Assert.Equal("1 unresolved thread", blocking.Title);
+        Assert.Equal(RequirementState.Missing, blocking.State);
+        Assert.Equal(RequirementState.Advisory, GitLab("mergeable", overrides: Threads()).First(r => r.Kind == RequirementKind.Conversations).State);
+    }
+
+    [Fact]
+    public void GitLabUnknownBlockerIsShown()
+    {
+        var p = Pr();
+        p.MergeBlocker = "Title or description must reference a Jira issue";
+        p.ForgeMerge = new ForgeMergeInfo { Status = "jira_association_missing" };
+        var other = MergeReadiness.Requirements(p, RulesStatus.Loading).First(r => r.Kind == RequirementKind.OtherRules);
+        Assert.Equal("Title or description must reference a Jira issue", other.Title);
+        Assert.Equal(RequirementState.Missing, other.State);
+    }
+
+    [Fact]
+    public void MergeQueueStatus()
+    {
+        Assert.Equal("Queued to merge · #3 in line · about 5 min", new MergeQueueEntry { Position = 3, State = "QUEUED", EstimatedTimeToMerge = 290 }.Summary);
+        Assert.Equal("Queued to merge · next in line", new MergeQueueEntry { Position = 1, State = "QUEUED" }.Summary);
+        Assert.Equal("Merge queue: waiting for checks · #2 in line", new MergeQueueEntry { Position = 2, State = "AWAITING_CHECKS" }.Summary);
+        Assert.True(new MergeQueueEntry { Position = 1, State = "UNMERGEABLE" }.Failing);
+
+        var enabled = Pr(new JsonObject { ["isMergeQueueEnabled"] = true, ["mergeStateStatus"] = "CLEAN" });
+        var note = MergeReadiness.Requirements(enabled, RulesStatus.Loading).First(r => r.Kind == RequirementKind.MergeQueue);
+        Assert.Equal(RequirementState.Advisory, note.State);
+        Assert.Equal("Merges through a merge queue", note.Title);
+
+        var queued = Pr(new JsonObject
+        {
+            ["isMergeQueueEnabled"] = true, ["isInMergeQueue"] = true,
+            ["mergeQueueEntry"] = new JsonObject { ["position"] = 2, ["state"] = "QUEUED", ["enqueuedAt"] = "2026-01-01T00:00:00Z", ["estimatedTimeToMerge"] = 600 }
+        });
+        var entry = MergeReadiness.Requirements(queued, RulesStatus.Loading).First(r => r.Kind == RequirementKind.MergeQueue);
+        Assert.Equal(RequirementState.Pending, entry.State);
+        Assert.Equal("Queued to merge · #2 in line · about 10 min", entry.Title);
+
+        var removed = Pr(new JsonObject { ["mergeQueueEntry"] = new JsonObject { ["position"] = 1, ["state"] = "UNMERGEABLE" } });
+        var failing = MergeReadiness.Requirements(removed, RulesStatus.Loading).First(r => r.Kind == RequirementKind.MergeQueue);
+        Assert.Equal(RequirementState.Missing, failing.State);
+        Assert.Equal("Fix the failing checks or conflicts and add it again", failing.Detail);
+        Assert.DoesNotContain(MergeReadiness.Requirements(Pr(), RulesStatus.Loading), r => r.Kind == RequirementKind.MergeQueue);
+    }
+
+    [Fact]
+    public void LegacyQueryDropsMergeQueueFields()
+    {
+        Assert.Contains("mergeQueueEntry { position state enqueuedAt estimatedTimeToMerge }", Q.PullRequest);
+        Assert.DoesNotContain("mergeQueue", Q.PullRequestLegacy);
+        Assert.DoesNotContain("isInMergeQueue", Q.PullRequestLegacy);
+        Assert.Contains("mergeQueueEntry { position state }", Q.PullRequestPulse);
+        Assert.DoesNotContain("mergeQueue", Q.PullRequestPulseLegacy);
+    }
+
+    [Fact]
+    public void GitLabMergeTrain()
+    {
+        Assert.Null(GitLabReviewMapper.TrainEntry(null));
+        GitLabMR.TrainCar Car(string json) => JsonSerializer.Deserialize<GitLabMR.TrainCar>(json, Json.Rest)!;
+        Assert.Equal("AWAITING_CHECKS", GitLabReviewMapper.TrainEntry(Car("""{"status":"fresh","pipeline":{"id":1,"status":"running"}}"""))?.State);
+        Assert.Equal("QUEUED", GitLabReviewMapper.TrainEntry(Car("""{"status":"idle","pipeline":{"id":1,"status":"success"}}"""))?.State);
+        Assert.Equal("MERGEABLE", GitLabReviewMapper.TrainEntry(Car("""{"status":"merging"}"""))?.State);
+        Assert.Null(GitLabReviewMapper.TrainEntry(Car("""{"status":"merged"}""")));
+        Assert.True(JsonSerializer.Deserialize<GitLabMR.Project>("""{"id":1,"merge_trains_enabled":true}""", Json.Rest)!.MergeTrainsEnabled);
+
+        var p = Pr();
+        p.ForgeMerge = new ForgeMergeInfo { Status = "mergeable" };
+        p.IsMergeQueueEnabled = true;
+        Assert.Equal("Merges through a merge train", MergeReadiness.Requirements(p, RulesStatus.Loading).First(r => r.Kind == RequirementKind.MergeQueue).Title);
+        p.MergeQueueEntry = new MergeQueueEntry { State = "QUEUED" };
+        Assert.Equal("In the merge train", MergeReadiness.Requirements(p, RulesStatus.Loading).First(r => r.Kind == RequirementKind.MergeQueue).Title);
+        p.MergeQueueEntry = new MergeQueueEntry { State = "AWAITING_CHECKS" };
+        Assert.Equal("Merge train: waiting for checks", MergeReadiness.Requirements(p, RulesStatus.Loading).First(r => r.Kind == RequirementKind.MergeQueue).Title);
+    }
 }

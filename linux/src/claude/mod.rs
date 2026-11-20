@@ -12,6 +12,7 @@ pub mod prefs;
 pub mod prompt_library;
 pub mod relogin;
 pub mod rewind;
+pub mod session_cost;
 pub mod session_index;
 pub mod sessions;
 pub mod ship;

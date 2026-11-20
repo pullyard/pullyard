@@ -7,6 +7,7 @@ use gtk::{gio, glib};
 
 use super::diff_view::{self, DiffSelection, HScroll, OnComment, RowLine, RowOpts, Side};
 use super::model::{Change, FlatRow, PrModel};
+use crate::api::code_owners::{OwnerEntry, OwnerStatus};
 use crate::api::interdiff::{DiffScope, ReviewedCommit};
 use crate::api::models::{PendingComment, RepoRef, ReviewThread};
 use crate::diff::{DiffAnchor, DiffFile, DiffLine, LineKind};
@@ -53,6 +54,7 @@ pub struct FilesTab {
     empty_key: RefCell<String>,
     list_toggle: gtk::ToggleButton,
     filter_entry: gtk::SearchEntry,
+    owner_badges: RefCell<std::collections::HashMap<String, OwnerBadge>>,
 }
 
 fn notice(icon_name: &str, color: &str, text: &str, detail: Option<&str>, action: &str, run: impl Fn() + 'static) -> gtk::Box {
@@ -74,6 +76,29 @@ fn notice(icon_name: &str, color: &str, text: &str, detail: Option<&str>, action
         row.set_tooltip_text(Some(d));
     }
     row
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerBadge {
+    pub text: String,
+    pub tooltip: String,
+    pub accessible: String,
+    pub approved: bool,
+}
+
+pub fn owner_badge(owners: &[OwnerEntry]) -> Option<OwnerBadge> {
+    if owners.is_empty() {
+        return None;
+    }
+    let approved = owners.iter().any(|o| o.status == OwnerStatus::Approved);
+    let mut text = owners.iter().take(2).map(|o| format!("@{}", o.handle)).collect::<Vec<_>>().join(", ");
+    if owners.len() > 2 {
+        text.push_str(&format!(" +{}", owners.len() - 2));
+    }
+    let all = owners.iter().map(|o| format!("@{}", o.handle)).collect::<Vec<_>>().join(", ");
+    let tooltip = format!("Code owners: {all}{}", if approved { " · approved" } else { "" });
+    let accessible = format!("Code owners {}", owners.iter().map(|o| o.handle.as_str()).collect::<Vec<_>>().join(", "));
+    Some(OwnerBadge { text, tooltip, accessible, approved })
 }
 
 #[derive(PartialEq)]
@@ -169,6 +194,9 @@ fn is_text_input(w: &gtk::Widget) -> bool {
 }
 
 fn blame_target(m: &PrModel) -> Option<(RepoRef, String)> {
+    if !m.features.blame {
+        return None;
+    }
     let oid = m.files_oid.borrow().clone().or_else(|| m.pr.borrow().as_ref().map(|p| p.head_ref_oid.clone()))?;
     Some((m.r.repo.clone(), oid)).filter(|(_, oid)| !oid.is_empty())
 }
@@ -344,6 +372,7 @@ impl FilesTab {
             banner,
             expanded_threads: RefCell::new(std::collections::HashMap::new()),
             pending_reveal: RefCell::new(None),
+            owner_badges: RefCell::new(std::collections::HashMap::new()),
             suppress_select: Cell::new(false),
             notices,
             empty,
@@ -505,6 +534,12 @@ impl FilesTab {
                         me.rebuild();
                     }
                     Change::Diff | Change::Pr => me.rebuild(),
+                    Change::Rules => {
+                        if me.sync_owner_badges() {
+                            me.rows_open.set(None);
+                            me.rebuild();
+                        }
+                    }
                     Change::Reveal(p) => me.reveal(p),
                     _ => {}
                 }
@@ -541,6 +576,7 @@ impl FilesTab {
             return;
         }
         self.widget.set_visible_child_name("files");
+        let owners_changed = self.sync_owner_badges();
         self.sync_scope();
         let filter = self.filter.borrow().clone();
         let flat = m.flat_rows(&filter);
@@ -554,7 +590,7 @@ impl FilesTab {
         let old = self.row_keys.replace(vec![]);
         let n = self.store.n_items() as usize;
         let mode = Some((wrap, split));
-        let full = self.rows_open.get() != open || self.rows_mode.get() != mode || old.len() != n || self.rows_filter.borrow().as_str() != filter;
+        let full = owners_changed || self.rows_open.get() != open || self.rows_mode.get() != mode || old.len() != n || self.rows_filter.borrow().as_str() != filter;
         if full || !wrap {
             let longest = if wrap { 0 } else { self.longest_columns(&rows) };
             self.hscroll.reset(longest, !wrap);
@@ -634,6 +670,19 @@ impl FilesTab {
                 set_status(&self.empty, &no_matches(filter, move || entry.set_text("")));
             }
         }
+    }
+
+    fn sync_owner_badges(&self) -> bool {
+        let fresh: std::collections::HashMap<String, OwnerBadge> = self
+            .model
+            .ownership()
+            .map(|o| o.groups.iter().filter_map(|g| owner_badge(&g.owners).map(|b| (b, &g.files))).flat_map(|(b, files)| files.iter().map(move |f| (f.clone(), b.clone()))).collect())
+            .unwrap_or_default();
+        if *self.owner_badges.borrow() == fresh {
+            return false;
+        }
+        *self.owner_badges.borrow_mut() = fresh;
+        true
     }
 
     fn sync_scope(&self) {
@@ -828,6 +877,9 @@ impl FilesTab {
             ']' => self.jump_hunk(1),
             '[' => self.jump_hunk(-1),
             'v' => {
+                if !self.model.features.viewed_files {
+                    return false;
+                }
                 let Some(path) = self.current_file() else { return false };
                 let m = self.model.clone();
                 crate::rt::spawn_local(async move { m.toggle_viewed(path).await });
@@ -1006,7 +1058,12 @@ impl FilesTab {
         }
         self.file_list_sig.set(sig);
         let viewed_count = files.iter().filter(|f| viewed.contains(&f.id)).count();
-        self.viewed_label.set_text(&format!("{viewed_count}/{}", files.len()));
+        if m.features.viewed_files {
+            self.viewed_label.set_text(&format!("{viewed_count}/{}", files.len()));
+        } else {
+            self.viewed_label.set_text(&files.len().to_string());
+            self.viewed_label.set_tooltip_text(Some("Files"));
+        }
         self.suppress_select.set(true);
         self.file_list.remove_all();
         let mut keys = vec![];
@@ -1116,6 +1173,13 @@ impl FilesTab {
         l.set_selectable(true);
         b.append(&l);
         b.append(&diff_stat(f.additions, f.deletions));
+        if let Some(badge) = self.owner_badges.borrow().get(&f.id) {
+            let owners = label_with(&badge.text, &[if badge.approved { "fg-green" } else { "sy-muted" }, "sy-small"]);
+            owners.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            owners.set_tooltip_text(Some(&badge.tooltip));
+            owners.update_property(&[gtk::accessible::Property::Label(&badge.accessible)]);
+            b.append(&owners);
+        }
         b.append(&spacer());
         let is_viewed = m.viewed.borrow().contains(&f.id);
         let viewed = gtk::CheckButton::with_label("Viewed");
@@ -1130,11 +1194,12 @@ impl FilesTab {
                 crate::rt::spawn_local(async move { mm.toggle_viewed(id).await });
             });
         });
+        viewed.set_visible(m.features.viewed_files);
         b.append(&viewed);
         let menu = Menu::new();
         let id = f.id.clone();
         menu.item("Copy file path", move || crate::app::copy(&id, "Copied file path"));
-        if f.status != "removed" {
+        if f.status != "removed" && m.features.blame {
             let mm = m.clone();
             let id = f.id.clone();
             menu.item("Blame", move || match blame_target(&mm) {
@@ -1165,13 +1230,15 @@ impl FilesTab {
                 }
             });
         }
-        let mm = m.clone();
-        let id = f.id.clone();
-        menu.item(if is_viewed { "Mark as not viewed (V)" } else { "Mark as viewed (V)" }, move || {
-            let mm = mm.clone();
-            let id = id.clone();
-            crate::rt::spawn_local(async move { mm.toggle_viewed(id).await });
-        });
+        if m.features.viewed_files {
+            let mm = m.clone();
+            let id = f.id.clone();
+            menu.item(if is_viewed { "Mark as not viewed (V)" } else { "Mark as viewed (V)" }, move || {
+                let mm = mm.clone();
+                let id = id.clone();
+                crate::rt::spawn_local(async move { mm.toggle_viewed(id).await });
+            });
+        }
         menu.section(None);
         menu.item(if diff_view::wrap() { "Don't wrap lines (W)" } else { "Wrap lines (W)" }, || diff_view::set_wrap(!diff_view::wrap()));
         if self.split_fits.get() {
@@ -1453,5 +1520,28 @@ impl FilesTab {
 impl Drop for FilesTab {
     fn drop(&mut self) {
         self.remove_keys();
+    }
+}
+
+#[cfg(test)]
+mod owner_badge_tests {
+    use super::*;
+
+    fn entry(handle: &str, status: OwnerStatus) -> OwnerEntry {
+        OwnerEntry { handle: handle.to_string(), is_team: handle.contains('/'), status }
+    }
+
+    #[test]
+    fn badge_lists_two_owners_and_count() {
+        assert!(owner_badge(&[]).is_none());
+        let one = owner_badge(&[entry("alice", OwnerStatus::NotRequested)]).unwrap();
+        assert_eq!(one.text, "@alice");
+        assert!(!one.approved);
+        assert_eq!(one.tooltip, "Code owners: @alice");
+        let many = owner_badge(&[entry("alice", OwnerStatus::Requested), entry("acme/core", OwnerStatus::Approved), entry("bob", OwnerStatus::NotRequested), entry("eve", OwnerStatus::NotRequested)]).unwrap();
+        assert_eq!(many.text, "@alice, @acme/core +2");
+        assert!(many.approved);
+        assert_eq!(many.tooltip, "Code owners: @alice, @acme/core, @bob, @eve · approved");
+        assert_eq!(many.accessible, "Code owners alice, acme/core, bob, eve");
     }
 }

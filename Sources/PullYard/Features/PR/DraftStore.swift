@@ -1,6 +1,6 @@
 import Foundation
 
-struct ReviewDraft: Codable, Equatable {
+struct SavedReviewDraft: Codable, Equatable {
     struct Comment: Codable, Equatable {
         var path: String
         var line: Int
@@ -67,11 +67,11 @@ final class DraftStore {
         try? data.write(to: file, options: .atomic)
     }
 
-    func review(_ key: String) -> ReviewDraft? {
-        read(key).flatMap { try? JSONDecoder().decode(ReviewDraft.self, from: $0) }
+    func review(_ key: String) -> SavedReviewDraft? {
+        read(key).flatMap { try? JSONDecoder().decode(SavedReviewDraft.self, from: $0) }
     }
 
-    func save(_ draft: ReviewDraft, key: String) {
+    func save(_ draft: SavedReviewDraft, key: String) {
         write(draft.isEmpty ? nil : try? JSONEncoder().encode(draft), key)
     }
 

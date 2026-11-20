@@ -5,23 +5,28 @@ namespace PullYard.Core.Git;
 
 public enum GitRemoteKind { GitHub, GitLab, Bitbucket, Other }
 
-public sealed record GitRemote(string Host, string Path)
+public sealed record GitRemote(string Host, string Path, GitRemoteKind Kind)
 {
-    public GitRemoteKind Kind
+    public GitRemote(string Host, string Path) : this(Host, Path, KindOf(Host))
     {
-        get
-        {
-            var h = Host.ToLowerInvariant();
-            if (h.Contains("github")) return GitRemoteKind.GitHub;
-            if (h.Contains("gitlab")) return GitRemoteKind.GitLab;
-            if (h.Contains("bitbucket")) return GitRemoteKind.Bitbucket;
-            return GitRemoteKind.Other;
-        }
     }
+
+    public static GitRemoteKind KindOf(string host)
+    {
+        var h = host.ToLowerInvariant();
+        if (h.Contains("github")) return GitRemoteKind.GitHub;
+        if (h.Contains("gitlab")) return GitRemoteKind.GitLab;
+        if (h.Contains("bitbucket")) return GitRemoteKind.Bitbucket;
+        return GitRemoteKind.Other;
+    }
+
+    public RepoRef? GitHubRepo => Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) ? RepoRef.Parse(Path) : null;
+
+    public RepoRef? Repo => GitHubRepo;
 
     public string WebUrl => $"https://{Host}/{Path}";
 
-    public RepoRef? Repo => Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) ? RepoRef.Parse(Path) : null;
+    public string Noun => RequestNoun(Kind);
 
     public GitRemoteKind KindFor(GitProvider? provider) => provider switch
     {
@@ -34,7 +39,11 @@ public sealed record GitRemote(string Host, string Path)
 
     public static string RequestNoun(GitRemoteKind kind) => kind == GitRemoteKind.GitLab ? "merge request" : "pull request";
 
-    public string NewRequestUrl(string branch, GitRemoteKind kind)
+    public string NewRequestUrl(string branch) => RequestUrl(branch, Kind, WebUrl);
+
+    public string NewRequestUrl(string branch, GitRemoteKind kind) => RequestUrl(branch, kind, $"{WebUrl}/pulls");
+
+    private string RequestUrl(string branch, GitRemoteKind kind, string fallback)
     {
         var b = Uri.EscapeDataString(branch).Replace("%2F", "/");
         return kind switch
@@ -42,14 +51,15 @@ public sealed record GitRemote(string Host, string Path)
             GitRemoteKind.GitHub => $"{WebUrl}/pull/new/{b}",
             GitRemoteKind.GitLab => $"{WebUrl}/-/merge_requests/new?merge_request%5Bsource_branch%5D={b}",
             GitRemoteKind.Bitbucket => $"{WebUrl}/pull-requests/new?source={b}",
-            _ => $"{WebUrl}/pulls"
+            _ => fallback
         };
     }
 
     public static GitRemote? Parse(string? raw)
     {
-        var url = (raw ?? "").Trim();
+        var url = (raw ?? "").Trim().TrimEnd('/');
         if (url.Length == 0) return null;
+        if (url.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) url = url[..^4];
         string host, path;
         var scheme = url.IndexOf("://", StringComparison.Ordinal);
         var colon = url.IndexOf(':');
@@ -59,7 +69,7 @@ public sealed record GitRemote(string Host, string Path)
             var slash = url.IndexOf('/');
             if (slash < 0) return null;
             host = url[..slash];
-            path = url[(slash + 1)..];
+            path = Uri.UnescapeDataString(url[(slash + 1)..]);
             var at = host.LastIndexOf('@');
             if (at >= 0) host = host[(at + 1)..];
             var port = host.IndexOf(':');
@@ -76,9 +86,12 @@ public sealed record GitRemote(string Host, string Path)
         {
             return null;
         }
+        host = host.ToLowerInvariant();
         path = path.Trim('/');
-        if (path.EndsWith(".git", StringComparison.Ordinal)) path = path[..^4];
+        if (host == "ssh.github.com") host = "github.com";
+        if (host.StartsWith("altssh.", StringComparison.Ordinal)) host = host["altssh.".Length..];
+        if (host == "bitbucket.org" && path.StartsWith("scm/", StringComparison.Ordinal)) path = path["scm/".Length..];
         if (host.Length == 0 || !path.Contains('/')) return null;
-        return new GitRemote(host, path);
+        return new GitRemote(host, path, KindOf(host));
     }
 }

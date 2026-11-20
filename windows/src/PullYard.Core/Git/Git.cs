@@ -38,14 +38,9 @@ public static class GitCli
 
     public static async Task<RepoRef?> RemoteRepo(string dir) => ParseRemote(await RemoteUrl(dir).ConfigureAwait(false));
 
-    public static RepoRef? ParseRemote(string url)
-    {
-        var i = url.IndexOf("github.com", StringComparison.OrdinalIgnoreCase);
-        if (i < 0) return null;
-        var tail = url[(i + "github.com".Length)..].Trim(':', '/');
-        if (tail.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) tail = tail[..^4];
-        return RepoRef.Parse(tail);
-    }
+    public static async Task<GitRemote?> Remote(string dir) => GitRemote.Parse(await RemoteUrl(dir).ConfigureAwait(false));
+
+    public static RepoRef? ParseRemote(string url) => GitRemote.Parse(url)?.GitHubRepo;
 
     public static List<PRFile> ParseUnifiedDiff(string text)
     {

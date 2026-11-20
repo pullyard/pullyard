@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Desktop apps for PR review with Claude Code, compared · PullYard</title>
+<meta name="description" content="Desktop apps that review GitHub pull requests and send the comments to Claude Code, compared: PullYard, Diffity, Reviu and PR Cockpit. Platforms, features, price.">
+<link rel="canonical" href="https://pullyard.app/claude-code-pr-review-apps.html">
+<meta property="og:title" content="PR review apps that work with Claude Code">
+<meta property="og:description" content="PullYard, Diffity, Reviu and PR Cockpit compared on platforms, features and price.">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="PullYard">
+<meta property="og:url" content="https://pullyard.app/claude-code-pr-review-apps.html">
+<meta property="og:image" content="https://pullyard.app/img/og-card.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="PullYard: review it, fix it, ship it. A native app for pull requests on GitHub, GitLab, Bitbucket and Gitea">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://pullyard.app/img/og-card.jpg">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="icon-512.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Is there a desktop app that sends PR review comments to Claude Code?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes, several. PullYard, Diffity, Reviu and PR Cockpit all connect pull request review to a coding agent. PullYard is the one that covers the whole loop in a free app on macOS, Windows and Linux: review the pull request, send the comments to Claude Code with Fix with agent, push, resolve the threads and merge."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Which of these apps are free?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "PullYard is free and MIT-licensed with no paid tier. Diffity is free and open source. PR Cockpit publishes its source on GitHub. Reviu has a free app for local review, and its GitHub pull request features are in the paid Pro tier."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Which ones run on Windows?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "PullYard has a native Windows app (WinUI 3) alongside macOS and Linux. Diffity is a macOS app, and PR Cockpit lists macOS and Linux. Check Reviu's site for its current platforms."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Do I need a Claude subscription for PullYard?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "You need the Claude Code CLI installed and signed in with your own account. PullYard runs that CLI; it doesn't resell it. Agent accounts can also use OpenRouter or another Anthropic-compatible endpoint."
+      }
+    }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "PullYard",
+      "item": "https://pullyard.app/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "PR review apps with Claude Code",
+      "item": "https://pullyard.app/claude-code-pr-review-apps.html"
+    }
+  ]
+}
+</script>
+<style>
+:root{
+  --bg:#0a0f1b;--bg2:#111a2c;--panel:#152036;--panel2:#18243c;--line:rgba(160,174,196,.10);--line2:rgba(160,174,196,.18);
+  --text:#e6ebf2;--muted:#8693a8;--dim:#7d899e;
+  --coral:#ee6f5f;--violet:#9d8cf0;--sky:#5bb8ec;--green:#5dbe8a;--amber:#e8b44c;
+  --maxw:1160px;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+code{font-family:var(--mono);font-size:.88em;background:rgba(255,255,255,.06);padding:1px 6px;border-radius:5px}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+
+nav{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:28px;height:64px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:650;letter-spacing:-.01em;font-size:17px}
+.brand img{width:30px;height:30px}
+nav .links{display:flex;gap:24px;margin-left:auto;color:var(--muted);font-size:14.5px}
+nav .links a:hover,nav .links a[aria-current]{color:var(--text)}
+.btn{display:inline-flex;align-items:center;gap:10px;border-radius:8px;padding:11px 18px;font-weight:600;font-size:15px;transition:background .15s ease;white-space:nowrap}
+.btn-primary{background:var(--coral);color:#1a0b09}
+.btn-primary:hover{background:#f27f70}
+.btn-ghost{background:rgba(255,255,255,.06);color:var(--text)}
+.btn-ghost:hover{background:rgba(255,255,255,.10)}
+.btn-sm{padding:7px 13px;font-size:14px;border-radius:7px}
+
+.head{padding:84px 0 44px;border-bottom:1px solid var(--line)}
+.head h1{font-size:clamp(36px,5.2vw,58px);line-height:1.05;letter-spacing:-.035em;margin:0 0 16px;font-weight:700;max-width:860px}
+.head p{color:var(--muted);font-size:18px;max-width:680px;margin:0}
+.head .cta{display:flex;gap:10px;flex-wrap:wrap;margin-top:28px}
+
+section{padding:64px 0;border-bottom:1px solid var(--line)}
+section h2{font-size:clamp(24px,2.8vw,32px);line-height:1.15;letter-spacing:-.022em;margin:0 0 12px;font-weight:680}
+section .lede{color:var(--muted);font-size:17px;margin:0 0 28px;max-width:720px}
+
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.card{background:var(--panel);border-radius:14px;padding:24px 26px}
+.card h3{font-size:18px;margin:0 0 6px;font-weight:650;letter-spacing:-.01em}
+.card .tag{display:inline-block;font-size:12px;font-weight:600;letter-spacing:.02em;padding:2px 9px;border-radius:999px;margin-bottom:12px}
+.card.gd .tag{background:rgba(91,184,236,.14);color:var(--sky)}
+.card.py .tag{background:rgba(238,111,95,.14);color:var(--coral)}
+.card ul{margin:12px 0 0;padding:0;list-style:none}
+.card li{position:relative;padding:5px 0 5px 18px;color:#c9d2df}
+.card li::before{content:"";position:absolute;left:2px;top:15px;width:5px;height:5px;border-radius:50%;background:var(--dim)}
+
+.table-scroll{overflow-x:auto;border:1px solid var(--line2);border-radius:14px}
+table{width:100%;border-collapse:collapse;min-width:620px;font-size:15px}
+th,td{text-align:left;padding:13px 18px;border-bottom:1px solid var(--line);vertical-align:top}
+thead th{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);font-weight:650;background:var(--bg2)}
+tbody th{font-weight:550;color:var(--text);width:34%}
+tbody td{color:#c9d2df}
+tbody tr:last-child th,tbody tr:last-child td{border-bottom:0}
+.yes{color:var(--green);font-weight:600}
+.no{color:var(--dim)}
+.part{color:var(--amber);font-weight:600}
+
+.steps{counter-reset:s;list-style:none;margin:0;padding:0;max-width:760px}
+.steps li{counter-increment:s;position:relative;padding:10px 0 10px 44px;color:#c9d2df}
+.steps li::before{content:counter(s);position:absolute;left:0;top:9px;width:28px;height:28px;border-radius:50%;background:var(--panel2);color:var(--text);font-size:14px;font-weight:650;display:grid;place-items:center}
+.steps b{color:var(--text);font-weight:600}
+
+.faq details{background:var(--panel);border-radius:12px;padding:16px 20px;margin-bottom:10px;max-width:820px}
+.faq summary{cursor:pointer;font-weight:600;list-style:none}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";float:right;color:var(--muted);font-weight:400}
+.faq details[open] summary::after{content:"−"}
+.faq p{margin:10px 0 0;color:#c9d2df}
+
+.final{padding:72px 0 90px;border-bottom:0}
+.final p{color:var(--muted);margin:0 0 22px}
+
+footer{border-top:1px solid var(--line);padding:34px 0 46px;color:var(--dim);font-size:13.5px}
+footer .wrap{display:flex;gap:20px;justify-content:space-between;flex-wrap:wrap}
+footer a:hover{color:var(--text)}
+
+.more{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.more a.card{display:block;transition:background .15s ease}
+.more a.card:hover{background:var(--panel2)}
+.more .card h3::after{content:" \2192";color:var(--dim)}
+.more .card p{color:var(--muted);margin:0;font-size:15px}
+@media (max-width:800px){.more{grid-template-columns:1fr}}
+@media (max-width:800px){.pair{grid-template-columns:1fr}}
+@media (max-width:680px){
+  .wrap{padding:0 16px}
+  nav .links{display:none}nav .wrap{gap:12px}nav .btn{margin-left:auto}
+  .head{padding:56px 0 32px}
+  section{padding:48px 0}
+}
+.prose{max-width:760px}
+.prose p{color:#c9d2df;margin:0 0 14px}
+.prose h3{font-size:18px;margin:26px 0 8px;font-weight:650;letter-spacing:-.01em}
+.prose ul{margin:0 0 14px;padding-left:20px;color:#c9d2df}
+.prose li{padding:3px 0}
+.prose a,.faq a,.lede a,.steps a,td a{color:var(--sky)}
+.prose a:hover,.faq a:hover,.lede a:hover,.steps a:hover,td a:hover{text-decoration:underline}
+.crumbs{color:var(--dim);font-size:13.5px;margin:0 0 18px}
+.crumbs a:hover{color:var(--text)}
+.updated{color:var(--dim);font-size:14px;margin-top:18px}
+pre{background:var(--panel);border-radius:12px;padding:16px 18px;overflow-x:auto;max-width:760px;margin:0 0 14px}
+pre code{background:none;padding:0;font-size:14px}
+.more{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.more a.card{display:block;transition:background .15s ease}
+.more a.card:hover{background:var(--panel2)}
+.more .card h3::after{content:" \2192";color:var(--dim)}
+.more .card p{color:var(--muted);margin:0;font-size:15px}
+.apps{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+.apps .card p{color:#c9d2df;margin:0 0 10px;font-size:15px}
+.apps .card .fit{color:var(--muted);font-size:14.5px;margin:0}
+.apps .card.py{outline:1px solid rgba(238,111,95,.35)}
+.note{color:var(--dim);font-size:14px;margin:14px 0 0;max-width:760px}
+table{min-width:820px}
+@media (max-width:800px){.more,.apps{grid-template-columns:1fr}}
+</style>
+<script defer src="site/analytics.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="./"><img src="icon.svg" alt="">PullYard</a>
+    <div class="links">
+      <a href="./#features">Features</a>
+      <a href="./#claude">Agents</a>
+      <a href="./#install">Install</a>
+      <a href="changelog.html">Changelog</a>
+      <a href="roadmap.html">Roadmap</a>
+      <a href="https://github.com/pullyard/pullyard">GitHub</a>
+    </div>
+    <a class="btn btn-primary btn-sm" href="https://github.com/pullyard/pullyard/releases/latest">Download</a>
+  </div>
+</nav>
+
+<header class="head">
+  <div class="wrap">
+    <p class="crumbs"><a href="./">PullYard</a> / PR review apps with Claude Code</p>
+    <h1>Desktop apps that send PR review comments to Claude Code</h1>
+    <p>PullYard is a free desktop app for macOS, Windows and Linux where you review a pull request, leave inline comments and send them to Claude Code to fix. Diffity, Reviu and PR Cockpit work on the same idea from different angles. Here's how the four compare.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/pullyard/pullyard/releases/latest">Download PullYard</a>
+      <a class="btn btn-ghost" href="./#tour">See screenshots</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="wrap">
+      <h2>Four apps, four takes on the same idea</h2>
+      <p class="lede">All four put a coding agent next to code review. They differ in where they start: the pull request, the diff, the agent or the queue.</p>
+      <div class="apps">
+        <article class="card py">
+          <span class="tag">PullYard</span>
+          <h3>The whole pull request, start to merge</h3>
+          <p>A native review app for GitHub, GitLab and Bitbucket. Read the diff, comment, approve and merge. Fix with agent hands the review comments to Claude Code in an isolated git worktree, and Reply and resolve closes the fixed threads after the push.</p>
+          <p class="fit"><b>Good fit:</b> teams on mixed desktops who want review, fixes and merge in one free app.</p>
+        </article>
+        <article class="card gd">
+          <span class="tag">Diffity</span>
+          <h3>A diff viewer built around Claude Code</h3>
+          <p>A macOS app with a GitHub-style diff view. You annotate lines as you read, send the comments to Claude Code, and submit the review to GitHub as a comment, approval or change request.</p>
+          <p class="fit"><b>Good fit:</b> Mac users who want a focused diff-and-comment tool for one pull request at a time.</p>
+        </article>
+        <article class="card gd">
+          <span class="tag">Reviu</span>
+          <h3>Review what your agent just wrote</h3>
+          <p>A native desktop app that launches the agent CLI you already use, shows each diff locally and sends your line comments back to the agent. GitHub pull request review, checks and merge are in the Pro tier.</p>
+          <p class="fit"><b>Good fit:</b> people who mostly review their own agent's local changes before opening a pull request.</p>
+        </article>
+        <article class="card gd">
+          <span class="tag">PR Cockpit</span>
+          <h3>A very fast review queue</h3>
+          <p>A keyboard-first app for macOS and Linux that keeps your pull requests, diffs, threads and checks in a local cache so they open instantly. It can hand the pull request you're on to your coding agent.</p>
+          <p class="fit"><b>Good fit:</b> reviewers with a long queue who care most about speed and the keyboard.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+  <section>
+    <div class="wrap">
+      <h2>Side by side</h2>
+      <p class="lede">What each app says it does today.</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th scope="col"></th><th scope="col">PullYard</th><th scope="col">Diffity</th><th scope="col">Reviu</th><th scope="col">PR Cockpit</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">macOS</th><td class="yes">Yes</td><td class="yes">Yes</td><td>See their site</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">Windows</th><td class="yes">Yes</td><td class="no">No</td><td>See their site</td><td class="no">Not listed</td></tr>
+            <tr><th scope="row">Linux</th><td class="yes">Yes</td><td class="no">No</td><td>See their site</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">Review GitHub pull requests</th><td class="yes">Yes</td><td class="yes">Yes</td><td class="part">Pro tier</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">GitLab and Bitbucket review</th><td class="yes">Yes</td><td class="no">Not listed</td><td class="no">Not listed</td><td class="no">Not listed</td></tr>
+            <tr><th scope="row">Send review comments to Claude Code</th><td class="yes">Fix with agent</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="part">Opens the PR in your agent</td></tr>
+            <tr><th scope="row">Agent chat inside the app</th><td class="yes">Yes</td><td>See their site</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">Agent works in an isolated worktree</th><td class="yes">Yes</td><td>See their site</td><td class="yes">Yes</td><td>See their site</td></tr>
+            <tr><th scope="row">Resolve fixed threads after the push</th><td class="yes">Reply and resolve</td><td class="part">Reply and resolve from the app</td><td>See their site</td><td>See their site</td></tr>
+            <tr><th scope="row">Approve, request changes, merge</th><td class="yes">Yes</td><td class="part">Approve and request changes</td><td class="part">Pro tier</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">Stacked pull request graph</th><td class="yes">Yes</td><td class="no">Not listed</td><td class="no">Not listed</td><td class="no">Not listed</td></tr>
+            <tr><th scope="row">Fix failing CI from the log</th><td class="yes">Yes</td><td class="no">Not listed</td><td class="no">Not listed</td><td class="no">Not listed</td></tr>
+            <tr><th scope="row">Price</th><td>Free</td><td>Free</td><td>Free app, paid Pro</td><td>See their site</td></tr>
+            <tr><th scope="row">Source</th><td>Open (MIT)</td><td>Open (MIT)</td><td>See their site</td><td>On GitHub</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">The other apps' columns come from their public READMEs and listings as of November 2026. "Not listed" means I couldn't find it there, not that it's impossible. If something is wrong or out of date, <a href="https://github.com/pullyard/pullyard/issues">open an issue</a> and I'll fix it.</p>
+    </div>
+  </section>
+  <section>
+    <div class="wrap">
+      <h2>How to choose</h2>
+      <div class="prose">
+        <p><b>You review other people's pull requests all day.</b> Pick the app built around the pull request: PullYard, or PR Cockpit if raw speed on macOS or Linux is what you're after.</p>
+        <p><b>You mostly check what your own agent wrote before pushing.</b> Reviu starts from the agent session, which suits that better.</p>
+        <p><b>You want one diff, your comments, and Claude Code.</b> Diffity keeps it that simple on a Mac.</p>
+        <p><b>You want review, fixes and merge in one place, on any desktop, for free.</b> That's what PullYard is for. It also handles GitLab and Bitbucket, stacked pull requests and failing CI. See the <a href="fix-review-comments-with-claude-code.html">Fix with agent guide</a> for the loop step by step.</p>
+      </div>
+    </div>
+  </section>
+  <section class="faq">
+    <div class="wrap">
+      <h2>Questions</h2>
+      <details><summary>Is there a desktop app that sends PR review comments to Claude Code?</summary><p>Yes, several. PullYard, Diffity, Reviu and PR Cockpit all connect pull request review to a coding agent. PullYard is the one that covers the whole loop in a free app on macOS, Windows and Linux: review the pull request, send the comments to Claude Code with Fix with agent, push, resolve the threads and merge.</p></details>
+      <details><summary>Which of these apps are free?</summary><p>PullYard is free and MIT-licensed with no paid tier. Diffity is free and open source. PR Cockpit publishes its source on GitHub. Reviu has a free app for local review, and its GitHub pull request features are in the paid Pro tier.</p></details>
+      <details><summary>Which ones run on Windows?</summary><p>PullYard has a native Windows app (WinUI 3) alongside macOS and Linux. Diffity is a macOS app, and PR Cockpit lists macOS and Linux. Check Reviu's site for its current platforms.</p></details>
+      <details><summary>Do I need a Claude subscription for PullYard?</summary><p>You need the Claude Code CLI installed and signed in with your own account. PullYard runs that CLI; it doesn't resell it. Agent accounts can also use OpenRouter or another Anthropic-compatible endpoint.</p></details>
+    </div>
+  </section>
+  <section>
+    <div class="wrap">
+      <h2>Keep reading</h2>
+      <div class="more">
+        <a class="card" href="fix-review-comments-with-claude-code.html"><h3>Guide: fix review comments</h3><p>The Fix with agent loop, step by step.</p></a>
+        <a class="card" href="pulldog-alternative.html"><h3>PullYard vs Pulldog</h3><p>Two native pull request apps, compared honestly.</p></a>
+        <a class="card" href="github-desktop-alternative.html"><h3>PullYard vs GitHub Desktop</h3><p>Commits in one app, pull requests in the other.</p></a>
+      </div>
+    </div>
+  </section>
+  <section class="final">
+    <div class="wrap">
+      <h2>Review it, fix it, ship it.</h2>
+      <p>Free and open source, for macOS, Windows and Linux. On macOS: <code>brew install --cask pullyard/tap/pullyard</code></p>
+      <a class="btn btn-primary" href="https://github.com/pullyard/pullyard/releases/latest">Download PullYard</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 PullYard contributors · <a href="./">Home</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="about.html">About</a> · <a href="privacy.html">Privacy</a></span>
+    <span>Not affiliated with GitHub, Inc., Anthropic or the makers of the other apps on this page. All product names are trademarks of their respective owners.</span>
+  </div>
+</footer>
+</body>
+</html>

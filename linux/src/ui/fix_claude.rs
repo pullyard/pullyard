@@ -248,6 +248,7 @@ impl State {
 
     fn ci_fetch(self: &Rc<Self>, id: &str) {
         let Some(ci) = &self.ci else { return };
+        let Some(api) = self.model.api.clone() else { return };
         let Some(check) = ci.checks.get(id).cloned() else { return };
         if !ci.requested.borrow_mut().insert(id.to_string()) {
             return;
@@ -267,7 +268,7 @@ impl State {
             }
             ci.render_status(f);
         }
-        let handle = crate::rt::spawn(ci_fix::collect(self.model.api.clone(), self.model.r.repo.clone(), check, ci.limit.clone(), log));
+        let handle = crate::rt::spawn(ci_fix::collect(api, self.model.r.repo.clone(), check, ci.limit.clone(), log));
         ci.tasks.borrow_mut().push(handle.abort_handle());
         let w = Rc::downgrade(self);
         crate::rt::spawn_local(async move {
@@ -426,9 +427,28 @@ impl State {
         });
     }
 
+    fn record_review_fix(&self) {
+        if self.ci.is_some() {
+            return;
+        }
+        let threads = self.threads();
+        let ids: Vec<String> = if self.use_reviewer.get() && self.found.is_some() {
+            threads.iter().map(|t| t.id.clone()).collect()
+        } else {
+            let selected = self.selected.borrow();
+            threads.iter().filter(|t| selected.contains(&t.id)).map(|t| t.id.clone()).collect()
+        };
+        if ids.is_empty() {
+            return;
+        }
+        let launch = crate::close_loop::ReviewFixLaunch { thread_ids: ids, head_oid: self.pr.head_ref_oid.clone(), at: chrono::Utc::now() };
+        app::get().claude.review_fixes.borrow_mut().insert(self.model.r.clone(), launch);
+    }
+
     fn start(&self, dialog: &adw::Dialog, prompt: String, folder: Option<String>, target: Target, mode: PermissionMode, name: String) {
         if target == Target::App {
             if let Some(f) = folder {
+                self.record_review_fix();
                 let tab = app::get().claude.new_session(&f, Some(prompt), Some(name), None, None);
                 if self.ci.is_some() {
                     CI_SESSIONS.with(|m| m.borrow_mut().insert(self.model.r.title(), Rc::downgrade(&tab)));
@@ -443,6 +463,8 @@ impl State {
             Ok(()) => {
                 if target == Target::Copy {
                     app::toast("Prompt copied");
+                } else {
+                    self.record_review_fix();
                 }
                 dialog.close();
             }

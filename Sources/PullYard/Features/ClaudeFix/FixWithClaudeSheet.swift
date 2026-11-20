@@ -260,7 +260,8 @@ struct FixWithClaudeSheet: View {
         let generation = ciGeneration
         ciLoading = true
         defer { if ciGeneration == generation { ciLoading = false } }
-        let api = model.api, repo = model.ref.repo
+        guard let api = model.api else { return }
+        let repo = model.ref.repo
         var queue = failing.filter(needsGather)[...]
         let seed = ci.flatMap { r in r.log.map { (r.focus, $0) } }
         await withTaskGroup(of: CIFailure.self) { group in
@@ -317,6 +318,10 @@ struct FixWithClaudeSheet: View {
                 let tab = try await ClaudeLauncher.startForPR(app: app, prompt: prompt, folder: folder, isolate: isolate, pr: pr, repo: model.ref.repo, target: target, mode: mode, name: name)
                 if source == .ci, target != .copy {
                     app.claude.ciFixes[model.ref] = CIFixLaunch(tabID: tab?.id, target: target, headOid: pr.headRefOid, at: Date())
+                }
+                if source != .ci, target != .copy {
+                    let ids = (source == .composed ? threads.filter { selected.contains($0.id) } : threads).map(\.id)
+                    if !ids.isEmpty { app.claude.reviewFixes[model.ref] = ReviewFixLaunch(threadIDs: ids, headOid: pr.headRefOid, at: Date()) }
                 }
                 dismiss()
             } catch {

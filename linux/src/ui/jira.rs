@@ -10,7 +10,7 @@ use super::menu::{context_menu, Menu};
 use super::pr::model::{Change, PrModel};
 use super::widgets::*;
 use crate::api::ApiError;
-use crate::jira::{self, JiraIssue};
+use crate::jira::{self, JiraIssue, JiraTransition};
 use crate::{rt, util};
 
 const DESCRIPTION_LINES: i32 = 6;
@@ -883,6 +883,200 @@ impl JiraTab {
             });
         });
         mb
+    }
+}
+
+pub struct MergeFollowUp {
+    pub widget: gtk::Box,
+    signature: RefCell<String>,
+    pr_url: RefCell<String>,
+    issues: RefCell<Vec<JiraIssue>>,
+    moves: RefCell<HashMap<String, JiraTransition>>,
+    working: RefCell<Option<String>>,
+    error: RefCell<Option<String>>,
+    generation: Cell<u64>,
+}
+
+impl MergeFollowUp {
+    pub fn new() -> Rc<Self> {
+        let widget = vbox(6);
+        widget.add_css_class("banner-box");
+        widget.add_css_class("sky");
+        widget.set_visible(false);
+        widget.update_property(&[gtk::accessible::Property::Label("Jira follow-up")]);
+        Rc::new(MergeFollowUp {
+            widget,
+            signature: RefCell::new(String::new()),
+            pr_url: RefCell::new(String::new()),
+            issues: RefCell::new(vec![]),
+            moves: RefCell::new(HashMap::new()),
+            working: RefCell::new(None),
+            error: RefCell::new(None),
+            generation: Cell::new(0),
+        })
+    }
+
+    pub fn reset(&self) {
+        self.signature.borrow_mut().clear();
+    }
+
+    pub fn update(self: &Rc<Self>, url: &str, merged: bool, keys: Vec<String>) {
+        let keys: Vec<String> = keys.into_iter().take(5).collect();
+        let signature = format!("{url}|{merged}|{}|{}", keys.join(","), jira::is_configured());
+        if *self.signature.borrow() == signature {
+            return;
+        }
+        *self.signature.borrow_mut() = signature;
+        *self.pr_url.borrow_mut() = url.to_string();
+        self.generation.set(self.generation.get() + 1);
+        self.issues.borrow_mut().clear();
+        self.moves.borrow_mut().clear();
+        *self.working.borrow_mut() = None;
+        *self.error.borrow_mut() = None;
+        self.render();
+        if !merged || keys.is_empty() || jira::is_follow_up_dismissed(url) || !jira::is_configured() {
+            return;
+        }
+        let generation = self.generation.get();
+        let known: Vec<(String, Option<JiraIssue>)> = keys.into_iter().map(|k| (k.clone(), jira::cached(&k))).collect();
+        let weak = Rc::downgrade(self);
+        rt::spawn_local(async move {
+            let Some(client) = jira::client().await else { return };
+            let (found, fetched, moves) = rt::run(async move {
+                let mut found = vec![];
+                let mut fetched = vec![];
+                for (key, hit) in known {
+                    match hit {
+                        Some(issue) => found.push(issue),
+                        None => {
+                            if let Ok(issue) = client.issue(&key).await {
+                                fetched.push(issue.clone());
+                                found.push(issue);
+                            }
+                        }
+                    }
+                }
+                let mut moves = HashMap::new();
+                for issue in jira::open_issues(&found) {
+                    if let Some(t) = jira::done_transition(&client.transitions(&issue.key).await.unwrap_or_default()) {
+                        moves.insert(issue.key, t);
+                    }
+                }
+                (found, fetched, moves)
+            })
+            .await;
+            for issue in &fetched {
+                jira::remember(issue);
+            }
+            let Some(me) = weak.upgrade() else { return };
+            if me.generation.get() != generation {
+                return;
+            }
+            *me.issues.borrow_mut() = found;
+            *me.moves.borrow_mut() = moves;
+            me.render();
+        });
+    }
+
+    fn render(self: &Rc<Self>) {
+        clear(&self.widget);
+        let pending = jira::open_issues(&self.issues.borrow());
+        self.widget.set_visible(!pending.is_empty());
+        if pending.is_empty() {
+            return;
+        }
+        let working = self.working.borrow().clone();
+        for issue in pending {
+            let row = hbox(8);
+            row.append(&colored_icon("sy-tag-symbolic", 14, "sky"));
+            row.append(&label_with(&issue.key, &["sy-mono", "sy-bold", "sy-text"]));
+            row.append(&ellipsized(&format!("is still {}", issue.status), &["sy-muted"]));
+            row.append(&spacer());
+            if let Some(t) = self.moves.borrow().get(&issue.key).cloned() {
+                let text = if working.as_deref() == Some(issue.key.as_str()) { "Moving…".to_string() } else { format!("Move to {}", t.to) };
+                let mv = button(&text);
+                mv.add_css_class("banner-button");
+                mv.add_css_class("tint-green");
+                mv.set_valign(gtk::Align::Center);
+                mv.set_sensitive(working.is_none());
+                let (weak, issue) = (Rc::downgrade(self), issue.clone());
+                mv.connect_clicked(move |_| {
+                    if let Some(me) = weak.upgrade() {
+                        me.move_issue(&issue, &t);
+                    }
+                });
+                row.append(&mv);
+            }
+            let open = button("Open in Jira");
+            open.add_css_class("banner-button");
+            open.set_valign(gtk::Align::Center);
+            let url = issue.url.clone();
+            open.connect_clicked(move |_| util::open_url(&url));
+            row.append(&open);
+            self.widget.append(&row);
+        }
+        let footer = hbox(8);
+        if let Some(e) = self.error.borrow().as_ref() {
+            footer.append(&wrap_label(e, &["fg-red", "sy-small"]));
+        }
+        footer.append(&spacer());
+        let later = link_button("Not now");
+        later.add_css_class("sy-small");
+        let weak = Rc::downgrade(self);
+        later.connect_clicked(move |_| {
+            let Some(me) = weak.upgrade() else { return };
+            jira::dismiss_follow_up(&me.pr_url.borrow());
+            me.generation.set(me.generation.get() + 1);
+            me.issues.borrow_mut().clear();
+            me.render();
+        });
+        footer.append(&later);
+        self.widget.append(&footer);
+    }
+
+    fn move_issue(self: &Rc<Self>, issue: &JiraIssue, t: &JiraTransition) {
+        if self.working.borrow().is_some() {
+            return;
+        }
+        *self.working.borrow_mut() = Some(issue.key.clone());
+        *self.error.borrow_mut() = None;
+        self.render();
+        let (weak, key, id, target, generation) = (Rc::downgrade(self), issue.key.clone(), t.id.clone(), t.to.clone(), self.generation.get());
+        rt::spawn_local(async move {
+            let result = match jira::client().await {
+                Some(client) => {
+                    let k = key.clone();
+                    rt::run(async move {
+                        client.transition(&k, &id).await?;
+                        Ok::<_, ApiError>(client.issue(&k).await.ok())
+                    })
+                    .await
+                }
+                None => Err(ApiError::new("Jira isn't connected")),
+            };
+            if let Ok(Some(fresh)) = &result {
+                jira::remember(fresh);
+            }
+            if result.is_ok() {
+                crate::app::toast(&format!("{key} moved to {target}"));
+            }
+            let Some(me) = weak.upgrade() else { return };
+            if me.generation.get() != generation {
+                return;
+            }
+            *me.working.borrow_mut() = None;
+            match result {
+                Ok(Some(fresh)) => {
+                    let mut issues = me.issues.borrow_mut();
+                    if let Some(slot) = issues.iter_mut().find(|i| i.key == fresh.key) {
+                        *slot = fresh;
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => *me.error.borrow_mut() = Some(e.message),
+            }
+            me.render();
+        });
     }
 }
 

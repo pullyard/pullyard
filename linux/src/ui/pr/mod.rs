@@ -1,3 +1,4 @@
+pub mod backend;
 pub mod diff_view;
 pub mod files;
 pub mod model;
@@ -11,6 +12,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 
+use self::backend::PrAction;
 use self::model::{Change, PrModel, PrTab};
 use super::composer::Composer;
 use super::dialogs;
@@ -21,8 +23,8 @@ use super::tabstrip::{TabItem, TabStrip};
 use super::widgets::*;
 use crate::api::code_owners::{OwnerEntry, OwnerStatus, OwnershipSummary};
 use crate::api::merge_readiness::{self, MergeRequirement, RequirementAction, RequirementState};
+use crate::api::risk::RiskLabel;
 use crate::api::models::*;
-use crate::api::queries as q;
 use crate::stack::{StackNode, StackTree};
 use crate::{app, util};
 
@@ -34,6 +36,7 @@ pub struct PrPage {
     busy: Loader,
     status: Rc<RefreshStatus>,
     header_box: gtk::Box,
+    risk_slot: RefCell<Option<gtk::Box>>,
     banners: gtk::Box,
     tabs: Rc<TabStrip>,
     tabs_area: gtk::Stack,
@@ -45,6 +48,7 @@ pub struct PrPage {
     files: RefCell<Option<Rc<files::FilesTab>>>,
     stack_tab: RefCell<Option<Rc<stack_tab::StackTab>>>,
     jira_tab: RefCell<Option<Rc<super::jira::JiraTab>>>,
+    jira_follow_up: Rc<super::jira::MergeFollowUp>,
     rerequested: RefCell<Option<Vec<String>>>,
     sending_rerequest: Cell<bool>,
     replaced: Cell<bool>,
@@ -55,7 +59,19 @@ pub struct PrPage {
 pub struct Conversation {
     pub html: Rc<HtmlView>,
     composer: Rc<Composer>,
+    next: gtk::Button,
     pub widget: gtk::Box,
+}
+
+impl Conversation {
+    fn update_next(&self, open: usize) {
+        self.next.set_visible(open > 0);
+        if open > 0 {
+            let text = format!("{open} unresolved · Next");
+            self.next.set_child(Some(&icon_label_content("sy-down-symbolic", &text)));
+            set_label(&self.next, &text);
+        }
+    }
 }
 
 pub fn page(r: &ItemRef) -> adw::NavigationPage {
@@ -74,7 +90,7 @@ impl PrPage {
         let tabs = TabStrip::new(vec![
             TabItem { id: "conversation", title: "Conversation".into(), icon: "sy-comment-symbolic" },
             TabItem { id: "commits", title: "Commits".into(), icon: "sy-commit-symbolic" },
-            TabItem { id: "checks", title: "Checks".into(), icon: "sy-checklist-symbolic" },
+            TabItem { id: "checks", title: model.features.checks_title().into(), icon: "sy-checklist-symbolic" },
             TabItem { id: "files", title: "Files changed".into(), icon: "sy-file-symbolic" },
             TabItem { id: "stack", title: "Stack".into(), icon: "sy-stack-symbolic" },
             TabItem { id: "jira", title: "Jira".into(), icon: "sy-tag-symbolic" },
@@ -125,6 +141,7 @@ impl PrPage {
             busy,
             status,
             header_box,
+            risk_slot: RefCell::new(None),
             banners,
             tabs,
             tabs_area,
@@ -136,6 +153,7 @@ impl PrPage {
             files: RefCell::new(None),
             stack_tab: RefCell::new(None),
             jira_tab: RefCell::new(None),
+            jira_follow_up: super::jira::MergeFollowUp::new(),
             rerequested: RefCell::new(None),
             sending_rerequest: Cell::new(false),
             replaced: Cell::new(false),
@@ -161,6 +179,8 @@ impl PrPage {
         crate::jira::on_change(move |_| match w.upgrade() {
             Some(me) => {
                 me.render_jira_badge();
+                me.jira_follow_up.reset();
+                me.render_jira_follow_up();
                 true
             }
             None => false,
@@ -229,6 +249,11 @@ impl PrPage {
                     c.html.scroll_to_bottom_after_load();
                 }
             }
+            Change::FocusThread => {
+                if let Some(c) = self.conversation.borrow().as_ref() {
+                    c.html.focus_next_unresolved();
+                }
+            }
             Change::ActionError(e) => dialogs::error(e),
             Change::Diff => {
                 let pr = self.model.pr.borrow().clone();
@@ -237,6 +262,7 @@ impl PrPage {
                 }
             }
             Change::Files => {
+                self.render_risks();
                 if self.model.tab.get() == PrTab::Files {
                     self.model.refresh_stale_files();
                 }
@@ -371,11 +397,37 @@ impl PrPage {
         pad(&row, 10);
         row.append(&composer.widget);
         row.append(&send);
+        let next = gtk::Button::new();
+        next.add_css_class("sy-small");
+        next.set_halign(gtk::Align::End);
+        next.set_valign(gtk::Align::End);
+        pad(&next, 10);
+        next.set_tooltip_text(Some("Jump to the next unresolved thread (Ctrl+Alt+Down)"));
+        next.set_visible(false);
+        let m = self.model.clone();
+        next.connect_clicked(move |_| m.next_unresolved_thread());
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&html.view));
+        overlay.add_overlay(&next);
+        overlay.set_vexpand(true);
         let widget = vbox(0);
-        widget.append(&html.view);
+        widget.append(&overlay);
         widget.append(&line());
         widget.append(&row);
-        let c = Rc::new(Conversation { html: html.clone(), composer: composer.clone(), widget });
+        let shortcuts = gtk::ShortcutController::new();
+        shortcuts.set_scope(gtk::ShortcutScope::Managed);
+        let m = self.model.clone();
+        let action = gtk::CallbackAction::new(move |_, _| {
+            if m.unresolved_threads() == 0 {
+                return gtk::glib::Propagation::Proceed;
+            }
+            m.next_unresolved_thread();
+            gtk::glib::Propagation::Stop
+        });
+        shortcuts.add_shortcut(gtk::Shortcut::new(gtk::ShortcutTrigger::parse_string("<Control><Alt>Down"), Some(action)));
+        widget.add_controller(shortcuts);
+        let c = Rc::new(Conversation { html: html.clone(), composer: composer.clone(), next, widget });
+        c.update_next(self.model.unresolved_threads());
         let w = Rc::downgrade(self);
         let weak_comp = Rc::downgrade(&composer);
         let submit = Rc::new(move || {
@@ -477,7 +529,7 @@ impl PrPage {
         self.body.set_visible_child_name("main");
         self.tabs_area.set_visible_child_name("tabs");
         self.title.set_title(&pr.title);
-        self.title.set_subtitle(&format!("{} #{}", self.model.r.repo.full(), pr.number));
+        self.title.set_subtitle(&format!("{} {}{}", self.model.r.repo.full(), self.model.features.number_prefix(), pr.number));
         if let Some(page) = self.page.upgrade() {
             page.set_title(&pr.title);
         }
@@ -523,6 +575,7 @@ impl PrPage {
         if let Some(c) = self.conversation.borrow().as_ref() {
             let h = self.model.html.borrow().clone();
             c.html.set_html(&h);
+            c.update_next(self.model.unresolved_threads());
         }
         if let Some(l) = self.commits.borrow().as_ref() {
             self.render_commits(l, &pr);
@@ -587,10 +640,11 @@ impl PrPage {
         let failed_runs: std::collections::HashSet<i64> = checks.iter().filter(|c| c.outcome() == CheckOutcome::Failure).filter_map(|c| c.run_id()).collect();
         if checks.is_empty() {
             let row = gtk::ListBoxRow::new();
-            row.set_child(Some(&label_with("No checks for the latest commit", &["sy-muted"])));
+            let empty = if self.model.features.is_gitlab() { "No pipeline for the latest commit" } else { "No checks for the latest commit" };
+            row.set_child(Some(&label_with(empty, &["sy-muted"])));
             l.append(&row);
         }
-        if !failed_runs.is_empty() && self.model.can_write() {
+        if self.model.features.rerun_checks && !failed_runs.is_empty() && self.model.can_write() {
             let b = icon_label_button("view-refresh-symbolic", &format!("Re-run failed jobs ({} workflow)", failed_runs.len()));
             b.add_css_class("flat");
             b.set_halign(gtk::Align::Start);
@@ -650,12 +704,12 @@ impl PrPage {
             }
             col.append(&ellipsized(&parts.join(" · "), &["sy-muted", "sy-small"]));
             b.append(&col);
-            if c.is_actions_job() && c.outcome() != CheckOutcome::Pending && c.outcome() != CheckOutcome::Skipped {
+            if self.model.features.job_logs && self.model.backend.can_show_log(&c) && c.outcome() != CheckOutcome::Pending && c.outcome() != CheckOutcome::Skipped {
                 let log = button("Log");
                 log.add_css_class("flat");
                 let m = self.model.clone();
                 let cc = c.clone();
-                let failed = crate::ci_fix::is_fixable(&c);
+                let failed = self.model.features.agent && crate::ci_fix::is_fixable(&c);
                 log.connect_clicked(move |_| {
                     let fix: Option<Rc<dyn Fn(Option<String>)>> = if failed {
                         let m = m.clone();
@@ -667,11 +721,14 @@ impl PrPage {
                     } else {
                         None
                     };
-                    sheets::job_log(m.api.clone(), m.r.repo.clone(), cc.clone(), fix);
+                    let backend = m.backend.clone();
+                    let r = m.r.clone();
+                    let check = cc.clone();
+                    sheets::job_log(async move { backend.job_log(&r, &check).await }, cc.clone(), fix);
                 });
                 b.append(&log);
             }
-            if crate::ci_fix::is_fixable(&c) {
+            if self.model.features.agent && crate::ci_fix::is_fixable(&c) {
                 let fix = icon_label_button("sy-sparkles-symbolic", "Fix with agent");
                 fix.add_css_class("flat");
                 fix.set_tooltip_text(Some("Send this check's failure log to a new Claude Code session"));
@@ -709,7 +766,7 @@ impl PrPage {
         let t = wrap_label(&pr.title, &["sy-title", "sy-text"]);
         t.set_selectable(true);
         top.append(&t);
-        top.append(&label_with(&format!("#{}", pr.number), &["sy-title-num"]));
+        top.append(&label_with(&format!("{}{}", self.model.features.number_prefix(), pr.number), &["sy-title-num"]));
         self.header_box.append(&top);
         let meta = hbox(8);
         meta.append(&state_badge(pr.visual_state(), false));
@@ -718,7 +775,9 @@ impl PrPage {
         meta.append(&branch_chip(&pr.base_ref_name, "sky"));
         meta.append(&label_with("←", &["sy-dim"]));
         meta.append(&branch_chip(&pr.head_ref_name, "violet"));
-        meta.append(&diff_stat(pr.additions, pr.deletions));
+        if let Some((additions, deletions)) = self.model.diff_stat() {
+            meta.append(&diff_stat(additions, deletions));
+        }
         meta.append(&spacer());
         let created = label_with(&util::rel(Some(pr.created_at)), &["sy-muted"]);
         created.set_tooltip_text(Some(&util::full_date(pr.created_at)));
@@ -752,14 +811,41 @@ impl PrPage {
         if let Some(tree) = tree {
             self.header_box.append(&stack_strip(&self.model, &tree, true));
         }
+        let slot = vbox(0);
+        self.header_box.append(&slot);
+        *self.risk_slot.borrow_mut() = Some(slot);
+        self.render_risks();
+        if let Some(parent) = self.jira_follow_up.widget.parent().and_downcast::<gtk::Box>() {
+            parent.remove(&self.jira_follow_up.widget);
+        }
+        self.header_box.append(&self.jira_follow_up.widget);
+        self.render_jira_follow_up();
         if let Some(bar) = merge_status_bar(&self.model, &pr, Rc::new({
             let m = self.model.clone();
             move || sheets::merge(m.clone())
-        }), Some(Rc::new({
+        }), self.model.features.request_reviewers.then(|| -> Rc<dyn Fn()> {
             let m = self.model.clone();
-            move || sheets::reviewers(m.clone())
-        }))) {
+            Rc::new(move || sheets::reviewers(m.clone()))
+        })) {
             self.header_box.append(&bar);
+        }
+    }
+
+    fn render_jira_follow_up(&self) {
+        let pr = self.model.pr.borrow().clone();
+        let Some(pr) = pr else { return };
+        let keys = super::jira::keys(&self.model);
+        self.jira_follow_up.update(&pr.url, pr.merged, keys);
+    }
+
+    fn render_risks(&self) {
+        let Some(slot) = self.risk_slot.borrow().clone() else { return };
+        clear(&slot);
+        let open = self.model.pr.borrow().as_ref().map(|p| p.is_open()).unwrap_or(false);
+        let risks = if open { self.model.risks() } else { vec![] };
+        slot.set_visible(!risks.is_empty());
+        if !risks.is_empty() {
+            slot.append(&risk_strip(&self.model, &risks));
         }
     }
 
@@ -807,10 +893,26 @@ impl PrPage {
 
     fn render_banners(self: &Rc<Self>, pr: &PullRequestDetail) {
         clear(&self.banners);
+        if !self.model.features.request_reviewers {
+            return;
+        }
         if let Some(b) = self.rereview_banner(pr, true) {
             self.banners.append(&b);
         }
+        if !self.model.features.agent {
+            return;
+        }
         self.ci_session.set(fix_claude::ci_session(&self.model.r).map(|(_, s)| s));
+        let w = Rc::downgrade(self);
+        if let Some(b) = sheets::close_loop_banner(&self.model, pr, move || {
+            let Some(me) = w.upgrade() else { return };
+            let pr = me.model.pr.borrow().clone();
+            if let Some(pr) = pr {
+                me.render_banners(&pr);
+            }
+        }) {
+            self.banners.append(&b);
+        }
         let m = self.model.clone();
         if let Some(b) = fix_claude::ci_banner(pr, &self.model.r, move || fix_claude::show_ci(m.clone(), None)) {
             self.banners.append(&b);
@@ -846,6 +948,7 @@ impl PrPage {
 
     fn render_actions(self: &Rc<Self>, pr: &PullRequestDetail) {
         let m = self.model.clone();
+        let agent = crate::host::claude_binary().is_some();
         let key = format!(
             "{}|{}|{}|{}|{}|{}|{}|{:?}|{}|{}|{}|{}",
             pr.number,
@@ -860,7 +963,7 @@ impl PrPage {
             pr.head_ref.is_some(),
             m.pending.borrow().len(),
             pr.head_ref_name
-        );
+        ) + &format!("|{}", pr.review_threads.nodes.iter().any(|t| !t.is_resolved && t.viewer_can_reply)) + &format!("|{:?}|{:?}", pr.viewer_can_approve, pr.viewer_approved) + &format!("|{}", agent);
         if *self.actions_key.borrow() == key {
             return;
         }
@@ -874,30 +977,58 @@ impl PrPage {
             let menu = Menu::new();
             let mm = m.clone();
             menu.item("Write review…", move || sheets::review(mm.clone()));
-            if !pr.viewer_did_author {
+            let features = m.features;
+            if pr.viewer_can_approve.unwrap_or(!pr.viewer_did_author) && pr.viewer_approved != Some(true) {
                 let mm = m.clone();
                 menu.item("Approve", move || confirm_approve(mm.clone()));
+            }
+            if agent {
+                let mm = m.clone();
+                menu.item("Draft comments with agent…", move || sheets::review_drafts(mm.clone()));
+            }
+            if pr.review_threads.nodes.iter().any(|t| !t.is_resolved && t.viewer_can_reply) {
+                let mm = m.clone();
+                menu.item("Reply and resolve threads…", move || {
+                    let pre = app::try_get().and_then(|a| a.claude.review_fixes.borrow().get(&mm.r).map(|l| l.thread_ids.clone())).unwrap_or_default();
+                    sheets::close_loop(mm.clone(), pre);
+                });
+            }
+            if features.revoke_approval && pr.viewer_approved == Some(true) {
+                let mm = m.clone();
+                menu.item("Revoke approval", move || {
+                    let mm = mm.clone();
+                    dialogs::confirm("Revoke your approval?", None, "Revoke approval", false, move || {
+                        let mm = mm.clone();
+                        crate::rt::spawn_local(async move {
+                            mm.revoke_approval().await;
+                        });
+                    });
+                });
             }
             split.set_menu_model(Some(&menu.model));
             menu.attach(&split);
             let mm = m.clone();
             split.connect_clicked(move |_| sheets::review(mm.clone()));
             self.actions.append(&split);
-            let rr = icon_button("sy-person-add-symbolic", "Request or re-request review");
-            let mm = m.clone();
-            rr.connect_clicked(move |_| sheets::reviewers(mm.clone()));
-            self.actions.append(&rr);
+            if features.request_reviewers {
+                let rr = icon_button("sy-person-add-symbolic", "Request or re-request review");
+                let mm = m.clone();
+                rr.connect_clicked(move |_| sheets::reviewers(mm.clone()));
+                self.actions.append(&rr);
+            }
         }
-        let fix = icon_label_button("sy-sparkles-symbolic", "Fix with agent");
-        fix.set_tooltip_text(Some("Send review comments and failing checks to a new agent session"));
-        set_label(&fix, "Fix with agent");
-        let mm = m.clone();
-        fix.connect_clicked(move |_| fix_claude::show(mm.clone()));
-        self.actions.append(&fix);
+        if m.features.agent {
+            let fix = icon_label_button("sy-sparkles-symbolic", "Fix with agent");
+            fix.set_tooltip_text(Some("Send review comments and failing checks to a new agent session"));
+            set_label(&fix, "Fix with agent");
+            let mm = m.clone();
+            fix.connect_clicked(move |_| fix_claude::show(mm.clone()));
+            self.actions.append(&fix);
+        }
         if pr.is_open() && !pr.is_draft && m.can_write() {
             let merge = icon_label_button("sy-merge-symbolic", "Merge");
             merge.add_css_class("suggested-action");
-            merge.set_tooltip_text(Some("Merge pull request (Ctrl+Shift+M)"));
+            merge.set_tooltip_text(Some(&format!("Merge {} (Ctrl+Shift+M)", m.features.request_title())));
             set_label(&merge, "Merge");
             let mm = m.clone();
             merge.connect_clicked(move |_| sheets::merge(mm.clone()));
@@ -905,10 +1036,12 @@ impl PrPage {
         }
         let group = hbox(0);
         group.add_css_class("linked");
-        let short = super::item_row::short_link_button(&Route::Pr(m.r.clone()));
-        short.remove_css_class("flat");
-        group.append(&short);
-        let open = icon_button("sy-external-symbolic", "Open in browser");
+        if m.features.provider.is_github() {
+            let short = super::item_row::short_link_button(&Route::Pr(m.r.clone()));
+            short.remove_css_class("flat");
+            group.append(&short);
+        }
+        let open = icon_button("sy-external-symbolic", &if m.features.provider.is_github() { "Open in browser".to_string() } else { format!("Open on {}", m.features.service_title()) });
         open.remove_css_class("flat");
         let url = pr.url.clone();
         open.connect_clicked(move |_| util::open_url(&url));
@@ -923,57 +1056,84 @@ impl PrPage {
         let m = self.model.clone();
         let url = pr.url.clone();
         menu.item("Copy link", move || app::copy(&url, "Copied link"));
-        let route = Route::Pr(m.r.clone());
-        menu.item("Copy short link", move || super::item_row::copy_short_link(&route));
-        let cmd = format!("gh pr checkout {} -R {}", pr.number, m.r.repo.full());
-        menu.item(&format!("Copy “gh pr checkout {}”", pr.number), move || app::copy(&cmd, "Copied checkout command"));
+        let f = m.features;
+        if f.provider.is_github() {
+            let route = Route::Pr(m.r.clone());
+            menu.item("Copy short link", move || super::item_row::copy_short_link(&route));
+            let cmd = format!("gh pr checkout {} -R {}", pr.number, m.r.repo.full());
+            menu.item(&format!("Copy “gh pr checkout {}”", pr.number), move || app::copy(&cmd, "Copied checkout command"));
+        } else if f.is_gitlab() {
+            let cmd = format!("glab mr checkout {} -R {}", pr.number, m.r.repo.full());
+            menu.item(&format!("Copy “glab mr checkout {}”", pr.number), move || app::copy(&cmd, "Copied checkout command"));
+        }
         let head = pr.head_ref_name.clone();
         menu.item("Copy branch name", move || app::copy(&head, &format!("Copied {head}")));
         menu.section(None);
-        if pr.viewer_can_update {
+        if pr.viewer_can_update && f.editing {
             let mm = m.clone();
             menu.item("Edit title and description…", move || sheets::edit(mm.clone()));
         }
-        let simple = |mm: Rc<PrModel>, q: &'static str| {
+        let simple = |mm: Rc<PrModel>, action: PrAction| {
             move || {
                 let mm = mm.clone();
                 crate::rt::spawn_local(async move {
-                    mm.simple(q).await;
+                    mm.simple(action).await;
                 });
             }
         };
+        let gitlab = f.is_gitlab();
+        let request = f.request_title();
         if pr.is_open() {
-            let mm = m.clone();
-            menu.item("Request review…", move || sheets::reviewers(mm.clone()));
-            if pr.viewer_can_update {
+            if f.request_reviewers {
+                let mm = m.clone();
+                menu.item("Request review…", move || sheets::reviewers(mm.clone()));
+            }
+            if pr.viewer_can_update && f.draft_toggle {
                 if pr.is_draft {
-                    menu.item("Ready for review", simple(m.clone(), q::READY_FOR_REVIEW));
+                    menu.item(if gitlab { "Mark as ready" } else { "Ready for review" }, simple(m.clone(), PrAction::ReadyForReview));
                 } else {
-                    menu.item("Convert to draft", simple(m.clone(), q::CONVERT_TO_DRAFT));
+                    menu.item(if gitlab { "Mark as draft" } else { "Convert to draft" }, simple(m.clone(), PrAction::ConvertToDraft));
                 }
             }
-            if matches!(pr.merge_state_status.as_deref(), Some("BEHIND") | Some("BLOCKED") | Some("UNSTABLE")) {
-                menu.item(&format!("Update branch from {}", pr.base_ref_name), simple(m.clone(), q::UPDATE_BRANCH));
+            let behind = if gitlab { pr.merge_state_status.as_deref() == Some("BEHIND") } else { matches!(pr.merge_state_status.as_deref(), Some("BEHIND") | Some("BLOCKED") | Some("UNSTABLE")) };
+            if f.update_branch && behind {
+                let label = if gitlab { format!("Rebase onto {}", pr.base_ref_name) } else { format!("Update branch from {}", pr.base_ref_name) };
+                menu.item(&label, simple(m.clone(), PrAction::UpdateBranch));
             }
             if pr.auto_merge_request.is_some() {
                 let mm = m.clone();
                 menu.item("Disable auto-merge", move || {
-                    let f = simple(mm.clone(), q::DISABLE_AUTO_MERGE);
+                    let f = simple(mm.clone(), PrAction::DisableAutoMerge);
                     dialogs::confirm("Disable auto-merge?", None, "Disable", true, f);
+                });
+            }
+            if f.merge_queue && pr.merge_queue_entry.is_some() && pr.viewer_can_update {
+                let mm = m.clone();
+                let queue = f.queue_title();
+                menu.item(&format!("Remove from {queue}…"), move || {
+                    let mm = mm.clone();
+                    dialogs::confirm(&format!("Remove from the {queue}?"), None, "Remove", true, move || {
+                        let mm = mm.clone();
+                        crate::rt::spawn_local(async move {
+                            if mm.simple(PrAction::Dequeue).await {
+                                app::toast(&format!("Removed from the {queue}"));
+                            }
+                        });
+                    });
                 });
             }
             menu.section(None);
             if pr.viewer_can_update {
                 let mm = m.clone();
-                menu.item("Close pull request…", move || {
-                    let f = simple(mm.clone(), q::CLOSE_PR);
-                    dialogs::confirm("Close pull request without merging?", None, "Close pull request", true, f);
+                menu.item(&format!("Close {request}…"), move || {
+                    let f = simple(mm.clone(), PrAction::Close);
+                    dialogs::confirm(&format!("Close {request} without merging?"), None, &format!("Close {request}"), true, f);
                 });
             }
-        } else if !pr.merged && pr.viewer_can_update {
-            menu.item("Reopen pull request", simple(m.clone(), q::REOPEN_PR));
+        } else if !pr.merged && pr.viewer_can_update && f.reopen {
+            menu.item(&format!("Reopen {request}"), simple(m.clone(), PrAction::Reopen));
         }
-        if !pr.is_open() && pr.head_ref.is_some() && m.can_write() {
+        if f.delete_branch && !pr.is_open() && pr.head_ref.is_some() && m.can_write() {
             let mm = m.clone();
             let head = pr.head_ref_name.clone();
             menu.item(&format!("Delete branch {head}…"), move || {
@@ -995,7 +1155,7 @@ pub fn confirm_approve(model: Rc<PrModel>) {
     let heading = if pending > 0 {
         format!("Approve and submit {pending} pending comment{}?", if pending == 1 { "" } else { "s" })
     } else {
-        "Approve this pull request?".to_string()
+        format!("Approve this {}?", model.features.request_title())
     };
     let label = if pending > 0 { "Approve and submit" } else { "Approve" };
     dialogs::confirm(&heading, None, label, false, move || {
@@ -1019,7 +1179,7 @@ pub fn shortcut(kind: Shortcut) {
     let Some(pr) = m.pr.borrow().clone() else { return };
     match kind {
         Shortcut::Review if pr.is_open() => sheets::review(m),
-        Shortcut::Approve if pr.is_open() && !pr.viewer_did_author => confirm_approve(m),
+        Shortcut::Approve if pr.is_open() && pr.viewer_can_approve.unwrap_or(!pr.viewer_did_author) && pr.viewer_approved != Some(true) => confirm_approve(m),
         Shortcut::Merge if pr.is_open() && !pr.is_draft && m.can_write() => sheets::merge(m),
         _ => {}
     }
@@ -1062,11 +1222,21 @@ pub fn merge_status(pr: &PullRequestDetail, requirements: &[MergeRequirement]) -
     if pr.is_draft {
         return s("sy-pr-draft-symbolic", "slate", "Draft — merging is unavailable".into(), false);
     }
+    if let Some(entry) = &pr.merge_queue_entry {
+        let text = if pr.forge_merge.is_none() { entry.summary() } else { merge_readiness::train_wording(&entry.summary()) };
+        return if entry.failing() { s("sy-attention-symbolic", "red", text, false) } else { s("sy-archive-symbolic", "green", text, false) };
+    }
     if pr.mergeable == "CONFLICTING" || pr.merge_state_status.as_deref() == Some("DIRTY") {
         return s("sy-attention-symbolic", "red", format!("Has conflicts with {}", pr.base_ref_name), false);
     }
     match pr.merge_state_status.as_deref() {
         Some("BEHIND") => s("sy-down-symbolic", "amber", format!("Branch is behind {}", pr.base_ref_name), false),
+        Some("BLOCKED") if pr.merge_blocker.is_some() => {
+            let blocker = pr.merge_blocker.clone().unwrap_or_default();
+            let pipeline = blocker.starts_with("Pipeline");
+            let icon = if pipeline && failed == 0 { "sy-clock-symbolic" } else { "sy-lock-symbolic" };
+            s(icon, "amber", if pipeline && failed > 0 { failed_text } else { blocker }, false)
+        }
         Some("BLOCKED") => match pr.review_decision.as_deref() {
             Some("CHANGES_REQUESTED") => s("sy-plusminus-symbolic", "red", "Changes requested".into(), false),
             Some("REVIEW_REQUIRED") => s("sy-eye-symbolic", "amber", "Review required".into(), false),
@@ -1127,7 +1297,7 @@ pub fn merge_status_bar(model: &Rc<PrModel>, pr: &PullRequestDetail, on_merge: R
         let ok = checks.iter().filter(|c| c.outcome() == CheckOutcome::Success).count();
         let btn = gtk::Button::new();
         btn.add_css_class("flat");
-        btn.set_tooltip_text(Some("Checks"));
+        btn.set_tooltip_text(Some(model.features.checks_title()));
         let c = hbox(6);
         let add = |icon_name: &str, n: usize, color: &str| {
             let x = hbox(2);
@@ -1148,13 +1318,15 @@ pub fn merge_status_bar(model: &Rc<PrModel>, pr: &PullRequestDetail, on_merge: R
         b.append(&btn);
     }
     b.append(&spacer());
-    if pr.merge_state_status.as_deref() == Some("BEHIND") && (model.can_write() || pr.viewer_can_update) {
-        let u = button("Update branch");
+    if model.features.update_branch && pr.merge_state_status.as_deref() == Some("BEHIND") && (model.can_write() || pr.viewer_can_update) {
+        let u = button(model.features.update_branch_title());
         let m = model.clone();
         u.connect_clicked(move |_| {
             let m = m.clone();
             crate::rt::spawn_local(async move {
-                m.simple(q::UPDATE_BRANCH).await;
+                if m.clone().simple(PrAction::UpdateBranch).await && m.features.is_gitlab() {
+                    app::toast("Rebase started");
+                }
             });
         });
         b.append(&u);
@@ -1194,6 +1366,34 @@ pub fn merge_status_bar(model: &Rc<PrModel>, pr: &PullRequestDetail, on_merge: R
     Some(outer)
 }
 
+fn risk_strip(model: &Rc<PrModel>, risks: &[RiskLabel]) -> gtk::FlowBox {
+    let row = gtk::FlowBox::new();
+    row.set_selection_mode(gtk::SelectionMode::None);
+    row.set_max_children_per_line(40);
+    row.set_column_spacing(6);
+    row.set_row_spacing(4);
+    row.update_property(&[gtk::accessible::Property::Label("Look closer")]);
+    row.insert(&label_with("Look closer:", &["sy-muted", "sy-small"]), -1);
+    for r in risks {
+        let btn = gtk::Button::new();
+        btn.add_css_class("flat");
+        btn.set_child(Some(&chip(&r.title, if r.strong() { "amber" } else { "muted" }, Some(r.icon()), false)));
+        btn.set_valign(gtk::Align::Center);
+        btn.set_tooltip_text(Some(&r.tooltip()));
+        set_label(&btn, &r.title);
+        btn.update_property(&[gtk::accessible::Property::Description(&r.detail)]);
+        let first = r.files.first().cloned();
+        let m = model.clone();
+        btn.connect_clicked(move |_| {
+            if let Some(path) = &first {
+                m.reveal_file(path);
+            }
+        });
+        row.insert(&btn, -1);
+    }
+    row
+}
+
 fn requirements_list(model: &Rc<PrModel>, pr: &PullRequestDetail, requirements: &[MergeRequirement], on_request_review: Option<Rc<dyn Fn()>>) -> gtk::Box {
     let list = vbox(4);
     list.update_property(&[gtk::accessible::Property::Label("Merge requirements")]);
@@ -1224,7 +1424,7 @@ fn requirements_list(model: &Rc<PrModel>, pr: &PullRequestDetail, requirements: 
         row.append(&text);
         if let Some(action) = r.action.filter(|_| r.state != RequirementState::Satisfied) {
             let allowed = match action {
-                RequirementAction::RequestReview => on_request_review.is_some() && (model.can_write() || pr.viewer_did_author),
+                RequirementAction::RequestReview => model.features.request_reviewers && on_request_review.is_some() && (model.can_write() || pr.viewer_did_author),
                 RequirementAction::UpdateBranch => false,
                 RequirementAction::ReadyForReview => pr.viewer_can_update,
                 _ => true,
@@ -1236,6 +1436,7 @@ fn requirements_list(model: &Rc<PrModel>, pr: &PullRequestDetail, requirements: 
                     RequirementAction::ShowConversation => "Show conversation",
                     RequirementAction::ShowConflicts => "View conflicts",
                     RequirementAction::UpdateBranch => "Update branch",
+                    RequirementAction::ReadyForReview if model.features.is_gitlab() => "Mark as ready",
                     RequirementAction::ReadyForReview => "Ready for review",
                 };
                 let btn = link_button(label);
@@ -1249,7 +1450,7 @@ fn requirements_list(model: &Rc<PrModel>, pr: &PullRequestDetail, requirements: 
                         }
                     }
                     RequirementAction::ShowChecks => m.set_tab(PrTab::Checks),
-                    RequirementAction::ShowConversation => m.set_tab(PrTab::Conversation),
+                    RequirementAction::ShowConversation => m.next_unresolved_thread(),
                     RequirementAction::ShowConflicts => {
                         m.set_tab(PrTab::Conversation);
                         m.emit(Change::ScrollBottom);
@@ -1257,13 +1458,13 @@ fn requirements_list(model: &Rc<PrModel>, pr: &PullRequestDetail, requirements: 
                     RequirementAction::UpdateBranch => {
                         let m = m.clone();
                         crate::rt::spawn_local(async move {
-                            m.simple(q::UPDATE_BRANCH).await;
+                            m.simple(PrAction::UpdateBranch).await;
                         });
                     }
                     RequirementAction::ReadyForReview => {
                         let m = m.clone();
                         crate::rt::spawn_local(async move {
-                            m.simple(q::READY_FOR_REVIEW).await;
+                            m.simple(PrAction::ReadyForReview).await;
                         });
                     }
                 });

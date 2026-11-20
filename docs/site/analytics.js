@@ -1,6 +1,6 @@
 (function () {
   var WEBSITE_ID = "a010e150-7bbe-4701-997e-f537873e8784";
-  var SITE_HOST = "pullyard.github.io";
+  var SITE_HOST = "pullyard.app";
   var local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
 
   if (WEBSITE_ID && !local) {

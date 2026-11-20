@@ -13,8 +13,8 @@ final class GitRemoteTests: XCTestCase {
     }
 
     func testOnlyGitHubDotComYieldsRepoRef() {
-        XCTAssertEqual(GitRemote.parse("git@github.com:acme/app.git")?.repo?.full, "acme/app")
-        XCTAssertNil(GitRemote.parse("git@gitlab.com:acme/app.git")?.repo)
+        XCTAssertEqual(GitRemote.parse("git@github.com:acme/app.git")?.githubRepo?.full, "acme/app")
+        XCTAssertNil(GitRemote.parse("git@gitlab.com:acme/app.git")?.githubRepo)
     }
 
     func testKindAndNewRequestURL() {
@@ -31,7 +31,7 @@ final class GitRemoteTests: XCTestCase {
 
     func testOpenPromptMatchesHost() {
         XCTAssertTrue(AgentShip.openPRPrompt(branch: "feat/x", defaultBranch: "main", hasChanges: true, ahead: 0).contains("gh pr create"))
-        let lab = AgentShip.openPRPrompt(branch: "feat/x", defaultBranch: "main", hasChanges: true, ahead: 0, kind: .gitlab)
+        let lab = AgentShip.openPRPrompt(branch: "feat/x", defaultBranch: "main", hasChanges: true, ahead: 0, remote: GitRemote(host: "gitlab.com", path: "acme/app"))
         XCTAssertTrue(lab.contains("glab mr create"))
         XCTAssertFalse(lab.contains("gh pr create"))
         XCTAssertEqual(AgentShip.pullRequestURL(in: "done: https://gitlab.com/group/sub/app/-/merge_requests/12 ok"), "https://gitlab.com/group/sub/app/-/merge_requests/12")

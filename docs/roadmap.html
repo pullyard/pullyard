@@ -3,25 +3,46 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Roadmap · PullYard</title>
-<meta name="description" content="What the PullYard team is working on now, next and later.">
+<title>PullYard roadmap: what comes now, next and later</title>
+<meta name="description" content="What comes next for PullYard, the free native app for pull requests: more AI agents, winget and Flathub, full review for GitLab and Bitbucket, signed apps.">
 <meta property="og:title" content="PullYard Roadmap">
 <meta property="og:description" content="What we are working on now, next and later.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="PullYard">
-<meta property="og:url" content="https://pullyard.github.io/pullyard/roadmap.html">
-<meta property="og:image" content="https://pullyard.github.io/pullyard/img/og-card.jpg">
+<meta property="og:url" content="https://pullyard.app/roadmap.html">
+<meta property="og:image" content="https://pullyard.app/img/og-card.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="PullYard: pull requests without the browser, for GitHub, GitLab, Bitbucket and Gitea">
+<meta property="og:image:alt" content="PullYard: review it, fix it, ship it. A native app for pull requests on GitHub, GitLab, Bitbucket and Gitea">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://pullyard.github.io/pullyard/img/og-card.jpg">
+<meta name="twitter:image" content="https://pullyard.app/img/og-card.jpg">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="apple-touch-icon" href="icon-512.png">
+<link rel="canonical" href="https://pullyard.app/roadmap.html">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "PullYard",
+      "item": "https://pullyard.app/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Roadmap",
+      "item": "https://pullyard.app/roadmap.html"
+    }
+  ]
+}
+</script>
 <style>
 :root{
   --bg:#0a0f1b;--bg2:#111a2c;--panel:#152036;--panel2:#18243c;--line:rgba(160,174,196,.10);--line2:rgba(160,174,196,.18);
-  --text:#e6ebf2;--muted:#8693a8;--dim:#5f6b80;
+  --text:#e6ebf2;--muted:#96a2b6;--dim:#8591a5;
   --coral:#ee6f5f;--violet:#9d8cf0;--sky:#5bb8ec;--green:#5dbe8a;--amber:#e8b44c;
   --maxw:1160px;
   --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
@@ -106,7 +127,13 @@ footer a:hover{color:var(--text)}
   .head{padding:56px 0 28px}
 }
 .head .row{margin-top:22px}
-.board{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;padding:48px 0 90px}
+.board{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;padding:48px 0 40px}
+.shipped{padding:0 0 90px}
+.shipped h2{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:650;margin:0 0 6px;color:var(--text)}
+.shipped h2 i{width:9px;height:9px;border-radius:50%;background:var(--green)}
+.shipped-lede{color:var(--muted);font-size:14.5px;margin:0 0 14px}
+.shipped-lede a{color:var(--sky)}
+.shipped-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0 24px}
 .col h2{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:650;margin:0 0 14px;color:var(--text)}
 .col h2 i{width:9px;height:9px;border-radius:50%}
 .col h2 .now{background:var(--coral)}.col h2 .next{background:var(--sky)}.col h2 .later{background:var(--dim)}
@@ -114,7 +141,7 @@ footer a:hover{color:var(--text)}
 .card h3{font-size:15.5px;margin:0 0 4px;font-weight:620;letter-spacing:-.01em}
 .card p{margin:0;color:var(--muted);font-size:14.5px;line-height:1.5}
 kbd{font-family:var(--mono);font-size:.85em;background:rgba(255,255,255,.07);border-radius:4px;padding:0 5px}
-@media (max-width:900px){.board{grid-template-columns:1fr;gap:30px}}
+@media (max-width:900px){.board{grid-template-columns:1fr;gap:30px}.shipped-grid{grid-template-columns:1fr}}
 </style>
 <script defer src="site/analytics.js"></script>
 </head>
@@ -152,7 +179,6 @@ kbd{font-family:var(--mono);font-size:.85em;background:rgba(255,255,255,.07);bor
   <div class="board">
     <section class="col">
       <h2><i class="now"></i>Now</h2>
-      <article class="card"><h3>OpenRouter and custom providers</h3><p>Run Claude Code through OpenRouter or any Anthropic-compatible endpoint, with the key kept in your system keychain.</p></article>
       <article class="card"><h3>winget and Flathub</h3><p>Install and update PullYard with your usual package manager on Windows and Linux. Homebrew is already here: <code>brew install --cask pullyard/tap/pullyard</code>.</p></article>
     </section>
     <section class="col">
@@ -160,10 +186,6 @@ kbd{font-family:var(--mono);font-size:.85em;background:rgba(255,255,255,.07);bor
       <article class="card"><h3>Codex support</h3><p>Chat with Codex next to your pull request and use it for Fix, with its own sessions and history.</p></article>
       <article class="card"><h3>More agents</h3><p>Gemini CLI and other agents through the open Agent Client Protocol.</p></article>
       <article class="card"><h3>Choose your agent</h3><p>Fix with Claude Code, Codex or another agent from the same sheet.</p></article>
-      <article class="card"><h3>Isolated worktrees</h3><p>Each fix runs in its own git worktree, so your working copy stays untouched.</p></article>
-      <article class="card"><h3>AI review drafts</h3><p>An agent reads the diff and drafts inline review comments. You pick which ones to post.</p></article>
-      <article class="card"><h3>Close the loop</h3><p>After a fix: commit, push, reply to the threads it addressed and resolve them.</p></article>
-      <article class="card"><h3>Full review for GitLab and Bitbucket</h3><p>Changed files, comments, approvals and merging for GitLab merge requests and Bitbucket pull requests, like on GitHub.</p></article>
     </section>
     <section class="col">
       <h2><i class="later"></i>Later</h2>
@@ -172,11 +194,22 @@ kbd{font-family:var(--mono);font-size:.85em;background:rgba(255,255,255,.07);bor
       <article class="card"><h3>Signed and notarized apps</h3><p>No more Gatekeeper or SmartScreen warnings on first launch.</p></article>
     </section>
   </div>
+  <section class="shipped">
+    <h2><i class="done"></i>Shipped in 2.14.0</h2>
+    <p class="shipped-lede">These were on this page until November 10, 2026. Details are in the <a href="changelog.html#v2.14.0">changelog</a>.</p>
+    <div class="shipped-grid">
+      <article class="card"><h3>OpenRouter and custom providers</h3><p>Run Claude Code through OpenRouter or any Anthropic-compatible endpoint, with the key kept in your system keychain.</p></article>
+      <article class="card"><h3>Isolated worktrees</h3><p>Each fix runs in its own git worktree, so your working copy stays untouched.</p></article>
+      <article class="card"><h3>AI review drafts</h3><p>An agent reads the diff and drafts inline review comments. You pick which ones to post.</p></article>
+      <article class="card"><h3>Close the loop</h3><p>After a fix: commit, push, reply to the threads it addressed and resolve them.</p></article>
+      <article class="card"><h3>Full review for GitLab and Bitbucket</h3><p>Changed files, comments, approvals and merging for GitLab merge requests and Bitbucket pull requests, like on GitHub.</p></article>
+    </div>
+  </section>
 </main>
 
 <footer>
   <div class="wrap">
-    <span>© 2026 PullYard contributors · <a href="./">Home</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a></span>
+    <span>© 2026 PullYard contributors · <a href="./">Home</a> · <a href="changelog.html">Changelog</a> · <a href="roadmap.html">Roadmap</a> · <a href="about.html">About</a> · <a href="privacy.html">Privacy</a></span>
     <span>Not affiliated with GitHub, Inc. or Anthropic. GitHub and Claude are trademarks of their respective owners.</span>
   </div>
 </footer>

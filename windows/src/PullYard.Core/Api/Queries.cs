@@ -62,6 +62,7 @@ fragment IssueItem on Issue { number title url issueState: state stateReason cre
       additions deletions changedFiles
       reviewDecision viewerCanUpdate viewerDidAuthor
       autoMergeRequest {{ enabledAt mergeMethod }}
+      isMergeQueueEnabled isInMergeQueue mergeQueueEntry {{ position state enqueuedAt estimatedTimeToMerge }}
       labels(first: 20) {{ nodes {{ name color }} }}
       assignees(first: 10) {{ nodes {{ login avatarUrl }} }}
       reviewRequests(first: 20) {{ nodes {{ asCodeOwner requestedReviewer {{ __typename ... on User {{ login avatarUrl }} ... on Team {{ name combinedSlug avatarUrl }} ... on Mannequin {{ login avatarUrl }} }} }} }}
@@ -84,7 +85,8 @@ fragment IssueItem on Issue { number title url issueState: state stateReason cre
     public static readonly string PullRequestLegacy = PullRequest
         .Replace(" isRequired(pullRequestNumber: $number)", "")
         .Replace("asCodeOwner ", "")
-        .Replace(" combinedSlug avatarUrl", "");
+        .Replace(" combinedSlug avatarUrl", "")
+        .Replace("isMergeQueueEnabled isInMergeQueue mergeQueueEntry { position state enqueuedAt estimatedTimeToMerge }", "");
 
     public const string CodeOwners = "query CodeOwners($owner: String!, $name: String!, $a: String!, $b: String!, $c: String!) { repository(owner: $owner, name: $name) { a: object(expression: $a) { ... on Blob { text isTruncated } } b: object(expression: $b) { ... on Blob { text isTruncated } } c: object(expression: $c) { ... on Blob { text isTruncated } } } }";
 
@@ -93,7 +95,7 @@ fragment IssueItem on Issue { number title url issueState: state stateReason cre
     public static readonly string PullRequestPulse = $@"query PullRequestPulse($owner: String!, $name: String!, $number: Int!) {{
   repository(owner: $owner, name: $name) {{
     pullRequest(number: $number) {{
-      updatedAt headRefOid state isDraft mergeable mergeStateStatus reviewDecision
+      updatedAt headRefOid state isDraft mergeable mergeStateStatus reviewDecision mergeQueueEntry {{ position state }}
       comments {{ totalCount }} reviews {{ totalCount }}
       {PrEditMarks}
       timelineItems(itemTypes: {PrTimelineTypes}) {{ totalCount }}
@@ -106,6 +108,8 @@ fragment IssueItem on Issue { number title url issueState: state stateReason cre
     }}
   }}
 }}";
+
+    public static readonly string PullRequestPulseLegacy = PullRequestPulse.Replace(" mergeQueueEntry { position state }", "");
 
     public static readonly string Issue = $@"query Issue($owner: String!, $name: String!, $number: Int!) {{
   viewer {{ login }}
@@ -168,6 +172,10 @@ fragment IssueItem on Issue { number title url issueState: state stateReason cre
     public const string Merge = "mutation Merge($id: ID!, $m: PullRequestMergeMethod!, $t: String, $b: String) { mergePullRequest(input: {pullRequestId: $id, mergeMethod: $m, commitHeadline: $t, commitBody: $b}) { clientMutationId } }";
 
     public const string EnableAutoMerge = "mutation EnableAutoMerge($id: ID!, $m: PullRequestMergeMethod!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: $m}) { clientMutationId } }";
+
+    public const string Enqueue = "mutation Enqueue($id: ID!, $oid: GitObjectID) { enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $oid}) { clientMutationId } }";
+
+    public const string Dequeue = "mutation Dequeue($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }";
 
     public const string DisableAutoMerge = "mutation DisableAutoMerge($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }";
 

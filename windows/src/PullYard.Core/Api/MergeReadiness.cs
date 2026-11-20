@@ -128,7 +128,7 @@ public enum RequirementState { Satisfied, Missing, Pending, Unknown, Advisory }
 
 public enum RequirementAction { RequestReview, ShowChecks, ShowConversation, ShowConflicts, UpdateBranch, ReadyForReview }
 
-public enum RequirementKind { Draft, Conflicts, Behind, ChangesRequested, Approvals, CodeOwners, LastPush, Checks, OptionalChecks, Conversations, Rules, OtherRules }
+public enum RequirementKind { Draft, Conflicts, Behind, ChangesRequested, Approvals, CodeOwners, LastPush, Checks, OptionalChecks, Conversations, MergeQueue, Rules, OtherRules }
 
 public sealed record MergeRequirement(RequirementKind Kind, RequirementState State, string Title, string? Detail = null, RequirementAction? Action = null)
 {
@@ -179,6 +179,7 @@ public static class MergeReadiness
     {
         var list = new List<MergeRequirement>();
         if (!pr.IsOpen) return list;
+        if (pr.ForgeMerge is { } merge) return merge.Provider == "bitbucket" ? Bitbucket(pr, merge) : GitLab(pr, merge);
         var rules = status.Rules;
         var loading = status.Phase == RulesPhase.Loading;
 
@@ -198,6 +199,11 @@ public static class MergeReadiness
         list.AddRange(ReviewRequirements(pr, rules, status.ReviewRules, loading));
         list.AddRange(CheckRequirements(pr, rules));
         if (ConversationRequirement(pr, rules, loading) is { } c) list.Add(c);
+
+        if (pr.MergeQueueEntry is { } entry)
+            list.Add(new(RequirementKind.MergeQueue, entry.Failing ? RequirementState.Missing : RequirementState.Pending, entry.Summary, entry.Failing ? "Fix the failing checks or conflicts and add it again" : null));
+        else if (pr.IsMergeQueueEnabled == true)
+            list.Add(new(RequirementKind.MergeQueue, RequirementState.Advisory, "Merges through a merge queue", "Add it from the merge sheet with “Add to merge queue”"));
 
         if (status.Phase == RulesPhase.Failed)
             list.Add(new(RequirementKind.Rules, RequirementState.Unknown, "Branch rules couldn’t be read", "Showing what GitHub reports for this pull request"));
@@ -300,6 +306,110 @@ public static class MergeReadiness
         var detail = rules?.ReviewRulesKnown == true ? "Not required to merge" : loading ? null : "May not block merging";
         return new(RequirementKind.Conversations, RequirementState.Advisory, title, detail, RequirementAction.ShowConversation);
     }
+
+    private static readonly HashSet<string> GitLabCovered = new()
+    {
+        "mergeable", "conflict", "broken_status", "need_rebase", "checking", "unchecked", "preparing", "approvals_syncing",
+        "draft_status", "not_open", "not_approved", "requested_changes", "ci_must_pass", "ci_still_running", "discussions_not_resolved"
+    };
+
+    public static List<MergeRequirement> GitLab(PullRequestDetail pr, ForgeMergeInfo merge)
+    {
+        var list = new List<MergeRequirement>();
+        if (pr.IsDraft)
+            list.Add(new(RequirementKind.Draft, RequirementState.Missing, "Draft merge request", "Mark it as ready before merging", RequirementAction.ReadyForReview));
+        list.Add(merge.Status switch
+        {
+            "conflict" or "broken_status" => new(RequirementKind.Conflicts, RequirementState.Missing, $"Conflicts with {pr.BaseRefName}", "Resolve them before merging"),
+            "checking" or "unchecked" or "preparing" or "approvals_syncing" => new(RequirementKind.Conflicts, RequirementState.Pending, "Checking for conflicts…"),
+            _ => new(RequirementKind.Conflicts, RequirementState.Satisfied, $"No conflicts with {pr.BaseRefName}")
+        });
+        if (merge.Status == "need_rebase")
+            list.Add(new(RequirementKind.Behind, RequirementState.Missing, $"Needs a rebase onto {pr.BaseRefName}", "The project allows only fast-forward merges", RequirementAction.UpdateBranch));
+
+        var approvers = pr.LatestOpinionatedReviews.Items.Count(r => r.State == "APPROVED");
+        if (merge.Status == "requested_changes")
+            list.Add(new(RequirementKind.ChangesRequested, RequirementState.Missing, "Changes requested", "A reviewer asked for changes"));
+        if (merge.ApprovalsRequired is { } required && required > 0)
+        {
+            var left = merge.ApprovalsLeft ?? Math.Max(required - approvers, 0);
+            var given = Math.Max(required - left, 0);
+            var title = $"{given} of {required} required approvals";
+            list.Add(left == 0
+                ? new(RequirementKind.Approvals, RequirementState.Satisfied, title)
+                : new(RequirementKind.Approvals, RequirementState.Missing, title, MoreApprovals(left)));
+        }
+        else if (merge.Status == "not_approved")
+            list.Add(new(RequirementKind.Approvals, RequirementState.Missing, "Approval required", merge.ApprovalsLeft is { } l ? MoreApprovals(l) : null));
+        else if (merge.ApprovalsRequired is not null)
+            list.Add(new(RequirementKind.Approvals, RequirementState.Satisfied, approvers > 0 ? (approvers == 1 ? "Approved" : $"Approved by {approvers} reviewers") : "No approvals required"));
+
+        var failed = pr.Checks.Where(c => c.Outcome == CheckOutcome.Failure).ToList();
+        var running = pr.Checks.Where(c => c.Outcome == CheckOutcome.Pending).ToList();
+        if (merge.Status is "ci_must_pass" or "ci_still_running")
+        {
+            if (failed.Count > 0)
+                list.Add(new(RequirementKind.Checks, RequirementState.Missing, Count(failed.Count, "job") + " failed", "The pipeline must succeed", RequirementAction.ShowChecks));
+            else if (pr.Checks.Count == 0 && merge.Status == "ci_must_pass")
+                list.Add(new(RequirementKind.Checks, RequirementState.Missing, "A pipeline must run and succeed", null, RequirementAction.ShowChecks));
+            else
+                list.Add(new(RequirementKind.Checks, RequirementState.Pending, "Pipeline is still running", running.Count == 0 ? null : "Running: " + Names(running.Select(c => c.Title)), RequirementAction.ShowChecks));
+        }
+        else if (failed.Count > 0)
+            list.Add(new(RequirementKind.Checks, RequirementState.Advisory, Count(failed.Count, "job") + " failed", "Doesn’t block merging", RequirementAction.ShowChecks));
+        else if (running.Count > 0)
+            list.Add(new(RequirementKind.Checks, RequirementState.Pending, "Pipeline is running", "Running: " + Names(running.Select(c => c.Title)), RequirementAction.ShowChecks));
+        else if (pr.Checks.Count > 0)
+            list.Add(new(RequirementKind.Checks, RequirementState.Satisfied, "Pipeline passed", null, RequirementAction.ShowChecks));
+
+        var open = pr.ReviewThreads.Items.Count(t => !t.IsResolved);
+        var threads = open == 1 ? "1 unresolved thread" : $"{open} unresolved threads";
+        if (merge.Status == "discussions_not_resolved")
+            list.Add(new(RequirementKind.Conversations, RequirementState.Missing, open > 0 ? threads : "All threads must be resolved", "The project requires resolving them", RequirementAction.ShowConversation));
+        else if (open > 0)
+            list.Add(new(RequirementKind.Conversations, RequirementState.Advisory, threads, "Not required to merge", RequirementAction.ShowConversation));
+
+        if (pr.MergeQueueEntry is { } entry)
+            list.Add(new(RequirementKind.MergeQueue, RequirementState.Pending, entry.TrainSummary));
+        else if (pr.IsMergeQueueEnabled == true)
+            list.Add(new(RequirementKind.MergeQueue, RequirementState.Advisory, "Merges through a merge train", "Merging starts or joins the train"));
+
+        if (!GitLabCovered.Contains(merge.Status))
+            list.Add(new(RequirementKind.OtherRules, RequirementState.Missing, pr.MergeBlocker ?? "Blocked by a project rule", "Reported by GitLab"));
+        return list;
+    }
+
+    public static List<MergeRequirement> Bitbucket(PullRequestDetail pr, ForgeMergeInfo merge)
+    {
+        var list = new List<MergeRequirement>();
+        if (pr.IsDraft)
+            list.Add(new(RequirementKind.Draft, RequirementState.Missing, "Draft pull request", "Mark it ready for review before merging", RequirementAction.ReadyForReview));
+        list.Add(pr.Mergeable == "CONFLICTING"
+            ? new(RequirementKind.Conflicts, RequirementState.Missing, $"Conflicts with {pr.BaseRefName}", "Resolve them before merging")
+            : new(RequirementKind.Conflicts, RequirementState.Satisfied, $"No conflicts with {pr.BaseRefName}"));
+        var reviews = pr.LatestOpinionatedReviews.Items;
+        var blockers = reviews.Where(r => r.State == "CHANGES_REQUESTED").Select(r => r.Author?.Login).OfType<string>().ToList();
+        var approvals = reviews.Count(r => r.State == "APPROVED");
+        if (blockers.Count > 0)
+            list.Add(new(RequirementKind.ChangesRequested, RequirementState.Advisory, "Changes requested", "By " + string.Join(", ", blockers)));
+        list.Add(approvals > 0
+            ? new(RequirementKind.Approvals, RequirementState.Satisfied, approvals == 1 ? "Approved" : $"Approved by {approvals} reviewers")
+            : new(RequirementKind.Approvals, RequirementState.Advisory, "No approvals yet", "Branch restrictions may require them"));
+        var failed = pr.Checks.Where(c => c.Outcome == CheckOutcome.Failure).ToList();
+        var running = pr.Checks.Where(c => c.Outcome == CheckOutcome.Pending).ToList();
+        if (failed.Count > 0)
+            list.Add(new(RequirementKind.Checks, RequirementState.Advisory, Count(failed.Count, "build") + " failed", Names(failed.Select(c => c.Title)), RequirementAction.ShowChecks));
+        else if (running.Count > 0)
+            list.Add(new(RequirementKind.Checks, RequirementState.Pending, "Waiting for " + Count(running.Count, "build"), Names(running.Select(c => c.Title)), RequirementAction.ShowChecks));
+        else if (pr.Checks.Count > 0)
+            list.Add(new(RequirementKind.Checks, RequirementState.Satisfied, pr.Checks.Count == 1 ? "1 build passed" : $"All {pr.Checks.Count} builds passed", null, RequirementAction.ShowChecks));
+        if (merge.OpenTasks is { } tasks && tasks > 0)
+            list.Add(new(RequirementKind.Conversations, RequirementState.Advisory, Count(tasks, "open task"), "Merge checks may require resolving them", RequirementAction.ShowConversation));
+        list.Add(new(RequirementKind.OtherRules, RequirementState.Unknown, "Merge checks aren’t visible", "Bitbucket rejects the merge if a required check fails"));
+        return list;
+    }
+
+    private static string MoreApprovals(int left) => left == 1 ? "Needs 1 more approval" : $"Needs {left} more approvals";
 
     private static string Count(int n, string noun) => n == 1 ? $"1 {noun}" : $"{n} {noun}s";
 

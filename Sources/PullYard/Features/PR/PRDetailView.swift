@@ -36,7 +36,7 @@ struct PRDetailView: View {
 }
 
 enum PRConfirm: Identifiable {
-    case approve, close, deleteBranch, disableAutoMerge, rerunFailed
+    case approve, revokeApproval, close, deleteBranch, disableAutoMerge, rerunFailed, dequeue
     var id: Int { hashValue }
 }
 
@@ -51,14 +51,21 @@ struct PRDetailContent: View {
     @State private var showReviewers = false
     @State private var confirm: PRConfirm?
     @State private var showFix = false
+    @State private var closeLoop: CloseLoopRequest?
+    @State private var showDrafts = false
     @State private var ciFix: CIFixRequest?
 
     var body: some View {
         VStack(spacing: 0) {
             PRHeaderView(model: model, pr: pr, onMerge: { showMerge = true }, onRequestReview: { showReviewers = true })
-            ReReviewBanner(model: model, pr: pr) { showReviewers = true }
-            ClaudeFixBanner(pr: pr) { showFix = true }
-            CIFailureBanner(model: model, pr: pr, onFix: { ciFix = CIFixRequest() }, onRerun: { confirm = .rerunFailed })
+            if model.features.requestReviewers {
+                ReReviewBanner(model: model, pr: pr) { showReviewers = true }
+            }
+            if model.features.claude {
+                ClaudeFixBanner(pr: pr) { showFix = true }
+                CloseLoopBanner(model: model, pr: pr) { closeLoop = CloseLoopRequest(preselected: $0) }
+                CIFailureBanner(model: model, pr: pr, onFix: { ciFix = CIFixRequest() }, onRerun: { confirm = .rerunFailed })
+            }
             TabStrip(items: tabItems, selection: $model.tab, shortcuts: true)
             .padding(.top, 6)
             Divider()
@@ -77,7 +84,7 @@ struct PRDetailContent: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle(pr.title)
-        .navigationSubtitle("\(model.ref.repo.full) #\(pr.number)")
+        .navigationSubtitle("\(model.ref.repo.full) \(model.provider.numberPrefix)\(pr.number)")
         .task(id: pr.url) { app.noteCanonical(model.ref, url: pr.url) }
         .background { if front { reviewShortcuts } }
         .panelToolbar(id: "pr-detail") { toolbar }
@@ -86,6 +93,8 @@ struct PRDetailContent: View {
         .sheet(isPresented: $showEdit) { EditPRSheet(model: model, pr: pr) }
         .sheet(isPresented: $showReviewers) { ReviewersSheet(model: model) }
         .sheet(isPresented: $showFix) { FixWithClaudeSheet(model: model, pr: pr) }
+        .sheet(item: $closeLoop) { CloseLoopSheet(model: model, pr: pr, preselected: $0.preselected) }
+        .sheet(isPresented: $showDrafts) { ReviewDraftsSheet(model: model, pr: pr) }
         .sheet(item: $ciFix) { FixWithClaudeSheet(model: model, pr: pr, ci: $0) }
         .sheet(isPresented: $model.showResolveConflicts) { ResolveConflictsSheet(model: model, pr: pr) }
         .sheet(item: $model.replyThread) { ReplySheet(model: model, thread: $0) }
@@ -95,7 +104,7 @@ struct PRDetailContent: View {
             Text(model.actionError ?? "")
         }
         .confirmationDialog(confirmTitle, isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }), presenting: confirm) { c in
-            Button(confirmButton(c), role: c == .approve || c == .rerunFailed ? nil : .destructive) { perform(c) }
+            Button(confirmButton(c), role: c == .approve || c == .rerunFailed || c == .revokeApproval ? nil : .destructive) { perform(c) }
             Button("Cancel", role: .cancel) {}
         }
     }
@@ -138,7 +147,7 @@ struct PRDetailContent: View {
         var items = [
             TabItem(id: PRTab.conversation, title: "Conversation", icon: "bubble.left.and.bubble.right", badge: commentsBadge),
             TabItem(id: PRTab.commits, title: "Commits", icon: "point.3.connected.trianglepath.dotted", badge: "\(pr.allCommits.totalCount ?? pr.allCommits.nodes.count)"),
-            TabItem(id: PRTab.checks, title: "Checks", icon: "checklist", badge: checksSummary, badgeColor: checksColor, badgeLabel: checksSpoken),
+            TabItem(id: PRTab.checks, title: model.features.checksTitle, icon: "checklist", badge: checksSummary, badgeColor: checksColor, badgeLabel: checksSpoken),
             TabItem(id: PRTab.files, title: "Files changed", icon: "doc.text", badge: "\(pr.changedFiles)")
         ]
         if let tree = model.stackTree {
@@ -186,10 +195,12 @@ struct PRDetailContent: View {
 
     private var confirmTitle: String {
         switch confirm {
-        case .approve: return model.pending.isEmpty ? "Approve this pull request?" : "Approve and submit \(plural(model.pending.count, "pending comment", "pending comments"))?"
-        case .close: return "Close pull request without merging?"
+        case .approve: return model.pending.isEmpty ? "Approve this \(model.provider.requestTitle)?" : "Approve and submit \(plural(model.pending.count, "pending comment", "pending comments"))?"
+        case .revokeApproval: return "Revoke your approval?"
+        case .close: return "Close \(model.provider.requestTitle) without merging?"
         case .deleteBranch: return "Delete branch \(pr.headRefName)?"
         case .disableAutoMerge: return "Disable auto-merge?"
+        case .dequeue: return "Remove from the \(model.features.queueTitle)?"
         case .rerunFailed:
             let runs = Set(pr.checks.filter { $0.outcome == .failure }.compactMap(\.runId)).count
             return "Re-run failed jobs in \(plural(runs, "workflow run", "workflow runs"))?"
@@ -200,9 +211,11 @@ struct PRDetailContent: View {
     private func confirmButton(_ c: PRConfirm) -> String {
         switch c {
         case .approve: return model.pending.isEmpty ? "Approve" : "Approve and submit"
-        case .close: return "Close pull request"
+        case .revokeApproval: return "Revoke approval"
+        case .close: return "Close \(model.provider.requestTitle)"
         case .deleteBranch: return "Delete branch"
         case .disableAutoMerge: return "Disable"
+        case .dequeue: return "Remove"
         case .rerunFailed: return "Re-run failed jobs"
         }
     }
@@ -211,9 +224,11 @@ struct PRDetailContent: View {
         Task {
             switch c {
             case .approve: _ = await model.submitReview(event: "APPROVE", body: "")
-            case .close: await model.simple(Q.closePR)
+            case .revokeApproval: await model.revokeApproval()
+            case .close: await model.simple(.close)
             case .deleteBranch: await model.deleteBranch()
-            case .disableAutoMerge: await model.simple(Q.disableAutoMerge)
+            case .disableAutoMerge: await model.simple(.disableAutoMerge)
+            case .dequeue: if await model.simple(.dequeue) { app.showToast("Removed from the \(model.features.queueTitle)") }
             case .rerunFailed: await model.rerunFailed()
             }
         }
@@ -245,11 +260,24 @@ struct PRDetailContent: View {
             ToolbarItem(id: "pr.review", placement: .primaryAction) {
                 Menu {
                     Button("Write review…") { showReview = true }
-                    if !pr.viewerDidAuthor {
+                    if ClaudeLauncher.claudeBinary != nil {
+                        Button("Draft comments with agent…") { showDrafts = true }
+                    }
+                    if pr.reviewThreads.nodes.contains(where: { !$0.isResolved && $0.viewerCanReply }) {
+                        Button("Reply and resolve threads…") {
+                            closeLoop = CloseLoopRequest(preselected: app.claude.reviewFixes[model.ref]?.threadIDs ?? [])
+                        }
+                    }
+                    if pr.viewerCanApprove ?? !pr.viewerDidAuthor, pr.viewerApproved != true {
                         Button("Approve") { confirm = .approve }
                     }
-                    Divider()
-                    Button("Request review…") { showReviewers = true }
+                    if model.features.revokeApproval, pr.viewerApproved == true {
+                        Button("Revoke approval") { confirm = .revokeApproval }
+                    }
+                    if model.features.requestReviewers {
+                        Divider()
+                        Button("Request review…") { showReviewers = true }
+                    }
                 } label: {
                     Label(model.pending.isEmpty ? "Review" : "Review (\(model.pending.count))", systemImage: "checkmark.bubble")
                 } primaryAction: {
@@ -258,12 +286,14 @@ struct PRDetailContent: View {
                 .labelStyle(.titleAndIcon)
                 .help(model.pending.isEmpty ? "Write a review (⇧⌘R)" : "Submit review with \(plural(model.pending.count, "pending comment", "pending comments")) (⇧⌘R)")
             }
-            ToolbarItem(id: "pr.requestReview", placement: .primaryAction, showsByDefault: false) {
-                Button { showReviewers = true } label: { Label("Request review", systemImage: "person.crop.circle.badge.plus") }
-                    .help("Request or re-request review")
+            if model.features.requestReviewers {
+                ToolbarItem(id: "pr.requestReview", placement: .primaryAction, showsByDefault: false) {
+                    Button { showReviewers = true } label: { Label("Request review", systemImage: "person.crop.circle.badge.plus") }
+                        .help("Request or re-request review")
+                }
             }
         }
-        if pr.isOpen {
+        if pr.isOpen, model.features.claude {
             ToolbarItem(id: "pr.fix", placement: .primaryAction) {
                 Button { showFix = true } label: { Label("Fix with agent", systemImage: "wrench.and.screwdriver") }
                     .labelStyle(.titleAndIcon)
@@ -274,13 +304,13 @@ struct PRDetailContent: View {
             ToolbarItem(id: "pr.merge", placement: .primaryAction) {
                 Button { showMerge = true } label: { Label("Merge", systemImage: "arrow.triangle.merge") }
                     .labelStyle(.titleAndIcon)
-                    .help("Merge pull request (⇧⌘M)")
+                    .help("Merge \(model.provider.requestTitle) (⇧⌘M)")
             }
         }
         ToolbarItem(id: "pr.more", placement: .primaryAction) {
             ControlGroup {
                 Button { openInBrowser(pr.url) } label: { Label("Open in browser", systemImage: "safari") }
-                    .help("Open in browser")
+                    .help(model.provider.isGitHub && model.provider != .githubEnterprise ? "Open on github.com" : "Open on \(model.features.serviceTitle)")
                 Menu {
                     moreMenu
                 } label: {
@@ -296,38 +326,45 @@ struct PRDetailContent: View {
     @ViewBuilder
     private var moreMenu: some View {
         Button("Copy link") { copy(pr.url, "Copied link") }
-        Button("Copy short link") { app.copyShortLink(ShortLink.ref(url: pr.url) ?? model.ref) }
-        Button("Copy “gh pr checkout \(pr.number)”") { copy("gh pr checkout \(pr.number) -R \(model.ref.repo.full)", "Copied checkout command") }
+        if model.provider.isGitHub {
+            Button("Copy short link") { app.copyShortLink(ShortLink.ref(url: pr.url) ?? model.ref) }
+            Button("Copy “gh pr checkout \(pr.number)”") { copy("gh pr checkout \(pr.number) -R \(model.ref.repo.full)", "Copied checkout command") }
+        } else if model.provider == .gitlab {
+            Button("Copy “glab mr checkout \(pr.number)”") { copy("glab mr checkout \(pr.number) -R \(model.ref.repo.full)", "Copied checkout command") }
+        }
         Button("Copy branch name") { copy(pr.headRefName, "Copied \(pr.headRefName)") }
         Divider()
-        if pr.viewerCanUpdate {
+        if pr.viewerCanUpdate, model.features.editing {
             Button("Edit title and description…") { showEdit = true }
         }
         if pr.isOpen {
-            if pr.viewerCanUpdate {
+            if pr.viewerCanUpdate, model.features.draftToggle {
                 if pr.isDraft {
-                    Button("Ready for review") { Task { if await model.simple(Q.readyForReview) { app.showToast("Marked ready for review") } } }
+                    Button(model.provider == .gitlab ? "Mark as ready" : "Ready for review") { Task { if await model.simple(.readyForReview) { app.showToast("Marked ready for review") } } }
                 } else {
-                    Button("Convert to draft") { Task { if await model.simple(Q.convertToDraft) { app.showToast("Converted to draft") } } }
+                    Button(model.provider == .gitlab ? "Mark as draft" : "Convert to draft") { Task { if await model.simple(.convertToDraft) { app.showToast("Converted to draft") } } }
                 }
             }
-            if MergeConflicts.applies(pr) {
+            if model.features.claude, model.features.localConflicts, MergeConflicts.applies(pr) {
                 Button("Resolve conflicts with agent…") { model.showResolveConflicts = true }
             }
-            if pr.mergeStateStatus == "BEHIND" || pr.mergeStateStatus == "BLOCKED" || pr.mergeStateStatus == "UNSTABLE" {
-                Button("Update branch from \(pr.baseRefName)") { Task { if await model.simple(Q.updateBranch) { app.showToast("Branch updated from \(pr.baseRefName)") } } }
+            if model.features.updateBranch, model.provider == .gitlab ? pr.mergeStateStatus == "BEHIND" : pr.mergeStateStatus == "BEHIND" || pr.mergeStateStatus == "BLOCKED" || pr.mergeStateStatus == "UNSTABLE" {
+                Button(model.provider == .gitlab ? "Rebase onto \(pr.baseRefName)" : "Update branch from \(pr.baseRefName)") { Task { if await model.simple(.updateBranch) { app.showToast(model.provider == .gitlab ? "Rebase started" : "Branch updated from \(pr.baseRefName)") } } }
             }
             if pr.autoMergeRequest != nil {
                 Button("Disable auto-merge") { confirm = .disableAutoMerge }
             }
+            if model.features.mergeQueue, pr.mergeQueueEntry != nil, pr.viewerCanUpdate {
+                Button("Remove from \(model.features.queueTitle)…") { confirm = .dequeue }
+            }
             Divider()
             if pr.viewerCanUpdate {
-                Button("Close pull request…") { confirm = .close }
+                Button("Close \(model.provider.requestTitle)…") { confirm = .close }
             }
-        } else if !pr.merged, pr.viewerCanUpdate {
-            Button("Reopen pull request") { Task { if await model.simple(Q.reopenPR) { app.showToast("Pull request reopened") } } }
+        } else if !pr.merged, pr.viewerCanUpdate, model.features.reopen {
+            Button("Reopen \(model.provider.requestTitle)") { Task { if await model.simple(.reopen) { app.showToast(model.provider == .gitlab ? "Merge request reopened" : "Pull request reopened") } } }
         }
-        if !pr.isOpen, pr.headRef != nil, model.canWrite {
+        if model.features.deleteBranch, !pr.isOpen, pr.headRef != nil, model.canWrite {
             Button("Delete branch \(pr.headRefName)…") { confirm = .deleteBranch }
         }
     }
@@ -391,13 +428,16 @@ struct PRHeaderView: View {
     let pr: PullRequestDetail
     let onMerge: () -> Void
     var onRequestReview: () -> Void = {}
+    @State private var jiraFollowUp = JiraFollowUpLoader()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(pr.title).font(.syTitle2.weight(.bold)).textSelection(.enabled)
-                Text("#\(pr.number)").font(.syTitle2).foregroundStyle(Color.syDim)
-                ShortLinkButton(ref: ShortLink.ref(url: pr.url) ?? model.ref)
+                Text("\(model.provider.numberPrefix)\(pr.number)").font(.syTitle2).foregroundStyle(Color.syDim)
+                if model.provider.isGitHub {
+                    ShortLinkButton(ref: ShortLink.ref(url: pr.url) ?? model.ref)
+                }
             }
             HStack(spacing: 8) {
                 StateBadge(state: pr.visualState)
@@ -406,7 +446,9 @@ struct PRHeaderView: View {
                 BranchChip(name: pr.baseRefName)
                 Image(systemName: "arrow.left").font(.syCaption).foregroundStyle(Color.syDim)
                 BranchChip(name: pr.headRefName, color: .syViolet)
-                DiffStat(additions: pr.additions, deletions: pr.deletions)
+                if let stat = model.diffStat {
+                    DiffStat(additions: stat.additions, deletions: stat.deletions)
+                }
                 Spacer(minLength: 0)
                 Text(Fmt.rel(pr.createdAt)).foregroundStyle(Color.syMuted).help(Fmt.full.string(from: pr.createdAt))
             }
@@ -433,11 +475,16 @@ struct PRHeaderView: View {
                 StackStrip(tree: tree, repo: model.ref.repo) { model.tab = .stack }
                     .transition(.opacity)
             }
+            if pr.isOpen {
+                RiskStrip(model: model, risks: model.risks)
+            }
+            JiraMergeFollowUp(pr: pr, loader: jiraFollowUp)
             MergeStatusBar(model: model, pr: pr, onMerge: onMerge, onRequestReview: onRequestReview)
         }
         .animation(Motion.smooth, value: model.stackTree)
         .padding(.horizontal, 16)
         .padding(.top, 12)
+        .task(id: "\(pr.url)|\(pr.merged)") { await jiraFollowUp.load(pr) }
     }
 }
 
@@ -598,7 +645,7 @@ struct MergeStatusBar: View {
                     }
                     checksBadge
                     Spacer()
-                    if MergeConflicts.applies(pr) {
+                    if model.features.localConflicts, MergeConflicts.applies(pr) {
                         Button(conflictsTitle) {
                             model.tab = .conversation
                             model.scrollToBottomToken += 1
@@ -606,15 +653,15 @@ struct MergeStatusBar: View {
                         .controlSize(.small)
                         .help("Show the conflicting files at the end of the conversation")
                     }
-                    if pr.mergeStateStatus == "BEHIND", model.canWrite || pr.viewerCanUpdate {
-                        Button("Update branch") {
-                            Task { if await model.simple(Q.updateBranch) { app.showToast("Branch updated from \(pr.baseRefName)") } }
+                    if model.features.updateBranch, pr.mergeStateStatus == "BEHIND", model.canWrite || pr.viewerCanUpdate {
+                        Button(model.features.updateBranchTitle) {
+                            Task { if await model.simple(.updateBranch) { app.showToast(model.provider == .gitlab ? "Rebase started" : "Branch updated from \(pr.baseRefName)") } }
                         }
                         .controlSize(.small)
                     }
-                    if pr.isDraft, pr.viewerCanUpdate {
-                        Button("Ready for review") {
-                            Task { if await model.simple(Q.readyForReview) { app.showToast("Marked ready for review") } }
+                    if pr.isDraft, pr.viewerCanUpdate, model.features.draftToggle {
+                        Button(model.provider == .gitlab ? "Mark as ready" : "Ready for review") {
+                            Task { if await model.simple(.readyForReview) { app.showToast("Marked ready for review") } }
                         }
                         .controlSize(.small)
                         .help("Mark this draft as ready for review")
@@ -661,7 +708,7 @@ struct MergeStatusBar: View {
 
     private func canPerform(_ action: RequirementAction) -> Bool {
         switch action {
-        case .requestReview: return model.canWrite || pr.viewerDidAuthor
+        case .requestReview: return model.features.requestReviewers && (model.canWrite || pr.viewerDidAuthor)
         case .updateBranch, .readyForReview: return false
         case .showConflicts: return !MergeConflicts.applies(pr)
         case .showChecks, .showConversation: return true
@@ -672,14 +719,14 @@ struct MergeStatusBar: View {
         switch action {
         case .requestReview: onRequestReview()
         case .showChecks: model.tab = .checks
-        case .showConversation: model.tab = .conversation
+        case .showConversation: model.nextUnresolvedThread()
         case .showConflicts:
             model.tab = .conversation
             model.scrollToBottomToken += 1
         case .updateBranch:
-            Task { if await model.simple(Q.updateBranch) { app.showToast("Branch updated from \(pr.baseRefName)") } }
+            Task { if await model.simple(.updateBranch) { app.showToast("Branch updated from \(pr.baseRefName)") } }
         case .readyForReview:
-            Task { if await model.simple(Q.readyForReview) { app.showToast("Marked ready for review") } }
+            Task { if await model.simple(.readyForReview) { app.showToast("Marked ready for review") } }
         }
     }
 
@@ -701,8 +748,8 @@ struct MergeStatusBar: View {
                 .font(.syCaption)
             }
             .buttonStyle(.plain)
-            .help("Checks")
-            .accessibilityLabel("Checks")
+            .help(model.features.checksTitle)
+            .accessibilityLabel(model.features.checksTitle)
             .accessibilityValue("\(failed) failed, \(pending) pending, \(ok) passed")
         }
     }
@@ -722,12 +769,20 @@ struct MergeStatusBar: View {
         let unstableFailed = pr.checks.filter { $0.outcome == .failure }.count
         let unstablePending = pr.checks.filter { $0.outcome == .pending }.count
         if pr.isDraft { return ("pencil.circle", .sySlate, "Draft — mark it ready for review to merge", false) }
+        if let entry = pr.mergeQueueEntry {
+            let text = pr.forgeMerge == nil ? entry.summary : entry.summary.replacingOccurrences(of: "Merge queue", with: "Merge train").replacingOccurrences(of: "Queued to merge", with: "In the merge train")
+            return (entry.failing ? "exclamationmark.triangle.fill" : "tray.full", entry.failing ? .ghRed : .ghGreen, text, false)
+        }
         if pr.mergeable == "CONFLICTING" || pr.mergeStateStatus == "DIRTY" {
             return ("exclamationmark.triangle.fill", .ghRed, "Has conflicts with \(pr.baseRefName)", false)
         }
         switch pr.mergeStateStatus {
         case "BEHIND": return ("arrow.down.circle", .ghYellow, "Branch is behind \(pr.baseRefName)", false)
         case "BLOCKED":
+            if let blocker = pr.mergeBlocker {
+                let pipeline = blocker.hasPrefix("Pipeline")
+                return (pipeline && failedChecks == 0 ? "clock" : "lock.circle", .ghYellow, pipeline && failedChecks > 0 ? failedChecksText : blocker, false)
+            }
             switch pr.reviewDecision {
             case "CHANGES_REQUESTED": return ("plusminus.circle.fill", .ghRed, "Changes requested", false)
             case "REVIEW_REQUIRED": return ("eye.circle", .ghYellow, "Review required", false)
@@ -759,8 +814,22 @@ struct ConversationTab: View {
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
-            HTMLView(html: model.html, scrollToBottomToken: model.scrollToBottomToken, onAction: handle, onLink: openLink)
+            HTMLView(html: model.html, scrollToBottomToken: model.scrollToBottomToken, focusThreadToken: model.threadFocusToken, onAction: handle, onLink: openLink)
                 .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, web: true, button: false) { await model.load(full: true) }
+                .overlay(alignment: .bottomTrailing) {
+                    let open = pr.reviewThreads.nodes.filter { !$0.isResolved }.count
+                    if open > 0 {
+                        Button { model.nextUnresolvedThread() } label: {
+                            Label(open == 1 ? "1 unresolved · Next" : "\(open) unresolved · Next", systemImage: "arrow.down.circle")
+                                .font(.syCaption.weight(.medium))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                        .help("Jump to the next unresolved thread (⌥⌘↓)")
+                        .padding(10)
+                    }
+                }
             Divider()
             HStack(alignment: .bottom, spacing: 8) {
                 ComposerBox(text: $model.commentDraft, placeholder: "Comment (Markdown) — ⌘↩ to send", minHeight: 56).frame(height: 64)
@@ -869,9 +938,9 @@ struct ChecksTab: View {
         let failedRuns = Set(checks.filter { $0.outcome == .failure }.compactMap(\.runId))
         List {
             if checks.isEmpty {
-                Text("No checks for the latest commit").font(.syBody).foregroundStyle(Color.syMuted)
+                Text(model.provider == .gitlab ? "No pipeline for the latest commit" : "No checks for the latest commit").font(.syBody).foregroundStyle(Color.syMuted)
             }
-            if !failedRuns.isEmpty, model.canWrite {
+            if model.features.rerunChecks, !failedRuns.isEmpty, model.canWrite {
                 Button(action: onRerun) {
                     Label("Re-run failed jobs (\(plural(failedRuns.count, "workflow", "workflows")))", systemImage: "arrow.clockwise")
                 }
@@ -885,12 +954,12 @@ struct ChecksTab: View {
                         Text(subtitle(c)).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
                     }
                     Spacer()
-                    if CIFailureCollector.isFixable(c), pr.isOpen {
+                    if model.features.claude, CIFailureCollector.isFixable(c), pr.isOpen {
                         Button("Fix with agent") { onFix(CIFixRequest(focus: c.id)) }
                             .controlSize(.small)
                             .tint(Color.syCoral)
                     }
-                    if c.isActionsJob, c.outcome != .pending, c.outcome != .skipped {
+                    if model.features.jobLogs, model.backend.canShowLog(c), c.outcome != .pending, c.outcome != .skipped {
                         Button("Log") { logTarget = c }.controlSize(.small)
                     }
                     if let link = c.link {
@@ -915,7 +984,8 @@ struct ChecksTab: View {
             fixAfterLog = nil
             onFix(request)
         }) { c in
-            JobLogSheet(api: model.api, repo: model.ref.repo, check: c, onFix: CIFailureCollector.isFixable(c) && pr.isOpen ? { log in fixAfterLog = CIFixRequest(focus: c.id, log: log); logTarget = nil } : nil)
+            JobLogSheet(load: { try await model.backend.jobLog(model.ref, check: c) }, check: c,
+                        onFix: model.features.claude && CIFailureCollector.isFixable(c) && pr.isOpen ? { log in fixAfterLog = CIFixRequest(focus: c.id, log: log); logTarget = nil } : nil)
         }
     }
 

@@ -84,6 +84,10 @@
   <data name="Agents_Updated" xml:space="preserve"><value>Updated {0}</value></data>
   <data name="Agents_WorktreeDetail" xml:space="preserve"><value>Worktree: {0}</value></data>
   <data name="App_Tagline" xml:space="preserve"><value>Pull requests, without the browser</value></data>
+  <data name="BB_ActShowBuilds" xml:space="preserve"><value>Show builds</value></data>
+  <data name="BB_Builds" xml:space="preserve"><value>Builds</value></data>
+  <data name="BB_NoBuilds" xml:space="preserve"><value>No builds for the latest commit</value></data>
+  <data name="BB_TitlePlaceholder" xml:space="preserve"><value>Commit title (Bitbucket default)</value></data>
   <data name="Badge_Description" xml:space="preserve"><value>{0} items need your attention</value></data>
   <data name="Board_All" xml:space="preserve"><value>All</value></data>
   <data name="Board_Draft" xml:space="preserve"><value>Draft</value></data>
@@ -105,6 +109,7 @@
   <data name="ChatWeb_Hint" xml:space="preserve"><value>/ commands · @ files · Shift+Enter new line · paste a screenshot Ctrl+V</value></data>
   <data name="ChatWeb_JumpLatest" xml:space="preserve"><value>Jump to the latest message</value></data>
   <data name="ChatWeb_JumpNew" xml:space="preserve"><value>{0} new — jump to the latest message</value></data>
+  <data name="ChatWeb_MROpen" xml:space="preserve"><value>Merge request !{0} is open</value></data>
   <data name="ChatWeb_OpenInApp" xml:space="preserve"><value>Open in PullYard</value></data>
   <data name="ChatWeb_PROpen" xml:space="preserve"><value>Pull request #{0} is open</value></data>
   <data name="ChatWeb_Recent" xml:space="preserve"><value>Recent in this project</value></data>
@@ -123,6 +128,7 @@
   <data name="ChatWeb_SugAddress" xml:space="preserve"><value>Address review on #{0}</value></data>
   <data name="ChatWeb_SugBugs" xml:space="preserve"><value>Find bugs in recent changes</value></data>
   <data name="ChatWeb_SugExplain" xml:space="preserve"><value>Explain the project structure</value></data>
+  <data name="ChatWeb_SugOpenMR" xml:space="preserve"><value>Open a merge request</value></data>
   <data name="ChatWeb_SugOpenPR" xml:space="preserve"><value>Open a pull request</value></data>
   <data name="ChatWeb_SugReview" xml:space="preserve"><value>Review my uncommitted changes</value></data>
   <data name="ChatWeb_SugTests" xml:space="preserve"><value>Write tests for changed code</value></data>
@@ -133,6 +139,9 @@
   <data name="Chat_Allow" xml:space="preserve"><value>Allow</value></data>
   <data name="Chat_AskedQuestion" xml:space="preserve"><value>Claude asked a question — answer above</value></data>
   <data name="Chat_AttachImage" xml:space="preserve"><value>Attach image</value></data>
+  <data name="Chat_BudgetContinue" xml:space="preserve"><value>Continue (+{0})</value></data>
+  <data name="Chat_BudgetHint" xml:space="preserve"><value>New messages wait until you continue. Change the limit in Settings › Agents.</value></data>
+  <data name="Chat_BudgetReached" xml:space="preserve"><value>Session cost {0} reached your {1} limit</value></data>
   <data name="Chat_ContextHelp" xml:space="preserve"><value>Context {0}% — click for usage and limits</value></data>
   <data name="Chat_ContextHint" xml:space="preserve"><value>Show usage and limits</value></data>
   <data name="Chat_ContextName" xml:space="preserve"><value>Context {0}% used</value></data>
@@ -237,6 +246,7 @@
   <data name="Claude_Never" xml:space="preserve"><value>Never</value></data>
   <data name="Claude_NewAccount" xml:space="preserve"><value>New Claude account</value></data>
   <data name="Claude_NewSession" xml:space="preserve"><value>New session</value></data>
+  <data name="Claude_NoLimit" xml:space="preserve"><value>No limit</value></data>
   <data name="Claude_NoSessionsMessage" xml:space="preserve"><value>Start a session in a project folder and it shows up here.</value></data>
   <data name="Claude_NoSessionsTitle" xml:space="preserve"><value>No agent sessions yet</value></data>
   <data name="Claude_NotFound" xml:space="preserve"><value>claude CLI not found — see the right side</value></data>
@@ -251,6 +261,8 @@
   <data name="Claude_OpenRouterKey" xml:space="preserve"><value>OpenRouter API key (sk-or-…)</value></data>
   <data name="Claude_OpenSignInLink" xml:space="preserve"><value>Open sign-in link</value></data>
   <data name="Claude_PasteCode" xml:space="preserve"><value>Paste the code from the page</value></data>
+  <data name="Claude_PauseAt" xml:space="preserve"><value>Pause a session at</value></data>
+  <data name="Claude_PauseAtHelp" xml:space="preserve"><value>When an agent session's reported cost reaches the limit, new messages wait until you continue. Useful with API keys, OpenRouter or another endpoint; with a subscription plan the cost is an estimate.</value></data>
   <data name="Claude_PermissionMode" xml:space="preserve"><value>Permission mode</value></data>
   <data name="Claude_ProfileHelp" xml:space="preserve"><value>The account gets its own sign-in, session history and limits. Sign-in opens right after.</value></data>
   <data name="Claude_ProfileName" xml:space="preserve"><value>Name, e.g. “Personal” or “Work”</value></data>
@@ -266,6 +278,9 @@
   <data name="Claude_Reveal" xml:space="preserve"><value>Show transcript in Explorer</value></data>
   <data name="Claude_RevealFolder" xml:space="preserve"><value>Show in Explorer</value></data>
   <data name="Claude_SearchSessions" xml:space="preserve"><value>Search sessions</value></data>
+  <data name="Claude_SessionCost" xml:space="preserve"><value>Session cost</value></data>
+  <data name="Claude_SessionCostLabel" xml:space="preserve"><value>Session cost {0}</value></data>
+  <data name="Claude_SessionCostLimit" xml:space="preserve"><value>Session cost · limit {0}</value></data>
   <data name="Claude_ShareSettings" xml:space="preserve"><value>Use my settings, CLAUDE.md, skills and plugins from the main account</value></data>
   <data name="Claude_ShowInspector" xml:space="preserve"><value>Show changes panel</value></data>
   <data name="Claude_SignIn" xml:space="preserve"><value>Sign in…</value></data>
@@ -290,6 +305,27 @@
   <data name="Claude_UsagePage" xml:space="preserve"><value>Usage page</value></data>
   <data name="Claude_WakeUp" xml:space="preserve"><value>Wake up</value></data>
   <data name="Clipboard_InClipboard" xml:space="preserve"><value>In clipboard: {0}</value></data>
+  <data name="CloseLoop_Banner" xml:space="preserve"><value>{0} since Fix with agent · {1}</value></data>
+  <data name="CloseLoop_Button" xml:space="preserve"><value>Reply and resolve…</value></data>
+  <data name="CloseLoop_Commits" xml:space="preserve"><value>{0} new commits</value></data>
+  <data name="CloseLoop_Intro" xml:space="preserve"><value>Posts the same reply on each selected thread. Use it once the fixes are pushed.</value></data>
+  <data name="CloseLoop_IntroResolve" xml:space="preserve"><value>Posts the same reply on each selected thread and resolves it. Use it once the fixes are pushed.</value></data>
+  <data name="CloseLoop_Menu" xml:space="preserve"><value>Reply and resolve threads…</value></data>
+  <data name="CloseLoop_NoOpen" xml:space="preserve"><value>No open threads</value></data>
+  <data name="CloseLoop_OneCommit" xml:space="preserve"><value>1 new commit</value></data>
+  <data name="CloseLoop_OneOpen" xml:space="preserve"><value>1 thread still open</value></data>
+  <data name="CloseLoop_OpenN" xml:space="preserve"><value>{0} threads still open</value></data>
+  <data name="CloseLoop_OpenThreads" xml:space="preserve"><value>Open threads</value></data>
+  <data name="CloseLoop_RepliedMany" xml:space="preserve"><value>Replied to {0} threads</value></data>
+  <data name="CloseLoop_RepliedOne" xml:space="preserve"><value>Replied to 1 thread</value></data>
+  <data name="CloseLoop_ReplyN" xml:space="preserve"><value>Reply to {0}</value></data>
+  <data name="CloseLoop_ReplyResolveN" xml:space="preserve"><value>Reply and resolve {0}</value></data>
+  <data name="CloseLoop_Resolve" xml:space="preserve"><value>Resolve the threads after replying</value></data>
+  <data name="CloseLoop_ResolvedMany" xml:space="preserve"><value>Replied and resolved {0} threads</value></data>
+  <data name="CloseLoop_ResolvedOne" xml:space="preserve"><value>Replied and resolved 1 thread</value></data>
+  <data name="CloseLoop_Thread" xml:space="preserve"><value>Thread</value></data>
+  <data name="CloseLoop_Title" xml:space="preserve"><value>Reply and resolve threads</value></data>
+  <data name="CloseLoop_Working" xml:space="preserve"><value>Working…</value></data>
   <data name="Code_Binary" xml:space="preserve"><value>Binary file</value></data>
   <data name="Code_Blame" xml:space="preserve"><value>Blame</value></data>
   <data name="Code_BlameHint" xml:space="preserve"><value>Show who last changed each line (Ctrl+Alt+B)</value></data>
@@ -361,8 +397,27 @@
   <data name="Diagnostics_TicksSummary" xml:space="preserve"><value>Live ticks with requests: {0}</value></data>
   <data name="Diagnostics_Totals" xml:space="preserve"><value>{0} requests · {1} · avg {2} ms · p95 {3} ms</value></data>
   <data name="Diagnostics_WindowTitle" xml:space="preserve"><value>{0} Diagnostics</value></data>
+  <data name="Drafts_Add" xml:space="preserve"><value>Add {0} to review</value></data>
+  <data name="Drafts_AddedMany" xml:space="preserve"><value>Added {0} comments to your pending review</value></data>
+  <data name="Drafts_AddedOne" xml:space="preserve"><value>Added 1 comment to your pending review</value></data>
+  <data name="Drafts_Comment" xml:space="preserve"><value>Comment</value></data>
+  <data name="Drafts_DroppedMany" xml:space="preserve"><value>{0} suggestions skipped because the line isn’t in the diff</value></data>
+  <data name="Drafts_DroppedOne" xml:space="preserve"><value>1 suggestion skipped because the line isn’t in the diff</value></data>
+  <data name="Drafts_Intro" xml:space="preserve"><value>The agent reads the diff and suggests inline comments. Nothing is posted: comments you keep are added to your pending review, and you submit them yourself.</value></data>
+  <data name="Drafts_LoadingDiff" xml:space="preserve"><value>Loading the diff…</value></data>
+  <data name="Drafts_Menu" xml:space="preserve"><value>Draft comments with agent…</value></data>
+  <data name="Drafts_NoCli" xml:space="preserve"><value>Install and sign in to the agent CLI first.</value></data>
+  <data name="Drafts_NoDiff" xml:space="preserve"><value>The diff couldn’t be loaded</value></data>
+  <data name="Drafts_None" xml:space="preserve"><value>No comments suggested.</value></data>
+  <data name="Drafts_Old" xml:space="preserve"><value> (old)</value></data>
+  <data name="Drafts_Run" xml:space="preserve"><value>Draft comments</value></data>
+  <data name="Drafts_Running" xml:space="preserve"><value>The agent is reading the diff. This can take a minute.</value></data>
+  <data name="Drafts_SkippedMany" xml:space="preserve"><value>{0} files not sent (no text diff or too large)</value></data>
+  <data name="Drafts_SkippedOne" xml:space="preserve"><value>1 file not sent (no text diff or too large)</value></data>
+  <data name="Drafts_Stop" xml:space="preserve"><value>Stop</value></data>
+  <data name="Drafts_Title" xml:space="preserve"><value>Draft review comments</value></data>
   <data name="Edit_Body" xml:space="preserve"><value>Description (Markdown)</value></data>
-  <data name="Edit_Header" xml:space="preserve"><value>Edit #{0}</value></data>
+  <data name="Edit_Header" xml:space="preserve"><value>Edit {0}</value></data>
   <data name="Edit_Title" xml:space="preserve"><value>Title</value></data>
   <data name="Empty_AssignedMessage" xml:space="preserve"><value>{0} assigned to you show up here.</value></data>
   <data name="Empty_ClearFilter" xml:space="preserve"><value>Clear filter</value></data>
@@ -392,6 +447,9 @@
   <data name="Empty_ReviewedMessage" xml:space="preserve"><value>{0} you’ve reviewed show up here.</value></data>
   <data name="Empty_TryDifferent" xml:space="preserve"><value>Try a different search.</value></data>
   <data name="Files_Binary" xml:space="preserve"><value>Binary or large file</value></data>
+  <data name="Files_CodeOwners" xml:space="preserve"><value>Code owners</value></data>
+  <data name="Files_CodeOwnersApproved" xml:space="preserve"><value>approved</value></data>
+  <data name="Files_Count" xml:space="preserve"><value>Files</value></data>
   <data name="Files_DiffLayout" xml:space="preserve"><value>Diff layout</value></data>
   <data name="Files_Filter" xml:space="preserve"><value>Filter files</value></data>
   <data name="Files_LayoutNarrow" xml:space="preserve"><value>Widen the window to use split view</value></data>
@@ -466,10 +524,12 @@
   <data name="Inline_Single" xml:space="preserve"><value>Add single comment</value></data>
   <data name="Inline_Title" xml:space="preserve"><value>Comment on line</value></data>
   <data name="Inspector_AskReview" xml:space="preserve"><value>Ask Claude to review this PR</value></data>
+  <data name="Inspector_BranchName" xml:space="preserve"><value>Branch {0}</value></data>
   <data name="Inspector_Changes" xml:space="preserve"><value>Changes</value></data>
   <data name="Inspector_Collapse" xml:space="preserve"><value>Collapse inspector</value></data>
   <data name="Inspector_CollapseHint" xml:space="preserve"><value>Collapse (Esc)</value></data>
   <data name="Inspector_CommitAgent" xml:space="preserve"><value>Commit and push to #{0} with agent</value></data>
+  <data name="Inspector_CreateInBrowser" xml:space="preserve"><value>Create in browser</value></data>
   <data name="Inspector_CreatePR" xml:space="preserve"><value>Create PR in browser</value></data>
   <data name="Inspector_Expand" xml:space="preserve"><value>Expand inspector</value></data>
   <data name="Inspector_ExpandHint" xml:space="preserve"><value>Expand over the chat</value></data>
@@ -484,7 +544,9 @@
   <data name="Inspector_NoRepo" xml:space="preserve"><value>Folder isn't linked to a GitHub repository</value></data>
   <data name="Inspector_OpenFull" xml:space="preserve"><value>Open full</value></data>
   <data name="Inspector_OpenInPRs" xml:space="preserve"><value>Open in PR section</value></data>
+  <data name="Inspector_OpenMRAgent" xml:space="preserve"><value>Open MR with agent</value></data>
   <data name="Inspector_OpenPRAgent" xml:space="preserve"><value>Open PR with agent</value></data>
+  <data name="Inspector_OpenService" xml:space="preserve"><value>Open {0}</value></data>
   <data name="Inspector_PR" xml:space="preserve"><value>PR</value></data>
   <data name="Inspector_Resize" xml:space="preserve"><value>Resize inspector</value></data>
   <data name="Inspector_ResizeHint" xml:space="preserve"><value>Drag to resize, double-click to reset</value></data>
@@ -517,6 +579,11 @@
   <data name="Jira_Description" xml:space="preserve"><value>Description</value></data>
   <data name="Jira_Disconnect" xml:space="preserve"><value>Disconnect</value></data>
   <data name="Jira_EmailPlaceholder" xml:space="preserve"><value>Atlassian account email (empty for a Data Center token)</value></data>
+  <data name="Jira_FollowUpMove" xml:space="preserve"><value>Move to {0}</value></data>
+  <data name="Jira_FollowUpMoved" xml:space="preserve"><value>{0} moved to {1}</value></data>
+  <data name="Jira_FollowUpMoving" xml:space="preserve"><value>Moving…</value></data>
+  <data name="Jira_FollowUpNotNow" xml:space="preserve"><value>Not now</value></data>
+  <data name="Jira_FollowUpStill" xml:space="preserve"><value>is still {0}</value></data>
   <data name="Jira_Hide" xml:space="preserve"><value>Hide</value></data>
   <data name="Jira_HideOnPr" xml:space="preserve"><value>Hide on this pull request</value></data>
   <data name="Jira_HideTip" xml:space="preserve"><value>Hide this ticket on this pull request</value></data>
@@ -617,6 +684,25 @@
   <data name="Login_SignInWithGlab" xml:space="preserve"><value>Sign in with glab</value></data>
   <data name="Login_YourAccounts" xml:space="preserve"><value>Your accounts</value></data>
   <data name="Login_YourServer" xml:space="preserve"><value>your server</value></data>
+  <data name="MR_ActShowPipeline" xml:space="preserve"><value>Show pipeline</value></data>
+  <data name="MR_ApproveQ" xml:space="preserve"><value>Approve this merge request?</value></data>
+  <data name="MR_Close" xml:space="preserve"><value>Close merge request…</value></data>
+  <data name="MR_CloseButton" xml:space="preserve"><value>Close merge request</value></data>
+  <data name="MR_CloseQ" xml:space="preserve"><value>Close merge request without merging?</value></data>
+  <data name="MR_CopyCheckout" xml:space="preserve"><value>Copy “glab mr checkout {0}”</value></data>
+  <data name="MR_MarkDraft" xml:space="preserve"><value>Mark as draft</value></data>
+  <data name="MR_MarkReady" xml:space="preserve"><value>Mark as ready</value></data>
+  <data name="MR_Merge" xml:space="preserve"><value>Merge merge request</value></data>
+  <data name="MR_MergeMethod" xml:space="preserve"><value>Merge</value></data>
+  <data name="MR_MergeTrain" xml:space="preserve"><value>merge train</value></data>
+  <data name="MR_NoPipeline" xml:space="preserve"><value>No pipeline for the latest commit</value></data>
+  <data name="MR_Rebase" xml:space="preserve"><value>Rebase</value></data>
+  <data name="MR_RebaseOnto" xml:space="preserve"><value>Rebase onto {0}</value></data>
+  <data name="MR_RebaseStarted" xml:space="preserve"><value>Rebase started</value></data>
+  <data name="MR_Reopen" xml:space="preserve"><value>Reopen merge request</value></data>
+  <data name="MR_RevokeApproval" xml:space="preserve"><value>Revoke approval</value></data>
+  <data name="MR_RevokeApprovalQ" xml:space="preserve"><value>Revoke your approval?</value></data>
+  <data name="MR_TitlePlaceholder" xml:space="preserve"><value>Commit title (GitLab default)</value></data>
   <data name="Menu_CheckForUpdates" xml:space="preserve"><value>Check for Updates…</value></data>
   <data name="Menu_CopyCheckout" xml:space="preserve"><value>Copy “gh pr checkout”</value></data>
   <data name="Menu_CopyLink" xml:space="preserve"><value>Copy Link</value></data>
@@ -629,10 +715,13 @@
   <data name="Merge_ActShowChecks" xml:space="preserve"><value>Show checks</value></data>
   <data name="Merge_ActShowConflicts" xml:space="preserve"><value>View conflicts</value></data>
   <data name="Merge_ActShowConversation" xml:space="preserve"><value>Show conversation</value></data>
+  <data name="Merge_AddToQueue" xml:space="preserve"><value>Add to {0}</value></data>
+  <data name="Merge_AddedToQueue" xml:space="preserve"><value>Added to the {0}</value></data>
   <data name="Merge_AutoEnabled" xml:space="preserve"><value>auto-merge enabled</value></data>
   <data name="Merge_Behind" xml:space="preserve"><value>Branch is behind {0}</value></data>
   <data name="Merge_Blocked" xml:space="preserve"><value>Blocked by branch protection</value></data>
   <data name="Merge_BodyPlaceholder" xml:space="preserve"><value>Commit description (optional)</value></data>
+  <data name="Merge_BranchNotDeleted" xml:space="preserve"><value>Merged, but the branch {0} couldn’t be deleted: {1}</value></data>
   <data name="Merge_CanMergeBut" xml:space="preserve"><value>Can be merged, but </value></data>
   <data name="Merge_Checking" xml:space="preserve"><value>Checking mergeability…</value></data>
   <data name="Merge_ChecksFailed" xml:space="preserve"><value>{0} checks failed</value></data>
@@ -645,9 +734,11 @@
   <data name="Merge_HideRequirements" xml:space="preserve"><value>Hide merge requirements</value></data>
   <data name="Merge_Merge" xml:space="preserve"><value>Merge…</value></data>
   <data name="Merge_MergeButton" xml:space="preserve"><value>Merge</value></data>
+  <data name="Merge_MergeDirectly" xml:space="preserve"><value>Merge directly</value></data>
   <data name="Merge_Method" xml:space="preserve"><value>Method</value></data>
   <data name="Merge_OneCheckFailed" xml:space="preserve"><value>1 check failed</value></data>
   <data name="Merge_OneCheckRunning" xml:space="preserve"><value>1 check is still running</value></data>
+  <data name="Merge_QueueNote" xml:space="preserve"><value>{0} uses a {1}. Add the {2} to it and it merges once the required checks pass; merging directly may be rejected.</value></data>
   <data name="Merge_Ready" xml:space="preserve"><value>Ready to merge</value></data>
   <data name="Merge_Rebase" xml:space="preserve"><value>Rebase and merge</value></data>
   <data name="Merge_ReqAdvisory" xml:space="preserve"><value>doesn’t block</value></data>
@@ -658,7 +749,7 @@
   <data name="Merge_Requirements" xml:space="preserve"><value>Merge requirements</value></data>
   <data name="Merge_ShowRequirements" xml:space="preserve"><value>Show merge requirements</value></data>
   <data name="Merge_Squash" xml:space="preserve"><value>Squash and merge</value></data>
-  <data name="Merge_Title" xml:space="preserve"><value>Merge #{0} into {1}</value></data>
+  <data name="Merge_Title" xml:space="preserve"><value>Merge {0} into {1}</value></data>
   <data name="Merge_TitlePlaceholder" xml:space="preserve"><value>Commit title (GitHub default)</value></data>
   <data name="Merge_UpdateBranch" xml:space="preserve"><value>Update branch</value></data>
   <data name="Nav_AI" xml:space="preserve"><value>AI</value></data>
@@ -723,8 +814,8 @@
   <data name="PR_ApproveQ" xml:space="preserve"><value>Approve this pull request?</value></data>
   <data name="PR_Assignees" xml:space="preserve"><value>Assignees:</value></data>
   <data name="PR_BlameAtHead" xml:space="preserve"><value>Blame this file at the pull request head</value></data>
+  <data name="PR_BranchUpdated" xml:space="preserve"><value>Branch updated from {0}</value></data>
   <data name="PR_BrowserAndMore" xml:space="preserve"><value>Browser and more</value></data>
-  <data name="PR_Checks" xml:space="preserve"><value>Checks</value></data>
   <data name="PR_ChecksSummary" xml:space="preserve"><value>{0} failed, {1} pending, {2} passed</value></data>
   <data name="PR_Close" xml:space="preserve"><value>Close pull request…</value></data>
   <data name="PR_CloseButton" xml:space="preserve"><value>Close pull request</value></data>
@@ -745,7 +836,16 @@
   <data name="PR_FixWithAgent" xml:space="preserve"><value>Send review comments to a new agent session</value></data>
   <data name="PR_Merge" xml:space="preserve"><value>Merge pull request</value></data>
   <data name="PR_MergeButton" xml:space="preserve"><value>Merge</value></data>
+  <data name="PR_MergeQueue" xml:space="preserve"><value>merge queue</value></data>
+  <data name="PR_NextThreadMany" xml:space="preserve"><value>{0} unresolved · Next</value></data>
+  <data name="PR_NextThreadOne" xml:space="preserve"><value>1 unresolved · Next</value></data>
+  <data name="PR_NextThreadTip" xml:space="preserve"><value>Jump to the next unresolved thread (Ctrl+Alt+Down)</value></data>
+  <data name="PR_Pipeline" xml:space="preserve"><value>Pipeline</value></data>
   <data name="PR_ReadyForReview" xml:space="preserve"><value>Ready for review</value></data>
+  <data name="PR_Remove" xml:space="preserve"><value>Remove</value></data>
+  <data name="PR_RemoveFromQueue" xml:space="preserve"><value>Remove from {0}…</value></data>
+  <data name="PR_RemoveFromQueueQ" xml:space="preserve"><value>Remove from the {0}?</value></data>
+  <data name="PR_RemovedFromQueue" xml:space="preserve"><value>Removed from the {0}</value></data>
   <data name="PR_Reopen" xml:space="preserve"><value>Reopen pull request</value></data>
   <data name="PR_RequestReviewMenu" xml:space="preserve"><value>Request review…</value></data>
   <data name="PR_Review" xml:space="preserve"><value>Review</value></data>
@@ -843,6 +943,9 @@
   <data name="Repos_NoActive" xml:space="preserve"><value>No active repositories</value></data>
   <data name="Repos_None" xml:space="preserve"><value>No repositories</value></data>
   <data name="Repos_NoneMessage" xml:space="preserve"><value>Repositories you can access show up here.</value></data>
+  <data name="ReviewLoad_Help" xml:space="preserve"><value>Open pull requests waiting for {0}'s review, among those you can see</value></data>
+  <data name="ReviewLoad_Many" xml:space="preserve"><value>{0} open reviews</value></data>
+  <data name="ReviewLoad_One" xml:space="preserve"><value>1 open review</value></data>
   <data name="Review_Approved" xml:space="preserve"><value>Approved</value></data>
   <data name="Review_ChangesRequested" xml:space="preserve"><value>Changes requested</value></data>
   <data name="Review_CommentOnly" xml:space="preserve"><value>Comment — without approval</value></data>
@@ -852,7 +955,7 @@
   <data name="Review_Required" xml:space="preserve"><value>Review required</value></data>
   <data name="Review_Submit" xml:space="preserve"><value>Submit review</value></data>
   <data name="Review_Summary" xml:space="preserve"><value>Review summary (optional when approving)</value></data>
-  <data name="Review_Title" xml:space="preserve"><value>Review #{0}</value></data>
+  <data name="Review_Title" xml:space="preserve"><value>Review {0}</value></data>
   <data name="Reviewers_Already" xml:space="preserve"><value>already requested</value></data>
   <data name="Reviewers_CodeOwner" xml:space="preserve"><value>code owner</value></data>
   <data name="Reviewers_CodeOwners" xml:space="preserve"><value>Code owners of changed files</value></data>
@@ -863,6 +966,8 @@
   <data name="Reviewers_Stale" xml:space="preserve"><value>reviewed before latest push</value></data>
   <data name="Reviewers_Team" xml:space="preserve"><value>team</value></data>
   <data name="Reviewers_Title" xml:space="preserve"><value>Request review</value></data>
+  <data name="Risk_LookCloser" xml:space="preserve"><value>Look closer:</value></data>
+  <data name="Risk_MoreFiles" xml:space="preserve"><value>…and {0} more</value></data>
   <data name="Search_Placeholder" xml:space="preserve"><value>Filter: text, repo:org/name, label:bug</value></data>
   <data name="Section_Claude" xml:space="preserve"><value>Agents</value></data>
   <data name="Section_IssuesTitle" xml:space="preserve"><value>Issues: {0}</value></data>

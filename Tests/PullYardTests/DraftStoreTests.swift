@@ -16,7 +16,7 @@ final class DraftStoreTests: XCTestCase {
     func testReviewDraftRoundTripsAndEmptyDraftRemovesFile() {
         let key = DraftStore.key(account: "me", host: "github.com", repo: "acme/app", number: 7)
         let store = DraftStore(directory: dir)
-        var draft = ReviewDraft()
+        var draft = SavedReviewDraft()
         draft.pending = [.init(path: "a/b.swift", line: 12, side: "RIGHT", body: "Rename this")]
         draft.composer = .init(path: "a/b.swift", line: 20, side: "LEFT", body: "half typed")
         draft.replies = ["T1": "agreed"]
@@ -24,7 +24,7 @@ final class DraftStoreTests: XCTestCase {
         store.save(draft, key: key)
         XCTAssertEqual(DraftStore(directory: dir).review(key), draft)
         XCTAssertNil(DraftStore(directory: dir).review(DraftStore.key(account: "me", host: "github.com", repo: "acme/app", number: 8)))
-        store.save(ReviewDraft(replies: ["T1": "  "], comment: "\n"), key: key)
+        store.save(SavedReviewDraft(replies: ["T1": "  "], comment: "\n"), key: key)
         XCTAssertNil(DraftStore(directory: dir).review(key))
         XCTAssertEqual((try? FileManager.default.contentsOfDirectory(atPath: dir.path))?.count ?? 0, 0)
     }

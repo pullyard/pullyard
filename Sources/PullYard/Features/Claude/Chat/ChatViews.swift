@@ -51,6 +51,10 @@ struct ChatView: View {
                             WorkingIndicator(chat: chat)
                                 .transition(.opacity)
                         }
+                        if chat.budgetPaused {
+                            BudgetPausedBanner(chat: chat)
+                                .transition(.pop)
+                        }
                         if let e = chat.lastError {
                             ErrorBanner(text: e, retry: { app.claude.restart(tab) }, reconnect: { app.claude.reconnect(tab) })
                                 .transition(.pop)
@@ -66,7 +70,7 @@ struct ChatView: View {
                     .frame(maxWidth: .infinity)
                     .background(ChatScrollObserver(follow: follow))
                 }
-                .scrollPosition(id: topAnchor)
+                .modifier(VisibleTopTracker(follow: follow))
                 .background {
                     GeometryReader { g in
                         Color.clear.preference(key: ChatViewportKey.self, value: g.size.height)
@@ -75,8 +79,11 @@ struct ChatView: View {
                 .modifier(InitialBottomAnchor())
                 .onPreferenceChange(ChatViewportKey.self) { follow.viewportHeight = $0 }
                 .onChange(of: chat.items.count) {
-                    if case .user? = chat.items.last { follow.stick = true }
-                    scrollDown(proxy)
+                    if case .user? = chat.items.last {
+                        jumpToBottom(proxy)
+                    } else {
+                        scrollDown(proxy)
+                    }
                 }
                 .onChange(of: chat.busy) { scrollDown(proxy) }
                 .onChange(of: chat.lastError) { scrollDown(proxy) }
@@ -101,6 +108,7 @@ struct ChatView: View {
                             JumpToLatestButton(newCount: max(0, chat.items.count - (awayCount ?? chat.items.count))) {
                                 follow.stick = true
                                 withAnimation(Motion.reduced ? nil : .spring(response: 0.55, dampingFraction: 0.86)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { scrollDown(proxy) }
                             }
                             .padding(.bottom, 16)
                             .transition(Motion.reduced ? .opacity : .asymmetric(
@@ -138,13 +146,6 @@ struct ChatView: View {
         .onDrop(of: ChatDropDelegate.types, delegate: ChatDropDelegate(chat: chat))
     }
 
-    private var topAnchor: Binding<String?> {
-        Binding(get: { follow.stick ? nil : follow.topID }, set: { id in
-            follow.topID = id
-            if !follow.resizing { follow.keptTopID = id }
-        })
-    }
-
     private func unlessPinned(_ animation: Animation?) -> Animation? {
         follow.stick ? nil : animation
     }
@@ -178,6 +179,21 @@ struct ChatView: View {
     }
 }
 
+private struct VisibleTopTracker: ViewModifier {
+    let follow: ChatFollow
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.onScrollTargetVisibilityChange(idType: String.self, threshold: 0.01) { ids in
+                follow.topID = ids.first
+                if !follow.resizing { follow.keptTopID = ids.first }
+            }
+        } else {
+            content
+        }
+    }
+}
+
 @Observable
 final class ChatFollow {
     var stick = true
@@ -208,6 +224,9 @@ private struct ChatScrollObserver: NSViewRepresentable {
         private weak var scroll: NSScrollView?
         private var observers: [NSObjectProtocol] = []
         private var lastWidth: CGFloat = 0
+        private var lastOriginY: CGFloat = 0
+        private var lastDocHeight: CGFloat = 0
+        private var lastClipHeight: CGFloat = 0
         private var restoreUntil = Date.distantPast
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -274,11 +293,35 @@ private struct ChatScrollObserver: NSViewRepresentable {
                     self.follow?.resizing = false
                 }
             }
+            trackManualScroll(clip: clip, doc: doc, follow: follow)
             guard follow.stick, resized || restoreUntil > Date() else { return }
             let y = max(0, doc.frame.height - clip.bounds.height)
             guard abs(clip.bounds.origin.y - y) > 0.5 else { return }
             clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
             s.reflectScrolledClipView(clip)
+        }
+
+        private func trackManualScroll(clip: NSClipView, doc: NSView, follow: ChatFollow) {
+            let originY = clip.bounds.origin.y
+            let docHeight = doc.frame.height
+            let clipHeight = clip.bounds.height
+            defer {
+                lastOriginY = originY
+                lastDocHeight = docHeight
+                lastClipHeight = clipHeight
+            }
+            guard restoreUntil < Date(),
+                  abs(docHeight - lastDocHeight) < 0.5,
+                  abs(clipHeight - lastClipHeight) < 0.5,
+                  let type = NSApp.currentEvent?.type,
+                  [.leftMouseDown, .leftMouseDragged, .keyDown, .scrollWheel].contains(type) else { return }
+            let distance = docHeight - clip.bounds.maxY
+            if follow.stick, originY < lastOriginY - 0.5, distance > 48 {
+                follow.lastUserScroll = Date()
+                follow.stick = false
+            } else if !follow.stick, originY > lastOriginY + 0.5, distance < 24 {
+                follow.stick = true
+            }
         }
 
         private var distanceToBottom: CGFloat {
@@ -293,6 +336,7 @@ private struct ChatScrollObserver: NSViewRepresentable {
             guard s.bounds.contains(point) else { return }
             follow?.lastUserScroll = Date()
             if event.scrollingDeltaY > 0 {
+                if innerScrollCanScrollUp(at: event, outer: s) { return }
                 let scrollable = (s.documentView?.frame.height ?? 0) > s.contentView.bounds.height + 1
                 if scrollable, follow?.stick == true { follow?.stick = false }
                 return
@@ -302,6 +346,15 @@ private struct ChatScrollObserver: NSViewRepresentable {
                 guard let self, let follow = self.follow else { return }
                 if !follow.stick, self.distanceToBottom < 24 { follow.stick = true }
             }
+        }
+
+        private func innerScrollCanScrollUp(at event: NSEvent, outer: NSScrollView) -> Bool {
+            guard let root = event.window?.contentView,
+                  let inner = root.hitTest(event.locationInWindow)?.enclosingScrollView,
+                  inner !== outer,
+                  let doc = inner.documentView else { return false }
+            let clip = inner.contentView.bounds
+            return doc.frame.height > clip.height + 1 && clip.minY > 0.5
         }
     }
 }
@@ -446,8 +499,8 @@ struct ChatWelcome: View {
         let git = tab?.git
         if let git, !git.changes.isEmpty {
             out.append(Suggestion(icon: "eye", title: "Review my uncommitted changes", prompt: "Review my uncommitted changes (git diff HEAD). Point out bugs, risky parts and missing tests."))
-            if let branch = git.branch, branch != "HEAD", git.remote != nil {
-                out.append(Suggestion(icon: "arrow.triangle.pull", title: "Open a pull request", prompt: AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: true, ahead: git.ahead, kind: git.remote?.kind ?? .github)))
+            if let branch = git.branch, branch != "HEAD", let remote = git.remote {
+                out.append(Suggestion(icon: "arrow.triangle.pull", title: "Open a \(remote.noun)", prompt: AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: true, ahead: git.ahead, remote: remote)))
             }
         }
         if let tab, let pr = app.claude.pullRequest(for: tab) {

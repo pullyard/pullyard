@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using PullYard.Core.Git;
+using PullYard.Core.Jira;
 using PullYard.Core.Util;
 
 namespace PullYard.Core.Claude;
@@ -9,7 +10,13 @@ public static partial class AgentShip
 {
     private static readonly string[] DefaultBranches = { "main", "master", "develop" };
 
-    public static string OpenPRPrompt(string branch, string? defaultBranch, bool hasChanges, int ahead, GitRemoteKind kind = GitRemoteKind.GitHub)
+    public static string OpenPRPrompt(string branch, string? defaultBranch, bool hasChanges, int ahead, GitRemote? remote = null) =>
+        OpenPRPrompt(branch, defaultBranch, hasChanges, ahead, remote?.Kind ?? GitRemoteKind.GitHub, remote);
+
+    public static string OpenPRPrompt(string branch, string? defaultBranch, bool hasChanges, int ahead, GitRemoteKind kind) =>
+        OpenPRPrompt(branch, defaultBranch, hasChanges, ahead, kind, null);
+
+    private static string OpenPRPrompt(string branch, string? defaultBranch, bool hasChanges, int ahead, GitRemoteKind kind, GitRemote? remote)
     {
         var onDefault = defaultBranch is not null ? defaultBranch == branch : DefaultBranches.Contains(branch);
         var steps = new List<string>();
@@ -20,27 +27,59 @@ public static partial class AgentShip
         else if (ahead == 0 && !onDefault)
             steps.Add("There are no local changes or unpushed commits. If there is nothing to open a pull request for, say so and stop.");
         steps.Add("Push the branch to origin and set the upstream.");
+        if (!onDefault && JiraFollowUp.ShipStep(branch) is { } jira) steps.Add(jira);
+        var target = defaultBranch ?? "the default branch";
         const string details = "Write a concise title and a description with a short summary, the list of changes and how it was tested.";
-        steps.Add(kind switch
+        switch (kind)
         {
-            GitRemoteKind.GitHub => $"Open a pull request with `gh pr create`. {details}",
-            GitRemoteKind.GitLab => $"Open a merge request with `glab mr create`. If `glab` is not installed, push with `-o merge_request.create` instead. {details}",
-            _ => $"Open a pull request with the CLI for this host if one is installed (for example `tea` or `bb`). If none is available, do not guess: reply with the web URL where it can be created. {details}"
-        });
+            case GitRemoteKind.GitHub:
+                steps.Add($"Open a pull request with `gh pr create`. {details}");
+                steps.Add("Reply with the pull request URL on its own line.");
+                break;
+            case GitRemoteKind.GitLab:
+                steps.Add($"Open a merge request into {target}. If `glab` is installed and signed in, use `glab mr create` with a concise title and a description (short summary, list of changes, how it was tested). Otherwise create it while pushing: `git push -u origin HEAD -o merge_request.create -o merge_request.target=<target branch> -o merge_request.title=\"<title>\"`, then show the description you would add.");
+                steps.Add("Reply with the merge request URL on its own line.");
+                break;
+            case GitRemoteKind.Bitbucket when remote is not null:
+                steps.Add("Bitbucket has no command-line tool for pull requests here, so do not try to create it. Write a concise title and a description (short summary, list of changes, how it was tested) for me to paste.");
+                steps.Add($"Reply with the create link {remote.NewRequestUrl(branch)} on its own line.");
+                break;
+            case GitRemoteKind.Other when remote is not null:
+                steps.Add("If the push output contains a link to create a pull request, reply with it on its own line, together with a concise title and description. Otherwise just confirm the push.");
+                break;
+            default:
+                steps.Add($"Open a pull request with the CLI for this host if one is installed (for example `tea` or `bb`). If none is available, do not guess: reply with the web URL where it can be created. {details}");
+                steps.Add("Reply with the pull request URL on its own line.");
+                break;
+        }
         var noun = GitRemote.RequestNoun(kind);
-        steps.Add($"Reply with the {noun} URL on its own line.");
         return $"Open a {noun} for this work:\n" + string.Join("\n", steps.Select((s, i) => $"{i + 1}. {s}"));
     }
 
     public static string CommitPrompt(int pr) =>
         $"Commit the current changes with a clear message and push them so pull request #{pr} is updated. Reply with a one-line summary.";
 
-    [GeneratedRegex(@"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-/]+/(pull|pulls|pull-requests|-/merge_requests)/\d+")]
+    public static readonly string[] CreateCommands = { "gh pr create", "glab mr create", "merge_request.create" };
+
+    [GeneratedRegex(@"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+/pulls?/\d+")]
     private static partial Regex PullUrl();
 
-    public static string? PullRequestUrl(string? text) => text is null ? null : PullUrl().Match(text) is { Success: true } m ? m.Value : null;
+    [GeneratedRegex(@"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-/]+/-/merge_requests/\d+")]
+    private static partial Regex MergeRequestUrl();
 
-    public static bool CreatesPullRequest(ToolItem tool) => tool.Name == "Bash" && (tool.Input.Str("command") ?? "").Contains("gh pr create");
+    [GeneratedRegex(@"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+/pull-requests/\d+")]
+    private static partial Regex BitbucketPullUrl();
+
+    public static string? PullRequestUrl(string? text)
+    {
+        if (text is null) return null;
+        return new[] { PullUrl().Match(text), MergeRequestUrl().Match(text), BitbucketPullUrl().Match(text) }
+            .Where(m => m.Success)
+            .OrderBy(m => m.Index)
+            .FirstOrDefault()?.Value;
+    }
+
+    public static bool CreatesPullRequest(ToolItem tool) => tool.Name == "Bash" && tool.Input.Str("command") is { } command && CreateCommands.Any(command.Contains);
 
     public static string? CreatedPullRequest(ToolItem tool)
     {
@@ -48,12 +87,24 @@ public static partial class AgentShip
         return PullRequestUrl(tool.ResultText) ?? PullRequestUrl(tool.Structured.Str("stdout"));
     }
 
-    public static (int Number, string Repo)? ParsePullRequestUrl(string url)
+    public static (int Number, string Repo)? ParsePullRequestUrl(string url) =>
+        Describe(url) is { } r && int.TryParse(r.Number, out var n) ? (n, r.Repo) : null;
+
+    public static CreatedRequest? Describe(string url)
     {
-        var parts = url.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 5 || !int.TryParse(parts[^1], out var n)) return null;
-        return (n, $"{parts[2]}/{parts[3]}");
+        var number = url.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "";
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return number.Length > 0 ? new CreatedRequest("", number, false) : null;
+        var parts = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var i = Array.IndexOf(parts, "-");
+        if (i >= 0 && parts.Length > i + 1 && parts[i + 1] == "merge_requests")
+            return new CreatedRequest(string.Join("/", parts[..i]), number, true);
+        return new CreatedRequest(parts.Length >= 2 ? $"{parts[0]}/{parts[1]}" : "", number, false);
     }
+}
+
+public sealed record CreatedRequest(string Repo, string Number, bool MergeRequest)
+{
+    public string Title => MergeRequest ? $"Merge request !{Number} is open" : $"Pull request #{Number} is open";
 }
 
 public enum WelcomeSuggestionKind { ReviewChanges, OpenPR, AddressReview, ExplainStructure, FindBugs, WriteTests }
@@ -62,14 +113,20 @@ public sealed record WelcomeSuggestion(WelcomeSuggestionKind Kind, string Prompt
 
 public static class AgentWelcome
 {
-    public static List<WelcomeSuggestion> Suggestions(int changed, string? branch, bool hasRepo, int ahead, int? prNumber, string? prUrl, GitRemoteKind kind = GitRemoteKind.GitHub)
+    public static List<WelcomeSuggestion> Suggestions(int changed, string? branch, bool hasRepo, int ahead, int? prNumber, string? prUrl, GitRemoteKind kind = GitRemoteKind.GitHub) =>
+        Build(changed, branch, hasRepo, null, kind, ahead, prNumber, prUrl);
+
+    public static List<WelcomeSuggestion> Suggestions(int changed, string? branch, GitRemote? remote, int ahead, int? prNumber, string? prUrl) =>
+        Build(changed, branch, remote is not null, remote, remote?.Kind ?? GitRemoteKind.GitHub, ahead, prNumber, prUrl);
+
+    private static List<WelcomeSuggestion> Build(int changed, string? branch, bool canOpen, GitRemote? remote, GitRemoteKind kind, int ahead, int? prNumber, string? prUrl)
     {
         var list = new List<WelcomeSuggestion>();
         if (changed > 0)
         {
             list.Add(new(WelcomeSuggestionKind.ReviewChanges, "Review my uncommitted changes (git diff HEAD). Point out bugs, risky parts and missing tests."));
-            if (branch is { Length: > 0 } b && b != "HEAD" && hasRepo && prNumber is null)
-                list.Add(new(WelcomeSuggestionKind.OpenPR, AgentShip.OpenPRPrompt(b, null, true, ahead, kind)));
+            if (branch is { Length: > 0 } b && b != "HEAD" && canOpen && prNumber is null)
+                list.Add(new(WelcomeSuggestionKind.OpenPR, remote is null ? AgentShip.OpenPRPrompt(b, null, true, ahead, kind) : AgentShip.OpenPRPrompt(b, null, true, ahead, remote)));
         }
         if (prNumber is { } n)
         {

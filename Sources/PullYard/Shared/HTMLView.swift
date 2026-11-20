@@ -4,6 +4,7 @@ import WebKit
 struct HTMLView: NSViewRepresentable {
     let html: String
     var scrollToBottomToken = 0
+    var focusThreadToken = 0
     var onAction: (String, String) -> Void = { _, _ in }
     var onLink: (URL) -> Void = { LinkBrowser.open($0) }
     var zoom = TextZoom.shared.scale
@@ -27,6 +28,7 @@ struct HTMLView: NSViewRepresentable {
         view.allowsMagnification = true
         view.pageZoom = zoom
         context.coordinator.render(in: view, html: html, token: scrollToBottomToken)
+        context.coordinator.focus(in: view, token: focusThreadToken)
         return view
     }
 
@@ -34,7 +36,12 @@ struct HTMLView: NSViewRepresentable {
         context.coordinator.parent = self
         if view.pageZoom != zoom { view.pageZoom = zoom }
         context.coordinator.render(in: view, html: html, token: scrollToBottomToken)
+        context.coordinator.focus(in: view, token: focusThreadToken)
     }
+
+    static let focusScript = """
+    (function(){var t=[].slice.call(document.querySelectorAll('details.thread[data-unresolved]'));if(!t.length)return 0;var y=window.scrollY+20;var n=t.find(function(e){return e.getBoundingClientRect().top+window.scrollY>y;})||t[0];n.open=true;n.scrollIntoView({block:'start',behavior:'smooth'});t.forEach(function(e){e.classList.remove('focus');});n.classList.add('focus');setTimeout(function(){n.classList.remove('focus');},1600);return t.length;})()
+    """
 
     static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
         view.configuration.userContentController.removeScriptMessageHandler(forName: "app")
@@ -53,6 +60,8 @@ struct HTMLView: NSViewRepresentable {
         weak var webView: PullWebView?
         private var html = ""
         private var token = 0
+        private var focusToken = 0
+        private var pendingFocus = false
         private var restoreY: Double?
         private var scrollBottom = false
         private var loading = false
@@ -61,6 +70,17 @@ struct HTMLView: NSViewRepresentable {
         init(_ parent: HTMLView) {
             self.parent = parent
             self.token = parent.scrollToBottomToken
+            self.focusToken = parent.focusThreadToken
+        }
+
+        func focus(in view: WKWebView, token: Int) {
+            guard token != focusToken else { return }
+            focusToken = token
+            if ready, !loading {
+                view.evaluateJavaScript(HTMLView.focusScript)
+            } else {
+                pendingFocus = true
+            }
         }
 
         func render(in view: WKWebView, html: String, token: Int) {
@@ -129,6 +149,10 @@ struct HTMLView: NSViewRepresentable {
                 self.webView?.atTop = ((y as? Double) ?? 0) <= 0
             }
             restoreY = nil
+            if pendingFocus {
+                pendingFocus = false
+                webView.evaluateJavaScript(HTMLView.focusScript)
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

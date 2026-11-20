@@ -19,6 +19,7 @@ struct SettingsView: View {
     @State private var refreshingToken = false
     @AppStorage("clipboard.watch") private var watchClipboard = true
     @AppStorage("settings.tab") private var tab = "general"
+    @AppStorage(SessionCost.budgetKey) private var sessionBudget = 0.0
     @AppStorage(Updater.autoCheckKey) private var autoCheckUpdates = true
     @AppStorage(Diagnostics.enabledKey) private var diagnosticsEnabled = false
     @Environment(\.openWindow) private var openWindow
@@ -213,6 +214,14 @@ struct SettingsView: View {
                         }
                     }
                     Text("Model, permission mode and sleep settings are in the Agents tab.")
+                        .font(.syCaption)
+                        .foregroundStyle(Color.syMuted)
+                    Picker("Pause a session at", selection: $sessionBudget) {
+                        ForEach(SessionCost.choices, id: \.self) { v in
+                            Text(v == 0 ? "No limit" : SessionCost.format(v)).tag(v)
+                        }
+                    }
+                    Text("When an agent session's reported cost reaches the limit, new messages wait until you continue. Useful with API keys, OpenRouter or another endpoint; with a Claude plan the cost is an estimate.")
                         .font(.syCaption)
                         .foregroundStyle(Color.syMuted)
                 } header: {

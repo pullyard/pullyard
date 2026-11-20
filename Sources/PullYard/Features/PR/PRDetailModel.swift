@@ -49,7 +49,7 @@ struct PRReviewer: Hashable {
 @MainActor
 final class PRDetailModel {
     let ref: ItemRef
-    let api: GitHubAPI
+    let backend: PRBackend
 
     var repo: PRRepository?
     var pr: PullRequestDetail?
@@ -88,7 +88,7 @@ final class PRDetailModel {
     @ObservationIgnored var inspectorFilesVisible = false {
         didSet { ensureFiles() }
     }
-    @ObservationIgnored private var pulse: PRPulse?
+    @ObservationIgnored private var pulse: PRPulseToken?
     @ObservationIgnored private var needsFull = false
     @ObservationIgnored private var fullReason: String?
     @ObservationIgnored private var manualRefresh = false
@@ -118,6 +118,7 @@ final class PRDetailModel {
     @ObservationIgnored private var interdiffKey: String?
     var html = ""
     var scrollToBottomToken = 0
+    var threadFocusToken = 0
     var conflicts: ConflictState?
     var showResolveConflicts = false
     @ObservationIgnored private var conflictsKey: String?
@@ -143,11 +144,11 @@ final class PRDetailModel {
     @ObservationIgnored private var draftSave: DispatchWorkItem?
 
     private var draftKey: String {
-        DraftStore.key(account: cacheAccount, host: api.host, repo: ref.repo.full, number: ref.number)
+        DraftStore.key(account: cacheAccount, host: api?.host ?? "\(provider)", repo: ref.repo.full, number: ref.number)
     }
 
-    var currentDraft: ReviewDraft {
-        ReviewDraft(
+    var currentDraft: SavedReviewDraft {
+        SavedReviewDraft(
             pending: pending.map { .init(path: $0.path, line: $0.line, side: $0.side, body: $0.body) },
             composer: composer.map { .init(path: $0.path, line: $0.line, side: $0.side, body: composerDraft) },
             replies: replyDrafts.filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
@@ -196,12 +197,27 @@ final class PRDetailModel {
     private var threadIndex: [String: [ReviewThread]] = [:]
     private var outdatedByPath: [String: [ReviewThread]] = [:]
 
-    init(ref: ItemRef, api: GitHubAPI) {
+    init(ref: ItemRef, backend: PRBackend) {
         self.ref = ref
-        self.api = api
+        self.backend = backend
     }
 
+    convenience init(ref: ItemRef, api: GitHubAPI) {
+        self.init(ref: ref, backend: GitHubPRBackend(api: api))
+    }
+
+    var api: GitHubAPI? { backend.github }
+    var features: PRFeatures { backend.features }
+    var provider: GitProvider { backend.features.provider }
+
     var canWrite: Bool { repo?.canWrite ?? false }
+
+    var diffStat: (additions: Int, deletions: Int)? {
+        guard let pr else { return nil }
+        if provider.isGitHub || pr.additions + pr.deletions > 0 { return (pr.additions, pr.deletions) }
+        guard filesLoaded else { return nil }
+        return (files.reduce(0) { $0 + $1.additions }, files.reduce(0) { $0 + $1.deletions })
+    }
 
     var reviewers: [PRReviewer] {
         guard let pr else { return [] }
@@ -219,7 +235,8 @@ final class PRDetailModel {
 
     var ownership: OwnershipSummary? {
         guard let pr, case .loaded(let owners) = codeOwners else { return nil }
-        return OwnershipSummary.build(owners: owners, files: changedPaths, pr: pr)
+        let paths = changedPaths.isEmpty ? files.map(\.id) : changedPaths
+        return OwnershipSummary.build(owners: owners, files: paths, pr: pr)
     }
 
     var lastReviewed: ReviewedCommit? {
@@ -230,7 +247,7 @@ final class PRDetailModel {
     var displayedFiles: [DiffFile] { diffScope == .sinceReview ? interdiffFiles : files }
 
     func loadInterdiff(force: Bool = false) async {
-        guard let pr, let reviewed = lastReviewed else {
+        guard let pr, let reviewed = lastReviewed, let api else {
             diffScope = .all
             return
         }
@@ -246,7 +263,7 @@ final class PRDetailModel {
             interdiffKey = key
             interdiffError = nil
             interdiffRebased = reviewed.rewritten || (result.behindBy ?? 0) > 0
-            collapsed.subtract(parsed.map(\.id))
+            collapsed.subtract(parsed.map { $0.id })
             filesVersion += 1
         } catch {
             if isCancellation(error) { return }
@@ -255,10 +272,23 @@ final class PRDetailModel {
     }
 
     func publishContext() {
-        guard let pr else { return }
+        guard let pr, let api else { return }
         let key = StackNotesFile.key(account: cacheAccount, host: api.host, repo: ref.repo.full, number: ref.number)
         let snapshot = PRContextPublisher.snapshot(ref: ref, pr: pr, requirements: requirements, ownership: ownership, files: changedPaths, reviewed: lastReviewed)
         Task.detached(priority: .utility) { try? PRContextStore.write(snapshot, key: key) }
+    }
+
+    func nextUnresolvedThread() {
+        tab = .conversation
+        threadFocusToken += 1
+    }
+
+    var risks: [RiskLabel] {
+        guard let pr else { return [] }
+        let list: [RiskFile] = filesLoaded && !files.isEmpty
+            ? files.map { RiskFile(path: $0.id, additions: $0.additions, deletions: $0.deletions) }
+            : changedPaths.map { RiskFile(path: $0, additions: 0, deletions: 0) }
+        return PRRisk.labels(files: list, additions: pr.additions, deletions: pr.deletions, changedFiles: pr.changedFiles, unowned: ownership?.unowned)
     }
 
     var requirements: [MergeRequirement] {
@@ -342,8 +372,8 @@ final class PRDetailModel {
             }
         }
         do {
-            let r = try await Diagnostics.$note.withValue("full: \(reason)") { try await api.pullRequest(ref) }
-            viewerLogin = r.viewer.login
+            let r = try await Diagnostics.$note.withValue("full: \(reason)") { try await backend.load(ref) }
+            viewerLogin = r.viewer
             guard let repo = r.repository, let pr = repo.pullRequest else {
                 notPR = true
                 return
@@ -393,7 +423,7 @@ final class PRDetailModel {
             var pages = 0
             while let after = next, pages < 30 {
                 guard let self, !Task.isCancelled else { return }
-                guard let page = try? await self.api.pullRequestFilesPage(self.ref, after: after), !Task.isCancelled else { return }
+                guard let api = self.api, let page = try? await api.pullRequestFilesPage(self.ref, after: after), !Task.isCancelled else { return }
                 self.viewedPaths.formUnion(page.viewedPaths)
                 self.changedPaths += page.nodes.map(\.path)
                 next = page.nextCursor
@@ -404,14 +434,14 @@ final class PRDetailModel {
     }
 
     private func loadCodeOwners(_ pr: PullRequestDetail) {
-        guard let base = pr.baseTipOid else { return }
+        guard let base = pr.baseTipOid, !base.isEmpty else { return }
         let key = "\(ref.repo.full)|\(base)"
         guard key != ownersKey else { return }
         ownersKey = key
         Task(priority: .utility) { [weak self] in
             guard let self else { return }
             do {
-                let owners = try await self.api.codeOwners(self.ref.repo, ref: base)
+                let owners = try await self.backend.codeOwners(self.ref, base: base)
                 guard self.ownersKey == key else { return }
                 self.codeOwners = owners.map { .loaded($0) } ?? .missing
                 self.publishContext()
@@ -424,6 +454,7 @@ final class PRDetailModel {
     }
 
     private func loadRules(_ pr: PullRequestDetail, force: Bool) {
+        guard api != nil else { return }
         let key = "\(ref.repo.full)|\(pr.baseRefName)"
         let fresh = rulesFetched.map { Date().timeIntervalSince($0) < 300 } ?? false
         if !force, key == rulesKey, fresh || branchRules == .loading { return }
@@ -434,7 +465,8 @@ final class PRDetailModel {
         Task(priority: .utility) { [weak self] in
             guard let self else { return }
             do {
-                let rules = try await self.api.branchRules(self.ref.repo, branch: pr.baseRefName, admin: admin)
+                guard let api = self.api else { return }
+                let rules = try await api.branchRules(self.ref.repo, branch: pr.baseRefName, admin: admin)
                 guard self.rulesKey == key else { return }
                 self.branchRules = .loaded(rules)
                 self.publishContext()
@@ -451,7 +483,7 @@ final class PRDetailModel {
     private func pulseCheck() async -> PulseResult {
         guard let known = pulse else { return .changed }
         do {
-            guard let current = try await api.pullRequestPulse(ref) else { return .changed }
+            guard let current = try await backend.pulse(ref) else { return .changed }
             guard current == known else { return .changed }
             refreshError = nil
             lastUpdated = Date()
@@ -470,7 +502,7 @@ final class PRDetailModel {
     }
 
     private func updateConflicts(_ pr: PullRequestDetail, force: Bool = false) {
-        guard MergeConflicts.applies(pr) else {
+        guard features.localConflicts, MergeConflicts.applies(pr) else {
             if pr.isOpen, pr.mergeable == "UNKNOWN", conflicts != nil { return }
             conflictScan?.cancel()
             conflictsKey = nil
@@ -534,12 +566,13 @@ final class PRDetailModel {
     }
 
     private func invalidateStack() {
+        guard let api else { return }
         StackStore.invalidate(api: api, repo: ref.repo, account: cacheAccount)
         stackRequest = true
     }
 
     func loadStack(force: Bool = false) async {
-        guard let pr else { return }
+        guard features.stack, let pr, let api else { return }
         stackKey = stackCacheKey(pr)
         if let hit = await StackStore.cached(api: api, repo: ref.repo, account: cacheAccount) {
             applyStack(hit.nodes)
@@ -593,10 +626,11 @@ final class PRDetailModel {
         guard force || (!filesLoaded && !filesLoading) else { return }
         filesLoading = true
         defer { filesLoading = false }
-        let oid = pr?.headRefOid
+        guard let pr else { return }
+        let oid = pr.headRefOid
         let mark = filesStaleMark
         do {
-            let raw = try await api.pullRequestFiles(ref)
+            let raw = try await backend.files(ref, pr: pr)
             let parsed = await Task.detached(priority: .userInitiated) { raw.map(DiffFile.init) }.value
             if !filesLoaded {
                 collapsed = Set(parsed.filter { viewedPaths.contains($0.id) || $0.lines.count > 1500 }.map(\.id))
@@ -721,7 +755,7 @@ final class PRDetailModel {
 
     func comment(_ body: String) async -> Bool {
         guard let pr else { return false }
-        let ok = await run { try await api.addComment(subject: pr.id, body: body) }
+        let ok = await run { try await backend.comment(ref, pr: pr, body: body) }
         if ok { scrollToBottomToken += 1 }
         return ok
     }
@@ -729,7 +763,8 @@ final class PRDetailModel {
     func submitReview(event: String, body: String) async -> Bool {
         guard let pr else { return false }
         let comments = pending
-        let ok = await run { try await api.addReview(pr: pr.id, event: event, body: body, comments: comments) }
+        let files = files
+        let ok = await run { try await backend.submitReview(ref, pr: pr, event: event, body: body, comments: comments, files: files) }
         if ok {
             pending = []
             summaryDraft = ""
@@ -744,7 +779,8 @@ final class PRDetailModel {
         let c = PendingComment(path: anchor.path, line: anchor.line, side: anchor.side, body: body)
         if immediately {
             guard let pr else { return false }
-            let ok = await run { try await api.addReview(pr: pr.id, event: "COMMENT", body: nil, comments: [c]) }
+            let files = files
+            let ok = await run { try await backend.submitReview(ref, pr: pr, event: "COMMENT", body: "", comments: [c], files: files) }
             if ok {
                 composer = nil
                 composerDraft = ""
@@ -758,11 +794,29 @@ final class PRDetailModel {
     }
 
     func reply(_ threadId: String, body: String) async -> Bool {
-        await run { try await api.mutate(Q.replyThread, ["id": threadId, "b": body]) }
+        await run { try await backend.reply(ref, thread: threadId, body: body) }
+    }
+
+    func closeLoop(_ threads: [ReviewThread], body: String, resolve: Bool) async -> [String: String] {
+        var failures: [String: String] = [:]
+        busy = true
+        for t in threads {
+            do {
+                try await backend.reply(ref, thread: t.id, body: body)
+                if resolve, t.viewerCanResolve {
+                    try await backend.setResolved(ref, thread: t.id, resolved: true)
+                }
+            } catch {
+                failures[t.id] = error.localizedDescription
+            }
+        }
+        busy = false
+        await load()
+        return failures
     }
 
     func setResolved(_ threadId: String, _ resolved: Bool) async {
-        await run { try await api.mutate(resolved ? Q.resolveThread : Q.unresolveThread, ["id": threadId]) }
+        await run { try await backend.setResolved(ref, thread: threadId, resolved: resolved) }
     }
 
     func merge(method: String, title: String?, body: String?, deleteBranch: Bool) async -> Bool {
@@ -770,14 +824,7 @@ final class PRDetailModel {
         invalidateStack()
         var branchError: String?
         let ok = await run {
-            try await api.mutate(Q.merge, ["id": pr.id, "m": method, "t": title, "b": body])
-            if deleteBranch, let head = pr.headRepository?.nameWithOwner {
-                do {
-                    try await api.deleteBranch(repo: head, branch: pr.headRefName)
-                } catch {
-                    branchError = error.localizedDescription
-                }
-            }
+            branchError = try await backend.merge(ref, pr: pr, method: method, title: title, body: body, deleteBranch: deleteBranch)
         }
         if ok, let branchError {
             deferredError = "Merged, but the branch \(pr.headRefName) couldn’t be deleted: \(branchError)"
@@ -787,28 +834,33 @@ final class PRDetailModel {
 
     func enableAutoMerge(method: String) async -> Bool {
         guard let pr else { return false }
-        return await run { try await api.mutate(Q.enableAutoMerge, ["id": pr.id, "m": method]) }
+        return await run { try await backend.enableAutoMerge(ref, pr: pr, method: method) }
     }
 
     @discardableResult
-    func simple(_ mutation: String) async -> Bool {
+    func simple(_ action: PRAction) async -> Bool {
         guard let pr else { return false }
         invalidateStack()
-        return await run { try await api.mutate(mutation, ["id": pr.id]) }
+        return await run { try await backend.perform(action, ref: ref, pr: pr) }
+    }
+
+    func revokeApproval() async {
+        guard let pr else { return }
+        await run { try await backend.revokeApproval(ref, pr: pr) }
     }
 
     func edit(title: String, body: String) async -> Bool {
         guard let pr else { return false }
-        return await run { try await api.mutate(Q.editPR, ["id": pr.id, "t": title, "b": body]) }
+        return await run { try await backend.edit(ref, pr: pr, title: title, body: body) }
     }
 
     func requestReviewers(_ logins: [String]) async -> Bool {
-        await run { try await api.requestReviewers(ref, logins: logins) }
+        await run { try await backend.requestReviewers(ref, logins: logins) }
     }
 
     func deleteBranch() async {
-        guard let pr, let head = pr.headRepository?.nameWithOwner else { return }
-        await run { try await api.deleteBranch(repo: head, branch: pr.headRefName) }
+        guard let pr else { return }
+        await run { try await backend.deleteBranch(ref, pr: pr) }
     }
 
     func toggleViewed(_ path: String, scroll: Bool = true) async {
@@ -826,7 +878,7 @@ final class PRDetailModel {
             }
         }
         let ok = await run(reload: false) {
-            try await api.mutate(viewed ? Q.unmarkViewed : Q.markViewed, ["id": pr.id, "p": path])
+            try await backend.setViewed(ref, pr: pr, path: path, viewed: !viewed)
         }
         if !ok {
             if viewed { viewedPaths.insert(path) } else { viewedPaths.remove(path) }
@@ -836,8 +888,6 @@ final class PRDetailModel {
 
     func rerunFailed() async {
         let runs = Set((pr?.checks ?? []).filter { $0.outcome == .failure }.compactMap(\.runId))
-        await run {
-            for id in runs { try await api.rerunFailedJobs(repo: ref.repo, runId: id) }
-        }
+        await run { try await backend.rerunFailed(ref, runs: runs) }
     }
 }

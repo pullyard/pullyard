@@ -125,14 +125,14 @@ public static class Dialogs
         panel.Children.Add(text);
         var radios = new RadioButtons();
         var comment = new RadioButton { Content = L.T("Review_CommentOnly", "Comment — without approval"), Tag = "COMMENT", IsChecked = true };
-        var approve = new RadioButton { Content = L.T("PR_Approve", "Approve"), Tag = "APPROVE", IsEnabled = !pr.ViewerDidAuthor };
-        var changes = new RadioButton { Content = L.T("Review_RequestChanges", "Request changes"), Tag = "REQUEST_CHANGES", IsEnabled = !pr.ViewerDidAuthor };
+        var approve = new RadioButton { Content = L.T("PR_Approve", "Approve"), Tag = "APPROVE", IsEnabled = model.CanApprove };
         radios.Items.Add(comment);
         radios.Items.Add(approve);
-        radios.Items.Add(changes);
+        if (model.Features.RequestChanges)
+            radios.Items.Add(new RadioButton { Content = L.T("Review_RequestChanges", "Request changes"), Tag = "REQUEST_CHANGES", IsEnabled = !pr.ViewerDidAuthor });
         radios.SelectedIndex = 0;
         panel.Children.Add(radios);
-        var d = Create(root, L.F("Review_Title", "Review #{0}", pr.Number), panel, L.T("Review_Submit", "Submit review"), model.PendingCount > 0 ? L.T("Review_Discard", "Discard pending comments") : null);
+        var d = Create(root, L.F("Review_Title", "Review {0}", model.NumberText), panel, L.T("Review_Submit", "Submit review"), model.PendingCount > 0 ? L.T("Review_Discard", "Discard pending comments") : null);
         string Event() => (radios.SelectedItem as RadioButton)?.Tag as string ?? "COMMENT";
         void Validate() => d.IsPrimaryButtonEnabled = Event() == "APPROVE" || text.Text.Trim().Length > 0 || model.PendingCount > 0;
         text.TextChanged += (_, _) =>
@@ -162,17 +162,17 @@ public static class Dialogs
             _ => repo.RebaseMergeAllowed
         }).ToList();
         var methods = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, Header = L.T("Merge_Method", "Method") };
-        foreach (var m in allowed) methods.Items.Add(new ComboBoxItem { Content = MergeMethods.Title(m), Tag = m });
+        foreach (var m in allowed) methods.Items.Add(new ComboBoxItem { Content = m == "MERGE" && model.IsGitLab ? L.T("MR_MergeMethod", "Merge") : MergeMethods.Title(m), Tag = m });
         var def = repo?.ViewerDefaultMergeMethod ?? "MERGE";
         methods.SelectedIndex = Math.Max(0, allowed.IndexOf(allowed.Contains(def) ? def : allowed.FirstOrDefault() ?? "MERGE"));
-        var title = new TextBox { PlaceholderText = L.T("Merge_TitlePlaceholder", "Commit title (GitHub default)") };
+        var title = new TextBox { PlaceholderText = model.IsGitLab ? L.T("MR_TitlePlaceholder", "Commit title (GitLab default)") : model.Features.IsBitbucket ? L.T("BB_TitlePlaceholder", "Commit title (Bitbucket default)") : L.T("Merge_TitlePlaceholder", "Commit title (GitHub default)") };
         var message = Editor(L.T("Merge_BodyPlaceholder", "Commit description (optional)"), minHeight: 80);
         var sameRepo = pr.HeadRepository?.NameWithOwner == model.Ref.Repo.Full;
         var deleteBox = new CheckBox { Content = L.F("Merge_DeleteBranch", "Delete branch {0} after merge", pr.HeadRefName), IsChecked = true, Visibility = !(repo?.DeleteBranchOnMerge ?? false) && sameRepo ? Visibility.Visible : Visibility.Collapsed };
         string Method() => (methods.SelectedItem as ComboBoxItem)?.Tag as string ?? "MERGE";
         void Prefill()
         {
-            title.Text = Method() == "SQUASH" ? $"{pr.Title} (#{pr.Number})" : "";
+            title.Text = Method() != "SQUASH" ? "" : model.Features.IsGitHub ? $"{pr.Title} (#{pr.Number})" : pr.Title;
             var rebase = Method() == "REBASE";
             title.Visibility = rebase ? Visibility.Collapsed : Visibility.Visible;
             message.Visibility = rebase ? Visibility.Collapsed : Visibility.Visible;
@@ -180,16 +180,39 @@ public static class Dialogs
         methods.SelectionChanged += (_, _) => Prefill();
         Prefill();
         var canAuto = repo?.AutoMergeAllowed == true && pr.AutoMergeRequest is null && pr.MergeStateStatus != "CLEAN";
-        var d = Create(root, L.F("Merge_Title", "Merge #{0} into {1}", pr.Number, pr.BaseRefName), Ui.V(10, methods, title, message, deleteBox), L.T("Merge_MergeButton", "Merge"), canAuto ? L.T("Merge_EnableAuto", "Enable auto-merge") : null);
-        d.IsPrimaryButtonEnabled = allowed.Count > 0;
-        d.PrimaryButtonClick += async (_, args) =>
+        var body = Ui.V(10, methods, title, message, deleteBox);
+        var queue = model.UsesQueue;
+        if (queue)
+        {
+            var note = Ui.Text(L.F("Merge_QueueNote", "{0} uses a {1}. Add the {2} to it and it merges once the required checks pass; merging directly may be rejected.", pr.BaseRefName, model.QueueTitle, model.Provider.RequestTitle()), 12, "muted", wrap: true);
+            body.Children.Insert(0, Ui.Columns((Ui.Glyph("\ue916", 13), Ui.Auto), (note, Ui.Star)));
+        }
+        var heading = L.F("Merge_Title", "Merge {0} into {1}", model.NumberText, pr.BaseRefName);
+        var d = queue
+            ? Create(root, heading, body, L.F("Merge_AddToQueue", "Add to {0}", model.QueueTitle), L.T("Merge_MergeDirectly", "Merge directly"))
+            : Create(root, heading, body, L.T("Merge_MergeButton", "Merge"), canAuto ? L.T("Merge_EnableAuto", "Enable auto-merge") : null);
+        Task<bool> MergeNow()
         {
             var t = title.Text.Trim();
             var b = message.Text.Trim();
             var del = deleteBox.IsChecked == true && deleteBox.Visibility == Visibility.Visible;
-            await RunWhileOpen(d, () => model.Merge(Method(), t.Length == 0 ? null : t, b.Length == 0 ? null : b, del), args);
-        };
-        d.SecondaryButtonClick += async (_, args) => await RunWhileOpen(d, () => model.EnableAutoMerge(Method()), args);
+            return model.Merge(Method(), t.Length == 0 ? null : t, b.Length == 0 ? null : b, del);
+        }
+        if (queue)
+        {
+            d.IsSecondaryButtonEnabled = allowed.Count > 0;
+            d.PrimaryButtonClick += async (_, args) =>
+            {
+                if (await RunWhileOpen(d, () => model.Simple(PRAction.Enqueue), args)) ShellView.Toast(L.F("Merge_AddedToQueue", "Added to the {0}", model.QueueTitle));
+            };
+            d.SecondaryButtonClick += async (_, args) => await RunWhileOpen(d, MergeNow, args);
+        }
+        else
+        {
+            d.IsPrimaryButtonEnabled = allowed.Count > 0;
+            d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, MergeNow, args);
+            d.SecondaryButtonClick += async (_, args) => await RunWhileOpen(d, () => model.EnableAutoMerge(Method()), args);
+        }
         await ShowAsync(d);
     }
 
@@ -198,7 +221,7 @@ public static class Dialogs
         if (root is null || model.Pr is not { } pr) return;
         var title = new TextBox { Header = L.T("Edit_Title", "Title"), Text = pr.Title };
         var body = Editor(L.T("Edit_Body", "Description (Markdown)"), pr.Body, 260);
-        var d = Create(root, L.F("Edit_Header", "Edit #{0}", pr.Number), Ui.V(10, title, body), L.T("Common_Save", "Save"), maxWidth: 760);
+        var d = Create(root, L.F("Edit_Header", "Edit {0}", model.NumberText), Ui.V(10, title, body), L.T("Common_Save", "Save"), maxWidth: 760);
         title.TextChanged += (_, _) => d.IsPrimaryButtonEnabled = title.Text.Trim().Length > 0;
         d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, () => model.Edit(title.Text, body.Text), args);
         await ShowAsync(d);
@@ -210,6 +233,14 @@ public static class Dialogs
         var candidates = model.Reviewers.Where(r => r.Login != model.ViewerLogin && !r.Login.EndsWith("[bot]") && (r.IsTeam || !r.Login.Contains('/'))).ToList();
         var stale = model.ReviewersToReRequest;
         var checks = new List<(CheckBox Box, string Login)>();
+        var loads = new List<(TextBlock Label, string Handle)>();
+        TextBlock LoadLabel(string handle)
+        {
+            var t = Ui.Caption("", "dim");
+            t.Visibility = Visibility.Collapsed;
+            loads.Add((t, handle));
+            return t;
+        }
         var panel = Ui.V(8);
         if (candidates.Count > 0)
         {
@@ -219,6 +250,7 @@ public static class Dialogs
                 var content = Ui.H(6, PRContent.ReviewerBadge(r), Ui.Text(r.Login, 13));
                 if (r.IsTeam) content.Children.Add(Ui.Caption(L.T("Reviewers_Team", "team")));
                 if (r.CodeOwner) content.Children.Add(Ui.Caption(L.T("Reviewers_CodeOwner", "code owner"), "violet"));
+                content.Children.Add(LoadLabel(r.Login));
                 if (stale.Contains(r.Login)) content.Children.Add(Ui.Caption(L.T("Reviewers_Stale", "reviewed before latest push"), "amber"));
                 else if (r.State == "PENDING") content.Children.Add(Ui.Caption(L.T("Reviewers_Already", "already requested")));
                 var box = new CheckBox { Content = content, IsChecked = stale.Contains(r.Login) };
@@ -237,6 +269,7 @@ public static class Dialogs
             {
                 var content = Ui.H(6, Ui.Text(o.Handle, 13));
                 if (o.IsTeam) content.Children.Add(Ui.Caption(L.T("Reviewers_Team", "team")));
+                content.Children.Add(LoadLabel(o.Handle));
                 content.Children.Add(Ui.Caption(L.T("Owners_NotRequested", "not requested")));
                 var box = new CheckBox { Content = content };
                 checks.Add((box, o.Handle));
@@ -267,7 +300,21 @@ public static class Dialogs
         typed.TextChanged += (_, _) => Validate();
         Validate();
         d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, () => model.RequestReviewers(Requested()), args);
+        if (model.Features.IsGitHub && model.Api is { } api && loads.Count > 0) LoadReviewLoad(api, loads).Forget();
         await ShowAsync(d);
+    }
+
+    private static async Task LoadReviewLoad(GitHubApi api, List<(TextBlock Label, string Handle)> loads)
+    {
+        var counts = await ReviewLoadStore.Shared.Load(loads.Select(l => l.Handle), api);
+        foreach (var (label, handle) in loads)
+        {
+            if (!counts.TryGetValue(handle.ToLowerInvariant(), out var n)) continue;
+            label.Text = "· " + (n == 1 ? L.T("ReviewLoad_One", "1 open review") : L.F("ReviewLoad_Many", "{0} open reviews", n));
+            label.Foreground = Palette.Brush(ReviewLoad.Busy(n) ? "amber" : "dim");
+            ToolTipService.SetToolTip(label, L.F("ReviewLoad_Help", "Open pull requests waiting for {0}'s review, among those you can see", handle));
+            label.Visibility = Visibility.Visible;
+        }
     }
 
     public static async Task Reply(XamlRoot? root, PRDetailViewModel model, ReviewThread thread)
@@ -306,6 +353,281 @@ public static class Dialogs
         await ShowAsync(d);
     }
 
+    public static async Task CloseLoopThreads(XamlRoot? root, PRDetailViewModel model, IReadOnlyCollection<string> preselected)
+    {
+        if (root is null || model.Pr is not { } pr) return;
+        var threads = CloseLoop.Replyable(pr);
+        var open = threads.Select(t => t.Id).ToHashSet();
+        var selected = preselected.Where(open.Contains).ToHashSet();
+        var resolve = true;
+        var working = false;
+        var panel = Ui.V(10);
+        var text = Editor(L.T("Reply_Placeholder", "Reply (Markdown)"), CloseLoop.DefaultReply(pr.HeadRefOid), minHeight: 56);
+        text.MaxHeight = 110;
+        var d = Create(root, L.T("CloseLoop_Title", "Reply and resolve threads"), panel, "", maxWidth: 680);
+        var intro = Ui.Text("", 13, "muted", wrap: true);
+        panel.Children.Add(intro);
+        var boxes = new List<(CheckBox Box, string Id)>();
+        var errors = new Dictionary<string, TextBlock>();
+        panel.Children.Add(Ui.Columns((Ui.Text(L.T("CloseLoop_OpenThreads", "Open threads"), 12, "muted", FontWeights.SemiBold), Ui.Star),
+            (Ui.H(8, Ui.Link(L.T("Fix_All", "All"), () => SetAll(true)), Ui.Link(L.T("Fix_None", "None"), () => SetAll(false))), Ui.Auto)));
+        var list = Ui.V(4);
+        if (threads.Count == 0) list.Children.Add(Ui.Text(L.T("CloseLoop_NoOpen", "No open threads"), 13, "dim"));
+        foreach (var th in threads)
+        {
+            var label = Ui.H(6, Ui.Text(string.IsNullOrEmpty(th.Path) ? L.T("CloseLoop_Thread", "Thread") : th.Location, 12, "sky", mono: true));
+            if (th.IsOutdated) label.Children.Add(Ui.Chip(L.T("Fix_Outdated", "outdated"), "amber"));
+            var first = th.Comments.Items.FirstOrDefault();
+            label.Children.Add(Ui.Text($"@{first?.Author?.Login ?? "?"}: {first?.Body.Replace("\n", " ")}", 12, "muted"));
+            var cb = new CheckBox { Content = label, IsChecked = selected.Contains(th.Id) };
+            var id = th.Id;
+            cb.Checked += (_, _) => { selected.Add(id); Validate(); };
+            cb.Unchecked += (_, _) => { selected.Remove(id); Validate(); };
+            boxes.Add((cb, id));
+            var error = Ui.Text("", 11, "red", wrap: true);
+            error.Margin = new Thickness(28, 0, 0, 0);
+            error.Visibility = Visibility.Collapsed;
+            errors[id] = error;
+            list.Children.Add(Ui.V(1, cb, error));
+        }
+        void SetAll(bool on)
+        {
+            foreach (var (cb, _) in boxes) cb.IsChecked = on;
+        }
+        panel.Children.Add(new ScrollViewer { Content = list, MaxHeight = 240 });
+        panel.Children.Add(text);
+        var resolveBox = new CheckBox { Content = L.T("CloseLoop_Resolve", "Resolve the threads after replying"), IsChecked = true };
+        resolveBox.Checked += (_, _) => { resolve = true; Validate(); };
+        resolveBox.Unchecked += (_, _) => { resolve = false; Validate(); };
+        panel.Children.Add(resolveBox);
+        void Validate()
+        {
+            intro.Text = resolve
+                ? L.T("CloseLoop_IntroResolve", "Posts the same reply on each selected thread and resolves it. Use it once the fixes are pushed.")
+                : L.T("CloseLoop_Intro", "Posts the same reply on each selected thread. Use it once the fixes are pushed.");
+            d.PrimaryButtonText = working ? L.T("CloseLoop_Working", "Working…")
+                : resolve ? L.F("CloseLoop_ReplyResolveN", "Reply and resolve {0}", selected.Count) : L.F("CloseLoop_ReplyN", "Reply to {0}", selected.Count);
+            d.IsPrimaryButtonEnabled = !working && selected.Count > 0 && text.Text.Trim().Length > 0;
+        }
+        text.TextChanged += (_, _) => Validate();
+        Validate();
+        d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, async () =>
+        {
+            var chosen = threads.Where(t => selected.Contains(t.Id)).ToList();
+            var body = text.Text.Trim();
+            var resolving = resolve;
+            working = true;
+            foreach (var e in errors.Values) e.Visibility = Visibility.Collapsed;
+            Validate();
+            var failures = await model.ReplyAndResolve(chosen, body, resolving);
+            working = false;
+            Validate();
+            foreach (var (id, message) in failures)
+            {
+                if (!errors.TryGetValue(id, out var e)) continue;
+                e.Text = message;
+                e.Visibility = Visibility.Visible;
+            }
+            foreach (var (cb, id) in boxes)
+                if (!failures.ContainsKey(id) && chosen.Any(t => t.Id == id)) cb.IsChecked = false;
+            var done = chosen.Count - failures.Count;
+            if (done > 0)
+            {
+                ShellView.Toast(resolving
+                    ? done == 1 ? L.T("CloseLoop_ResolvedOne", "Replied and resolved 1 thread") : L.F("CloseLoop_ResolvedMany", "Replied and resolved {0} threads", done)
+                    : done == 1 ? L.T("CloseLoop_RepliedOne", "Replied to 1 thread") : L.F("CloseLoop_RepliedMany", "Replied to {0} threads", done));
+            }
+            if (failures.Count > 0) return false;
+            model.ReviewFix = null;
+            return true;
+        }, args);
+        await ShowAsync(d);
+    }
+
+    private enum DraftPhase { Idle, LoadingFiles, Running, Ready, Failed }
+
+    public static async Task DraftComments(XamlRoot? root, PRDetailViewModel model)
+    {
+        if (root is null || model.Pr is not { } pr) return;
+        var run = new ReviewDraftRun();
+        var phase = DraftPhase.Idle;
+        var drafts = new List<ReviewDraft>();
+        var chosen = new HashSet<Guid>();
+        var boxes = new List<CheckBox>();
+        string? summary = null;
+        string? note = null;
+        string? failure = null;
+        var closed = false;
+        var panel = Ui.V(10);
+        var d = Create(root, L.T("Drafts_Title", "Draft review comments"), panel, L.T("Drafts_Run", "Draft comments"), maxWidth: 760);
+        d.PrimaryButtonStyle = (Style)Application.Current.Resources["AccentButtonStyle"];
+        panel.Children.Add(Ui.Text(L.T("Drafts_Intro", "The agent reads the diff and suggests inline comments. Nothing is posted: comments you keep are added to your pending review, and you submit them yourself."), 13, "muted", wrap: true));
+        var content = Ui.V(8);
+        panel.Children.Add(content);
+        var picker = Ui.H(8, Ui.Link(L.T("Fix_All", "All"), () => SetAll(true)), Ui.Link(L.T("Fix_None", "None"), () => SetAll(false)));
+        panel.Children.Add(picker);
+
+        void SetAll(bool on)
+        {
+            foreach (var cb in boxes) cb.IsChecked = on;
+        }
+
+        void Validate()
+        {
+            var busy = phase is DraftPhase.LoadingFiles or DraftPhase.Running;
+            d.CloseButtonText = busy ? L.T("Drafts_Stop", "Stop") : L.T("Common_Cancel", "Cancel");
+            picker.Visibility = phase == DraftPhase.Ready && drafts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            switch (phase)
+            {
+                case DraftPhase.Idle:
+                case DraftPhase.Failed:
+                    d.PrimaryButtonText = L.T("Drafts_Run", "Draft comments");
+                    d.IsPrimaryButtonEnabled = ClaudeLauncher.Available;
+                    break;
+                case DraftPhase.Ready:
+                    d.PrimaryButtonText = L.F("Drafts_Add", "Add {0} to review", chosen.Count);
+                    d.IsPrimaryButtonEnabled = chosen.Count > 0;
+                    break;
+                default:
+                    d.PrimaryButtonText = "";
+                    break;
+            }
+        }
+
+        FrameworkElement Row(ReviewDraft draft)
+        {
+            var color = draft.Severity == "bug" ? "red" : draft.Severity == "risk" ? "amber" : "slate";
+            var location = Ui.Text($"{draft.Path}:{draft.Line}{(draft.Side == "LEFT" ? L.T("Drafts_Old", " (old)") : "")}", 12, "sky", mono: true);
+            location.TextTrimming = TextTrimming.CharacterEllipsis;
+            var cb = new CheckBox { Content = Ui.H(6, Ui.Chip(draft.Severity, color), location), IsChecked = chosen.Contains(draft.Id) };
+            cb.Checked += (_, _) => { chosen.Add(draft.Id); Validate(); };
+            cb.Unchecked += (_, _) => { chosen.Remove(draft.Id); Validate(); };
+            boxes.Add(cb);
+            var editor = new TextBox
+            {
+                PlaceholderText = L.T("Drafts_Comment", "Comment"),
+                Text = draft.Body,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                MinHeight = 56,
+                MaxHeight = 180,
+                FontSize = 13,
+                Margin = new Thickness(28, 0, 0, 0)
+            };
+            ScrollViewer.SetVerticalScrollBarVisibility(editor, ScrollBarVisibility.Auto);
+            editor.TextChanged += (_, _) => draft.Body = editor.Text;
+            return Ui.V(4, cb, editor);
+        }
+
+        void Render()
+        {
+            content.Children.Clear();
+            boxes.Clear();
+            switch (phase)
+            {
+                case DraftPhase.Idle:
+                    if (!ClaudeLauncher.Available)
+                        content.Children.Add(Ui.Text(L.T("Drafts_NoCli", "Install and sign in to the agent CLI first."), 13, "amber", wrap: true));
+                    break;
+                case DraftPhase.LoadingFiles:
+                    content.Children.Add(Ui.H(8, Ui.Spinner(14), Ui.Text(L.T("Drafts_LoadingDiff", "Loading the diff…"), 13, "muted")));
+                    break;
+                case DraftPhase.Running:
+                    content.Children.Add(Ui.H(8, Ui.Spinner(14), Ui.Text(L.T("Drafts_Running", "The agent is reading the diff. This can take a minute."), 13, "muted", wrap: true)));
+                    break;
+                case DraftPhase.Failed:
+                    content.Children.Add(Ui.Text(failure, 13, "red", wrap: true, select: true));
+                    break;
+                case DraftPhase.Ready:
+                    if (summary is not null) content.Children.Add(Ui.Text(summary, 13, "text", wrap: true, select: true));
+                    if (note is not null) content.Children.Add(Ui.Text(note, 12, "muted", wrap: true));
+                    if (drafts.Count == 0)
+                    {
+                        content.Children.Add(Ui.Text(L.T("Drafts_None", "No comments suggested."), 13, "dim"));
+                        break;
+                    }
+                    var list = Ui.V(10);
+                    foreach (var draft in drafts) list.Children.Add(Row(draft));
+                    content.Children.Add(new ScrollViewer { Content = list, MaxHeight = 380 });
+                    break;
+            }
+            Validate();
+        }
+
+        async Task Start()
+        {
+            if (ClaudeLauncher.Command is not { } command) return;
+            var current = new ReviewDraftRun();
+            run = current;
+            failure = null;
+            phase = DraftPhase.LoadingFiles;
+            Render();
+            var files = await model.EnsureFiles();
+            if (closed || current.Cancelled) return;
+            if (files.Count == 0)
+            {
+                failure = model.FilesError ?? L.T("Drafts_NoDiff", "The diff couldn’t be loaded");
+                phase = DraftPhase.Failed;
+                Render();
+                return;
+            }
+            var prompt = Core.Claude.ReviewDrafts.Build(pr, model.Ref.Repo, files, CiFixPrompt.NewNonce());
+            phase = DraftPhase.Running;
+            Render();
+            try
+            {
+                var text = await current.Run(command, prompt.Text, ReviewDraftRun.Environment());
+                var parsed = Core.Claude.ReviewDrafts.Parse(text, files);
+                drafts = parsed.Drafts.ToList();
+                chosen = drafts.Select(x => x.Id).ToHashSet();
+                summary = parsed.Summary;
+                var notes = new List<string>();
+                if (parsed.Dropped > 0)
+                    notes.Add(parsed.Dropped == 1
+                        ? L.T("Drafts_DroppedOne", "1 suggestion skipped because the line isn’t in the diff")
+                        : L.F("Drafts_DroppedMany", "{0} suggestions skipped because the line isn’t in the diff", parsed.Dropped));
+                if (prompt.Skipped.Count > 0)
+                    notes.Add(prompt.Skipped.Count == 1
+                        ? L.T("Drafts_SkippedOne", "1 file not sent (no text diff or too large)")
+                        : L.F("Drafts_SkippedMany", "{0} files not sent (no text diff or too large)", prompt.Skipped.Count));
+                note = notes.Count == 0 ? null : string.Join(" · ", notes);
+                phase = DraftPhase.Ready;
+            }
+            catch (OperationCanceledException)
+            {
+                phase = DraftPhase.Idle;
+            }
+            catch (Exception e)
+            {
+                failure = e.Message;
+                phase = DraftPhase.Failed;
+            }
+            if (!closed) Render();
+        }
+
+        d.PrimaryButtonClick += (_, args) =>
+        {
+            if (phase != DraftPhase.Ready)
+            {
+                args.Cancel = true;
+                if (phase is DraftPhase.Idle or DraftPhase.Failed) Start().Forget();
+                return;
+            }
+            var keep = drafts.Where(x => chosen.Contains(x.Id) && x.Body.Trim().Length > 0).ToList();
+            model.AddPending(keep.Select(x => new PendingComment { Path = x.Path, Line = x.Line, Side = x.Side, Body = x.Body }));
+            ShellView.Toast(keep.Count == 1
+                ? L.T("Drafts_AddedOne", "Added 1 comment to your pending review")
+                : L.F("Drafts_AddedMany", "Added {0} comments to your pending review", keep.Count));
+        };
+        d.Closed += (_, _) =>
+        {
+            closed = true;
+            run.Cancel();
+        };
+        Render();
+        await ShowAsync(d);
+    }
+
     public static async Task InlineComment(XamlRoot? root, PRDetailViewModel model, DiffAnchor anchor)
     {
         if (root is null) return;
@@ -332,9 +654,9 @@ public static class Dialogs
         if (!submitted && model.ComposerAnchor == anchor && string.IsNullOrWhiteSpace(model.ComposerDraft)) model.SetComposer(null, "");
     }
 
-    public static async Task JobLog(XamlRoot? root, GitHubApi api, RepoRef repo, CheckContext check, Action<string?>? fix = null)
+    public static async Task JobLog(XamlRoot? root, Func<Task<string>> load, CheckContext check, Action<string?>? fix = null)
     {
-        if (root is null || check.DatabaseId is not { } id) return;
+        if (root is null) return;
         var html = new HtmlView { Height = 560 };
         var errorsOnly = new CheckBox { Content = L.T("Log_ErrorsOnly", "Errors only") };
         string? log = null;
@@ -381,7 +703,7 @@ public static class Dialogs
         {
             try
             {
-                var raw = await api.JobLog(repo, id);
+                var raw = await load();
                 return CiLog.Clean(raw);
             }
             catch (Exception e)
@@ -822,6 +1144,12 @@ public static class Dialogs
             removeWorktree.IsEnabled = true;
             await RefreshWorktree();
         };
+        void RecordReviewFix(ClaudeTarget t)
+        {
+            if (ci || t == ClaudeTarget.Copy) return;
+            var ids = (useReviewer && found is not null ? threads : threads.Where(x => selected.Contains(x.Id))).Select(x => x.Id).ToList();
+            if (ids.Count > 0) model.ReviewFix = new ReviewFixLaunch(ids, pr.HeadRefOid, DateTimeOffset.Now);
+        }
         d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, async () =>
         {
             var prompt = promptBox.Text;
@@ -843,12 +1171,14 @@ public static class Dialogs
                 {
                     var tab = app.Claude.NewSession(launchFolder, prompt, name);
                     if (ci) model.CiFix = new CiFixLaunch(t, tab, pr.HeadRefOid, DateTimeOffset.Now);
+                    RecordReviewFix(t);
                     app.Section = Section.Claude;
                     return true;
                 }
                 var mode = (modes.SelectedItem as ComboBoxItem)?.Tag is ClaudePermissionMode m ? m : ClaudePermissionMode.Standard;
                 ClaudeLauncher.Launch(prompt, launchFolder ?? "", t, mode, name, null, ClaudeProfiles.Shared.ActiveOverride, WindowInterop.Copy);
                 if (ci && t is ClaudeTarget.Terminal or ClaudeTarget.Desktop) model.CiFix = new CiFixLaunch(t, null, pr.HeadRefOid, DateTimeOffset.Now);
+                RecordReviewFix(t);
                 return true;
             }
             catch (Exception e)

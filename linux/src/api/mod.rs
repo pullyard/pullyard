@@ -4,6 +4,8 @@ pub mod interdiff;
 pub mod merge_readiness;
 pub mod models;
 pub mod queries;
+pub mod review_load;
+pub mod risk;
 
 use std::collections::HashMap;
 use std::fmt;

@@ -836,6 +836,13 @@ struct ClaudeControlBar: View {
             }
             } else if let chat = tab.chat, chat.totalCost > 0 || chat.sessionId != nil {
                 Text(chat.model.replacingOccurrences(of: "claude-", with: "")).font(.syCaption).foregroundStyle(Color.syMuted)
+                if chat.totalCost > 0, SessionCost.billedPerUse || SessionCost.budget > 0 {
+                    Text(SessionCost.format(chat.totalCost))
+                        .font(.syCaption.monospacedDigit())
+                        .foregroundStyle(chat.budgetPaused ? Color.syAmber : Color.syMuted)
+                        .help(SessionCost.budget > 0 ? "Session cost · limit \(SessionCost.format(SessionCost.budget))" : "Session cost")
+                        .accessibilityLabel("Session cost \(SessionCost.format(chat.totalCost))")
+                }
             }
             OpenInMenu(folder: tab.folder)
             Picker("", selection: Binding(get: { tab.kind }, set: { k in
@@ -1183,7 +1190,7 @@ struct BranchPRPanel: View {
                         if let repo, let b = tab.git.branch, b != "HEAD" {
                             HStack(spacing: 8) {
                                 Button("Open PR with Agent") {
-                                    app.claude.send(AgentShip.openPRPrompt(branch: b, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead), to: tab)
+                                    app.claude.send(AgentShip.openPRPrompt(branch: b, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead, remote: tab.git.remote), to: tab)
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .tint(.syAgentAccent)
@@ -1345,7 +1352,7 @@ struct ForgeBranchPanel: View {
                     if let b = tab.git.branch, b != "HEAD" {
                         HStack(spacing: 8) {
                             Button("Open \(kind == .gitlab ? "MR" : "PR") with Agent") {
-                                app.claude.send(AgentShip.openPRPrompt(branch: b, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead, kind: kind), to: tab)
+                                app.claude.send(AgentShip.openPRPrompt(branch: b, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead, remote: remote.with(kind: kind)), to: tab)
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(.syAgentAccent)
@@ -1354,6 +1361,9 @@ struct ForgeBranchPanel: View {
                         }
                         .controlSize(.small)
                     }
+                    Button("Open \(remote.with(kind: kind).service)") { openInBrowser(remote.webURL) }
+                        .buttonStyle(.link)
+                        .font(.syCaption)
                 }
                 .padding(.vertical, 4)
             } header: {
@@ -1637,9 +1647,9 @@ struct AgentBranchMenu: View {
                         Button("Commit and Push with Agent") { app.claude.send(AgentShip.commitPrompt(pr: pr.number), to: tab) }
                             .disabled(tab.state == .working)
                     }
-                } else if branch != "HEAD", git.repo != nil {
-                    Button("Open Pull Request with Agent") {
-                        app.claude.send(AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: !git.changes.isEmpty, ahead: git.ahead, kind: git.remote?.kind ?? .github), to: tab)
+                } else if branch != "HEAD", let remote = git.remote {
+                    Button(remote.kind == .gitlab ? "Open Merge Request with Agent" : "Open Pull Request with Agent") {
+                        app.claude.send(AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: !git.changes.isEmpty, ahead: git.ahead, remote: remote), to: tab)
                     }
                     .disabled(tab.state == .working)
                 }

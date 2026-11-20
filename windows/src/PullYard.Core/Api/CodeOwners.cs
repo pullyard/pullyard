@@ -3,22 +3,36 @@ using System.Text.RegularExpressions;
 
 namespace PullYard.Core.Api;
 
-public sealed record CodeOwnersRule(string Pattern, List<string> Owners, int Line, Regex Regex);
+public sealed record CodeOwnersRule(string Pattern, List<string> Owners, int Line, Regex Regex, int Section = 0);
+
+public enum CodeOwnersFlavor { GitHub, GitLab }
 
 public sealed class CodeOwners
 {
     public static readonly string[] Paths = { ".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS" };
+    public static readonly string[] GitLabPaths = { "CODEOWNERS", "docs/CODEOWNERS", ".gitlab/CODEOWNERS" };
+    public static readonly string[] BitbucketPaths = { ".bitbucket/CODEOWNERS", "CODEOWNERS" };
 
     public string Path { get; }
+    public CodeOwnersFlavor Flavor { get; }
     public List<CodeOwnersRule> Rules { get; } = new();
     public List<int> InvalidLines { get; } = new();
 
-    public CodeOwners(string text, string path = ".github/CODEOWNERS")
+    public CodeOwners(string text, string path = ".github/CODEOWNERS", CodeOwnersFlavor flavor = CodeOwnersFlavor.GitHub)
     {
         Path = path;
+        Flavor = flavor;
+        var section = 0;
+        var defaults = new List<string>();
         var lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
         for (var index = 0; index < lines.Length; index++)
         {
+            if (flavor == CodeOwnersFlavor.GitLab && SectionHeader(lines[index]) is { } header)
+            {
+                section++;
+                defaults = header;
+                continue;
+            }
             var tokens = Tokens(lines[index]);
             if (tokens.Count == 0) continue;
             var pattern = tokens[0];
@@ -28,13 +42,34 @@ public sealed class CodeOwners
                 InvalidLines.Add(index + 1);
                 continue;
             }
-            Rules.Add(new CodeOwnersRule(pattern, owners, index + 1, regex));
+            if (owners.Count == 0 && flavor == CodeOwnersFlavor.GitLab) owners = defaults;
+            Rules.Add(new CodeOwnersRule(pattern, owners, index + 1, regex, section));
         }
+    }
+
+    public static List<string>? SectionHeader(string line)
+    {
+        var s = line.Trim(' ', '\t');
+        if (s.StartsWith('^')) s = s[1..];
+        if (!s.StartsWith('[')) return null;
+        var close = s.IndexOf(']');
+        if (close < 2) return null;
+        var rest = s[(close + 1)..];
+        if (rest.StartsWith('[') && rest.IndexOf(']') is var count and >= 0) rest = rest[(count + 1)..];
+        var owners = Tokens(rest);
+        return owners.All(IsOwner) ? owners : null;
     }
 
     public CodeOwnersRule? RuleFor(string file) => Rules.LastOrDefault(r => r.Regex.IsMatch(file));
 
-    public List<string> OwnersFor(string file) => RuleFor(file)?.Owners ?? new();
+    public List<string> OwnersFor(string file)
+    {
+        if (Flavor != CodeOwnersFlavor.GitLab) return RuleFor(file)?.Owners ?? new();
+        var lastBySection = new SortedDictionary<int, CodeOwnersRule>();
+        foreach (var r in Rules.Where(r => r.Regex.IsMatch(file))) lastBySection[r.Section] = r;
+        var seen = new HashSet<string>();
+        return lastBySection.Values.SelectMany(r => r.Owners).Where(o => seen.Add(o.ToLowerInvariant())).ToList();
+    }
 
     public static bool IsOwner(string token) =>
         token.StartsWith('@') ? token.Length > 1 : token.Contains('@');
@@ -179,6 +214,8 @@ public sealed record OwnershipSummary(List<OwnerGroup> Groups, List<string> Unow
         }).ToList();
         return new OwnershipSummary(groups, unowned, owners.Path);
     }
+
+    public List<OwnerEntry>? OwnersOf(string file) => Groups.FirstOrDefault(g => g.Files.Contains(file))?.Owners;
 
     public List<OwnerEntry> Suggestions(ISet<string> excluding)
     {

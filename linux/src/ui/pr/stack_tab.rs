@@ -818,7 +818,7 @@ impl StackTab {
             return;
         };
         if let Some(node) = node {
-            let nodes = stack::store::memory_nodes(&self.model.api, &self.model.r.repo).unwrap_or_else(|| self.tree.borrow().nodes.values().cloned().collect());
+            let nodes = self.model.api.as_ref().and_then(|api| stack::store::memory_nodes(api, &self.model.r.repo)).unwrap_or_else(|| self.tree.borrow().nodes.values().cloned().collect());
             next.seed_stack(&node, &nodes);
         } else {
             next.tab.set(PrTab::Stack);

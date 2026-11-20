@@ -31,6 +31,7 @@ public sealed partial class ChatSession : ObservableObject
     [ObservableProperty] private int pendingCount;
     [ObservableProperty] private string? createdPR;
     [ObservableProperty] private string? draftRequest;
+    [ObservableProperty] private bool budgetPaused;
 
     public List<ChatItem> Items { get; } = new();
     public List<PermissionRequest> PendingPermissions { get; } = new();
@@ -50,6 +51,9 @@ public sealed partial class ChatSession : ObservableObject
     private readonly Dictionary<string, (string Label, Action Undo)> rollbacks = new();
     private readonly Dictionary<string, (string ToolId, string? Previous)> stopRequests = new();
     private bool intentionalStop;
+    private readonly SessionCostTracker cost = new();
+    private readonly List<(string Id, string Text, IReadOnlyList<ChatImage> Images)> heldPrompts = new();
+    internal Func<double> BudgetSource { get; set; } = () => SessionCost.Budget;
 
     public event Action<string>? OnSessionId;
     public event Action? OnTurnFinished;
@@ -147,6 +151,7 @@ public sealed partial class ChatSession : ObservableObject
             LastError = "claude CLI not found";
             return;
         }
+        cost.ProcessStarted();
         var args = new List<string>
         {
             "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
@@ -264,7 +269,7 @@ public sealed partial class ChatSession : ObservableObject
 
     private bool FlushQueue()
     {
-        if (!Running || Busy || queuedPrompts.Count == 0) return false;
+        if (!Running || Busy || BudgetPaused || queuedPrompts.Count == 0) return false;
         var next = queuedPrompts[0];
         queuedPrompts.RemoveAt(0);
         OnPropertyChanged(nameof(HasQueuedPrompts));
@@ -314,11 +319,8 @@ public sealed partial class ChatSession : ObservableObject
         }
     }
 
-    private double costBase;
-
     private void Terminated(Process p, int code)
     {
-        costBase = TotalCost;
         if (!ReferenceEquals(p, process)) return;
         var wasIntentional = intentionalStop;
         intentionalStop = false;
@@ -389,6 +391,11 @@ public sealed partial class ChatSession : ObservableObject
         LastActivity = DateTimeOffset.Now;
         var id = Guid.NewGuid().ToString();
         Append(new UserItem(id, trimmed, images));
+        if (BudgetPaused)
+        {
+            heldPrompts.Add((id, trimmed, images));
+            return;
+        }
         if (!Running || Busy)
         {
             queuedPrompts.Add((id, trimmed, images));
@@ -396,6 +403,17 @@ public sealed partial class ChatSession : ObservableObject
             return;
         }
         Deliver(trimmed, images);
+    }
+
+    public void ContinuePastBudget()
+    {
+        cost.Continue(BudgetSource());
+        BudgetPaused = cost.Paused;
+        var held = heldPrompts.ToList();
+        heldPrompts.Clear();
+        queuedPrompts.AddRange(held);
+        if (held.Count > 0) OnPropertyChanged(nameof(HasQueuedPrompts));
+        FlushQueue();
     }
 
     private void Deliver(string trimmed, IReadOnlyList<ChatImage> images)
@@ -775,7 +793,12 @@ public sealed partial class ChatSession : ObservableObject
         Busy = false;
         Status = null;
         var before = TotalCost;
-        if (o.Dbl("total_cost_usd") is { } c) TotalCost = costBase + c;
+        if (o.Dbl("total_cost_usd") is { } c)
+        {
+            cost.Report(c, BudgetSource());
+            TotalCost = cost.Total;
+            BudgetPaused = cost.Paused;
+        }
         Ledger?.Record(TotalCost - before);
         foreach (var t in tools.Values.Where(t => t.Status == ToolStatus.Running && t.ParentToolUseId is null))
         {

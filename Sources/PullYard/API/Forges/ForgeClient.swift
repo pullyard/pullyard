@@ -56,6 +56,7 @@ protocol ForgeClient: AnyObject {
     func notifications() async throws -> [ForgeNotification]
     func markDone(_ notification: ForgeNotification) async throws
     func repositories() async throws -> [ForgeRepo]
+    func reviewBackend() -> PRBackend?
 }
 
 extension ForgeClient {
@@ -63,6 +64,7 @@ extension ForgeClient {
     func notifications() async throws -> [ForgeNotification] { [] }
     func markDone(_ notification: ForgeNotification) async throws {}
     func repositories() async throws -> [ForgeRepo] { [] }
+    func reviewBackend() -> PRBackend? { nil }
 }
 
 @MainActor
@@ -130,18 +132,67 @@ final class ForgeHTTP {
         try await call("GET", path, query)
     }
 
-    func post(_ path: String, _ query: [URLQueryItem] = [], method: String = "POST") async throws {
-        let _: Empty = try await call(method, path, query, allowEmpty: true)
+    func post(_ path: String, _ query: [URLQueryItem] = [], method: String = "POST", json: [String: Any]? = nil) async throws {
+        let _: Empty = try await call(method, path, query, json: json, allowEmpty: true)
+    }
+
+    func text(_ path: String, _ query: [URLQueryItem] = []) async throws -> String {
+        let target = try url(path, query)
+        var (data, status) = try await send(target, accept: "text/plain")
+        if status == 401, let refresh {
+            authorization = try await refresh()
+            (data, status) = try await send(target, accept: "text/plain")
+        }
+        guard (200..<300).contains(status) else {
+            if status == 401 { throw APIError(message: "Token is invalid or revoked (401)", status: 401) }
+            throw APIError(message: "\(service) \(status): \(Self.message(data) ?? HTTPURLResponse.localizedString(forStatusCode: status))", status: status)
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private final class HoldRedirect: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest) async -> URLRequest? { nil }
+    }
+
+    func download(_ path: String, hops: Int = 3) async throws -> String {
+        let target = try url(path, [])
+        var req = URLRequest(url: target)
+        req.setValue(authorization, forHTTPHeaderField: "Authorization")
+        req.setValue("*/*", forHTTPHeaderField: "Accept")
+        req.setValue("PullYard-macOS", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: req, delegate: HoldRedirect())
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if (300..<400).contains(status), hops > 0, let location = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Location"),
+           let next = URL(string: location, relativeTo: target)?.absoluteURL {
+            if next.host?.lowercased() == target.host?.lowercased() {
+                return try await download(next.absoluteString, hops: hops - 1)
+            }
+            guard next.scheme == "https" else { throw APIError(message: "\(service) sent an insecure log address") }
+            let (blob, raw) = try await session.data(from: next)
+            let code = (raw as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(code) else { throw APIError(message: "\(service) \(code): \(HTTPURLResponse.localizedString(forStatusCode: code))", status: code) }
+            return String(decoding: blob, as: UTF8.self)
+        }
+        guard (200..<300).contains(status) else {
+            if status == 401 { throw APIError(message: "Token is invalid or revoked (401)", status: 401) }
+            throw APIError(message: "\(service) \(status): \(Self.message(data) ?? HTTPURLResponse.localizedString(forStatusCode: status))", status: status)
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    func send<T: Decodable>(_ method: String, _ path: String, _ query: [URLQueryItem] = [], json: [String: Any]? = nil) async throws -> T {
+        try await call(method, path, query, json: json)
     }
 
     private struct Empty: Decodable {}
 
-    private func call<T: Decodable>(_ method: String, _ path: String, _ query: [URLQueryItem], allowEmpty: Bool = false) async throws -> T {
+    private func call<T: Decodable>(_ method: String, _ path: String, _ query: [URLQueryItem], json: [String: Any]? = nil, allowEmpty: Bool = false) async throws -> T {
         let target = try url(path, query)
-        var (data, status) = try await send(target, method: method)
+        let body = try json.map { try JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys]) }
+        var (data, status) = try await send(target, method: method, body: body)
         if status == 401, let refresh {
             authorization = try await refresh()
-            (data, status) = try await send(target, method: method)
+            (data, status) = try await send(target, method: method, body: body)
         }
         guard (200..<300).contains(status) else {
             if status == 401 { throw APIError(message: "Token is invalid or revoked (401)", status: 401) }
@@ -155,11 +206,15 @@ final class ForgeHTTP {
         }
     }
 
-    private func send(_ url: URL, method: String = "GET") async throws -> (Data, Int) {
+    private func send(_ url: URL, method: String = "GET", body: Data? = nil, accept: String = "application/json") async throws -> (Data, Int) {
         var req = URLRequest(url: url)
         req.httpMethod = method
+        if let body {
+            req.httpBody = body
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
         req.setValue(authorization, forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue(accept, forHTTPHeaderField: "Accept")
         req.setValue("PullYard-macOS", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: req)
         return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
@@ -168,6 +223,13 @@ final class ForgeHTTP {
     private static func message(_ data: Data) -> String? {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         if let m = obj["message"] as? String { return m }
+        if let m = obj["message"] as? [String], !m.isEmpty { return m.joined(separator: "; ") }
+        if let m = obj["message"] as? [String: Any], !m.isEmpty {
+            return m.keys.sorted().map { key in
+                let value = (m[key] as? [String])?.joined(separator: ", ") ?? (m[key].map { "\($0)" } ?? "")
+                return key == "base" ? value : "\(key) \(value)"
+            }.joined(separator: "; ")
+        }
         if let e = obj["error"] as? [String: Any], let m = e["message"] as? String { return m }
         if let e = obj["error_description"] as? String { return e }
         if let e = obj["error"] as? String { return e }

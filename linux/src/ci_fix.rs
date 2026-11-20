@@ -101,6 +101,17 @@ pub fn one_line(s: &str) -> String {
     clip(&flat.split_whitespace().collect::<Vec<_>>().join(" "), META_CAP)
 }
 
+pub fn clean_text(raw: &str) -> String {
+    raw.split('\n')
+        .map(|line| {
+            let stripped = strip_ansi(line);
+            let l = stripped.strip_prefix('\u{feff}').unwrap_or(&stripped);
+            strip_timestamp(l.strip_suffix('\r').unwrap_or(l)).to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn clean(raw: &str) -> Vec<String> {
     let mut lines: Vec<String> = raw
         .split('\n')

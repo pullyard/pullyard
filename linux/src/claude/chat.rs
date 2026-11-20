@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use base64::Engine;
 use serde_json::{json, Map, Value};
 
-use super::{accounts, payload, ship, usage_ledger};
+use super::{accounts, payload, session_cost, ship, usage_ledger};
 use crate::host;
 use crate::signal::Signal;
 
@@ -342,7 +342,11 @@ pub struct ChatSession {
     pub commands: RefCell<Vec<Command>>,
     pub pending: RefCell<Vec<Rc<PermissionRequest>>>,
     pub total_cost: Cell<f64>,
+    pub budget_paused: Cell<bool>,
     cost_base: Cell<f64>,
+    budget_allowance: Cell<f64>,
+    held: RefCell<Vec<QueuedPrompt>>,
+    budget_source: Cell<fn() -> f64>,
     pub context_percent: Cell<Option<i64>>,
     pub context: RefCell<Option<ContextUsage>>,
     pub last_error: RefCell<Option<String>>,
@@ -469,7 +473,11 @@ impl ChatSession {
             commands: RefCell::new(vec![]),
             pending: RefCell::new(vec![]),
             total_cost: Cell::new(0.0),
+            budget_paused: Cell::new(false),
             cost_base: Cell::new(0.0),
+            budget_allowance: Cell::new(0.0),
+            held: RefCell::new(vec![]),
+            budget_source: Cell::new(session_cost::budget),
             context_percent: Cell::new(None),
             context: RefCell::new(None),
             last_error: RefCell::new(None),
@@ -576,6 +584,7 @@ impl ChatSession {
             self.emit(Event::State);
             return;
         };
+        self.cost_base.set(self.total_cost.get());
         let mut args: Vec<String> = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompts", "host", "--permission-prompt-tool", "stdio"]
             .iter()
             .map(|s| s.to_string())
@@ -776,7 +785,9 @@ impl ChatSession {
         self.last_activity.set(Instant::now());
         let id = uuid::Uuid::new_v4().to_string();
         self.items.borrow_mut().push(ChatItem::User { id: id.clone(), text: trimmed.clone(), images: images.clone() });
-        if !self.running.get() || self.busy.get() {
+        if self.budget_paused.get() {
+            self.held.borrow_mut().push(QueuedPrompt { id, text: trimmed, images });
+        } else if !self.running.get() || self.busy.get() {
             self.queued.borrow_mut().push(QueuedPrompt { id, text: trimmed, images });
         } else {
             self.deliver(&trimmed, &images);
@@ -785,20 +796,38 @@ impl ChatSession {
         self.emit(Event::State);
     }
 
+    pub fn held_count(&self) -> usize {
+        self.held.borrow().len()
+    }
+
+    pub fn budget(&self) -> f64 {
+        (self.budget_source.get())()
+    }
+
+    pub fn continue_past_budget(&self) {
+        self.budget_allowance.set(session_cost::next_allowance(self.total_cost.get(), self.budget()));
+        self.budget_paused.set(false);
+        let held = std::mem::take(&mut *self.held.borrow_mut());
+        self.queued.borrow_mut().extend(held);
+        if !self.flush_queue() {
+            self.emit(Event::State);
+        }
+    }
+
     pub fn queued_count(&self) -> usize {
         self.queued.borrow().len()
     }
 
     pub fn is_queued(&self, id: &str) -> bool {
-        self.queued.borrow().iter().any(|q| q.id == id)
+        self.queued.borrow().iter().chain(self.held.borrow().iter()).any(|q| q.id == id)
     }
 
     pub fn cancel_queued(&self, id: &str) -> Option<String> {
-        let prompt = {
-            let mut queued = self.queued.borrow_mut();
-            let index = queued.iter().position(|q| q.id == id)?;
-            queued.remove(index)
-        };
+        let prompt = [&self.queued, &self.held].into_iter().find_map(|list| {
+            let mut list = list.borrow_mut();
+            let index = list.iter().position(|q| q.id == id)?;
+            Some(list.remove(index))
+        })?;
         let item_id = format!("u{id}");
         self.items.borrow_mut().retain(|i| i.id() != item_id);
         self.emit(Event::Appended);
@@ -807,7 +836,7 @@ impl ChatSession {
     }
 
     fn flush_queue(&self) -> bool {
-        if !self.running.get() || self.busy.get() {
+        if !self.running.get() || self.busy.get() || self.budget_paused.get() {
             return false;
         }
         let next = {
@@ -1251,7 +1280,10 @@ impl ChatSession {
         *self.status.borrow_mut() = None;
         let before = self.total_cost.get();
         if let Some(c) = o.get("total_cost_usd").and_then(|v| v.as_f64()) {
-            self.total_cost.set(self.cost_base.get() + c);
+            self.total_cost.set(session_cost::total(self.cost_base.get(), c));
+            if session_cost::over_budget(self.total_cost.get(), self.budget(), self.budget_allowance.get()) {
+                self.budget_paused.set(true);
+            }
         }
         if self.running.get() {
             usage_ledger::record(self.total_cost.get() - before);
@@ -1661,6 +1693,7 @@ mod tests {
 
     fn session(delivers: bool) -> (Rc<ChatSession>, Rc<RefCell<Vec<Value>>>) {
         let chat = ChatSession::new("/tmp", None);
+        chat.budget_source.set(no_budget);
         chat.running.set(true);
         let sent: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(Vec::new()));
         let log = sent.clone();
@@ -1891,5 +1924,60 @@ mod tests {
             false
         });
         assert_eq!(calls, 1);
+    }
+
+    fn budget_four_cents() -> f64 {
+        0.04
+    }
+
+    fn no_budget() -> f64 {
+        0.0
+    }
+
+    #[test]
+    fn reported_cost_is_cumulative_per_process() {
+        let chat = ChatSession::new("/tmp", None);
+        chat.budget_source.set(no_budget);
+        chat.feed(r#"{"type":"result","total_cost_usd":0.0302}"#);
+        chat.feed(r#"{"type":"result","total_cost_usd":0.0432}"#);
+        assert!((chat.total_cost.get() - 0.0432).abs() < 1e-9);
+        assert!(!chat.budget_paused.get());
+    }
+
+    #[test]
+    fn new_process_adds_to_the_earlier_total() {
+        let chat = ChatSession::new("/tmp", None);
+        chat.budget_source.set(no_budget);
+        chat.feed(r#"{"type":"result","total_cost_usd":0.05}"#);
+        chat.cost_base.set(chat.total_cost.get());
+        chat.feed(r#"{"type":"result","total_cost_usd":0.02}"#);
+        chat.feed(r#"{"type":"result","total_cost_usd":-1}"#);
+        assert!((chat.total_cost.get() - 0.05).abs() < 1e-9);
+        chat.feed(r#"{"type":"result","total_cost_usd":0.03}"#);
+        assert!((chat.total_cost.get() - 0.08).abs() < 1e-9);
+    }
+
+    #[test]
+    fn budget_pauses_and_continues() {
+        let chat = ChatSession::new("/tmp", None);
+        chat.budget_source.set(budget_four_cents);
+        chat.feed(r#"{"type":"result","total_cost_usd":0.03}"#);
+        assert!(!chat.budget_paused.get());
+        chat.feed(r#"{"type":"result","total_cost_usd":0.045}"#);
+        assert!(chat.budget_paused.get());
+        let before = chat.items.borrow().len();
+        chat.send("next step", vec![]);
+        assert_eq!(chat.items.borrow().len(), before + 1);
+        assert!(!chat.busy.get());
+        assert_eq!(chat.held_count(), 1);
+        assert_eq!(chat.queued_count(), 0);
+        chat.continue_past_budget();
+        assert!(!chat.budget_paused.get());
+        assert_eq!(chat.held_count(), 0);
+        assert_eq!(chat.queued_count(), 1);
+        chat.feed(r#"{"type":"result","total_cost_usd":0.07}"#);
+        assert!(!chat.budget_paused.get());
+        chat.feed(r#"{"type":"result","total_cost_usd":0.09}"#);
+        assert!(chat.budget_paused.get());
     }
 }

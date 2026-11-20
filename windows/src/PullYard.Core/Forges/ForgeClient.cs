@@ -48,6 +48,7 @@ public interface IForgeClient
     Task<List<ForgeNotification>> Notifications(CancellationToken ct = default) => Task.FromResult(new List<ForgeNotification>());
     Task MarkDone(ForgeNotification notification, CancellationToken ct = default) => Task.CompletedTask;
     Task<List<ForgeRepo>> Repositories(CancellationToken ct = default) => Task.FromResult(new List<ForgeRepo>());
+    IPRBackend? ReviewBackend() => null;
 }
 
 public static class ForgeClients
@@ -71,7 +72,17 @@ public sealed class ForgeHttp
     })
     { Timeout = TimeSpan.FromSeconds(40) };
 
+    private static readonly HttpClient SharedNoRedirectHttp = new(new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        AutomaticDecompression = DecompressionMethods.All,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        ConnectTimeout = TimeSpan.FromSeconds(10)
+    })
+    { Timeout = TimeSpan.FromSeconds(40) };
+
     private readonly HttpClient http;
+    private readonly HttpClient noRedirectHttp;
     private readonly SemaphoreSlim refreshGate = new(1, 1);
 
     public string Base { get; }
@@ -85,6 +96,7 @@ public sealed class ForgeHttp
         Service = service;
         Authorization = authorization;
         this.http = http ?? SharedHttp;
+        noRedirectHttp = http ?? SharedNoRedirectHttp;
     }
 
     public static string Query(IEnumerable<(string Key, string Value)> query) =>
@@ -114,13 +126,53 @@ public sealed class ForgeHttp
     }
 
     public async Task Post(string path, IEnumerable<(string Key, string Value)>? query = null, string method = "POST", CancellationToken ct = default) =>
-        await Call(new HttpMethod(method), path, query, ct).ConfigureAwait(false);
+        await Call(new HttpMethod(method), path, query, null, ct).ConfigureAwait(false);
 
-    private async Task<byte[]> Call(HttpMethod method, string path, IEnumerable<(string Key, string Value)>? query, CancellationToken ct)
+    public async Task Post(string path, JsonObject json, string method = "POST", CancellationToken ct = default) =>
+        await Call(new HttpMethod(method), path, null, Encoding.UTF8.GetBytes(json.ToJsonString()), ct).ConfigureAwait(false);
+
+    public async Task<string> Text(string path, IEnumerable<(string Key, string Value)>? query = null, CancellationToken ct = default) =>
+        Encoding.UTF8.GetString(await Call(HttpMethod.Get, path, query, null, ct, "text/plain").ConfigureAwait(false));
+
+    public async Task<string> Download(string path, int hops = 3, CancellationToken ct = default)
+    {
+        var target = Url(path);
+        using var req = new HttpRequestMessage(HttpMethod.Get, target);
+        req.Headers.TryAddWithoutValidation("Authorization", Authorization);
+        req.Headers.Accept.ParseAdd("*/*");
+        req.Headers.UserAgent.ParseAdd(AppInfo.UserAgent);
+        using var response = await noRedirectHttp.SendAsync(req, ct).ConfigureAwait(false);
+        var status = (int)response.StatusCode;
+        if (status is >= 300 and < 400 && hops > 0 && response.Headers.Location is { } location)
+        {
+            var next = location.IsAbsoluteUri ? location : new Uri(target, location);
+            if (string.Equals(next.Host, target.Host, StringComparison.OrdinalIgnoreCase)) return await Download(next.AbsoluteUri, hops - 1, ct).ConfigureAwait(false);
+            if (next.Scheme != Uri.UriSchemeHttps) throw new ApiException($"{Service} sent an insecure log address");
+            using var plain = new HttpRequestMessage(HttpMethod.Get, next);
+            plain.Headers.UserAgent.ParseAdd(AppInfo.UserAgent);
+            using var blob = await http.SendAsync(plain, ct).ConfigureAwait(false);
+            var code = (int)blob.StatusCode;
+            var bytes = await blob.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+            if (code is < 200 or >= 300) throw new ApiException($"{Service} {code}: {(HttpStatusCode)code}", code);
+            return Encoding.UTF8.GetString(bytes);
+        }
+        var data = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        if (status is < 200 or >= 300)
+        {
+            if (status == 401) throw new ApiException("Token is invalid or revoked (401)", 401);
+            throw new ApiException($"{Service} {status}: {Message(data) ?? ((HttpStatusCode)status).ToString()}", status);
+        }
+        return Encoding.UTF8.GetString(data);
+    }
+
+    private Task<byte[]> Call(HttpMethod method, string path, IEnumerable<(string Key, string Value)>? query, CancellationToken ct) =>
+        Call(method, path, query, null, ct);
+
+    private async Task<byte[]> Call(HttpMethod method, string path, IEnumerable<(string Key, string Value)>? query, byte[]? body, CancellationToken ct, string accept = "application/json")
     {
         var target = Url(path, query);
         var used = Authorization;
-        var (status, data) = await Send(method, target, used, ct).ConfigureAwait(false);
+        var (status, data) = await Send(method, target, used, body, accept, ct).ConfigureAwait(false);
         if (status == 401 && Refresh is { } refresh)
         {
             await refreshGate.WaitAsync(ct).ConfigureAwait(false);
@@ -132,7 +184,7 @@ public sealed class ForgeHttp
             {
                 refreshGate.Release();
             }
-            (status, data) = await Send(method, target, Authorization, ct).ConfigureAwait(false);
+            (status, data) = await Send(method, target, Authorization, body, accept, ct).ConfigureAwait(false);
         }
         if (status is < 200 or >= 300)
         {
@@ -142,11 +194,16 @@ public sealed class ForgeHttp
         return data;
     }
 
-    private async Task<(int Status, byte[] Data)> Send(HttpMethod method, Uri url, string authorization, CancellationToken ct)
+    private async Task<(int Status, byte[] Data)> Send(HttpMethod method, Uri url, string authorization, byte[]? body, string accept, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(method, url);
+        if (body is not null)
+        {
+            req.Content = new ByteArrayContent(body);
+            req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        }
         req.Headers.TryAddWithoutValidation("Authorization", authorization);
-        req.Headers.Accept.ParseAdd("application/json");
+        req.Headers.Accept.ParseAdd(accept);
         req.Headers.UserAgent.ParseAdd(AppInfo.UserAgent);
         req.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
         using var response = await http.SendAsync(req, ct).ConfigureAwait(false);
@@ -159,12 +216,23 @@ public sealed class ForgeHttp
         try
         {
             if (JsonNode.Parse(data) is not JsonObject o) return null;
-            return o.Str("message") ?? o.Obj("error").Str("message") ?? o.Str("error_description") ?? o.Str("error");
+            return o.Str("message") ?? Listed(o["message"]) ?? o.Obj("error").Str("message") ?? o.Str("error_description") ?? o.Str("error");
         }
         catch (JsonException)
         {
             return null;
         }
+    }
+
+    private static string? Listed(JsonNode? message)
+    {
+        if (message is JsonArray list && list.Strings().ToList() is { Count: > 0 } items) return string.Join("; ", items);
+        if (message is not JsonObject fields || fields.Count == 0) return null;
+        return string.Join("; ", fields.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f =>
+        {
+            var value = f.Value is JsonArray a ? string.Join(", ", a.Strings()) : f.Value?.ToString() ?? "";
+            return f.Key == "base" ? value : $"{f.Key} {value}";
+        }));
     }
 
     public static string Basic(string user, string secret) => "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{user}:{secret}"));

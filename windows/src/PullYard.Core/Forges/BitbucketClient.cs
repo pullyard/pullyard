@@ -4,7 +4,7 @@ using PullYard.Core.Auth;
 
 namespace PullYard.Core.Forges;
 
-public sealed class BitbucketClient : IForgeClient
+public sealed partial class BitbucketClient : IForgeClient
 {
     public const int MaxRepos = 20;
     public static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(180);
@@ -134,7 +134,11 @@ public sealed class BitbucketClient : IForgeClient
     }
 
     public Task<ForgeCapabilities> Capabilities(CancellationToken ct = default) =>
-        Task.FromResult(new ForgeCapabilities(new[] { ForgeFilter.ReviewRequested, ForgeFilter.Mine, ForgeFilter.Reviewed }, Array.Empty<ForgeIssueFilter>(), ForgeInbox.None, true));
+        Task.FromResult(new ForgeCapabilities(new[] { ForgeFilter.ReviewRequested, ForgeFilter.Mine, ForgeFilter.Reviewed }, Array.Empty<ForgeIssueFilter>(), ForgeInbox.None, true)
+        {
+            PullRequestReview = CapabilityState.Supported,
+            MergeRequirements = CapabilityState.Unavailable
+        });
 
     public async Task<List<SearchItem>> PullRequests(ForgeFilter filter, ForgeState state, CancellationToken ct = default)
     {
@@ -257,7 +261,7 @@ public sealed class BitbucketClient : IForgeClient
         return repos;
     }
 
-    private async Task<string> UserId(CancellationToken ct) => uuid ?? (await CurrentUser(ct).ConfigureAwait(false)).Id ?? "";
+    public async Task<string> UserId(CancellationToken ct = default) => uuid ?? (await CurrentUser(ct).ConfigureAwait(false)).Id ?? "";
 
     private async Task<List<string>> WorkspaceSlugs(CancellationToken ct)
     {

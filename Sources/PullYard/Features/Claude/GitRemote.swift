@@ -7,8 +7,19 @@ struct GitRemote: Hashable, Sendable {
 
     let host: String
     let path: String
+    let kind: Kind
 
-    var kind: Kind {
+    init(host: String, path: String, kind: Kind) {
+        self.host = host
+        self.path = path
+        self.kind = kind
+    }
+
+    init(host: String, path: String) {
+        self.init(host: host, path: path, kind: Self.kind(host: host))
+    }
+
+    static func kind(host: String) -> Kind {
         let h = host.lowercased()
         if h.contains("github") { return .github }
         if h.contains("gitlab") { return .gitlab }
@@ -18,7 +29,17 @@ struct GitRemote: Hashable, Sendable {
 
     var webURL: String { "https://\(host)/\(path)" }
 
-    var repo: RepoRef? { host.lowercased() == "github.com" ? RepoRef(full: path) : nil }
+    var githubRepo: RepoRef? { host.lowercased() == "github.com" ? RepoRef(full: path) : nil }
+
+    var noun: String { requestNoun(kind) }
+
+    var service: String {
+        switch kind {
+        case .gitlab: return "GitLab"
+        case .bitbucket: return "Bitbucket"
+        case .github, .other: return host
+        }
+    }
 
     func kind(for provider: GitProvider?) -> Kind {
         switch provider {
@@ -30,7 +51,13 @@ struct GitRemote: Hashable, Sendable {
         }
     }
 
+    func with(kind: Kind) -> GitRemote { GitRemote(host: host, path: path, kind: kind) }
+
     func requestNoun(_ kind: Kind) -> String { kind == .gitlab ? "merge request" : "pull request" }
+
+    func newRequestURL(branch: String) -> String {
+        kind == .other ? webURL : newRequestURL(branch: branch, kind: kind)
+    }
 
     func newRequestURL(branch: String, kind: Kind) -> String {
         let b = branch.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&+=?#"))) ?? branch
@@ -45,24 +72,27 @@ struct GitRemote: Hashable, Sendable {
     static func parse(_ raw: String) -> GitRemote? {
         var url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !url.isEmpty else { return nil }
-        var host = ""
-        var path = ""
-        if let scheme = url.range(of: "://") {
-            url = String(url[scheme.upperBound...])
-            guard let slash = url.firstIndex(of: "/") else { return nil }
-            host = String(url[..<slash])
-            path = String(url[url.index(after: slash)...])
-            if let at = host.lastIndex(of: "@") { host = String(host[host.index(after: at)...]) }
-            if let colon = host.firstIndex(of: ":") { host = String(host[..<colon]) }
-        } else if let colon = url.firstIndex(of: ":"), !url[..<colon].contains("/") {
+        while url.hasSuffix("/") { url.removeLast() }
+        if url.hasSuffix(".git") { url.removeLast(4) }
+        var host: String
+        var path: String
+        if let comps = URLComponents(string: url), let h = comps.host, comps.scheme != nil {
+            host = h
+            path = comps.path
+        } else if let at = url.firstIndex(of: "@"), let colon = url[at...].firstIndex(of: ":") {
+            host = String(url[url.index(after: at)..<colon])
+            path = String(url[url.index(after: colon)...])
+        } else if !url.contains("://"), let colon = url.firstIndex(of: ":"), !url[..<colon].contains("/") {
             host = String(url[..<colon])
             path = String(url[url.index(after: colon)...])
-            if let at = host.lastIndex(of: "@") { host = String(host[host.index(after: at)...]) }
         } else {
             return nil
         }
+        host = host.lowercased()
         path = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        if path.hasSuffix(".git") { path.removeLast(4) }
+        if host == "ssh.github.com" { host = "github.com" }
+        if host.hasPrefix("altssh.") { host = String(host.dropFirst(7)) }
+        if host == "bitbucket.org", path.hasPrefix("scm/") { path = String(path.dropFirst(4)) }
         guard !host.isEmpty, path.contains("/") else { return nil }
         return GitRemote(host: host, path: path)
     }

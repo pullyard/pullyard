@@ -29,6 +29,7 @@ public sealed class ChatView : Grid
     private readonly ChatSession chat;
     private readonly HtmlView web = new("chat.html");
     private readonly Border sleepBanner = new();
+    private readonly Border budgetBanner = new();
     private readonly Border permissionStrip = new();
     private readonly TextBox input = new()
     {
@@ -69,13 +70,16 @@ public sealed class ChatView : Grid
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Children.Add(web);
         SetRow(sleepBanner, 1);
         Children.Add(sleepBanner);
-        SetRow(permissionStrip, 2);
+        SetRow(budgetBanner, 2);
+        Children.Add(budgetBanner);
+        SetRow(permissionStrip, 3);
         Children.Add(permissionStrip);
         var composer = BuildComposer();
-        SetRow(composer, 3);
+        SetRow(composer, 4);
         Children.Add(composer);
 
         web.MessageReceived += OnWebMessage;
@@ -106,7 +110,7 @@ public sealed class ChatView : Grid
 
     private void OnContext(object? sender, PropertyChangedEventArgs e)
     {
-        if (chat.Items.Count > 0 || e.PropertyName is not (nameof(GitWorkingCopy.Branch) or nameof(GitWorkingCopy.Changes) or nameof(GitWorkingCopy.Ahead) or nameof(GitWorkingCopy.Repo) or nameof(ClaudeWorkspace.Projects))) return;
+        if (chat.Items.Count > 0 || e.PropertyName is not (nameof(GitWorkingCopy.Branch) or nameof(GitWorkingCopy.Changes) or nameof(GitWorkingCopy.Ahead) or nameof(GitWorkingCopy.Remote) or nameof(ClaudeWorkspace.Projects))) return;
         DispatcherQueue.TryEnqueue(SendMeta);
     }
 
@@ -151,6 +155,7 @@ public sealed class ChatView : Grid
             ["ChatWeb_WaitingSignIn"] = L.T("ChatWeb_WaitingSignIn", "Waiting for sign-in…"),
             ["ChatWeb_RestartSession"] = L.T("ChatWeb_RestartSession", "Restart session"),
             ["ChatWeb_PROpen"] = L.T("ChatWeb_PROpen", "Pull request #{0} is open"),
+            ["ChatWeb_MROpen"] = L.T("ChatWeb_MROpen", "Merge request !{0} is open"),
             ["ChatWeb_OpenInApp"] = L.T("ChatWeb_OpenInApp", "Open in PullYard"),
             ["ChatWeb_CopyLink"] = L.T("ChatWeb_CopyLink", "Copy link"),
             ["ChatWeb_WelcomeIntro"] = L.T("ChatWeb_WelcomeIntro", "Describe a task. The agent reads the code, proposes changes and asks before acting."),
@@ -286,7 +291,7 @@ public sealed class ChatView : Grid
         ["turnStartedAt"] = chat.TurnStartedAt?.ToUnixTimeMilliseconds(),
         ["authExpired"] = chat.AuthExpired,
         ["reauthWaiting"] = reauthWaiting && chat.AuthExpired,
-        ["createdPR"] = chat.CreatedPR is { } url && AgentShip.ParsePullRequestUrl(url) is { } pr ? new JsonObject { ["url"] = url, ["number"] = pr.Number, ["repo"] = pr.Repo } : null,
+        ["createdPR"] = chat.CreatedPR is { } url && AgentShip.Describe(url) is { Number.Length: > 0 } pr ? new JsonObject { ["url"] = url, ["number"] = pr.Number, ["repo"] = pr.Repo, ["mergeRequest"] = pr.MergeRequest } : null,
         ["todos"] = TodoProgress.Latest(chat.Items) is { Finished: false } todos ? todos.ToJson() : null,
         ["welcome"] = Welcome()
     };
@@ -301,12 +306,12 @@ public sealed class ChatView : Grid
         var sid = string.IsNullOrEmpty(chat.SessionId) ? tab.SessionId : chat.SessionId;
         var linked = sessions.FirstOrDefault(s => s.PrNumber is not null && (s.Id == sid || (git.Branch is { Length: > 0 } b && b != "HEAD" && s.Branch == b)));
         var suggestions = new JsonArray();
-        foreach (var s in AgentWelcome.Suggestions(git.Changes.Count, git.Branch, git.Repo is not null || git.Remote is not null, git.Ahead, linked?.PrNumber, linked?.PrUrl, git.Remote?.Kind ?? GitRemoteKind.GitHub))
+        foreach (var s in AgentWelcome.Suggestions(git.Changes.Count, git.Branch, git.Remote, git.Ahead, linked?.PrNumber, linked?.PrUrl))
         {
             var (icon, title) = s.Kind switch
             {
                 WelcomeSuggestionKind.ReviewChanges => ("review", L.T("ChatWeb_SugReview", "Review my uncommitted changes")),
-                WelcomeSuggestionKind.OpenPR => ("pr", L.T("ChatWeb_SugOpenPR", "Open a pull request")),
+                WelcomeSuggestionKind.OpenPR => ("pr", git.Remote?.Kind == GitRemoteKind.GitLab ? L.T("ChatWeb_SugOpenMR", "Open a merge request") : L.T("ChatWeb_SugOpenPR", "Open a pull request")),
                 WelcomeSuggestionKind.AddressReview => ("chat", L.F("ChatWeb_SugAddress", "Address review on #{0}", s.PullRequest ?? 0)),
                 WelcomeSuggestionKind.ExplainStructure => ("map", L.T("ChatWeb_SugExplain", "Explain the project structure")),
                 WelcomeSuggestionKind.FindBugs => ("bug", L.T("ChatWeb_SugBugs", "Find bugs in recent changes")),
@@ -354,6 +359,7 @@ public sealed class ChatView : Grid
             case nameof(ChatSession.Running):
             case nameof(ChatSession.TurnStartedAt):
             case nameof(ChatSession.CreatedPR):
+            case nameof(ChatSession.BudgetPaused):
                 SendMeta();
                 UpdateChrome();
                 break;
@@ -388,6 +394,22 @@ public sealed class ChatView : Grid
         else
         {
             sleepBanner.Visibility = Visibility.Collapsed;
+        }
+        if (chat.BudgetPaused)
+        {
+            var limit = SessionCost.Format(SessionCost.Budget);
+            var text = Ui.V(2,
+                Ui.Text(L.F("Chat_BudgetReached", "Session cost {0} reached your {1} limit", SessionCost.Format(chat.TotalCost), limit), 13, "text", FontWeights.Medium, wrap: true),
+                Ui.Text(L.T("Chat_BudgetHint", "New messages wait until you continue. Change the limit in Settings › Agents."), 12, "muted", wrap: true));
+            budgetBanner.Child = Ui.Columns((Ui.H(8, Ui.Glyph("\uE8C7", 13, "amber"), text), Ui.Star),
+                (Ui.Button(L.F("Chat_BudgetContinue", "Continue (+{0})", limit), chat.ContinuePastBudget, accent: true), Ui.Auto));
+            budgetBanner.Padding = new Thickness(14, 6, 14, 6);
+            budgetBanner.Background = Palette.Brush("amber", 0.08);
+            budgetBanner.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            budgetBanner.Visibility = Visibility.Collapsed;
         }
         if (chat.PendingPermissions.FirstOrDefault(p => !p.Resolved) is { } pending)
         {

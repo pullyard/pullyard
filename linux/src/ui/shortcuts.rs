@@ -43,6 +43,7 @@ const GROUPS: &[Group] = &[
             ("Stop the agent", "Escape"),
         ],
     ),
+    ("Pull request conversation", &[("Next unresolved thread", "<Control><Alt>Down")]),
     (
         "Pull request",
         &[

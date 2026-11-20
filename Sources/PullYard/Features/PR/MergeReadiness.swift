@@ -152,7 +152,7 @@ enum RequirementAction: Equatable {
 }
 
 enum RequirementKind: String {
-    case draft, conflicts, behind, changesRequested, approvals, codeOwners, lastPush, checks, optionalChecks, conversations, rules, otherRules
+    case draft, conflicts, behind, changesRequested, approvals, codeOwners, lastPush, checks, optionalChecks, conversations, mergeQueue, rules, otherRules
 }
 
 struct MergeRequirement: Identifiable, Equatable {
@@ -206,6 +206,7 @@ enum MergeReadiness {
 
     static func requirements(_ pr: PullRequestDetail, rules status: RulesStatus) -> [MergeRequirement] {
         guard pr.isOpen else { return [] }
+        if let merge = pr.forgeMerge { return merge.provider == "bitbucket" ? bitbucket(pr, merge: merge) : gitlab(pr, merge: merge) }
         let rules = status.rules
         var out: [MergeRequirement] = []
 
@@ -228,6 +229,14 @@ enum MergeReadiness {
         out += reviewRequirements(pr, rules: rules, access: status.reviewRules, loading: status == .loading)
         out += checkRequirements(pr, rules: rules)
         if let c = conversationRequirement(pr, rules: rules, loading: status == .loading) { out.append(c) }
+
+        if let entry = pr.mergeQueueEntry {
+            out.append(MergeRequirement(kind: .mergeQueue, state: entry.failing ? .missing : .pending, title: entry.summary,
+                                        detail: entry.failing ? "Fix the failing checks or conflicts and add it again" : nil))
+        } else if pr.isMergeQueueEnabled == true {
+            out.append(MergeRequirement(kind: .mergeQueue, state: .advisory, title: "Merges through a merge queue",
+                                        detail: "Add it from the merge sheet with “Add to merge queue”"))
+        }
 
         if status == .failed {
             out.append(MergeRequirement(kind: .rules, state: .unknown, title: "Branch rules couldn’t be read", detail: "Showing what GitHub reports for this pull request"))
@@ -332,6 +341,123 @@ enum MergeReadiness {
         guard open > 0 else { return nil }
         let detail = rules?.reviewRulesKnown == true ? "Not required to merge" : loading ? nil : "May not block merging"
         return MergeRequirement(kind: .conversations, state: .advisory, title: title, detail: detail, action: .showConversation)
+    }
+
+    static func bitbucket(_ pr: PullRequestDetail, merge: ForgeMergeInfo) -> [MergeRequirement] {
+        var out: [MergeRequirement] = []
+        if pr.isDraft {
+            out.append(MergeRequirement(kind: .draft, state: .missing, title: "Draft pull request", detail: "Mark it ready for review before merging", action: .readyForReview))
+        }
+        if pr.mergeable == "CONFLICTING" {
+            out.append(MergeRequirement(kind: .conflicts, state: .missing, title: "Conflicts with \(pr.baseRefName)", detail: "Resolve them before merging"))
+        } else {
+            out.append(MergeRequirement(kind: .conflicts, state: .satisfied, title: "No conflicts with \(pr.baseRefName)"))
+        }
+        let reviews = pr.latestOpinionatedReviews.nodes
+        let blockers = reviews.filter { $0.state == "CHANGES_REQUESTED" }.compactMap { $0.author?.login }
+        let approvals = reviews.filter { $0.state == "APPROVED" }.count
+        if !blockers.isEmpty {
+            out.append(MergeRequirement(kind: .changesRequested, state: .advisory, title: "Changes requested", detail: "By " + blockers.joined(separator: ", ")))
+        }
+        if approvals > 0 {
+            out.append(MergeRequirement(kind: .approvals, state: .satisfied, title: approvals == 1 ? "Approved" : "Approved by \(approvals) reviewers"))
+        } else {
+            out.append(MergeRequirement(kind: .approvals, state: .advisory, title: "No approvals yet", detail: "Branch restrictions may require them"))
+        }
+        let failed = pr.checks.filter { $0.outcome == .failure }
+        let running = pr.checks.filter { $0.outcome == .pending }
+        if !failed.isEmpty {
+            out.append(MergeRequirement(kind: .checks, state: .advisory, title: count(failed.count, "build") + " failed", detail: names(failed.map(\.title)), action: .showChecks))
+        } else if !running.isEmpty {
+            out.append(MergeRequirement(kind: .checks, state: .pending, title: "Waiting for " + count(running.count, "build"), detail: names(running.map(\.title)), action: .showChecks))
+        } else if !pr.checks.isEmpty {
+            out.append(MergeRequirement(kind: .checks, state: .satisfied, title: pr.checks.count == 1 ? "1 build passed" : "All \(pr.checks.count) builds passed", action: .showChecks))
+        }
+        if let tasks = merge.openTasks, tasks > 0 {
+            out.append(MergeRequirement(kind: .conversations, state: .advisory, title: count(tasks, "open task"), detail: "Merge checks may require resolving them", action: .showConversation))
+        }
+        out.append(MergeRequirement(kind: .otherRules, state: .unknown, title: "Merge checks aren’t visible", detail: "Bitbucket rejects the merge if a required check fails"))
+        return out
+    }
+
+    static func gitlab(_ pr: PullRequestDetail, merge: ForgeMergeInfo) -> [MergeRequirement] {
+        var out: [MergeRequirement] = []
+        if pr.isDraft {
+            out.append(MergeRequirement(kind: .draft, state: .missing, title: "Draft merge request", detail: "Mark it as ready before merging", action: .readyForReview))
+        }
+        switch merge.status {
+        case "conflict", "broken_status":
+            out.append(MergeRequirement(kind: .conflicts, state: .missing, title: "Conflicts with \(pr.baseRefName)", detail: "Resolve them before merging"))
+        case "checking", "unchecked", "preparing", "approvals_syncing":
+            out.append(MergeRequirement(kind: .conflicts, state: .pending, title: "Checking for conflicts…"))
+        default:
+            out.append(MergeRequirement(kind: .conflicts, state: .satisfied, title: "No conflicts with \(pr.baseRefName)"))
+        }
+        if merge.status == "need_rebase" {
+            out.append(MergeRequirement(kind: .behind, state: .missing, title: "Needs a rebase onto \(pr.baseRefName)", detail: "The project allows only fast-forward merges", action: .updateBranch))
+        }
+
+        let approvers = pr.latestOpinionatedReviews.nodes.filter { $0.state == "APPROVED" }.count
+        if merge.status == "requested_changes" {
+            out.append(MergeRequirement(kind: .changesRequested, state: .missing, title: "Changes requested", detail: "A reviewer asked for changes"))
+        }
+        if let required = merge.approvalsRequired, required > 0 {
+            let left = merge.approvalsLeft ?? max(required - approvers, 0)
+            let given = max(required - left, 0)
+            if left == 0 {
+                out.append(MergeRequirement(kind: .approvals, state: .satisfied, title: "\(given) of \(required) required approvals"))
+            } else {
+                out.append(MergeRequirement(kind: .approvals, state: .missing, title: "\(given) of \(required) required approvals",
+                                            detail: left == 1 ? "Needs 1 more approval" : "Needs \(left) more approvals"))
+            }
+        } else if merge.status == "not_approved" {
+            out.append(MergeRequirement(kind: .approvals, state: .missing, title: "Approval required", detail: merge.approvalsLeft.map { $0 == 1 ? "Needs 1 more approval" : "Needs \($0) more approvals" }))
+        } else if merge.approvalsRequired != nil {
+            out.append(MergeRequirement(kind: .approvals, state: .satisfied, title: approvers > 0 ? (approvers == 1 ? "Approved" : "Approved by \(approvers) reviewers") : "No approvals required"))
+        }
+
+        let failed = pr.checks.filter { $0.outcome == .failure }
+        let running = pr.checks.filter { $0.outcome == .pending }
+        switch merge.status {
+        case "ci_must_pass", "ci_still_running":
+            if !failed.isEmpty {
+                out.append(MergeRequirement(kind: .checks, state: .missing, title: count(failed.count, "job") + " failed", detail: "The pipeline must succeed", action: .showChecks))
+            } else if pr.checks.isEmpty, merge.status == "ci_must_pass" {
+                out.append(MergeRequirement(kind: .checks, state: .missing, title: "A pipeline must run and succeed", action: .showChecks))
+            } else {
+                out.append(MergeRequirement(kind: .checks, state: .pending, title: "Pipeline is still running",
+                                            detail: running.isEmpty ? nil : "Running: " + names(running.map(\.title)), action: .showChecks))
+            }
+        default:
+            if !failed.isEmpty {
+                out.append(MergeRequirement(kind: .checks, state: .advisory, title: count(failed.count, "job") + " failed", detail: "Doesn’t block merging", action: .showChecks))
+            } else if !running.isEmpty {
+                out.append(MergeRequirement(kind: .checks, state: .pending, title: "Pipeline is running", detail: "Running: " + names(running.map(\.title)), action: .showChecks))
+            } else if !pr.checks.isEmpty {
+                out.append(MergeRequirement(kind: .checks, state: .satisfied, title: "Pipeline passed", action: .showChecks))
+            }
+        }
+
+        let open = pr.reviewThreads.nodes.filter { !$0.isResolved }.count
+        let threads = open == 1 ? "1 unresolved thread" : "\(open) unresolved threads"
+        if merge.status == "discussions_not_resolved" {
+            out.append(MergeRequirement(kind: .conversations, state: .missing, title: open > 0 ? threads : "All threads must be resolved", detail: "The project requires resolving them", action: .showConversation))
+        } else if open > 0 {
+            out.append(MergeRequirement(kind: .conversations, state: .advisory, title: threads, detail: "Not required to merge", action: .showConversation))
+        }
+
+        if let entry = pr.mergeQueueEntry {
+            out.append(MergeRequirement(kind: .mergeQueue, state: .pending, title: entry.summary.replacingOccurrences(of: "Merge queue", with: "Merge train").replacingOccurrences(of: "Queued to merge", with: "In the merge train")))
+        } else if pr.isMergeQueueEnabled == true {
+            out.append(MergeRequirement(kind: .mergeQueue, state: .advisory, title: "Merges through a merge train", detail: "Merging starts or joins the train"))
+        }
+
+        let covered: Set<String> = ["mergeable", "conflict", "broken_status", "need_rebase", "checking", "unchecked", "preparing", "approvals_syncing",
+                                    "draft_status", "not_open", "not_approved", "requested_changes", "ci_must_pass", "ci_still_running", "discussions_not_resolved"]
+        if !covered.contains(merge.status) {
+            out.append(MergeRequirement(kind: .otherRules, state: .missing, title: pr.mergeBlocker ?? "Blocked by a project rule", detail: "Reported by GitLab"))
+        }
+        return out
     }
 
     private static func count(_ n: Int, _ noun: String) -> String {

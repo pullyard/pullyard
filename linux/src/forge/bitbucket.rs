@@ -5,6 +5,7 @@ use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde::Deserialize;
 
 use super::{newest_first, ForgeCapabilities, ForgeClient, ForgeItem, ForgeRepo, ForgeUser, Query};
+use crate::api::merge_readiness::CapabilityState;
 use crate::api::models::{Date, SearchItem};
 use crate::api::{ApiError, ApiResult};
 use crate::app::PrFilter;
@@ -155,7 +156,7 @@ pub(super) fn authorization(email: Option<&str>, token: &str) -> String {
     }
 }
 
-fn segment(s: &str) -> String {
+pub(super) fn segment(s: &str) -> String {
     utf8_percent_encode(s, SEGMENT).to_string()
 }
 
@@ -167,7 +168,14 @@ pub(super) async fn current_user(c: &ForgeClient) -> ApiResult<ForgeUser> {
 }
 
 pub(super) fn capabilities() -> ForgeCapabilities {
-    ForgeCapabilities { pull_filters: vec![PrFilter::ReviewRequested, PrFilter::Mine, PrFilter::Reviewed], issue_filters: vec![], inbox_title: None, repositories: true, ..Default::default() }
+    ForgeCapabilities {
+        pull_filters: vec![PrFilter::ReviewRequested, PrFilter::Mine, PrFilter::Reviewed],
+        issue_filters: vec![],
+        inbox_title: None,
+        repositories: true,
+        pull_request_review: CapabilityState::Supported,
+        merge_requirements: CapabilityState::Unavailable,
+    }
 }
 
 fn state_query(state: StateFilter) -> Query {

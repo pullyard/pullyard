@@ -147,7 +147,7 @@ fn code_block(code: &str) -> gtk::Widget {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-enum Block {
+pub(crate) enum Block {
     Para(String),
     Code(String),
     Heading(usize, String),
@@ -157,7 +157,7 @@ enum Block {
     Item(i32, String, String),
 }
 
-fn parse(text: &str) -> Vec<Block> {
+pub(crate) fn parse(text: &str) -> Vec<Block> {
     let mut blocks = vec![];
     let lines: Vec<&str> = text.split('\n').collect();
     let mut i = 0;

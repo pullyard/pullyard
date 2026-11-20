@@ -120,7 +120,7 @@ public sealed class StackTab : Grid
         graph?.Show(tree, sessions, NoteKey);
     });
 
-    public string NoteKey(int number) => StackNotes.Key(model.CacheAccount, model.Api.Host, model.Ref.Repo, number);
+    public string NoteKey(int number) => StackNotes.Key(model.CacheAccount, (model.Api?.Host ?? ""), model.Ref.Repo, number);
 
     private void Render()
     {
@@ -220,7 +220,7 @@ public sealed class StackTab : Grid
         next.Tab = PRTab.Stack;
         if (tree.Nodes.TryGetValue(number, out var node))
         {
-            var nodes = StackStore.Shared.MemoryNodes(model.CacheAccount, model.Api.Host, model.Ref.Repo) ?? tree.Nodes.Values.ToList();
+            var nodes = StackStore.Shared.MemoryNodes(model.CacheAccount, (model.Api?.Host ?? ""), model.Ref.Repo) ?? tree.Nodes.Values.ToList();
             next.SeedStack(node, nodes);
         }
         if (!inPlace || next.Pr is not null)

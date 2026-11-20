@@ -2,6 +2,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use super::{issue, lenient, newest_first, state_matches, FlexLabel, ForgeCapabilities, ForgeClient, ForgeItem, ForgeNotification, ForgeRepo, ForgeUser, Query};
+use crate::api::merge_readiness::CapabilityState;
 use crate::api::models::{Actor, Date, SearchItem};
 use crate::api::ApiResult;
 use crate::app::{IssueFilter, PrFilter};
@@ -138,7 +139,14 @@ pub(super) async fn capabilities(c: &ForgeClient) -> ForgeCapabilities {
     if approval_filter_available(c).await {
         pull_filters.push(PrFilter::Reviewed);
     }
-    ForgeCapabilities { pull_filters, issue_filters: IssueFilter::ALL.to_vec(), inbox_title: Some("To-Do List"), repositories: true, ..Default::default() }
+    ForgeCapabilities {
+        pull_filters,
+        issue_filters: IssueFilter::ALL.to_vec(),
+        inbox_title: Some("To-Do List"),
+        repositories: true,
+        pull_request_review: CapabilityState::Supported,
+        merge_requirements: CapabilityState::Supported,
+    }
 }
 
 fn list_query() -> Query {

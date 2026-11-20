@@ -12,7 +12,7 @@ use crate::claude::chat::{self, ChatImage, ChatItem, ChatSession, ChatText, Even
 use crate::claude::sessions::{self, SessionInfo};
 use crate::claude::tool_groups::{self, relative, tool_summary, tool_title, DisplayItem, ToolStep};
 use crate::claude::workspace::{Tab, WsEvent};
-use crate::claude::{accounts, payload, prompt_library, relogin, rewind, ship, ClaudeMode, TabKind};
+use crate::claude::{accounts, payload, prompt_library, relogin, rewind, session_cost, ship, ClaudeMode, TabKind};
 use crate::diff::{DiffLine, LineKind};
 use crate::ui::markdown;
 use crate::ui::menu::Menu;
@@ -38,6 +38,8 @@ pub struct ChatView {
     working_label: gtk::Label,
     working_time: gtk::Label,
     error_box: gtk::Box,
+    budget_box: gtk::Box,
+    budget_key: RefCell<String>,
     pr_card: gtk::Box,
     pr_key: RefCell<Option<String>>,
     sleeping: gtk::Box,
@@ -56,6 +58,8 @@ pub struct ChatView {
     stick: Cell<bool>,
     scrolling: Cell<bool>,
     last_value: Cell<f64>,
+    read_anchor: RefCell<Option<(glib::WeakRef<gtk::Widget>, f64)>>,
+    last_width: Cell<i32>,
     dirty_texts: RefCell<Vec<String>>,
     flush_scheduled: Cell<bool>,
     markdowns: RefCell<std::collections::HashMap<String, Rc<markdown::MarkdownView>>>,
@@ -371,9 +375,14 @@ impl ChatView {
         let error_box = vbox(8);
         error_box.add_css_class("chat-error");
         error_box.set_visible(false);
+        let budget_box = vbox(8);
+        budget_box.add_css_class("chat-error");
+        budget_box.set_visible(false);
         column.append(&working);
+        column.append(&budget_box);
         column.append(&error_box);
         margins(&working, 0, 20, 0, 20);
+        margins(&budget_box, 0, 20, 16, 20);
         margins(&error_box, 0, 20, 16, 20);
 
         let jump_button = gtk::Button::new();
@@ -462,6 +471,8 @@ impl ChatView {
             working_label,
             working_time,
             error_box,
+            budget_box,
+            budget_key: RefCell::new(String::new()),
             pr_card,
             pr_key: RefCell::new(None),
             sleeping,
@@ -480,6 +491,8 @@ impl ChatView {
             stick: Cell::new(true),
             scrolling: Cell::new(false),
             last_value: Cell::new(0.0),
+            read_anchor: RefCell::new(None),
+            last_width: Cell::new(0),
             dirty_texts: RefCell::new(vec![]),
             flush_scheduled: Cell::new(false),
             markdowns: RefCell::new(std::collections::HashMap::new()),
@@ -503,6 +516,7 @@ impl ChatView {
         let w = Rc::downgrade(&me);
         me.scroller.vadjustment().connect_changed(move |_| {
             if let Some(me) = w.upgrade() {
+                me.keep_reading_position();
                 me.scroll_down();
                 me.sync_permission_bar();
             }
@@ -713,9 +727,60 @@ impl ChatView {
             self.set_stick(true);
         } else if value < previous {
             self.set_stick(false);
+            if let Some(anim) = self.scroll_anim.borrow_mut().take() {
+                anim.pause();
+            }
         } else if distance <= 40.0 {
             self.set_stick(true);
         }
+        self.capture_anchor();
+    }
+
+    fn capture_anchor(&self) {
+        if self.stick.get() {
+            self.read_anchor.replace(None);
+            return;
+        }
+        let mut kids = vec![];
+        let mut next = self.items_box.first_child();
+        while let Some(w) = next {
+            next = w.next_sibling();
+            kids.push(w);
+        }
+        let bounds = |w: &gtk::Widget| w.compute_bounds(&self.scroller);
+        let (mut lo, mut hi) = (0, kids.len());
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if bounds(&kids[mid]).is_some_and(|b| b.y() + b.height() > 0.0) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        let anchor = kids.get(lo).and_then(|w| bounds(w).map(|b| (w.downgrade(), b.y() as f64)));
+        self.read_anchor.replace(anchor);
+    }
+
+    fn keep_reading_position(self: &Rc<Self>) {
+        let width = self.scroller.width();
+        if self.last_width.replace(width) == width || self.stick.get() || self.read_anchor.borrow().is_none() {
+            return;
+        }
+        let w = Rc::downgrade(self);
+        glib::idle_add_local_once(move || {
+            let Some(me) = w.upgrade().filter(|me| !me.stick.get()) else { return };
+            let Some((widget, top)) = me.read_anchor.borrow().as_ref().and_then(|(r, top)| r.upgrade().map(|w| (w, *top))) else { return };
+            let Some(now) = widget.compute_bounds(&me.scroller) else { return };
+            let delta = now.y() as f64 - top;
+            if delta.abs() < 0.5 {
+                return;
+            }
+            let adj = me.scroller.vadjustment();
+            me.scrolling.set(true);
+            adj.set_value(adj.value() + delta);
+            me.last_value.set(adj.value());
+            me.scrolling.set(false);
+        });
     }
 
     fn scroll_to_end(&self) {
@@ -796,6 +861,7 @@ impl ChatView {
         if !c.busy.get() {
             self.working_time.set_text("");
         }
+        self.render_budget();
         self.render_error();
         self.render_created_pr();
         self.sleeping.set_visible(c.sleeping.get() && !c.running.get());
@@ -879,6 +945,35 @@ impl ChatView {
         self.set_stick(false);
         let target = (adj.value() + bounds.y() as f64 - 24.0).clamp(adj.lower(), (adj.upper() - adj.page_size()).max(adj.lower()));
         adj.set_value(target);
+    }
+
+    fn render_budget(self: &Rc<Self>) {
+        let c = &self.chat;
+        let paused = c.budget_paused.get();
+        let budget = c.budget();
+        let key = if paused { format!("{}|{}", session_cost::format(c.total_cost.get()), session_cost::format(budget)) } else { String::new() };
+        if *self.budget_key.borrow() == key {
+            return;
+        }
+        *self.budget_key.borrow_mut() = key;
+        clear(&self.budget_box);
+        self.budget_box.set_visible(paused);
+        if !paused {
+            return;
+        }
+        let row = hbox(10);
+        row.append(&colored_icon("sy-gauge-symbolic", 14, "amber"));
+        let text = vbox(2);
+        text.set_hexpand(true);
+        text.append(&wrap_label(&session_cost::banner_title(c.total_cost.get(), budget), &["sy-bold", "sy-text"]));
+        text.append(&wrap_label(session_cost::BANNER_DETAIL, &["sy-muted", "sy-small"]));
+        row.append(&text);
+        let resume = tinted(&session_cost::continue_label(budget), "amber");
+        resume.set_valign(gtk::Align::Center);
+        let cc = c.clone();
+        resume.connect_clicked(move |_| cc.continue_past_budget());
+        row.append(&resume);
+        self.budget_box.append(&row);
     }
 
     fn render_error(self: &Rc<Self>) {
@@ -1002,10 +1097,10 @@ impl ChatView {
         let text = vbox(2);
         text.set_hexpand(true);
         text.set_valign(gtk::Align::Center);
-        text.append(&label_with(&format!("{} #{} is open", ship::request_title(&url), ship::pr_number(&url)), &["sy-bold", "sy-text"]));
-        let repo = ship::pr_repo(&url);
-        if !repo.is_empty() {
-            text.append(&label_with(&repo, &["sy-muted", "sy-small"]));
+        let info = ship::describe(&url);
+        text.append(&label_with(&info.title(), &["sy-bold", "sy-text"]));
+        if !info.repo.is_empty() {
+            text.append(&label_with(&info.repo, &["sy-muted", "sy-small"]));
         }
         row.append(&text);
         let copy = button("Copy link");
@@ -1091,13 +1186,14 @@ impl ChatView {
         let branch = git.branch.borrow().clone().filter(|b| b != "HEAD");
         let changes = git.changes.borrow().len();
         let ahead = git.ahead();
-        let remote_kind = git.remote.borrow().as_ref().map(|r| r.kind());
+        let remote = git.remote.borrow().clone();
+        let remote_key = remote.as_ref().map(|r| r.web_url()).unwrap_or_default();
         let sid = self.chat.session_id.borrow().clone().unwrap_or_default();
         let root = sessions::project_root(&self.tab.folder);
         let recent: Vec<SessionInfo> = ws.projects.borrow().iter().find(|p| p.path == root).map(|p| p.sessions.iter().filter(|s| s.id != sid).take(3).cloned().collect()).unwrap_or_default();
         let linked: Option<(i64, String)> = if sid.is_empty() { None } else { ws.find_session(&sid).and_then(|s| Some((s.pr_number?, s.pr_url?))) };
         let key = format!(
-            "{:?}|{changes}|{ahead}|{remote_kind:?}|{:?}|{}",
+            "{:?}|{changes}|{ahead}|{remote_key}|{:?}|{}",
             branch,
             linked,
             recent.iter().map(|s| format!("{}:{}:{}", s.id, s.title, s.modified.timestamp())).collect::<Vec<_>>().join(",")
@@ -1138,8 +1234,8 @@ impl ChatView {
         let mut suggestions: Vec<(&str, String, String)> = vec![];
         if changes > 0 {
             suggestions.push(("sy-eye-symbolic", "Review my uncommitted changes".into(), "Review my uncommitted changes (git diff HEAD). Point out bugs, risky parts and missing tests.".into()));
-            if let (Some(b), Some(kind)) = (&branch, remote_kind) {
-                suggestions.push(("sy-pr-symbolic", format!("Open a {}", kind.request_noun()), ship::open_pr_prompt(b, None, true, ahead, kind)));
+            if let (Some(b), Some(r)) = (&branch, &remote) {
+                suggestions.push(("sy-pr-symbolic", format!("Open a {}", r.noun()), ship::open_request_prompt(b, None, true, ahead, Some(r))));
             }
         }
         if let Some((n, url)) = &linked {
@@ -2466,7 +2562,9 @@ impl ChatComposer {
             buffer.place_cursor(&buffer.end_iter());
             self.view.grab_focus();
         }
-        self.placeholder.set_text(if c.queued_count() > 0 && !c.running.get() {
+        self.placeholder.set_text(if c.budget_paused.get() {
+            "Paused at the cost limit — messages wait until you continue…"
+        } else if c.queued_count() > 0 && !c.running.get() {
             "Queued — sends when the session starts…"
         } else if c.busy.get() {
             "Message will be queued…"
