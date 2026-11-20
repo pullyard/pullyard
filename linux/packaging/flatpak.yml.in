@@ -1,6 +1,6 @@
 id: @APP_ID@
 runtime: org.gnome.Platform
-runtime-version: '47'
+runtime-version: '50'
 sdk: org.gnome.Sdk
 command: @BIN_NAME@
 finish-args:
@@ -38,7 +38,7 @@ modules:
     sources:
       - type: git
         url: https://gitlab.gnome.org/GNOME/vte.git
-        tag: 0.78.2
+        tag: 0.84.1
   - name: @BIN_NAME@
     buildsystem: simple
     build-commands:
