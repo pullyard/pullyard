@@ -227,6 +227,8 @@ jobs:
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
       options: --privileged
+      volumes:
+        - flatpak-data:/var/lib/flatpak
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
