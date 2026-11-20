@@ -132,15 +132,67 @@ final class PRDetailModel {
     var collapsed: Set<String> = []
     var scrollTarget: String?
     var scrollToken = 0
-    var pending: [PendingComment] = []
-    var composer: DiffAnchor?
-    var composerDraft = ""
-    var replyDrafts: [String: String] = [:]
+    var pending: [PendingComment] = [] { didSet { draftsChanged() } }
+    var composer: DiffAnchor? { didSet { draftsChanged() } }
+    var composerDraft = "" { didSet { draftsChanged() } }
+    var replyDrafts: [String: String] = [:] { didSet { draftsChanged() } }
+    var commentDraft = "" { didSet { draftsChanged() } }
+    var summaryDraft = "" { didSet { draftsChanged() } }
+    var restoredDrafts = false
+    @ObservationIgnored var drafts: DraftStore = .shared
+    @ObservationIgnored private var draftsLoaded = false
+    @ObservationIgnored private var draftSave: DispatchWorkItem?
+
+    private var draftKey: String {
+        DraftStore.key(account: cacheAccount, host: api?.host ?? "\(provider)", repo: ref.repo.full, number: ref.number)
+    }
+
+    var currentDraft: SavedReviewDraft {
+        SavedReviewDraft(
+            pending: pending.map { .init(path: $0.path, line: $0.line, side: $0.side, body: $0.body) },
+            composer: composer.map { .init(path: $0.path, line: $0.line, side: $0.side, body: composerDraft) },
+            replies: replyDrafts.filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
+            comment: commentDraft,
+            summary: summaryDraft
+        )
+    }
+
+    func restoreDrafts() {
+        guard !draftsLoaded else { return }
+        if let saved = drafts.review(draftKey) {
+            pending = saved.pending.map { PendingComment(path: $0.path, line: $0.line, side: $0.side, body: $0.body) }
+            if let open = saved.composer {
+                composer = DiffAnchor(path: open.path, line: open.line, side: open.side)
+                composerDraft = open.body
+            }
+            replyDrafts = saved.replies
+            commentDraft = saved.comment
+            summaryDraft = saved.summary
+            restoredDrafts = !saved.pending.isEmpty
+        }
+        draftsLoaded = true
+    }
+
+    func saveDraftsNow() {
+        draftSave?.cancel()
+        draftSave = nil
+        guard draftsLoaded else { return }
+        drafts.save(currentDraft, key: draftKey)
+    }
+
+    private func draftsChanged() {
+        guard draftsLoaded else { return }
+        draftSave?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.saveDraftsNow() }
+        draftSave = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
     var replyThread: ReviewThread?
 
     @ObservationIgnored private(set) var flatCacheKey = ""
     @ObservationIgnored private var flatCache: [FlatDiffRow] = []
     private var threadsVersion = 0
+    @ObservationIgnored private var threadsSignature = 0
     private var filesVersion = 0
     private var threadIndex: [String: [ReviewThread]] = [:]
     private var outdatedByPath: [String: [ReviewThread]] = [:]
@@ -608,9 +660,33 @@ final class PRDetailModel {
                 outdated[t.path, default: []].append(t)
             }
         }
+        var hasher = Hasher()
+        for t in threads {
+            hasher.combine(t.id)
+            hasher.combine(t.isResolved)
+            hasher.combine(t.isOutdated)
+            hasher.combine(t.line)
+            for c in t.comments.nodes {
+                hasher.combine(c.id)
+                hasher.combine(c.body)
+            }
+        }
+        let signature = hasher.finalize()
+        guard signature != threadsSignature || threadsVersion == 0 else { return }
+        threadsSignature = signature
         threadIndex = idx
         outdatedByPath = outdated
         threadsVersion += 1
+    }
+
+    var hiddenThreadCount: Int {
+        guard let pr, let total = pr.reviewThreads.totalCount else { return 0 }
+        return max(total - pr.reviewThreads.nodes.count, 0)
+    }
+
+    var hiddenCheckCount: Int {
+        guard let contexts = pr?.rollup?.contexts, let total = contexts.totalCount else { return 0 }
+        return max(total - contexts.nodes.count, 0)
     }
 
     func flatRows(filter: String) -> [FlatDiffRow] {
@@ -691,7 +767,10 @@ final class PRDetailModel {
         let ok = await run { try await backend.submitReview(ref, pr: pr, event: event, body: body, comments: comments, files: files) }
         if ok {
             pending = []
+            summaryDraft = ""
+            restoredDrafts = false
             scrollToBottomToken += 1
+            saveDraftsNow()
         }
         return ok
     }

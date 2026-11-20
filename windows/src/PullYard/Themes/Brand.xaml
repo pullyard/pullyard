@@ -14,9 +14,9 @@
             <SolidColorBrush x:Key="SyLineStrongBrush" Color="#261A2333" />
             <SolidColorBrush x:Key="SyTextBrush" Color="#FF1A2333" />
             <SolidColorBrush x:Key="SyMutedBrush" Color="#FF5F6B7E" />
-            <SolidColorBrush x:Key="SyDimBrush" Color="#FF7C8494" />
+            <SolidColorBrush x:Key="SyDimBrush" Color="#FF6B7486" />
             <SolidColorBrush x:Key="SyAccentBrush" Color="#FF2A8BC8" />
-            <SolidColorBrush x:Key="SySkyBrush" Color="#FF1F7FB8" />
+            <SolidColorBrush x:Key="SySkyBrush" Color="#FF1A6A9E" />
             <SolidColorBrush x:Key="SyVioletBrush" Color="#FF6B55D6" />
             <SolidColorBrush x:Key="SyCoralBrush" Color="#FFD8513F" />
             <SolidColorBrush x:Key="SyGreenBrush" Color="#FF2E8A57" />
@@ -399,6 +399,21 @@
             <StaticResource x:Key="ScrollBarThumbFillPressed" ResourceKey="SyScrollThumbBrush" />
             <StaticResource x:Key="ScrollBarThumbBackground" ResourceKey="SyScrollThumbBrush" />
             <StaticResource x:Key="ScrollBarPanningThumbBackground" ResourceKey="SyScrollThumbBrush" />
+            <Color x:Key="SystemAccentColor">#FF2A8BC8</Color>
+            <Color x:Key="SystemAccentColorLight1">#FF4A9FD6</Color>
+            <Color x:Key="SystemAccentColorLight2">#FF5BB8EC</Color>
+            <Color x:Key="SystemAccentColorLight3">#FF8FD0F4</Color>
+            <Color x:Key="SystemAccentColorDark1">#FF1D70A6</Color>
+            <Color x:Key="SystemAccentColorDark2">#FF1A6A9E</Color>
+            <Color x:Key="SystemAccentColorDark3">#FF134F78</Color>
+            <SolidColorBrush x:Key="AccentTextFillColorPrimaryBrush" Color="#FF1A6A9E" />
+            <SolidColorBrush x:Key="AccentTextFillColorSecondaryBrush" Color="#FF134F78" />
+            <SolidColorBrush x:Key="AccentTextFillColorTertiaryBrush" Color="#FF1D70A6" />
+            <SolidColorBrush x:Key="AccentTextFillColorDisabledBrush" Color="#5C1A2333" />
+            <SolidColorBrush x:Key="InfoBadgeBackground" Color="#FF1D70A6" />
+            <SolidColorBrush x:Key="InfoBadgeForeground" Color="#FFFFFFFF" />
+            <SolidColorBrush x:Key="PersonPictureEllipseFillThemeBrush" Color="#FFE4E0D8" />
+            <SolidColorBrush x:Key="PersonPictureForegroundThemeBrush" Color="#FF5F6B7E" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
             <SolidColorBrush x:Key="SyWindowBrush" Color="#FF0C1220" />
@@ -412,7 +427,7 @@
             <SolidColorBrush x:Key="SyLineStrongBrush" Color="#2EA0AEC4" />
             <SolidColorBrush x:Key="SyTextBrush" Color="#FFE6EBF2" />
             <SolidColorBrush x:Key="SyMutedBrush" Color="#FF8693A8" />
-            <SolidColorBrush x:Key="SyDimBrush" Color="#FF6B778C" />
+            <SolidColorBrush x:Key="SyDimBrush" Color="#FF8290A6" />
             <SolidColorBrush x:Key="SyAccentBrush" Color="#FF5BB8EC" />
             <SolidColorBrush x:Key="SySkyBrush" Color="#FF5BB8EC" />
             <SolidColorBrush x:Key="SyVioletBrush" Color="#FF9D8CF0" />
@@ -797,6 +812,21 @@
             <StaticResource x:Key="ScrollBarThumbFillPressed" ResourceKey="SyScrollThumbBrush" />
             <StaticResource x:Key="ScrollBarThumbBackground" ResourceKey="SyScrollThumbBrush" />
             <StaticResource x:Key="ScrollBarPanningThumbBackground" ResourceKey="SyScrollThumbBrush" />
+            <Color x:Key="SystemAccentColor">#FF5BB8EC</Color>
+            <Color x:Key="SystemAccentColorLight1">#FF4A9FD6</Color>
+            <Color x:Key="SystemAccentColorLight2">#FF5BB8EC</Color>
+            <Color x:Key="SystemAccentColorLight3">#FF8FD0F4</Color>
+            <Color x:Key="SystemAccentColorDark1">#FF1D70A6</Color>
+            <Color x:Key="SystemAccentColorDark2">#FF1A6A9E</Color>
+            <Color x:Key="SystemAccentColorDark3">#FF134F78</Color>
+            <SolidColorBrush x:Key="AccentTextFillColorPrimaryBrush" Color="#FF5BB8EC" />
+            <SolidColorBrush x:Key="AccentTextFillColorSecondaryBrush" Color="#FF5BB8EC" />
+            <SolidColorBrush x:Key="AccentTextFillColorTertiaryBrush" Color="#FF4A9FD6" />
+            <SolidColorBrush x:Key="AccentTextFillColorDisabledBrush" Color="#5CE6EBF2" />
+            <SolidColorBrush x:Key="InfoBadgeBackground" Color="#FF1D70A6" />
+            <SolidColorBrush x:Key="InfoBadgeForeground" Color="#FFFFFFFF" />
+            <SolidColorBrush x:Key="PersonPictureEllipseFillThemeBrush" Color="#FF1E2A44" />
+            <SolidColorBrush x:Key="PersonPictureForegroundThemeBrush" Color="#FF8693A8" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="HighContrast">
             <SolidColorBrush x:Key="SyWindowBrush" Color="{ThemeResource SystemColorWindowColor}" />

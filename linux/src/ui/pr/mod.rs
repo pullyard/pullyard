@@ -382,6 +382,15 @@ impl PrPage {
         let html = HtmlView::new();
         let composer = Composer::new("Comment (Markdown) — Ctrl+Enter to send", 56);
         composer.widget.set_hexpand(true);
+        composer.set_text(&self.model.comment_draft.borrow());
+        let draft_model = self.model.clone();
+        let draft_comp = Rc::downgrade(&composer);
+        composer.on_changed(move || {
+            if let Some(c) = draft_comp.upgrade() {
+                *draft_model.comment_draft.borrow_mut() = c.text();
+                draft_model.drafts_changed();
+            }
+        });
         let send = composer.send_button("Comment");
         send.set_valign(gtk::Align::End);
         let row = hbox(8);
@@ -546,7 +555,8 @@ impl PrPage {
         let pr = self.model.pr.borrow().clone();
         let Some(pr) = pr else { return };
         let unresolved = pr.review_threads.nodes.iter().filter(|t| !t.is_resolved && !t.is_outdated).count();
-        self.tabs.set_badge("conversation", if unresolved > 0 { Some(unresolved.to_string()) } else { None }.as_deref(), None);
+        let more = if self.model.hidden_thread_count() > 0 { "+" } else { "" };
+        self.tabs.set_badge("conversation", if unresolved > 0 || !more.is_empty() { Some(format!("{unresolved}{more}")) } else { None }.as_deref(), None);
         self.tabs.set_badge("commits", Some(&pr.all_commits.total_count.unwrap_or(pr.all_commits.nodes.len() as i64).to_string()), None);
         let checks = pr.checks();
         let failed = checks.iter().filter(|c| c.outcome() == CheckOutcome::Failure).count();
@@ -601,11 +611,13 @@ impl PrPage {
             b.append(&icon("go-next-symbolic", 12));
             row.set_child(Some(&b));
             let oid = c.oid.clone();
+            let short = c.abbreviated_oid.clone();
             let url = c.url.clone();
             context_menu(&row, move || {
                 let m = Menu::ctx();
                 let o = oid.clone();
-                m.item("Copy SHA", move || util::copy(&o));
+                let s = short.clone();
+                m.item("Copy SHA", move || app::copy(&o, &format!("Copied {s}")));
                 let u = url.clone();
                 m.item("Open in browser", move || util::open_url(&u));
                 m
@@ -616,7 +628,7 @@ impl PrPage {
         if total > pr.all_commits.nodes.len() as i64 {
             let row = gtk::ListBoxRow::new();
             row.set_widget_name("all-commits");
-            row.set_child(Some(&label_with(&format!("Show all {total} commits in browser"), &["fg-accent"])));
+            row.set_child(Some(&label_with(&format!("Showing the latest {} of {total} commits — open all in browser", pr.all_commits.nodes.len()), &["fg-accent"])));
             l.append(&row);
         }
     }
@@ -731,6 +743,17 @@ impl PrPage {
                 b.append(&open);
             }
             row.set_child(Some(&b));
+            l.append(&row);
+        }
+        let hidden = self.model.hidden_check_count();
+        if hidden > 0 {
+            let link = link_button(&format!("{hidden} more checks are not shown — open in browser"));
+            link.set_halign(gtk::Align::Start);
+            let url = format!("{}/checks", pr.url);
+            link.connect_clicked(move |_| util::open_url(&url));
+            let row = gtk::ListBoxRow::new();
+            row.set_activatable(false);
+            row.set_child(Some(&link));
             l.append(&row);
         }
     }
@@ -950,29 +973,14 @@ impl PrPage {
             let pending = m.pending.borrow().len();
             let split = adw::SplitButton::new();
             split.set_label(&if pending == 0 { "Review".to_string() } else { format!("Review ({pending})") });
-            split.set_tooltip_text(Some("Submit review"));
+            split.set_tooltip_text(Some(&if pending == 0 { "Write a review (Ctrl+Shift+R)".to_string() } else { format!("Submit review with {} (Ctrl+Shift+R)", util::plural(pending as i64, "pending comment", "pending comments")) }));
             let menu = Menu::new();
             let mm = m.clone();
             menu.item("Write review…", move || sheets::review(mm.clone()));
             let features = m.features;
             if pr.viewer_can_approve.unwrap_or(!pr.viewer_did_author) && pr.viewer_approved != Some(true) {
                 let mm = m.clone();
-                menu.item("Approve", move || {
-                    let mm = mm.clone();
-                    let pending = mm.pending.borrow().len();
-                    let heading = if pending > 0 {
-                        format!("Approve and submit {pending} pending comment{}?", if pending == 1 { "" } else { "s" })
-                    } else {
-                        format!("Approve this {}?", features.request_title())
-                    };
-                    let label = if pending > 0 { "Approve and submit" } else { "Approve" };
-                    dialogs::confirm(&heading, None, label, false, move || {
-                        let mm = mm.clone();
-                        crate::rt::spawn_local(async move {
-                            mm.submit_review("APPROVE".into(), String::new()).await;
-                        });
-                    });
-                });
+                menu.item("Approve", move || confirm_approve(mm.clone()));
             }
             if agent {
                 let mm = m.clone();
@@ -1020,7 +1028,7 @@ impl PrPage {
         if pr.is_open() && !pr.is_draft && m.can_write() {
             let merge = icon_label_button("sy-merge-symbolic", "Merge");
             merge.add_css_class("suggested-action");
-            merge.set_tooltip_text(Some(&format!("Merge {}", m.features.request_title())));
+            merge.set_tooltip_text(Some(&format!("Merge {} (Ctrl+Shift+M)", m.features.request_title())));
             set_label(&merge, "Merge");
             let mm = m.clone();
             merge.connect_clicked(move |_| sheets::merge(mm.clone()));
@@ -1047,19 +1055,19 @@ impl PrPage {
         let mut menu = Menu::new();
         let m = self.model.clone();
         let url = pr.url.clone();
-        menu.item("Copy link", move || util::copy(&url));
+        menu.item("Copy link", move || app::copy(&url, "Copied link"));
         let f = m.features;
         if f.provider.is_github() {
             let route = Route::Pr(m.r.clone());
             menu.item("Copy short link", move || super::item_row::copy_short_link(&route));
             let cmd = format!("gh pr checkout {} -R {}", pr.number, m.r.repo.full());
-            menu.item(&format!("Copy “gh pr checkout {}”", pr.number), move || util::copy(&cmd));
+            menu.item(&format!("Copy “gh pr checkout {}”", pr.number), move || app::copy(&cmd, "Copied checkout command"));
         } else if f.is_gitlab() {
             let cmd = format!("glab mr checkout {} -R {}", pr.number, m.r.repo.full());
-            menu.item(&format!("Copy “glab mr checkout {}”", pr.number), move || util::copy(&cmd));
+            menu.item(&format!("Copy “glab mr checkout {}”", pr.number), move || app::copy(&cmd, "Copied checkout command"));
         }
         let head = pr.head_ref_name.clone();
-        menu.item("Copy branch name", move || util::copy(&head));
+        menu.item("Copy branch name", move || app::copy(&head, &format!("Copied {head}")));
         menu.section(None);
         if pr.viewer_can_update && f.editing {
             let mm = m.clone();
@@ -1139,6 +1147,41 @@ impl PrPage {
             });
         }
         menu
+    }
+}
+
+pub fn confirm_approve(model: Rc<PrModel>) {
+    let pending = model.pending.borrow().len();
+    let heading = if pending > 0 {
+        format!("Approve and submit {pending} pending comment{}?", if pending == 1 { "" } else { "s" })
+    } else {
+        format!("Approve this {}?", model.features.request_title())
+    };
+    let label = if pending > 0 { "Approve and submit" } else { "Approve" };
+    dialogs::confirm(&heading, None, label, false, move || {
+        let mm = model.clone();
+        crate::rt::spawn_local(async move {
+            mm.submit_review("APPROVE".into(), String::new()).await;
+        });
+    });
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Shortcut {
+    Review,
+    Approve,
+    Merge,
+}
+
+pub fn shortcut(kind: Shortcut) {
+    let Some(Route::Pr(r)) = app::visible_route() else { return };
+    let Some(m) = app::existing_pr_model(&r) else { return };
+    let Some(pr) = m.pr.borrow().clone() else { return };
+    match kind {
+        Shortcut::Review if pr.is_open() => sheets::review(m),
+        Shortcut::Approve if pr.is_open() && pr.viewer_can_approve.unwrap_or(!pr.viewer_did_author) && pr.viewer_approved != Some(true) => confirm_approve(m),
+        Shortcut::Merge if pr.is_open() && !pr.is_draft && m.can_write() => sheets::merge(m),
+        _ => {}
     }
 }
 

@@ -179,7 +179,54 @@ public sealed partial class ClaudeWorkspace : ObservableObject
         {
             S.Set(Keys.ClaudeModel, value.Raw());
             OnPropertyChanged();
+            OnPropertyChanged(nameof(ModelValue));
         }
+    }
+
+    public string ModelValue
+    {
+        get => S.GetString(Keys.ClaudeModel) is { Length: > 0 } v && v != "default" ? v : "";
+        set
+        {
+            S.Set(Keys.ClaudeModel, value == "default" ? "" : value);
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(Model));
+        }
+    }
+
+    public bool RememberComposerChoice
+    {
+        get => S.GetBool(Keys.ClaudeRememberComposer, false);
+        set
+        {
+            S.Set(Keys.ClaudeRememberComposer, value);
+            OnPropertyChanged();
+        }
+    }
+
+    public void ComposerChangedModel(string value)
+    {
+        if (RememberComposerChoice) ModelValue = value;
+    }
+
+    public void ComposerChangedEffort(string value)
+    {
+        if (RememberComposerChoice) Effort = ClaudeEnums.ParseEffort(value);
+    }
+
+    public void ComposerChangedMode(string value)
+    {
+        if (RememberComposerChoice) Mode = ClaudeEnums.ParseMode(value);
+    }
+
+    public void ResetDefaults()
+    {
+        ModelValue = "";
+        Effort = ClaudeEffort.Standard;
+        Mode = ClaudeMode.Standard;
+        PreferredKind = ClaudeTabKind.Chat;
+        IdleMinutes = 15;
+        RememberComposerChoice = false;
     }
 
     public ClaudeEffort Effort
@@ -610,9 +657,9 @@ public sealed partial class ClaudeWorkspace : ObservableObject
 
     public void ApplyModelToCurrent()
     {
-        if (SelectedTab is not { Running: true } tab || Model == ClaudeModelOption.Standard) return;
-        if (tab.Chat is { } chat) chat.SetModel(Model.Raw());
-        else tab.Terminal?.Write($"/model {Model.Raw()}\r");
+        if (SelectedTab is not { Running: true } tab || ModelValue.Length == 0) return;
+        if (tab.Chat is { } chat) chat.SetModel(ModelValue);
+        else tab.Terminal?.Write($"/model {ModelValue}\r");
     }
 
     public void Send(string text, ClaudeTab? target = null, bool submit = false)
@@ -660,7 +707,7 @@ public sealed partial class ClaudeWorkspace : ObservableObject
         chat.OnTurnFinished += () => tab.Git.Refresh().Forget();
         var m = modeOverride ?? Mode;
         chat.Start(resume, fork,
-            Model == ClaudeModelOption.Standard ? null : Model.Raw(),
+            ModelValue.Length == 0 ? null : ModelValue,
             Effort == ClaudeEffort.Standard ? null : Effort.Raw(),
             m == ClaudeMode.Standard ? null : m.Raw(),
             prompt);
@@ -671,7 +718,7 @@ public sealed partial class ClaudeWorkspace : ObservableObject
     {
         var mode = modeOverride ?? Mode;
         var args = new List<string>();
-        if (Model != ClaudeModelOption.Standard) args.AddRange(new[] { "--model", Model.Raw() });
+        if (ModelValue.Length > 0) args.AddRange(new[] { "--model", ModelValue });
         if (Effort != ClaudeEffort.Standard) args.AddRange(new[] { "--effort", Effort.Raw() });
         if (mode != ClaudeMode.Standard) args.AddRange(new[] { "--permission-mode", mode.Raw() });
         args.AddRange(extra);

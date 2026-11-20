@@ -318,7 +318,7 @@ impl View {
             tab.git.branch.borrow(),
             tab.running(),
             tab.session_id.borrow().is_empty(),
-            ws.model().key(),
+            ws.model_value(),
             ws.effort(),
             ws.mode(),
             ws.idle_minutes(),
@@ -353,12 +353,13 @@ impl View {
             let mut model_menu = model_menu;
             model_menu.section(None);
             let w = ws.clone();
-            if tab.running() && ws.model() != ModelOption::Default {
+            let custom_model = ws.model_value();
+            if tab.running() && !custom_model.is_empty() {
                 model_menu.item("Apply to current session (/model)", move || w.apply_model_to_current());
             } else {
                 model_menu.disabled("Apply to current session (/model)");
             }
-            self.control_bar.append(&control_menu("sy-memory-symbolic", ws.model().title(), "Model", &model_menu));
+            self.control_bar.append(&control_menu("sy-memory-symbolic", if ws.model() == ModelOption::Default && !custom_model.is_empty() { custom_model.as_str() } else { ws.model().title() }, "Model", &model_menu));
             let effort_menu = Menu::new();
             let current = ws.effort();
             for e in EFFORTS {

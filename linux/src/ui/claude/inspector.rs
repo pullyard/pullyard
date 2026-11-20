@@ -507,7 +507,7 @@ impl BranchPrs {
                 });
                 row.append(&agent);
                 let create = button("Create PR in browser");
-                let url = format!("https://github.com/{}/pull/new/{b}", repo.full());
+                let url = self.tab.git.remote.borrow().as_ref().map(|r| r.new_request_url(&b)).unwrap_or_else(|| format!("https://github.com/{}/pull/new/{b}", repo.full()));
                 create.connect_clicked(move |_| util::open_url(&url));
                 row.append(&create);
                 self.branch_box.append(&row);

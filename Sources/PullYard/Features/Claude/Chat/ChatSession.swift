@@ -153,6 +153,25 @@ final class ClaudeUsageStore {
     var updatedAt: Date?
 }
 
+struct MCPServerStatus: Identifiable, Hashable {
+    let name: String
+    let status: String
+    var id: String { name }
+    var healthy: Bool { status == "connected" }
+    var pending: Bool { status == "pending" }
+
+    var title: String {
+        switch status {
+        case "connected": return "Connected"
+        case "pending": return "Connecting…"
+        case "needs-auth": return "Needs sign-in"
+        case "failed": return "Failed to connect"
+        case "disabled": return "Disabled"
+        default: return status
+        }
+    }
+}
+
 struct ChatCommand: Identifiable, Hashable {
     let name: String
     let description: String
@@ -166,6 +185,9 @@ final class ChatSession {
     let configDir: String?
     var sessionId: String?
     var items: [ChatItem] = []
+    var historyLoading = false
+    @ObservationIgnored var ledger: AgentUsageLedger? = .shared
+    @ObservationIgnored var announceResume = true
     var running = false
     var busy = false
     var status: String?
@@ -175,12 +197,12 @@ final class ChatSession {
     var effort: String = ""
     var models: [ChatModelOption] = []
     var commands: [ChatCommand] = []
+    var mcpServers: [MCPServerStatus] = []
     var pendingPermissions: [PermissionRequest] = []
     var totalCost: Double = 0
     var budgetPaused = false
     @ObservationIgnored private var costBase: Double = 0
     @ObservationIgnored private var budgetAllowance: Double = 0
-    @ObservationIgnored private var heldPrompts: [(text: String, images: [ChatImage])] = []
     var contextPercent: Int?
     var context: ContextUsage?
     var lastError: String?
@@ -191,6 +213,12 @@ final class ChatSession {
     var memoryBytes = 0
     var expandedTools: Set<String> = []
     var draftRequest: String?
+    var draftText = ""
+    var draftImages: [ChatImage] = []
+    var droppedItems: [ChatDropItem] = []
+    var dropTargeted = false
+    @ObservationIgnored private var dropExit: DispatchWorkItem?
+    @ObservationIgnored private var dropIgnoredUntil = Date.distantPast
 
     @ObservationIgnored private var process: Process?
     @ObservationIgnored private var stdin: FileHandle?
@@ -201,8 +229,11 @@ final class ChatSession {
     @ObservationIgnored private var tools: [String: ChatToolCall] = [:]
     @ObservationIgnored private var streamTexts: [String: ChatText] = [:]
     @ObservationIgnored private var messageTexts: [String: [ChatText]] = [:]
-    @ObservationIgnored private var queuedPrompts: [(text: String, images: [ChatImage])] = []
+    @ObservationIgnored private var queuedPrompts: [(id: String, text: String, images: [ChatImage])] = []
+    var queuedIDs: [String] = []
     @ObservationIgnored private var requestCounter = 0
+    @ObservationIgnored private var rollbacks: [String: (label: String, undo: () -> Void)] = [:]
+    @ObservationIgnored var transport: (([String: Any]) -> Bool)?
     @ObservationIgnored private var todoCache: (count: Int, todos: [[String: Any]]) = (-1, [])
     @ObservationIgnored private var displayCache: (key: DisplayKey, items: [ChatDisplayItem])?
     var resolvedPermissions = 0
@@ -237,6 +268,44 @@ final class ChatSession {
         let last: String?
     }
 
+    var sentPrompts: [String] {
+        var seen: [String] = []
+        for item in items {
+            if case .user(_, let text, _) = item, !text.isEmpty, seen.last != text { seen.append(text) }
+        }
+        return seen
+    }
+
+    func markdownTranscript(title: String) -> String {
+        var out = ["# " + title, ""]
+        for item in items {
+            switch item {
+            case .user(_, let text, let images):
+                out.append("## You")
+                out.append("")
+                if !text.isEmpty { out.append(text) }
+                if !images.isEmpty { out.append("_\(images.count) image\(images.count == 1 ? "" : "s") attached_") }
+                out.append("")
+            case .text(let t):
+                guard !t.text.isEmpty else { continue }
+                out.append("## Claude")
+                out.append("")
+                out.append(t.text)
+                out.append("")
+            case .tool(let call):
+                let detail = call.string("command") ?? call.string("file_path") ?? call.string("pattern") ?? call.string("description") ?? ""
+                out.append("- `\(call.name)`" + (detail.isEmpty ? "" : " " + detail.replacingOccurrences(of: "\n", with: " ").prefix(160)))
+            case .notice(_, let text, _):
+                out.append("")
+                out.append("_\(text)_")
+                out.append("")
+            case .thinking:
+                continue
+            }
+        }
+        return out.joined(separator: "\n")
+    }
+
     var lastAssistantText: String? {
         for item in items.reversed() {
             if case .text(let t) = item, !t.text.isEmpty { return t.text }
@@ -250,6 +319,25 @@ final class ChatSession {
     }
 
     var pendingCount: Int { pendingPermissions.filter { !$0.resolved }.count }
+
+    func setDropHover(_ on: Bool, immediately: Bool = false, now: Date = Date()) {
+        if on, now < dropIgnoredUntil { return }
+        dropExit?.cancel()
+        dropExit = nil
+        if !on, immediately {
+            if dropTargeted { dropTargeted = false }
+            return
+        }
+        if on, !dropTargeted { dropTargeted = true }
+        let work = DispatchWorkItem { [weak self] in self?.dropTargeted = false }
+        dropExit = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + (on ? 4 : 0.25), execute: work)
+    }
+
+    func finishDrop(now: Date = Date()) {
+        dropIgnoredUntil = now.addingTimeInterval(0.6)
+        setDropHover(false, immediately: true, now: now)
+    }
 
     var pid: pid_t { process?.processIdentifier ?? 0 }
 
@@ -359,6 +447,8 @@ final class ChatSession {
         process = nil
         stdin = nil
         memoryBytes = 0
+        costBase = totalCost
+        rollbacks.removeAll()
         for t in tools.values where t.status == .running { t.status = wasIntentional ? .done : .error }
         if wasIntentional {
             sleeping = sessionId != nil
@@ -374,34 +464,51 @@ final class ChatSession {
         }
     }
 
-    private func write(_ obj: [String: Any]) {
-        guard let stdin, let data = try? JSONSerialization.data(withJSONObject: obj) else { return }
+    @discardableResult
+    private func write(_ obj: [String: Any]) -> Bool {
+        if let transport { return transport(obj) }
+        guard let stdin, let data = try? JSONSerialization.data(withJSONObject: obj) else { return false }
         var line = data
         line.append(0x0A)
-        try? stdin.write(contentsOf: line)
+        do {
+            try stdin.write(contentsOf: line)
+            return true
+        } catch {
+            return false
+        }
     }
 
-    private func control(_ subtype: String, _ extra: [String: Any]) {
+    @discardableResult
+    private func control(_ subtype: String, _ extra: [String: Any], rollback: (label: String, undo: () -> Void)? = nil) -> Bool {
         requestCounter += 1
         var req = extra
         req["subtype"] = subtype
-        write(["type": "control_request", "request_id": "gl-\(requestCounter)-\(subtype)", "request": req])
+        let id = "gl-\(requestCounter)-\(subtype)"
+        guard write(["type": "control_request", "request_id": id, "request": req]) else { return false }
+        if let rollback { rollbacks[id] = rollback }
+        return true
     }
 
     func send(_ text: String, images: [ChatImage] = []) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !images.isEmpty else { return }
         lastActivity = Date()
-        items.append(.user(id: UUID().uuidString, text: trimmed, images: images))
-        if budgetPaused {
-            heldPrompts.append((trimmed, images))
-            return
-        }
-        guard running else {
-            queuedPrompts.append((trimmed, images))
+        let id = UUID().uuidString
+        items.append(.user(id: id, text: trimmed, images: images))
+        guard running, !busy, !budgetPaused else {
+            queuedPrompts.append((id, trimmed, images))
+            queuedIDs.append(id)
             return
         }
         deliver(trimmed, images: images)
+    }
+
+    func cancelQueued(_ id: String) -> String? {
+        guard let index = queuedPrompts.firstIndex(where: { $0.id == id }) else { return nil }
+        let prompt = queuedPrompts.remove(at: index)
+        queuedIDs.removeAll { $0 == id }
+        items.removeAll { $0.id == "u" + id }
+        return prompt.text
     }
 
     private func deliver(_ text: String, images: [ChatImage]) {
@@ -409,7 +516,11 @@ final class ChatSession {
             ["type": "image", "source": ["type": "base64", "media_type": $0.mediaType, "data": $0.data.base64EncodedString()]]
         }
         if !text.isEmpty { content.append(["type": "text", "text": text]) }
-        write(["type": "user", "message": ["role": "user", "content": content]])
+        guard write(["type": "user", "message": ["role": "user", "content": content]]) else {
+            items.append(.notice(id: UUID().uuidString, text: "Message wasn't delivered — the Claude process isn't responding. Reconnect and send it again.", isError: true))
+            busy = false
+            return
+        }
         busy = true
         status = nil
         turnStartedAt = Date()
@@ -418,22 +529,26 @@ final class ChatSession {
     func continuePastBudget() {
         budgetAllowance = SessionCost.nextAllowance(cost: totalCost, budget: SessionCost.budget)
         budgetPaused = false
-        let held = heldPrompts
-        heldPrompts = []
-        for h in held {
-            if running { deliver(h.text, images: h.images) } else { queuedPrompts.append(h) }
-        }
+        flushQueue()
     }
 
-    private func flushQueue() {
-        let queued = queuedPrompts
-        queuedPrompts = []
-        for q in queued { deliver(q.text, images: q.images) }
+    @discardableResult
+    private func flushQueue() -> Bool {
+        guard running, !busy, !budgetPaused, !queuedPrompts.isEmpty else { return false }
+        let next = queuedPrompts.removeFirst()
+        queuedIDs.removeAll { $0 == next.id }
+        if let index = items.firstIndex(where: { $0.id == "u" + next.id }), index != items.count - 1 {
+            let item = items.remove(at: index)
+            items.append(item)
+        }
+        deliver(next.text, images: next.images)
+        return true
     }
 
     nonisolated static func isAuthError(_ text: String) -> Bool {
         let s = text.lowercased()
-        return ["/login", "log in", "logged in", "not logged", "authentication", "invalid api key", "api key", "oauth", "401", "credential", "token has expired", "token expired"].contains { s.contains($0) }
+        if ["/login", "not logged in", "please log in", "invalid api key", "authentication_error", "oauth token", "token has expired", "token expired", "invalid x-api-key"].contains(where: { s.contains($0) }) { return true }
+        return s.contains("401") && ["unauthorized", "authentication", "api error"].contains { s.contains($0) }
     }
 
     func interrupt() {
@@ -451,18 +566,24 @@ final class ChatSession {
     }
 
     func setModel(_ value: String) {
+        let previous = modelValue
         modelValue = value
-        control("set_model", ["model": value])
+        guard running else { return }
+        control("set_model", ["model": value], rollback: ("model", { [weak self] in self?.modelValue = previous }))
     }
 
     func setPermissionMode(_ mode: String) {
+        let previous = permissionMode
         permissionMode = mode
-        control("set_permission_mode", ["mode": mode])
+        guard running else { return }
+        control("set_permission_mode", ["mode": mode], rollback: ("permission mode", { [weak self] in self?.permissionMode = previous }))
     }
 
     func setEffort(_ level: String) {
+        let previous = effort
         effort = level
-        control("apply_flag_settings", ["settings": ["effortLevel": level.isEmpty ? NSNull() as Any : level as Any]])
+        guard running else { return }
+        control("apply_flag_settings", ["settings": ["effortLevel": level.isEmpty ? NSNull() as Any : level as Any]], rollback: ("effort", { [weak self] in self?.effort = previous }))
     }
 
     func respond(_ req: PermissionRequest, allow: Bool, always: PermissionSuggestion? = nil, message: String? = nil, updatedInput: [String: Any]? = nil) {
@@ -524,6 +645,12 @@ final class ChatSession {
             }
             if let m = o["model"] as? String { model = m }
             if let pm = o["permissionMode"] as? String { permissionMode = pm }
+            if let servers = o["mcp_servers"] as? [[String: Any]] {
+                mcpServers = servers.compactMap { s in
+                    guard let name = s["name"] as? String else { return nil }
+                    return MCPServerStatus(name: name, status: s["status"] as? String ?? "unknown")
+                }
+            }
             flushQueue()
         case "status":
             let s = o["status"] as? String
@@ -651,6 +778,7 @@ final class ChatSession {
                     return c
                 }()
                 call.input = block["input"] as? [String: Any] ?? [:]
+            todoCache = (-1, [])
                 call.partialInput = ""
             default:
                 break
@@ -734,7 +862,7 @@ final class ChatSession {
         return .notice(id: id, text: subject.isEmpty ? "\(label) \(verb)" : "\(label) \(verb) · \(subject)", isError: failed)
     }
 
-    static func resultText(_ content: Any?) -> String? {
+    nonisolated static func resultText(_ content: Any?) -> String? {
         let text: String
         if let s = content as? String {
             text = s
@@ -750,10 +878,12 @@ final class ChatSession {
     private func handleResult(_ o: [String: Any]) {
         busy = false
         status = nil
+        let before = totalCost
         if let c = o["total_cost_usd"] as? Double {
             totalCost = SessionCost.total(base: costBase, reported: c)
             if SessionCost.overBudget(cost: totalCost, budget: SessionCost.budget, allowance: budgetAllowance) { budgetPaused = true }
         }
+        ledger?.record(cost: totalCost - before)
         for t in tools.values where t.status == .running { t.status = .done }
         if o["is_error"] as? Bool == true {
             let sub = o["subtype"] as? String ?? ""
@@ -765,7 +895,17 @@ final class ChatSession {
             }
         }
         control("get_context_usage", [:])
-        onTurnFinished?()
+        trimItems()
+        if !flushQueue() { onTurnFinished?() }
+    }
+
+    func trimItems(limit: Int = 2000) {
+        guard items.count > limit else { return }
+        let drop = items.count - limit * 4 / 5
+        for case .tool(let c) in items.prefix(drop) { tools[c.id] = nil }
+        items.removeFirst(drop)
+        items.removeAll { $0.id == "nolder" }
+        items.insert(.notice(id: "older", text: "Showing the latest messages", isError: false), at: 0)
     }
 
     private func handleControlRequest(_ o: [String: Any]) {
@@ -812,7 +952,7 @@ final class ChatSession {
             items.append(.tool(call))
         }
         pendingPermissions.append(p)
-        NSApp.requestUserAttention(.informationalRequest)
+        (NSApp as NSApplication?)?.requestUserAttention(.informationalRequest)
         onNeedsInput?(p)
     }
 
@@ -844,12 +984,22 @@ final class ChatSession {
     }
 
     private func handleControlResponse(_ o: [String: Any]) {
-        guard let r = o["response"] as? [String: Any], let rid = r["request_id"] as? String, let body = r["response"] as? [String: Any] else { return }
+        guard let r = o["response"] as? [String: Any], let rid = r["request_id"] as? String else { return }
+        let rollback = rollbacks.removeValue(forKey: rid)
+        if r["subtype"] as? String == "error" {
+            guard let rollback else { return }
+            rollback.undo()
+            let reason = (r["error"] as? String).map { ": " + $0 } ?? ""
+            items.append(.notice(id: UUID().uuidString, text: "Couldn't change \(rollback.label)\(reason)", isError: true))
+            return
+        }
+        guard let body = r["response"] as? [String: Any] else { return }
         if rid.hasSuffix("-initialize") {
             models = (body["models"] as? [[String: Any]] ?? []).compactMap { m in
                 guard let v = m["value"] as? String else { return nil }
                 return ChatModelOption(value: v, displayName: m["displayName"] as? String ?? v, description: m["description"] as? String ?? "", efforts: m["supportedEffortLevels"] as? [String] ?? [])
             }
+            AgentDefaults.shared.remember(models: models)
             if let sub = (body["account"] as? [String: Any])?["subscriptionType"] as? String {
                 ClaudeUsageStore.shared.subscription = sub.replacingOccurrences(of: "Claude ", with: "")
             }
@@ -892,7 +1042,29 @@ final class ChatSession {
     }
 
     func loadHistory(from file: URL, limit: Int = 600) {
-        guard let (data, truncated) = Self.readTail(file) else { return }
+        guard !historyLoading else { return }
+        historyLoading = true
+        Task { @MainActor [weak self] in
+            let history = await Task.detached(priority: .userInitiated) { ChatSession.parseHistory(file, limit: limit) }.value
+            guard let self else { return }
+            self.historyLoading = false
+            if let history { self.apply(history) }
+        }
+    }
+
+    func apply(_ history: ChatHistory) {
+        for case .tool(let c) in history.items { tools[c.id] = c }
+        var head = history.items
+        if history.partial { head.insert(.notice(id: "older", text: "Showing the latest messages", isError: false), at: 0) }
+        if !head.isEmpty, announceResume {
+            head.append(.notice(id: "resumed", text: "Session resumed", isError: false))
+        }
+        items = head + items
+        DispatchQueue.global(qos: .utility).async { MemoryRelief.release() }
+    }
+
+    nonisolated static func parseHistory(_ file: URL, limit: Int = 600) -> ChatHistory? {
+        guard let (data, truncated) = readTail(file) else { return nil }
         var loaded: [ChatItem] = []
         var map: [String: ChatToolCall] = [:]
         for line in data.split(separator: 0x0A) {
@@ -906,7 +1078,13 @@ final class ChatSession {
                     if let item = ChatSession.historyUserItem(id: (o["uuid"] as? String) ?? UUID().uuidString, text: s) { loaded.append(item) }
                 } else if let blocks = msg["content"] as? [[String: Any]] {
                     var texts: [String] = []
+                    var pictures: [ChatImage] = []
                     for b in blocks {
+                        if b["type"] as? String == "image", let source = b["source"] as? [String: Any], source["type"] as? String == "base64",
+                           let encoded = source["data"] as? String, let bytes = Data(base64Encoded: encoded) {
+                            pictures.append(ChatImage(data: bytes, mediaType: source["media_type"] as? String ?? "image/png"))
+                            continue
+                        }
                         if b["type"] as? String == "tool_result", let id = b["tool_use_id"] as? String, let tool = map[id] {
                             tool.status = (b["is_error"] as? Bool == true) ? .error : .done
                             tool.resultText = ChatSession.resultText(b["content"])
@@ -915,7 +1093,16 @@ final class ChatSession {
                             texts.append(s)
                         }
                     }
-                    if !texts.isEmpty, let item = ChatSession.historyUserItem(id: (o["uuid"] as? String) ?? UUID().uuidString, text: texts.joined(separator: "\n")) { loaded.append(item) }
+                    let uid = (o["uuid"] as? String) ?? UUID().uuidString
+                    if !texts.isEmpty, let item = ChatSession.historyUserItem(id: uid, text: texts.joined(separator: "\n")) {
+                        if case .user(let id, let text, _) = item, !pictures.isEmpty {
+                            loaded.append(.user(id: id, text: text, images: pictures))
+                        } else {
+                            loaded.append(item)
+                        }
+                    } else if !pictures.isEmpty {
+                        loaded.append(.user(id: uid, text: "", images: pictures))
+                    }
                 }
             } else if type == "assistant", let blocks = msg["content"] as? [[String: Any]] {
                 let uuid = (o["uuid"] as? String) ?? UUID().uuidString
@@ -926,6 +1113,12 @@ final class ChatSession {
                             let t = ChatText(id: "h\(uuid):\(i)", text: s)
                             t.finalized = true
                             loaded.append(.text(t))
+                        }
+                    case "thinking":
+                        if let s = b["thinking"] as? String, !s.isEmpty {
+                            let t = ChatText(id: "hk\(uuid):\(i)", text: s)
+                            t.finalized = true
+                            loaded.append(.thinking(t))
                         }
                     case "tool_use":
                         guard let id = b["id"] as? String, let name = b["name"] as? String else { continue }
@@ -940,18 +1133,13 @@ final class ChatSession {
                 }
             }
         }
-        let tail = Array(loaded.suffix(limit))
-        for case .tool(let c) in tail { tools[c.id] = c }
-        if loaded.count > limit || truncated {
-            items = [.notice(id: "older", text: "Showing the latest messages", isError: false)] + tail
-        } else {
-            items = tail
-        }
-        if !items.isEmpty {
-            items.append(.notice(id: "resumed", text: "Session resumed", isError: false))
-        }
-        DispatchQueue.global(qos: .utility).async { MemoryRelief.release() }
+        return ChatHistory(items: Array(loaded.suffix(limit)), partial: loaded.count > limit || truncated)
     }
+}
+
+struct ChatHistory: @unchecked Sendable {
+    let items: [ChatItem]
+    let partial: Bool
 }
 
 struct StreamBatch: @unchecked Sendable {

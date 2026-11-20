@@ -125,7 +125,7 @@ public sealed class JiraConnectForm : Grid
 
 public static class JiraUi
 {
-    public static SolidColorBrush LineBrush() => Palette.Brush("text", ThemeService.IsDark ? 0.10 : 0.08);
+    public static SolidColorBrush LineBrush() => Palette.Brush("line");
 
     public static Border Panel(UIElement child, double radius = 12, double padding = 16) => new()
     {

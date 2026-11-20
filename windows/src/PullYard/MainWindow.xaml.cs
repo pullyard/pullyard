@@ -28,13 +28,20 @@ public sealed partial class MainWindow : Window
         TitleText.Text = AppInfo.DisplayName;
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(TitleBarGrid);
+        var mica = false;
         try
         {
-            SystemBackdrop = new MicaBackdrop();
+            if (Microsoft.UI.Composition.SystemBackdrops.MicaController.IsSupported())
+            {
+                SystemBackdrop = new MicaBackdrop();
+                mica = true;
+            }
         }
         catch
         {
+            mica = false;
         }
+        Palette.MicaActive = mica;
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         var scale = WindowInterop.Scale(this);
         PlaceInitial(scale);
@@ -115,16 +122,35 @@ public sealed partial class MainWindow : Window
 
     private void ApplyBackground()
     {
-        RootGrid.Background = ThemeService.IsBrand
-            ? Palette.Brush("window")
-            : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        RootGrid.Background = Palette.Brush("window");
+        TitleBarGrid.Background = Palette.Brush("bar");
+        TitleText.Foreground = Palette.Brush("text");
+        SubtitleText.Foreground = Palette.Brush("muted");
         var titleBar = AppWindow.TitleBar;
+        if (ThemeService.IsHighContrast)
+        {
+            titleBar.ButtonBackgroundColor = null;
+            titleBar.ButtonInactiveBackgroundColor = null;
+            titleBar.ButtonForegroundColor = null;
+            titleBar.ButtonInactiveForegroundColor = null;
+            titleBar.ButtonHoverForegroundColor = null;
+            titleBar.ButtonHoverBackgroundColor = null;
+            titleBar.ButtonPressedForegroundColor = null;
+            titleBar.ButtonPressedBackgroundColor = null;
+            return;
+        }
         var dark = ThemeService.IsDark;
+        var under = PullYard.Core.Theming.ThemeTokens.Resolve("window", !ThemeService.IsBrand, dark);
+        Windows.UI.Color Flat(string key) => Palette.Hex(PullYard.Core.Theming.ThemeTokens.Over(Palette.Argb(key), under) & 0xFFFFFF);
+        var text = Flat("text");
         titleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
         titleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
-        titleBar.ButtonForegroundColor = Palette.Get("text");
-        titleBar.ButtonHoverForegroundColor = Palette.Get("text");
-        titleBar.ButtonHoverBackgroundColor = Palette.Get("text", (byte)(dark ? 0x20 : 0x18));
+        titleBar.ButtonForegroundColor = text;
+        titleBar.ButtonInactiveForegroundColor = Flat("dim");
+        titleBar.ButtonHoverForegroundColor = text;
+        titleBar.ButtonHoverBackgroundColor = Palette.Hex(Palette.Argb("text") & 0xFFFFFF, (byte)(dark ? 0x20 : 0x18));
+        titleBar.ButtonPressedForegroundColor = text;
+        titleBar.ButtonPressedBackgroundColor = Palette.Hex(Palette.Argb("text") & 0xFFFFFF, (byte)(dark ? 0x34 : 0x28));
     }
 
     private void OnActivated(object sender, WindowActivatedEventArgs args)
@@ -145,7 +171,7 @@ public sealed partial class MainWindow : Window
     private void OnClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
         if (App.Quitting || Program.SmokeUi) return;
-        if (Settings.Shared.GetBool(Keys.CloseToTray, true))
+        if (Settings.Shared.GetBool(Keys.CloseToTray, true) && App.TrayVisible)
         {
             args.Cancel = true;
             sender.Hide();
@@ -167,22 +193,33 @@ public sealed partial class MainWindow : Window
             };
             RootGrid.KeyboardAccelerators.Add(acc);
         }
+        void AddSignedIn(VirtualKey key, VirtualKeyModifiers mods, Action action) => Add(key, mods, () =>
+        {
+            if (model.Phase == Phase.LoggedIn) action();
+        });
+        void Go(Section section)
+        {
+            if (model.Forge is null || section.Kind == SectionKind.Claude || model.ForgeSupports(section)) model.Section = section;
+        }
         RootGrid.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
-        Add(VirtualKey.R, VirtualKeyModifiers.Control, () => model.Refresh());
-        Add(VirtualKey.F5, VirtualKeyModifiers.None, () => model.Refresh());
-        Add(VirtualKey.L, VirtualKeyModifiers.Control, () => { if (model.Phase == Phase.LoggedIn) model.RequestOpenLink(); });
+        AddSignedIn(VirtualKey.R, VirtualKeyModifiers.Control, () => model.Refresh());
+        AddSignedIn(VirtualKey.F5, VirtualKeyModifiers.None, () => model.Refresh());
+        AddSignedIn(VirtualKey.L, VirtualKeyModifiers.Control, () => { if (model.Forge is null) model.RequestOpenLink(); });
         Add((VirtualKey)188, VirtualKeyModifiers.Control, () => model.RequestSettings());
-        Add(VirtualKey.Number1, VirtualKeyModifiers.Control, () => model.Section = Section.Prs(PRFilter.ReviewRequested));
-        Add(VirtualKey.Number2, VirtualKeyModifiers.Control, () => model.Section = Section.Prs(PRFilter.Mine));
-        Add(VirtualKey.Number3, VirtualKeyModifiers.Control, () => model.Section = Section.Notifications);
-        Add(VirtualKey.Number4, VirtualKeyModifiers.Control, () => model.Section = Section.Repos);
-        Add(VirtualKey.Number5, VirtualKeyModifiers.Control, () => model.Section = Section.Projects);
-        Add(VirtualKey.Number6, VirtualKeyModifiers.Control, () => model.Section = Section.Claude);
-        Add(VirtualKey.Left, VirtualKeyModifiers.Menu, () => ShellView.Current?.GoBack());
-        Add((VirtualKey)219, VirtualKeyModifiers.Control, () => ShellView.Current?.GoBack());
-        Add(VirtualKey.GoBack, VirtualKeyModifiers.None, () => ShellView.Current?.GoBack());
+        AddSignedIn(VirtualKey.Number1, VirtualKeyModifiers.Control, () => Go(Section.Prs(PRFilter.ReviewRequested)));
+        AddSignedIn(VirtualKey.Number2, VirtualKeyModifiers.Control, () => Go(Section.Prs(PRFilter.Mine)));
+        AddSignedIn(VirtualKey.Number3, VirtualKeyModifiers.Control, () => Go(Section.Notifications));
+        AddSignedIn(VirtualKey.Number4, VirtualKeyModifiers.Control, () => Go(Section.Repos));
+        AddSignedIn(VirtualKey.Number5, VirtualKeyModifiers.Control, () => Go(Section.Projects));
+        AddSignedIn(VirtualKey.Number6, VirtualKeyModifiers.Control, () => Go(Section.Claude));
+        AddSignedIn(VirtualKey.Left, VirtualKeyModifiers.Menu, () => ShellView.Current?.GoBack());
+        AddSignedIn((VirtualKey)219, VirtualKeyModifiers.Control, () => ShellView.Current?.GoBack());
+        AddSignedIn(VirtualKey.GoBack, VirtualKeyModifiers.None, () => ShellView.Current?.GoBack());
+        AddSignedIn(VirtualKey.Right, VirtualKeyModifiers.Menu, () => ShellView.Current?.GoForward());
+        AddSignedIn((VirtualKey)221, VirtualKeyModifiers.Control, () => ShellView.Current?.GoForward());
+        AddSignedIn(VirtualKey.GoForward, VirtualKeyModifiers.None, () => ShellView.Current?.GoForward());
         Add(VirtualKey.K, VirtualKeyModifiers.Control, () => CommandPalette.Toggle(RootGrid.XamlRoot));
-        Add(VirtualKey.K, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => { if (model.Phase == Phase.LoggedIn) AgentQuickOpen.Show(RootGrid.XamlRoot).Forget(); });
+        AddSignedIn(VirtualKey.K, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => AgentQuickOpen.Show(RootGrid.XamlRoot).Forget());
         AppShortcut = id =>
         {
             switch (id)
@@ -197,6 +234,16 @@ public sealed partial class MainWindow : Window
         Add(VirtualKey.N, VirtualKeyModifiers.Control, () => NewAgentSession().Forget());
         Add((VirtualKey)221, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => CycleAgent(1));
         Add((VirtualKey)219, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => CycleAgent(-1));
+        var lockNow = new KeyboardAccelerator { Key = VirtualKey.L, Modifiers = VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu };
+        lockNow.Invoked += (_, e) =>
+        {
+            if (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.RightMenu).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down)) return;
+            e.Handled = true;
+            if (model.CanLock) model.LockNow();
+        };
+        RootGrid.KeyboardAccelerators.Add(lockNow);
+        Add((VirtualKey)191, VirtualKeyModifiers.Control, () => ShortcutsDialog.Show(RootGrid.XamlRoot).Forget());
+        Add(VirtualKey.F1, VirtualKeyModifiers.None, () => ShortcutsDialog.Show(RootGrid.XamlRoot).Forget());
         Add(VirtualKey.Q, VirtualKeyModifiers.Control, App.Quit);
         Add((VirtualKey)187, VirtualKeyModifiers.Control, TextZoom.ZoomIn);
         Add((VirtualKey)187, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, TextZoom.ZoomIn);

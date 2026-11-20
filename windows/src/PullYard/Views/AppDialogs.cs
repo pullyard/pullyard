@@ -82,7 +82,14 @@ public static class SettingsDialog
                 if (focused is { } f && (f.Key == "style" ? styleBar : modeBar)?.SelectedItem is { } item) item.Focus(f.State);
             });
         }
+        void SyncZoom()
+        {
+            if (zoomBox is not { } z) return;
+            var match = z.Items.OfType<ComboBoxItem>().FirstOrDefault(i => Math.Abs((double)i.Tag! - TextZoom.Scale) < 0.001);
+            if (match is not null && !ReferenceEquals(z.SelectedItem, match)) z.SelectedItem = match;
+        }
         ThemeService.Changed += Rebuild;
+        TextZoom.Changed += SyncZoom;
         try
         {
             await Dialogs.ShowAsync(d);
@@ -90,15 +97,67 @@ public static class SettingsDialog
         finally
         {
             ThemeService.Changed -= Rebuild;
+            TextZoom.Changed -= SyncZoom;
             openDialog = null;
             openScroll = null;
             styleBar = null;
             modeBar = null;
+            zoomBox = null;
+            ghButton = null;
+            ghStatus = null;
+            ghResult = null;
         }
     }
 
     private static SelectorBar? styleBar;
     private static SelectorBar? modeBar;
+    private static ComboBox? zoomBox;
+    private static bool ghBusy;
+    private static (string Text, bool Failed)? ghResult;
+    private static Button? ghButton;
+    private static TextBlock? ghStatus;
+
+    private static void ShowGhState()
+    {
+        if (ghButton is { } button)
+        {
+            button.IsEnabled = !ghBusy;
+            button.Content = ghBusy ? L.T("Settings_RefreshingFromGh", "Refreshing…") : L.T("Settings_RefreshFromGh", "Refresh token from gh");
+        }
+        if (ghStatus is { } status)
+        {
+            status.Text = ghResult?.Text ?? "";
+            status.Foreground = Palette.Brush(ghResult?.Failed == true ? "red" : "muted");
+            status.Visibility = ghResult is null ? Visibility.Collapsed : Visibility.Visible;
+        }
+    }
+
+    private static async Task RefreshFromGh(AppViewModel app)
+    {
+        if (ghBusy) return;
+        ghBusy = true;
+        ghResult = null;
+        ShowGhState();
+        string? failure;
+        try
+        {
+            failure = await app.RefreshTokenFromGh();
+        }
+        catch (Exception e)
+        {
+            failure = e.Message;
+        }
+        ghBusy = false;
+        var failed = failure is not null;
+        var text = failed ? L.F("Settings_GhFailed", "Couldn’t read the token from gh: {0}", failure!) : L.T("Settings_GhRefreshed", "Token refreshed from gh.");
+        if (openDialog is null)
+        {
+            ShellView.Toast(text, failed);
+            return;
+        }
+        ghResult = (text, failed);
+        ShowGhState();
+    }
 
     private static (string Key, FocusState State)? FocusedSelector(ScrollViewer scroll)
     {
@@ -116,13 +175,26 @@ public static class SettingsDialog
     {
         var app = AppViewModel.Shared;
         var panel = Ui.V(18);
+        ghButton = null;
+        ghStatus = null;
 
         var style = styleBar = Segmented(new[] { ("brand", AppInfo.DisplayName), ("system", L.T("Settings_System", "System")) }, ThemeService.Style == ThemeStyle.System ? "system" : "brand",
             v => ThemeService.Style = v == "system" ? ThemeStyle.System : ThemeStyle.PullYard);
         var mode = modeBar = Segmented(new[] { ("auto", L.T("Settings_MatchSystem", "Match system")), ("light", L.T("Settings_Light", "Light")), ("dark", L.T("Settings_Dark", "Dark")) },
             ThemeService.Appearance switch { AppearanceMode.Light => "light", AppearanceMode.Dark => "dark", _ => "auto" },
             v => ThemeService.Appearance = v switch { "light" => AppearanceMode.Light, "dark" => AppearanceMode.Dark, _ => AppearanceMode.Auto });
-        panel.Children.Add(Group(L.T("Settings_Appearance", "Appearance"), "", "violet", Row(L.T("Settings_Theme", "Theme"), style), Row(L.T("Settings_Mode", "Mode"), mode)));
+        var zoom = zoomBox = new ComboBox { MinWidth = 160 };
+        foreach (var level in ZoomLevels.All)
+        {
+            var percent = (int)Math.Round(level * 100);
+            zoom.Items.Add(new ComboBoxItem { Content = Math.Abs(level - 1) < 0.001 ? L.F("Settings_TextSizeDefault", "{0}% (default)", percent) : $"{percent}%", Tag = level });
+        }
+        zoom.SelectedItem = zoom.Items.OfType<ComboBoxItem>().FirstOrDefault(i => Math.Abs((double)i.Tag! - TextZoom.Scale) < 0.001);
+        zoom.SelectionChanged += (_, _) =>
+        {
+            if ((zoom.SelectedItem as ComboBoxItem)?.Tag is double v) TextZoom.Set(v);
+        };
+        panel.Children.Add(Group(L.T("Settings_Appearance", "Appearance"), "", "violet", Row(L.T("Settings_Theme", "Theme"), style), Row(L.T("Settings_Mode", "Mode"), mode), Row(L.T("Settings_TextSize", "Text size"), zoom)));
 
         var account = Ui.V(8);
         if (app.User is { } u)
@@ -131,18 +203,25 @@ public static class SettingsDialog
             account.Children.Add(Row(L.T("Settings_Service", "Service"), Ui.Text(app.Provider.Title(), 12, "muted")));
             if (app.Provider.IsGitHub()) account.Children.Add(Row(L.T("Settings_Scopes", "Token scopes"), Ui.Text(app.Scopes.Count == 0 ? "fine-grained / unknown" : string.Join(", ", app.Scopes), 12, "muted", wrap: true)));
             var buttons = Ui.H(8);
-            if (app.Provider.IsGitHub() && app.GitAccount is not null && GhCli.Binary is not null) buttons.Children.Add(Ui.Button(L.T("Settings_RefreshFromGh", "Refresh token from gh"), () => app.RefreshTokenFromGh().Forget()));
+            if (app.Provider.IsGitHub() && app.GitAccount is not null && GhCli.Binary is not null)
+            {
+                var gh = ghButton = Ui.Button(L.T("Settings_RefreshFromGh", "Refresh token from gh"), () => RefreshFromGh(app).Forget());
+                buttons.Children.Add(gh);
+            }
             buttons.Children.Add(Ui.Button(L.T("Accounts_Add", "Add Account…"), () =>
             {
                 CloseOpenDialog();
                 AccountDialogs.Add(App.MainWindow?.Content?.XamlRoot).Forget();
             }));
-            buttons.Children.Add(Ui.Button(L.T("Settings_SignOut", "Sign out"), () =>
+            buttons.Children.Add(Ui.Button(L.T("Accounts_SignOut", "Sign Out…"), () =>
             {
                 CloseOpenDialog();
                 AccountDialogs.ConfirmSignOut(App.MainWindow?.Content?.XamlRoot).Forget();
             }));
             account.Children.Add(buttons);
+            var status = ghStatus = Ui.Text("", 12, "muted", wrap: true, select: true);
+            account.Children.Add(status);
+            ShowGhState();
             if (app.GitAccount is { } signedIn) account.Children.Add(LockSettings(app, signedIn));
         }
         else
@@ -156,7 +235,13 @@ public static class SettingsDialog
         foreach (var b in LinkBrowser.Installed) browsers.Items.Add(new ComboBoxItem { Content = b.Name, Tag = b.Id });
         browsers.SelectedItem = browsers.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string?)i.Tag == LinkBrowser.Selected) ?? browsers.Items[0];
         browsers.SelectionChanged += (_, _) => LinkBrowser.Selected = (browsers.SelectedItem as ComboBoxItem)?.Tag as string ?? LinkBrowser.SystemDefault;
-        panel.Children.Add(Group(L.T("Settings_Links", "Links"), "", "indigo", Row(L.T("Settings_OpenLinksIn", "Open links in"), browsers)));
+        var clipboard = new ToggleSwitch { IsOn = Settings.Shared.GetBool(Keys.ClipboardWatch, true), OnContent = "", OffContent = "" };
+        clipboard.Toggled += (_, _) =>
+        {
+            Settings.Shared.Set(Keys.ClipboardWatch, clipboard.IsOn);
+            if (!clipboard.IsOn) app.ClipboardRoute = null;
+        };
+        panel.Children.Add(Group(L.T("Settings_Links", "Links"), "", "indigo", Row(L.T("Settings_OpenLinksIn", "Open links in"), browsers), Row(L.T("Settings_ClipboardWatch", "Offer to open a copied pull request or issue link"), clipboard)));
 
         var poll = new ComboBox { MinWidth = 240 };
         var intervals = new[] { (15.0, L.T("Settings_Every15s", "Every 15 seconds")), (30.0, L.T("Settings_Every30s", "Every 30 seconds")), (60.0, L.T("Settings_EveryMinute", "Every minute")), (120.0, L.T("Settings_Every2m", "Every 2 minutes")), (300.0, L.T("Settings_Every5m", "Every 5 minutes")), (900.0, L.T("Settings_Every15m", "Every 15 minutes")) };
@@ -173,7 +258,14 @@ public static class SettingsDialog
         };
         var tray = new ToggleSwitch { IsOn = Settings.Shared.GetBool(Keys.CloseToTray, true), OnContent = "", OffContent = "" };
         tray.Toggled += (_, _) => Settings.Shared.Set(Keys.CloseToTray, tray.IsOn);
-        panel.Children.Add(Group(L.T("Settings_Refresh", "Refresh"), "", "green", Row(L.T("Settings_AutoRefresh", "Auto-refresh pull requests"), poll), Row(L.T("Settings_CloseToTray", "Keep running in the notification area when the window is closed"), tray)));
+        var showTray = new ToggleSwitch { IsOn = Settings.Shared.GetBool(Keys.TrayShow, true), OnContent = "", OffContent = "" };
+        tray.IsEnabled = showTray.IsOn;
+        showTray.Toggled += (_, _) =>
+        {
+            Settings.Shared.Set(Keys.TrayShow, showTray.IsOn);
+            tray.IsEnabled = showTray.IsOn;
+        };
+        panel.Children.Add(Group(L.T("Settings_Refresh", "Refresh"), "", "green", Row(L.T("Settings_AutoRefreshLists", "Auto-refresh lists"), poll), Row(L.F("Settings_TrayShow", "Show {0} in the notification area", AppInfo.DisplayName), showTray), Row(L.T("Settings_CloseToTray", "Keep running in the notification area when the window is closed"), tray)));
 
         panel.Children.Add(Group(L.T("Settings_Notifications", "Notifications"), "\uEA8F", "amber", NotificationSettings()));
 
@@ -225,6 +317,12 @@ public static class SettingsDialog
         var license = Path.Combine(AppContext.BaseDirectory, "LICENSE.txt");
         var licenses = Path.Combine(AppContext.BaseDirectory, "licenses");
         var links = Ui.H(16);
+        links.Children.Add(Ui.Link(L.T("Shortcuts_Title", "Keyboard Shortcuts"), () =>
+        {
+            var root = App.MainWindow?.Content?.XamlRoot;
+            CloseOpenDialog();
+            App.MainWindow?.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => ShortcutsDialog.Show(root).Forget());
+        }, 13));
         if (File.Exists(notices)) links.Children.Add(Ui.Link(L.T("About_ThirdPartyLicenses", "Third-party licenses"), () => OpenPath(notices), 13));
         if (Directory.Exists(licenses)) links.Children.Add(Ui.Link(L.T("About_LicenseFiles", "License files"), () => OpenPath(licenses), 13));
         if (File.Exists(license)) links.Children.Add(Ui.Link(L.T("About_License", "MIT License"), () => OpenPath(license), 13));
@@ -266,6 +364,14 @@ public static class SettingsDialog
             else TurnOffPin(root, account).Forget();
         };
         panel.Children.Add(Row(L.T("Lock_RequirePin", "Require PIN for this account"), pin));
+        if (protectedNow && app.CanLock && app.GitAccount?.Id == account.Id)
+        {
+            panel.Children.Add(Row(L.F("Lock_NowHint", "Lock {0} until the PIN is entered again", AppInfo.DisplayName), Ui.Button(L.T("Lock_Now", "Lock Now"), () =>
+            {
+                CloseOpenDialog();
+                app.LockNow();
+            })));
+        }
         if (protectedNow && WindowsHello.Available)
         {
             var hello = new ToggleSwitch { IsOn = app.Lock.HelloEnabled(account.Id), OnContent = "", OffContent = "" };
@@ -326,6 +432,49 @@ public static class SettingsDialog
                 }), Ui.Auto)));
                 break;
         }
+        var ws = app.Claude;
+        var kind = new ComboBox { MinWidth = 160 };
+        kind.Items.Add(new ComboBoxItem { Content = L.T("Claude_Chat", "Chat"), Tag = ClaudeTabKind.Chat });
+        kind.Items.Add(new ComboBoxItem { Content = L.T("Claude_Terminal", "Terminal"), Tag = ClaudeTabKind.Terminal });
+        kind.SelectedItem = kind.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (ClaudeTabKind)i.Tag! == ws.PreferredKind);
+        kind.SelectionChanged += (_, _) =>
+        {
+            if ((kind.SelectedItem as ComboBoxItem)?.Tag is ClaudeTabKind k) ws.PreferredKind = k;
+        };
+        panel.Children.Add(Row(L.T("Claude_OpenAs", "Open new sessions as"), kind));
+        var model = new ComboBox { MinWidth = 160 };
+        foreach (var m in Enum.GetValues<ClaudeModelOption>()) model.Items.Add(new ComboBoxItem { Content = m.Title(), Tag = m.Raw() });
+        if (ws.ModelValue.Length > 0 && ws.Model == ClaudeModelOption.Standard) model.Items.Add(new ComboBoxItem { Content = ws.ModelValue, Tag = ws.ModelValue });
+        model.SelectedItem = model.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag! == ws.ModelValue);
+        model.SelectionChanged += (_, _) =>
+        {
+            if ((model.SelectedItem as ComboBoxItem)?.Tag is string v) ws.ModelValue = v;
+        };
+        panel.Children.Add(Row(L.T("Claude_DefaultModel", "Model for new sessions"), model));
+        var effort = new ComboBox { MinWidth = 160 };
+        foreach (var e in Enum.GetValues<ClaudeEffort>()) effort.Items.Add(new ComboBoxItem { Content = e.Title(), Tag = e });
+        effort.SelectedItem = effort.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (ClaudeEffort)i.Tag! == ws.Effort);
+        effort.SelectionChanged += (_, _) =>
+        {
+            if ((effort.SelectedItem as ComboBoxItem)?.Tag is ClaudeEffort e) ws.Effort = e;
+        };
+        panel.Children.Add(Row(L.T("Claude_DefaultEffort", "Effort for new sessions"), effort));
+        var modeHelp = Ui.Text(ws.Mode.Detail(), 12, "muted", wrap: true);
+        var mode = new ComboBox { MinWidth = 160 };
+        foreach (var m in Enum.GetValues<ClaudeMode>()) mode.Items.Add(new ComboBoxItem { Content = m.Title(), Tag = m });
+        mode.SelectedItem = mode.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (ClaudeMode)i.Tag! == ws.Mode);
+        mode.SelectionChanged += (_, _) =>
+        {
+            if ((mode.SelectedItem as ComboBoxItem)?.Tag is not ClaudeMode m) return;
+            ws.Mode = m;
+            modeHelp.Text = m.Detail();
+        };
+        panel.Children.Add(Row(L.T("Claude_DefaultMode", "Permission mode for new sessions"), mode));
+        panel.Children.Add(modeHelp);
+        var remember = new ToggleSwitch { IsOn = ws.RememberComposerChoice, OnContent = "", OffContent = "" };
+        remember.Toggled += (_, _) => ws.RememberComposerChoice = remember.IsOn;
+        panel.Children.Add(Row(L.T("Claude_RememberComposer", "Remember changes made in the chat composer"), remember));
+        panel.Children.Add(Ui.Text(L.T("Claude_RememberComposerHelp", "When on, picking a model, effort or mode in a chat also makes it the default for the next chats."), 12, "muted", wrap: true));
         var idle = new ComboBox { MinWidth = 160 };
         foreach (var (m, t) in new[] { (0, L.T("Claude_Never", "Never")), (5, "5 minutes"), (15, "15 minutes"), (30, "30 minutes"), (60, "1 hour") })
             idle.Items.Add(new ComboBoxItem { Content = t, Tag = m });
@@ -346,6 +495,11 @@ public static class SettingsDialog
         };
         panel.Children.Add(Row(L.T("Claude_PauseAt", "Pause a session at"), budget));
         panel.Children.Add(Ui.Text(L.T("Claude_PauseAtHelp", "When an agent session's reported cost reaches the limit, new messages wait until you continue. Useful with API keys, OpenRouter or another endpoint; with a subscription plan the cost is an estimate."), 12, "muted", wrap: true));
+        var usageToday = AgentUsageLedger.Shared.Total(1);
+        var usageWeek = AgentUsageLedger.Shared.Total(7);
+        var usageMonth = AgentUsageLedger.Shared.Total(30);
+        panel.Children.Add(Row(L.T("Claude_UsageTotals", "Chat usage on this PC"), Ui.Text(L.F("Claude_UsageCosts", "Today ${0:0.00} · 7 days ${1:0.00} · 30 days ${2:0.00}", usageToday.Cost, usageWeek.Cost, usageMonth.Cost), 13, "muted")));
+        panel.Children.Add(Ui.Text(L.F("Claude_UsageTurns", "Turns: {0} today, {1} in 7 days, {2} in 30 days. Cost is what the claude CLI reports per turn.", usageToday.Turns, usageWeek.Turns, usageMonth.Turns), 12, "muted", wrap: true));
         store.Refresh().Forget();
         return panel;
     }
@@ -428,6 +582,80 @@ public static class SettingsDialog
             if (s.SelectedItem?.Tag is string id) changed(id);
         };
         return bar;
+    }
+}
+
+public static class ShortcutsDialog
+{
+    public static async Task Show(XamlRoot? root)
+    {
+        if (root is null) return;
+        var groups = new (string Title, (string Combo, string What)[] Rows)[]
+        {
+            (L.T("Shortcuts_Navigation", "Navigation"), new[]
+            {
+                ("Ctrl+K", L.T("Shortcuts_Palette", "Command palette")),
+                ("Ctrl+L", L.T("Shortcuts_OpenLink", "Open by link")),
+                ("Ctrl+1 – Ctrl+6", L.T("Shortcuts_Sections", "Review requests, mine, notifications, repositories, projects, agents")),
+                ("Alt+Left   Ctrl+[", L.T("Shortcuts_Back", "Back")),
+                ("Alt+Right   Ctrl+]", L.T("Shortcuts_Forward", "Forward")),
+                ("Ctrl+R   F5", L.T("Shortcuts_Refresh", "Refresh")),
+                ("Ctrl+P", L.T("Shortcuts_GoToFile", "Go to file in a repository")),
+                ("Ctrl+Alt+L", L.T("Shortcuts_Lock", "Lock now")),
+                ("Ctrl+,", L.T("Shortcuts_Settings", "Settings")),
+                ("Ctrl+/   F1", L.T("Shortcuts_This", "Keyboard shortcuts")),
+                ("Ctrl+Q", L.F("Shortcuts_Quit", "Quit {0}", AppInfo.DisplayName))
+            }),
+            (L.T("Shortcuts_PullRequest", "Pull request"), new[]
+            {
+                ("Ctrl+Shift+1 – 6", L.T("Shortcuts_Tabs", "Switch tab")),
+                ("Ctrl+Shift+R", L.T("Shortcuts_WriteReview", "Write review")),
+                ("Ctrl+Shift+A", L.T("Shortcuts_Approve", "Approve")),
+                ("Ctrl+Shift+M", L.T("Shortcuts_Merge", "Merge")),
+                ("Ctrl+Shift+C", L.T("Shortcuts_ShortLink", "Copy short link")),
+                ("Ctrl+Enter", L.T("Shortcuts_SendComment", "Send comment"))
+            }),
+            (L.T("Shortcuts_Files", "Files changed"), new[]
+            {
+                ("N   P", L.T("Shortcuts_NextFile", "Next and previous file")),
+                ("]   [", L.T("Shortcuts_NextHunk", "Next and previous hunk")),
+                ("V", L.T("Shortcuts_Viewed", "Mark file as viewed")),
+                ("W", L.T("Shortcuts_Wrap", "Wrap lines")),
+                ("S", L.T("Shortcuts_Split", "Split view"))
+            }),
+            (L.T("Section_Claude", "Agents"), new[]
+            {
+                ("Ctrl+N", L.T("Shortcuts_NewSession", "New agent session")),
+                ("Ctrl+Shift+K", L.T("Shortcuts_GoToSession", "Go to session")),
+                ("Ctrl+Shift+]   Ctrl+Shift+[", L.T("Shortcuts_CycleSession", "Next and previous session")),
+                ("Ctrl+J", L.T("Shortcuts_FocusComposer", "Focus the message box")),
+                ("Shift+Tab", L.T("Shortcuts_CycleMode", "Switch permission mode in the message box")),
+                ("Shift+Enter", L.T("Shortcuts_NewLine", "New line in the message box"))
+            }),
+            (L.T("Shortcuts_View", "View"), new[]
+            {
+                ("Ctrl+=   Ctrl+-   Ctrl+0", L.T("Shortcuts_TextSize", "Text size")),
+                ("Ctrl+Alt+B", L.T("Shortcuts_Blame", "Blame"))
+            })
+        };
+        var panel = Ui.V(18);
+        foreach (var group in groups)
+        {
+            var heading = Ui.Text(group.Title, 14, "text", FontWeights.SemiBold);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetHeadingLevel(heading, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level2);
+            var section = Ui.V(6, heading);
+            foreach (var (keys, action) in group.Rows)
+            {
+                var row = Ui.Columns((Ui.Text(keys, 12.5, "text", mono: true), new GridLength(Math.Round(214 * TextZoom.Scale))), (Ui.Text(action, 13, "muted", wrap: true), Ui.Star));
+                row.ColumnSpacing = 12;
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(row, $"{keys}: {action}");
+                section.Children.Add(row);
+            }
+            panel.Children.Add(section);
+        }
+        var scroll = new ScrollViewer { Content = panel, MaxHeight = 560, Padding = new Thickness(0, 0, 12, 0), VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        var d = Dialogs.Create(root, L.T("Shortcuts_Title", "Keyboard Shortcuts"), scroll, close: L.T("Common_Done", "Done"), maxWidth: 600);
+        await Dialogs.ShowAsync(d);
     }
 }
 

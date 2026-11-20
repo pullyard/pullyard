@@ -42,6 +42,7 @@ public sealed class HtmlView : Grid
             TextZoom.Changed -= ApplyZoom;
             TextZoom.Changed += ApplyZoom;
             ApplyZoom();
+            if (appliedVars != ConversationHtml.Vars) OnTheme();
         };
     }
 
@@ -67,8 +68,11 @@ public sealed class HtmlView : Grid
     private void ApplyBackground() =>
         web.DefaultBackgroundColor = ThemeService.IsBrand ? Palette.Get("panel") : Microsoft.UI.Colors.Transparent;
 
+    private string? appliedVars = ConversationHtml.Vars;
+
     private void OnTheme()
     {
+        appliedVars = ConversationHtml.Vars;
         ApplyBackground();
         WebViewEnvironment.ApplyScheme(web);
         if (lastRender is not null)
@@ -172,7 +176,7 @@ public sealed class HtmlView : Grid
         "diff" => ConversationHtml.Css + DiffHtml.Css,
         "code" => ConversationHtml.Css + CodeHtml.Css,
         _ => ConversationHtml.Css
-    }) + (ThemeService.IsBrand ? $"html,body{{background:{Palette.CssHex("panel")}}}" : "");
+    });
 
     public void Render(string html, string kind = "conversation", string? scroll = null, string bodyClass = "")
     {

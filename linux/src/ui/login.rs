@@ -47,6 +47,7 @@ struct Login {
     get_code: gtk::Button,
     device_uri: RefCell<Option<(String, String)>>,
     cancel: RefCell<Option<tokio::task::AbortHandle>>,
+    device_starting: Cell<bool>,
 }
 
 fn client_id_for(provider: GitProvider) -> String {
@@ -76,6 +77,13 @@ impl Login {
             Some(m) => {
                 self.error.set_text(m);
                 self.error_box.set_visible(true);
+                let target = self.error_box.clone();
+                gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(80), move || {
+                    if let Some(scroll) = target.ancestor(gtk::ScrolledWindow::static_type()).and_downcast::<gtk::ScrolledWindow>() {
+                        let adj = scroll.vadjustment();
+                        adj.set_value(adj.upper() - adj.page_size());
+                    }
+                });
             }
             None => self.error_box.set_visible(false),
         }
@@ -95,7 +103,8 @@ impl Login {
         let host = self.effective_host();
         self.sign.set_sensitive(self.can_submit_token());
         self.cli_button.set_sensitive(!host.is_empty());
-        self.get_code.set_sensitive(!self.client.text().trim().is_empty() && !host.is_empty());
+        self.get_code.set_sensitive(!self.device_starting.get() && !self.client.text().trim().is_empty() && !host.is_empty());
+        self.one_click_button.set_sensitive(!self.device_starting.get());
         match p.token_create_url(&host, brand::APP_NAME) {
             Some(_) => {
                 self.create.set_label(&p.token_create_label(&host));
@@ -231,7 +240,9 @@ impl Login {
         } else {
             (self.device_box.clone(), self.code_label.clone(), self.device_hint.clone(), self.get_code.clone())
         };
+        self.device_starting.set(true);
         start.set_sensitive(false);
+        self.set_busy(true);
         let endpoint = auth::Endpoint::for_provider(p, &host);
         let keep_refresh = p == GitProvider::Gitlab;
         let (tx, rx) = async_channel::bounded::<Result<auth::DeviceCode, String>>(1);
@@ -253,7 +264,10 @@ impl Login {
         let me = self.clone();
         rt::spawn_local(async move {
             let first = rx.recv().await;
+            me.device_starting.set(false);
+            me.set_busy(false);
             start.set_sensitive(true);
+            me.sync_state();
             match first {
                 Ok(Ok(code)) => {
                     code_label.set_text(&code.user_code);
@@ -655,6 +669,7 @@ pub fn form(embedded: bool, on_done: Option<Rc<dyn Fn()>>) -> gtk::Box {
         get_code,
         device_uri: RefCell::new(None),
         cancel: RefCell::new(None),
+        device_starting: Cell::new(false),
     });
 
     for (p, t) in &login.tabs {

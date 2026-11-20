@@ -146,14 +146,14 @@ pub fn item_menu(item: &SearchItem) -> Menu {
     let url = item.url.clone();
     menu.item("Open in Browser", move || util::open_url(&url));
     let url = item.url.clone();
-    menu.item("Copy Link", move || util::copy(&url));
+    menu.item("Copy Link", move || app::copy(&url, "Copied link"));
     let route = item.route();
     if route.short_link().is_some() {
         menu.item("Copy Short Link", move || copy_short_link(&route));
     }
     if item.is_pr() && !item.forge {
         let cmd = format!("gh pr checkout {} -R {}", item.number, item.repository.name_with_owner);
-        menu.item("Copy “gh pr checkout”", move || util::copy(&cmd));
+        menu.item("Copy “gh pr checkout”", move || app::copy(&cmd, "Copied checkout command"));
     }
     menu
 }

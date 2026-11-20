@@ -74,6 +74,14 @@ public static class ClaudeEnums
         _ => "Ask"
     };
 
+    public static string Detail(this ClaudeMode m) => m switch
+    {
+        ClaudeMode.AcceptEdits => "File edits apply without asking. Commands still ask.",
+        ClaudeMode.Plan => "Claude reads and plans. Nothing changes until you approve the plan.",
+        ClaudeMode.Auto => "Claude decides which actions are safe to run without asking.",
+        _ => "Claude asks before it edits files or runs commands."
+    };
+
     public static ClaudeMode ParseMode(string? raw) =>
         Enum.GetValues<ClaudeMode>().FirstOrDefault(m => m.Raw() == (raw ?? "default"));
 

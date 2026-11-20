@@ -228,6 +228,7 @@ final class TextZoom {
     func zoomIn() { set(Self.levels.first { $0 > scale + 0.001 } ?? scale) }
     func zoomOut() { set(Self.levels.last { $0 < scale - 0.001 } ?? scale) }
     func reset() { set(1) }
+    func setScale(_ value: CGFloat) { set(Self.levels.min { abs($0 - value) < abs($1 - value) } ?? 1) }
 
     func installEqualsShortcut() {
         guard keyMonitor == nil else { return }

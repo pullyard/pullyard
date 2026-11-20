@@ -16,6 +16,7 @@ struct LoginView: View {
     @State private var showDevice = false
     @State private var prefilled: GitAccount?
     @State private var deviceUsesBundled = false
+    @State private var deviceStarting = false
 
     private var provider: GitProvider { GitProvider(rawValue: providerRaw) ?? .github }
 
@@ -47,6 +48,7 @@ struct LoginView: View {
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(spacing: 18) {
                 if !embedded {
@@ -96,6 +98,7 @@ struct LoginView: View {
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.large)
+                                .disabled(deviceStarting)
                             }
                         }
                     }
@@ -156,7 +159,7 @@ struct LoginView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    if busy { ProgressView().controlSize(.small) }
+                    if busy || deviceStarting { ProgressView().controlSize(.small).id("loginProgress") }
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(Color.syRed)
@@ -165,6 +168,7 @@ struct LoginView: View {
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
                             .card(radius: 10, fill: Color.syRed.opacity(0.08))
+                            .id("loginError")
                     }
                 }
                 .welcomeStage(1.95 * pace, enabled: !embedded)
@@ -172,6 +176,10 @@ struct LoginView: View {
             .padding(embedded ? 20 : 40)
             .frame(maxWidth: 520)
             .frame(maxWidth: .infinity)
+        }
+        .onChange(of: error) { _, value in
+            if value != nil { withAnimation(Motion.smooth) { proxy.scrollTo("loginError", anchor: .center) } }
+        }
         }
         .background { if !embedded { WelcomeBackdrop() } }
         .onAppear(perform: providerChanged)
@@ -214,7 +222,7 @@ struct LoginView: View {
                 deviceCodeRow(device)
             } else {
                 Button("Get code") { startDevice() }
-                    .disabled(clientID.trimmingCharacters(in: .whitespaces).isEmpty || effectiveHost.isEmpty)
+                    .disabled(deviceStarting || clientID.trimmingCharacters(in: .whitespaces).isEmpty || effectiveHost.isEmpty)
             }
         }
     }
@@ -334,9 +342,11 @@ struct LoginView: View {
         let keepRefresh = provider == .gitlab
         error = nil
         deviceTask?.cancel()
+        deviceStarting = true
         deviceTask = Task {
             do {
                 let code = try await DeviceFlow.start(clientID: id, endpoint: endpoint)
+                deviceStarting = false
                 device = code
                 copyToPasteboard(code.userCode)
                 openInBrowser(code.verificationUri)
@@ -348,6 +358,7 @@ struct LoginView: View {
             } catch {
                 self.error = error.localizedDescription
             }
+            deviceStarting = false
             device = nil
         }
     }

@@ -197,7 +197,7 @@ impl PlainDiff {
                 }
                 let c = icon_button("edit-copy-symbolic", "Copy file path");
                 let id = f.id.clone();
-                c.connect_clicked(move |_| util::copy(&id));
+                c.connect_clicked(move |_| app::copy(&id, "Copied file path"));
                 b.append(&c);
                 let w = gtk::ToggleButton::new();
                 w.set_icon_name("format-justify-left-symbolic");

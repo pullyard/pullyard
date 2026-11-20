@@ -168,6 +168,21 @@ impl Section {
         }
     }
 
+    pub fn from_key(key: &str) -> Option<Self> {
+        let mut parts = key.split('/');
+        match (parts.next(), parts.next()) {
+            (Some("notifications"), _) => Some(Section::Notifications),
+            (Some("prs"), Some("byProject")) => Some(Section::MyPrsByRepo),
+            (Some("prs"), Some(f)) => Some(Section::Prs(PrFilter::from_key(f).unwrap_or(PrFilter::ReviewRequested))),
+            (Some("stacks"), _) => Some(Section::Stacks),
+            (Some("issues"), Some(f)) => Some(Section::Issues(IssueFilter::from_key(f).unwrap_or(IssueFilter::Assigned))),
+            (Some("repos"), _) => Some(Section::Repos),
+            (Some("projects"), _) => Some(Section::Projects),
+            (Some("claude"), _) => Some(Section::Claude),
+            _ => None,
+        }
+    }
+
     pub fn title(&self) -> String {
         match self {
             Section::Notifications => "Notifications".into(),
@@ -200,6 +215,7 @@ pub struct State {
     pub user: Option<RestUser>,
     pub scopes: Vec<String>,
     pub section: Section,
+    last_list_section: Option<Section>,
     pub route: Option<Route>,
     pub review_requests: Vec<SearchItem>,
     pub my_prs: Vec<SearchItem>,
@@ -231,8 +247,33 @@ pub struct App {
     splash_done: Cell<bool>,
     held: Cell<bool>,
     smoke: Cell<bool>,
+    pending_url: RefCell<Option<String>>,
+    pending_activity: RefCell<Option<(String, String)>>,
+    lockable: Cell<bool>,
     pub claude: Rc<Workspace>,
 }
+
+const PHASE_ACTIONS: [&str; 17] = [
+    "refresh",
+    "back",
+    "command-palette",
+    "agents-quick-open",
+    "agents-new-session",
+    "agents-next-session",
+    "agents-previous-session",
+    "lock-now",
+    "pr-review",
+    "pr-approve",
+    "pr-merge",
+    "section-1",
+    "section-2",
+    "section-3",
+    "section-4",
+    "section-5",
+    "section-6",
+];
+
+pub const GITHUB_LINK_ON_FORGE: &str = "This link opens a GitHub item. Switch to a GitHub account to view it.";
 
 thread_local! {
     static APP: RefCell<Option<Rc<App>>> = const { RefCell::new(None) };
@@ -343,6 +384,30 @@ pub fn toast(msg: &str) {
     }
 }
 
+pub fn toast_error(msg: &str) {
+    if let Some(t) = try_get().and_then(|a| a.toasts.borrow().clone()) {
+        let title = gtk::Label::new(Some(msg));
+        title.set_wrap(true);
+        title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        title.set_lines(6);
+        title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        title.set_xalign(0.0);
+        let toast = adw::Toast::new(msg);
+        toast.set_custom_title(Some(&title));
+        toast.set_timeout(8);
+        toast.set_priority(adw::ToastPriority::High);
+        toast.set_button_label(Some("Copy"));
+        let text = msg.to_string();
+        toast.connect_button_clicked(move |_| util::copy(&text));
+        t.add_toast(toast);
+    }
+}
+
+pub fn copy(text: &str, message: &str) {
+    util::copy(text);
+    toast(message);
+}
+
 pub fn toast_with(msg: &str, button: &str, f: impl Fn() + 'static) {
     if let Some(t) = try_get().and_then(|a| a.toasts.borrow().clone()) {
         let toast = adw::Toast::new(msg);
@@ -355,6 +420,7 @@ pub fn toast_with(msg: &str, button: &str, f: impl Fn() + 'static) {
 
 pub fn quit() {
     if let Some(a) = try_get() {
+        a.flush_drafts();
         a.claude.stop_all();
         a.gtk_app.quit();
     }
@@ -386,10 +452,18 @@ pub fn section() -> Section {
 
 pub fn set_section(s: Section) {
     let a = get();
-    if a.state.borrow().section == s || !section_allowed(s) {
+    let old = a.state.borrow().section;
+    if old == s || !section_allowed(s) {
         return;
     }
-    a.state.borrow_mut().section = s;
+    {
+        let mut st = a.state.borrow_mut();
+        if old != Section::Claude {
+            st.last_list_section = Some(old);
+        }
+        st.section = s;
+    }
+    a.remember_section(s);
     a.section_changed.emit(&s);
     if s == Section::Claude {
         a.claude.window_activated();
@@ -399,6 +473,7 @@ pub fn set_section(s: Section) {
 pub fn select(route: Option<Route>) {
     let a = get();
     a.state.borrow_mut().route = route.clone();
+    a.remember_route(route.as_ref());
     if let Some(m) = a.main.borrow().clone() {
         m.show_route(route.clone(), false);
     }
@@ -412,8 +487,14 @@ pub fn open(route: Route, push: bool) {
     }
     let section = a.state.borrow().section;
     if section == Section::Claude {
-        let target = if section_allowed(Section::Prs(PrFilter::Mine)) { Section::Prs(PrFilter::Mine) } else { first_section(&forge_caps()) };
+        let last = a.state.borrow().last_list_section;
+        let target = match last.filter(|s| *s != Section::Claude && section_allowed(*s)) {
+            Some(s) => s,
+            None if section_allowed(Section::Prs(PrFilter::Mine)) => Section::Prs(PrFilter::Mine),
+            None => first_section(&forge_caps()),
+        };
         a.state.borrow_mut().section = target;
+        a.remember_section(target);
         a.section_changed.emit(&target);
         select(Some(route));
         a.present();
@@ -444,11 +525,21 @@ pub fn sync_actions() {
     if let Some(action) = a.gtk_app.lookup_action("copy-short-link").and_downcast::<gio::SimpleAction>() {
         action.set_enabled(visible_route().and_then(|r| r.short_link()).is_some());
     }
+    if let Some(action) = a.gtk_app.lookup_action("forward").and_downcast::<gio::SimpleAction>() {
+        let can = a.state.try_borrow().is_ok_and(|s| s.phase == Phase::LoggedIn && s.section != Section::Claude) && a.main.try_borrow().ok().and_then(|m| m.clone()).is_some_and(|m| m.can_forward());
+        action.set_enabled(can);
+    }
 }
 
 pub fn back() {
     if let Some(m) = try_get().and_then(|a| a.main.borrow().clone()) {
         m.back();
+    }
+}
+
+pub fn forward() {
+    if let Some(m) = try_get().and_then(|a| a.main.borrow().clone()) {
+        m.forward();
     }
 }
 
@@ -559,15 +650,36 @@ pub fn pr_model(r: &ItemRef) -> Option<Rc<PrModel>> {
         (None, Some(forge)) => PrModel::with_backend(r.clone(), crate::ui::pr::backend::PrBackend::GitLab(crate::forge::gitlab_review::GitLabReview::new(forge))),
         (None, None) => return None,
     };
+    if a.persists_navigation() {
+        m.restore_drafts(&cache_account());
+    }
     models.push((r.clone(), m.clone()));
     if models.len() > 15 {
-        models.remove(0);
+        let (_, old) = models.remove(0);
+        old.save_drafts_now();
     }
     Some(m)
 }
 
+pub fn can_lock() -> bool {
+    try_get().is_some_and(|a| a.lockable.get() && a.state.borrow().phase == Phase::LoggedIn)
+}
+
+pub fn drafts_enabled() -> bool {
+    try_get().is_some_and(|a| a.persists_navigation())
+}
+
+pub fn existing_pr_model(r: &ItemRef) -> Option<Rc<PrModel>> {
+    let a = try_get()?;
+    let models = a.pr_models.try_borrow().ok()?;
+    models.iter().find(|(k, _)| k == r).map(|(_, m)| m.clone())
+}
+
 pub fn insert_pr_model(m: Rc<PrModel>) {
     let a = get();
+    if a.persists_navigation() {
+        m.restore_drafts(&cache_account());
+    }
     let mut models = a.pr_models.borrow_mut();
     models.retain(|(k, _)| *k != m.r);
     models.push((m.r.clone(), m));
@@ -581,9 +693,155 @@ impl App {
     }
 
     fn set_phase(self: &Rc<Self>, phase: Phase) {
+        let entering = phase == Phase::LoggedIn && self.state.borrow().phase != Phase::LoggedIn;
         self.state.borrow_mut().phase = phase;
+        if entering {
+            self.restore_route();
+        }
         self.render_phase();
+        self.sync_phase_actions();
         self.phase_changed.emit(&phase);
+        if phase != Phase::LoggedIn {
+            self.lockable.set(false);
+        }
+        if entering {
+            self.refresh_lockable();
+            self.replay_pending();
+        }
+    }
+
+    pub fn refresh_lockable(self: &Rc<Self>) {
+        let Some(id) = self.state.borrow().account.as_ref().map(|a| a.id.clone()) else {
+            self.lockable.set(false);
+            return;
+        };
+        let me = self.clone();
+        crate::rt::spawn_local(async move {
+            let protected = crate::account_lock::is_protected(&id).await;
+            let current = me.state.borrow().account.as_ref().is_some_and(|a| a.id == id);
+            if current {
+                me.lockable.set(protected);
+            }
+        });
+    }
+
+    fn persists_navigation(&self) -> bool {
+        !self.smoke.get() && !demo::is_on() && !crate::tour::active()
+    }
+
+    fn remember_section(&self, s: Section) {
+        if !self.persists_navigation() {
+            return;
+        }
+        let key = s.key();
+        if settings::read(|st| st.nav_section != key) {
+            settings::update(|st| st.nav_section = key);
+        }
+    }
+
+    fn remember_route(&self, route: Option<&Route>) {
+        if !self.persists_navigation() || self.state.borrow().phase != Phase::LoggedIn {
+            return;
+        }
+        let stored = route.and_then(|r| crate::nav_memory::encode(r, &cache_account()));
+        if settings::read(|st| st.nav_route != stored) {
+            settings::update(|st| st.nav_route = stored);
+        }
+    }
+
+    fn restore_route(&self) {
+        if !self.persists_navigation() {
+            return;
+        }
+        let Some(stored) = settings::read(|st| st.nav_route.clone()) else { return };
+        let account = cache_account();
+        let mut s = self.state.borrow_mut();
+        if s.api.is_none() || s.route.is_some() || s.section == Section::Claude {
+            return;
+        }
+        s.route = crate::nav_memory::decode(&stored, &account);
+    }
+
+    fn sync_phase_actions(&self) {
+        let logged_in = self.state.borrow().phase == Phase::LoggedIn;
+        let enable = |name: &str, on: bool| {
+            if let Some(action) = self.gtk_app.lookup_action(name).and_downcast::<gio::SimpleAction>() {
+                action.set_enabled(on);
+            }
+        };
+        for name in PHASE_ACTIONS {
+            enable(name, logged_in);
+        }
+        enable("open-link", logged_in && github_links());
+        if !logged_in {
+            enable("forward", false);
+        }
+    }
+
+    fn replay_pending(self: &Rc<Self>) {
+        let url = self.pending_url.borrow_mut().take();
+        let activity = self.pending_activity.borrow_mut().take();
+        if url.is_none() && activity.is_none() {
+            return;
+        }
+        let me = self.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(url) = url {
+                me.handle_url(&url);
+            }
+            if let Some((account, url)) = activity {
+                crate::notify::open(&account, &url);
+            }
+        });
+    }
+
+    pub fn queue_activity(&self, account: &str, url: &str) {
+        *self.pending_activity.borrow_mut() = Some((account.to_string(), url.to_string()));
+    }
+
+    pub fn flush_drafts(&self) {
+        let models: Vec<Rc<PrModel>> = self.pr_models.borrow().iter().map(|(_, m)| m.clone()).collect();
+        for m in models {
+            m.save_drafts_now();
+        }
+    }
+
+    fn drop_pr_models(&self) {
+        self.flush_drafts();
+        self.pr_models.borrow_mut().clear();
+    }
+
+    pub fn lock_now(self: &Rc<Self>) {
+        let me = self.clone();
+        crate::rt::spawn_local(async move {
+            let account = {
+                let s = me.state.borrow();
+                if s.phase != Phase::LoggedIn {
+                    return;
+                }
+                s.account.clone()
+            };
+            let Some(account) = account else { return };
+            if !crate::account_lock::is_protected(&account.id).await {
+                toast("Turn on “Require PIN for this account” in Preferences to lock it.");
+                return;
+            }
+            if me.state.borrow().phase != Phase::LoggedIn {
+                return;
+            }
+            if let Some(id) = me.poll.borrow_mut().take() {
+                id.remove();
+            }
+            me.drop_pr_models();
+            {
+                let mut s = me.state.borrow_mut();
+                s.api = None;
+                s.forge = None;
+                s.account = None;
+                s.user = None;
+            }
+            me.lock(account);
+        });
     }
 
     fn render_phase(self: &Rc<Self>) {
@@ -793,7 +1051,7 @@ impl App {
             return;
         }
         reset_session_caches();
-        self.pr_models.borrow_mut().clear();
+        self.drop_pr_models();
         self.state.borrow_mut().route = None;
         if let Some(root) = self.root.borrow().clone() {
             if let Some(old) = root.child_by_name("main") {
@@ -833,7 +1091,7 @@ impl App {
         if same {
             return;
         }
-        self.pr_models.borrow_mut().clear();
+        self.drop_pr_models();
         self.state.borrow_mut().route = None;
         if was_logged_in {
             if let Some(root) = self.root.borrow().clone() {
@@ -865,7 +1123,7 @@ impl App {
                 s.section = first_section(&caps);
             }
         }
-        self.pr_models.borrow_mut().clear();
+        self.drop_pr_models();
         self.set_phase(Phase::LoggedIn);
         self.start_polling();
         let me = self.clone();
@@ -1002,15 +1260,16 @@ impl App {
         self.claude.reload_projects().await;
     }
 
-    pub async fn refresh_token_from_gh(self: Rc<Self>) {
+    pub async fn refresh_token_from_gh(self: Rc<Self>) -> Option<String> {
         let account = self.state.borrow().account.clone();
         let provider = account.as_ref().map(|a| a.provider).unwrap_or(GitProvider::Github);
         if !provider.is_github() {
-            return;
+            return None;
         }
         let host = account.map(|a| a.host).unwrap_or_else(|| crate::api::GITHUB_HOST.to_string());
-        if let Ok(t) = crate::auth::gh_token(host.clone()).await {
-            let _ = self.add_account(provider, host, GitCredential::token(t), None).await;
+        match crate::auth::gh_token(host.clone()).await {
+            Ok(t) => self.add_account(provider, host, GitCredential::token(t), None).await.err().map(|e| e.message),
+            Err(e) => Some(e.message),
         }
     }
 
@@ -1024,6 +1283,10 @@ impl App {
         }
         forget_account(current.as_ref());
         self.reset_session(true);
+        let gone = current.map(|a| a.id);
+        if let Some(next) = git_accounts::accounts().into_iter().find(|a| Some(&a.id) != gone.as_ref()) {
+            self.request_switch(next.id);
+        }
     }
 
     fn revoked(self: &Rc<Self>, target: Option<GitAccount>) {
@@ -1069,7 +1332,7 @@ impl App {
             s.known_review_requests = None;
         }
         crate::notify::reset();
-        self.pr_models.borrow_mut().clear();
+        self.drop_pr_models();
         self.set_phase(Phase::LoggedOut);
         self.badges.emit(&());
     }
@@ -1226,6 +1489,9 @@ impl App {
     }
 
     fn check_clipboard(self: &Rc<Self>) {
+        if !settings::read(|s| s.clipboard_watch) {
+            return;
+        }
         let Some(display) = gtk::gdk::Display::default() else { return };
         let clip = display.clipboard();
         let me = self.clone();
@@ -1303,6 +1569,7 @@ impl App {
 
     pub fn handle_url(self: &Rc<Self>, uri: &str) {
         if self.state.borrow().phase != Phase::LoggedIn {
+            *self.pending_url.borrow_mut() = Some(uri.to_string());
             return;
         }
         let Ok(url) = url::Url::parse(uri) else {
@@ -1380,7 +1647,12 @@ impl App {
         }
         let target = query("url").unwrap_or_else(|| format!("https://{}", uri.split("://").skip(1).collect::<Vec<_>>().join("://")));
         if let Some(route) = util::parse_github_url(&target, false) {
-            open(route, false);
+            if github_links() {
+                open(route, false);
+            } else {
+                self.present();
+                toast_error(GITHUB_LINK_ON_FORGE);
+            }
         }
     }
 
@@ -1398,6 +1670,15 @@ impl App {
         add("refresh", &["<Control>r", "F5"], Box::new(move || me.user_refresh()));
         add("open-link", &["<Control>l"], Box::new(|| ui::main_view::open_link_dialog()));
         add("back", &["<Alt>Left", "<Control>bracketleft"], Box::new(back));
+        add("forward", &["<Alt>Right", "<Control>bracketright"], Box::new(forward));
+        if let Some(action) = app.lookup_action("forward").and_downcast::<gio::SimpleAction>() {
+            action.set_enabled(false);
+        }
+        let me = self.clone();
+        add("lock-now", &["<Control><Shift>l"], Box::new(move || me.lock_now()));
+        add("pr-review", &["<Control><Shift>r"], Box::new(|| ui::pr::shortcut(ui::pr::Shortcut::Review)));
+        add("pr-approve", &["<Control><Shift>a"], Box::new(|| ui::pr::shortcut(ui::pr::Shortcut::Approve)));
+        add("pr-merge", &["<Control><Shift>m"], Box::new(|| ui::pr::shortcut(ui::pr::Shortcut::Merge)));
         add("preferences", &["<Control>comma"], Box::new(|| ui::settings::show()));
         add("check-updates", &[], Box::new(|| ui::update::show(true)));
         add("show-update", &[], Box::new(|| ui::update::show(false)));
@@ -1561,6 +1842,7 @@ impl App {
                 s.window_maximized = max;
             });
             if let Some(me) = weak.upgrade() {
+                me.flush_drafts();
                 if settings::read(|s| s.run_in_background) && !me.smoke.get() {
                     w.set_visible(false);
                     if !me.held.get() {
@@ -1578,6 +1860,14 @@ impl App {
     }
 }
 
+fn initial_section(smoke: bool) -> Section {
+    let fallback = Section::Prs(PrFilter::ReviewRequested);
+    if smoke || demo::is_on() || crate::tour::active() {
+        return fallback;
+    }
+    Section::from_key(&settings::read(|s| s.nav_section.clone())).unwrap_or(fallback)
+}
+
 pub fn run(smoke: bool) -> glib::ExitCode {
     let gtk_app = adw::Application::builder().application_id(brand::APP_ID).flags(gio::ApplicationFlags::HANDLES_OPEN).build();
     let app = Rc::new(App {
@@ -1591,7 +1881,8 @@ pub fn run(smoke: bool) -> glib::ExitCode {
             locked: None,
             user: None,
             scopes: vec![],
-            section: Section::Prs(PrFilter::ReviewRequested),
+            section: initial_section(smoke),
+            last_list_section: None,
             route: None,
             review_requests: vec![],
             my_prs: vec![],
@@ -1619,6 +1910,9 @@ pub fn run(smoke: bool) -> glib::ExitCode {
         splash_done: Cell::new(false),
         held: Cell::new(false),
         smoke: Cell::new(smoke),
+        pending_url: RefCell::new(None),
+        pending_activity: RefCell::new(None),
+        lockable: Cell::new(false),
         claude: Workspace::new(),
     });
     APP.with(|a| *a.borrow_mut() = Some(app.clone()));
@@ -1738,5 +2032,20 @@ mod tests {
         assert!(link_prompt_too_long(&"a".repeat(MAX_LINK_PROMPT_CHARS + 1)));
         assert!(!link_prompt_too_long(&"é".repeat(MAX_LINK_PROMPT_CHARS)));
         assert!(link_prompt_too_long_message(&"a".repeat(9000)).contains("9000 characters"));
+    }
+
+    #[test]
+    fn section_keys_round_trip() {
+        let mut all = vec![Section::Notifications, Section::MyPrsByRepo, Section::Stacks, Section::Repos, Section::Projects, Section::Claude];
+        all.extend(PrFilter::ALL.into_iter().map(Section::Prs));
+        all.extend(IssueFilter::ALL.into_iter().map(Section::Issues));
+        for s in all {
+            assert_eq!(Section::from_key(&s.key()), Some(s));
+        }
+        assert_eq!(Section::from_key("prs/unknown"), Some(Section::Prs(PrFilter::ReviewRequested)));
+        assert_eq!(Section::from_key("issues/unknown"), Some(Section::Issues(IssueFilter::Assigned)));
+        assert_eq!(Section::from_key("prs"), None);
+        assert_eq!(Section::from_key(""), None);
+        assert_eq!(Section::from_key("nope/x"), None);
     }
 }

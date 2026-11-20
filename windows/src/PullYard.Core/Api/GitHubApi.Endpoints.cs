@@ -271,7 +271,11 @@ public sealed partial class GitHubApi
             await GraphQL<EmptyData>(Q.ClearProjectItem, V(("p", project), ("i", item), ("f", field)), strict: true, ct: ct).ConfigureAwait(false);
     }
 
-    private static string NotificationsPath(bool all) => $"/notifications?all={(all ? "true" : "false")}&per_page=50";
+    public const int NotificationPageSize = 100;
+
+    public static string CountLabel(int count) => count >= NotificationPageSize ? $"{NotificationPageSize}+" : count.ToString();
+
+    private static string NotificationsPath(bool all) => $"/notifications?all={(all ? "true" : "false")}&per_page={NotificationPageSize}";
 
     public async Task<List<NotificationThread>> Notifications(bool all, CancellationToken ct = default)
     {
@@ -289,7 +293,7 @@ public sealed partial class GitHubApi
 
     public async Task<int?> UnreadNotificationCount(bool live = false, CancellationToken ct = default)
     {
-        var (data, changed) = await Conditional("/notifications?per_page=50", live, ct).ConfigureAwait(false);
+        var (data, changed) = await Conditional($"/notifications?per_page={NotificationPageSize}", live, ct).ConfigureAwait(false);
         return changed ? DecodeNotifications(data).Count : null;
     }
 
@@ -301,7 +305,7 @@ public sealed partial class GitHubApi
         }
         catch (JsonException e)
         {
-            throw new ApiException($"Failed to parse response: {e.Message}");
+            throw ApiException.Unreadable("GitHub", e);
         }
     }
 

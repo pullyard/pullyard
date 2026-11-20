@@ -21,8 +21,10 @@ public abstract class ListPane : Grid
     protected readonly RowAppear Appear;
     protected readonly ContentControl Overlay = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch, IsTabStop = false, IsHitTestVisible = true };
     protected readonly RefreshFooter Footer = new();
+    protected readonly StackPanel Notice = Ui.V(0);
     private readonly LiveRefresh live;
     private bool subscribed;
+    private string noticeKey = "";
 
     protected ListPane(string title, string template)
     {
@@ -34,6 +36,7 @@ public abstract class ListPane : Grid
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var header = Ui.Columns((Ui.H(8, TitleText, CountText), Ui.Star), (Tools, Ui.Auto), (Ui.RefreshButton(OnPullRefresh), Ui.Auto));
@@ -67,8 +70,12 @@ public abstract class ListPane : Grid
         SetRow(area, 3);
         Children.Add(area);
 
+        Notice.Visibility = Visibility.Collapsed;
+        SetRow(Notice, 4);
+        Children.Add(Notice);
+
         Footer.Retry = () => OnPullRefresh().Forget();
-        SetRow(Footer, 4);
+        SetRow(Footer, 5);
         Children.Add(Footer);
 
         Loaded += (_, _) =>
@@ -119,6 +126,73 @@ public abstract class ListPane : Grid
     {
         LoadingBar.Visibility = loading && hasItems ? Visibility.Visible : Visibility.Collapsed;
         List.Opacity = loading && hasItems ? 0.6 : 1;
+    }
+
+    protected void SetNotice(string key, params FrameworkElement?[] rows)
+    {
+        if (key == noticeKey) return;
+        noticeKey = key;
+        Notice.Children.Clear();
+        foreach (var row in rows)
+            if (row is not null) Notice.Children.Add(row);
+        Notice.Visibility = Notice.Children.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    protected void OnRowOpen(Action<object> open)
+    {
+        List.DoubleTapped += (_, e) =>
+        {
+            if (RowItem(e.OriginalSource as DependencyObject) is { } item) open(item);
+        };
+        List.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key != Windows.System.VirtualKey.Enter || e.OriginalSource is not ListViewItem row || List.ItemFromContainer(row) is not { } item) return;
+            e.Handled = true;
+            open(item);
+        };
+    }
+
+    private object? RowItem(DependencyObject? node)
+    {
+        while (node is not null)
+        {
+            if (node is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase) return null;
+            if (node is ListViewItem row) return List.ItemFromContainer(row);
+            node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node);
+        }
+        return null;
+    }
+
+    public static FrameworkElement LoadingMoreRow()
+    {
+        var row = Ui.H(8, Ui.Spinner(14), Ui.Caption(L.T("List_LoadingMore", "Loading more…")));
+        row.HorizontalAlignment = HorizontalAlignment.Center;
+        row.Padding = new Thickness(12, 6, 12, 6);
+        return row;
+    }
+
+    public static FrameworkElement LoadMoreErrorRow(string message, Action retry)
+    {
+        var detail = Ui.Text(message, 12, "muted", maxLines: 2);
+        Ui.Tip(detail, message);
+        var words = Ui.V(1, Ui.Text(L.T("List_LoadMoreFailed", "Couldn’t load more results"), 13, "text", FontWeights.Medium), detail);
+        var grid = Ui.Columns((Ui.Glyph("\uE7BA", 14, "amber"), Ui.Auto), (words, Ui.Star), (Ui.Button(L.T("Common_Retry", "Retry"), retry), Ui.Auto));
+        grid.Padding = new Thickness(14, 6, 12, 6);
+        return grid;
+    }
+
+    public static FrameworkElement NoteRow(string text)
+    {
+        var note = Ui.Text(text, 12, "muted", wrap: true);
+        note.Margin = new Thickness(14, 6, 14, 6);
+        return note;
+    }
+
+    public static FrameworkElement ActionRow(string glyph, string text, string buttonText, Action action)
+    {
+        var grid = Ui.Columns((Ui.Glyph(glyph, 13), Ui.Auto), (Ui.Text(text, 12.5, "muted", maxLines: 1), Ui.Star), (Ui.Button(buttonText, action), Ui.Auto));
+        grid.Padding = new Thickness(14, 6, 12, 6);
+        return grid;
     }
 
     protected static SelectorBar StateBar(StateFilter current, Action<StateFilter> changed)

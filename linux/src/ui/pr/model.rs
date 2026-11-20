@@ -13,6 +13,7 @@ use crate::api::models::*;
 use crate::api::{ApiError, ErrorKind, GitHubApi};
 use crate::conversation_html::{self, Look};
 use crate::diff::{DiffAnchor, DiffFile};
+use crate::drafts::{self, DraftComment, ReviewDraft};
 use crate::signal::Signal;
 use crate::stack::{self, context, StackNode, StackTree};
 
@@ -121,6 +122,12 @@ pub struct PrModel {
     pub pending: RefCell<Vec<PendingComment>>,
     pub composer: RefCell<Option<DiffAnchor>>,
     pub composer_text: RefCell<String>,
+    pub reply_drafts: RefCell<HashMap<String, String>>,
+    pub comment_draft: RefCell<String>,
+    pub summary_draft: RefCell<String>,
+    pub restored_drafts: Cell<bool>,
+    draft_key: RefCell<Option<String>>,
+    draft_gen: Cell<u64>,
     thread_index: RefCell<HashMap<String, Vec<ReviewThread>>>,
     outdated_by_path: RefCell<HashMap<String, Vec<ReviewThread>>>,
     active: Cell<bool>,
@@ -184,6 +191,12 @@ impl PrModel {
             pending: RefCell::new(vec![]),
             composer: RefCell::new(None),
             composer_text: RefCell::new(String::new()),
+            reply_drafts: RefCell::new(HashMap::new()),
+            comment_draft: RefCell::new(String::new()),
+            summary_draft: RefCell::new(String::new()),
+            restored_drafts: Cell::new(false),
+            draft_key: RefCell::new(None),
+            draft_gen: Cell::new(0),
             thread_index: RefCell::new(HashMap::new()),
             outdated_by_path: RefCell::new(HashMap::new()),
             active: Cell::new(false),
@@ -228,6 +241,82 @@ impl PrModel {
 
     pub fn emit(&self, c: Change) {
         self.changed.emit(&c);
+    }
+
+    pub fn current_draft(&self) -> ReviewDraft {
+        let composer = self.composer.borrow().as_ref().map(|a| DraftComment { path: a.path.clone(), line: a.line, side: a.side.clone(), body: self.composer_text.borrow().clone() });
+        ReviewDraft {
+            pending: self.pending.borrow().iter().map(|p| DraftComment { path: p.path.clone(), line: p.line, side: p.side.clone(), body: p.body.clone() }).collect(),
+            composer,
+            replies: self.reply_drafts.borrow().iter().filter(|(_, v)| !v.trim().is_empty()).map(|(k, v)| (k.clone(), v.clone())).collect(),
+            comment: self.comment_draft.borrow().clone(),
+            summary: self.summary_draft.borrow().clone(),
+        }
+    }
+
+    pub fn restore_drafts(&self, account: &str) {
+        if self.draft_key.borrow().is_some() {
+            return;
+        }
+        let key = drafts::key(account, &self.backend.host(), &self.r.repo.full(), self.r.number, "pr");
+        if let Some(saved) = drafts::with(|s| s.review(&key)) {
+            self.restored_drafts.set(!saved.pending.is_empty());
+            *self.pending.borrow_mut() = saved.pending.into_iter().map(|c| PendingComment { id: uuid::Uuid::new_v4().to_string(), path: c.path, line: c.line, side: c.side, body: c.body }).collect();
+            if let Some(open) = saved.composer {
+                *self.composer.borrow_mut() = Some(DiffAnchor { path: open.path, line: open.line, side: open.side });
+                *self.composer_text.borrow_mut() = open.body;
+            }
+            *self.reply_drafts.borrow_mut() = saved.replies;
+            *self.comment_draft.borrow_mut() = saved.comment;
+            *self.summary_draft.borrow_mut() = saved.summary;
+        }
+        *self.draft_key.borrow_mut() = Some(key);
+    }
+
+    pub fn save_drafts_now(&self) {
+        self.draft_gen.set(self.draft_gen.get() + 1);
+        let Some(key) = self.draft_key.borrow().clone() else { return };
+        let draft = self.current_draft();
+        drafts::with(|s| s.save(&draft, &key));
+    }
+
+    pub fn drafts_changed(self: &Rc<Self>) {
+        if self.draft_key.borrow().is_none() {
+            return;
+        }
+        let gen = self.draft_gen.get() + 1;
+        self.draft_gen.set(gen);
+        let weak = Rc::downgrade(self);
+        crate::rt::spawn_local(async move {
+            crate::rt::sleep(Duration::from_millis(400)).await;
+            if let Some(me) = weak.upgrade() {
+                if me.draft_gen.get() == gen {
+                    me.save_drafts_now();
+                }
+            }
+        });
+    }
+
+    pub fn set_reply_draft(self: &Rc<Self>, thread_id: &str, text: &str) {
+        {
+            let mut replies = self.reply_drafts.borrow_mut();
+            if text.is_empty() {
+                replies.remove(thread_id);
+            } else {
+                replies.insert(thread_id.to_string(), text.to_string());
+            }
+        }
+        self.drafts_changed();
+    }
+
+    pub fn hidden_thread_count(&self) -> i64 {
+        self.pr.borrow().as_ref().map(|p| (p.review_threads.total_count.unwrap_or(0) - p.review_threads.nodes.len() as i64).max(0)).unwrap_or(0)
+    }
+
+    pub fn hidden_check_count(&self) -> i64 {
+        let pr = self.pr.borrow();
+        let contexts = pr.as_ref().and_then(|p| p.rollup()).and_then(|r| r.contexts.as_ref());
+        contexts.map(|c| (c.total_count.unwrap_or(0) - c.nodes.len() as i64).max(0)).unwrap_or(0)
     }
 
     pub fn set_tab(&self, t: PrTab) {
@@ -971,6 +1060,9 @@ impl PrModel {
         let ok = self.run(true, move |b| async move { b.submit_review(&r, &pr, &event, Some(body), &comments, &files).await }).await;
         if ok {
             self.pending.borrow_mut().clear();
+            self.summary_draft.borrow_mut().clear();
+            self.restored_drafts.set(false);
+            self.save_drafts_now();
             self.emit(Change::Diff);
             self.emit(Change::ScrollBottom);
         }
@@ -987,6 +1079,7 @@ impl PrModel {
             if ok {
                 *self.composer.borrow_mut() = None;
                 self.composer_text.borrow_mut().clear();
+                self.save_drafts_now();
                 self.emit(Change::Diff);
             }
             return ok;
@@ -994,13 +1087,20 @@ impl PrModel {
         self.pending.borrow_mut().push(c);
         *self.composer.borrow_mut() = None;
         self.composer_text.borrow_mut().clear();
+        self.save_drafts_now();
         self.emit(Change::Diff);
         true
     }
 
     pub async fn reply(self: Rc<Self>, thread_id: String, body: String) -> bool {
+        let id = thread_id.clone();
         let r = self.r.clone();
-        self.run(true, move |b| async move { b.reply(&r, &thread_id, &body).await }).await
+        let ok = self.run(true, move |b| async move { b.reply(&r, &thread_id, &body).await }).await;
+        if ok {
+            self.reply_drafts.borrow_mut().remove(&id);
+            self.save_drafts_now();
+        }
+        ok
     }
 
     pub async fn set_resolved(self: Rc<Self>, thread_id: String, resolved: bool) -> bool {

@@ -21,6 +21,32 @@ enum StateFilter: String, CaseIterable, Identifiable {
     }
 }
 
+enum ListSort: String, CaseIterable, Identifiable {
+    case updated, created, comments
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .updated: return "Recently updated"
+        case .created: return "Newest"
+        case .comments: return "Most commented"
+        }
+    }
+
+    var query: String {
+        switch self {
+        case .updated: return "sort:updated-desc"
+        case .created: return "sort:created-desc"
+        case .comments: return "sort:comments-desc"
+        }
+    }
+}
+
+@MainActor
+enum ListFilterMemory {
+    static var text: [String: String] = [:]
+}
+
 struct EmptyCopy {
     let title: String
     let message: String
@@ -100,7 +126,7 @@ final class SearchListModel {
     var error: String?
     private var cursor: String?
     private var hasMore = false
-    private var loadingMore = false
+    private(set) var loadingMore = false
     private(set) var loadMoreError: String?
     private var currentQuery = ""
     private var currentKey = ""
@@ -228,6 +254,8 @@ final class SearchListModel {
         }
     }
 
+    var hasMorePages: Bool { hasMore }
+
     var groups: [RepoGroup] {
         var order: [String] = []
         var byRepo: [String: [SearchItem]] = [:]
@@ -273,32 +301,56 @@ struct SearchListView: View {
     let grouped: Bool
     @Environment(AppModel.self) private var app
     @State private var model: SearchListModel
-    @State private var stateFilter: StateFilter = .open
-    @State private var text = ""
+    @AppStorage private var stateFilter: StateFilter
+    @AppStorage private var sort: ListSort
+    @State private var text: String
     @State private var loadedText = ""
     @State private var collapsed: Set<String> = []
+    private let memoryKey: String
 
     init(title: String, kind: String, baseQuery: String, grouped: Bool = false) {
         self.title = title
         self.kind = kind
         self.baseQuery = baseQuery
         self.grouped = grouped
-        _model = State(initialValue: SearchListModel(rows: .shared("search|\(kind)|\(baseQuery)\(grouped ? "|grouped" : "")")))
+        let key = "search|\(kind)|\(baseQuery)\(grouped ? "|grouped" : "")"
+        memoryKey = key
+        _model = State(initialValue: SearchListModel(rows: .shared(key)))
+        _stateFilter = AppStorage(wrappedValue: .open, "list.state.\(kind)")
+        _sort = AppStorage(wrappedValue: .updated, "list.sort.\(kind)")
+        _text = State(initialValue: ListFilterMemory.text[key] ?? "")
     }
 
     private var query: String {
-        [baseQuery, "is:\(kind)", stateFilter.query, "archived:false", "sort:updated-desc", text]
+        [baseQuery, "is:\(kind)", stateFilter.query, "archived:false", sort.query, text]
             .filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     var body: some View {
         @Bindable var app = app
         VStack(spacing: 0) {
-            Picker("", selection: $stateFilter) {
-                ForEach(StateFilter.allCases) { Text($0.title).tag($0) }
+            HStack(spacing: 6) {
+                Picker("", selection: $stateFilter) {
+                    ForEach(StateFilter.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityLabel("State")
+                Menu {
+                    Picker("Sort by", selection: $sort) {
+                        ForEach(ListSort.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Sort: \(sort.title)")
+                .accessibilityLabel("Sort")
+                .accessibilityValue(sort.title)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             LoadingBar(active: model.loading && !model.showingCached && !model.items.isEmpty)
@@ -319,10 +371,20 @@ struct SearchListView: View {
                     }
                 } else {
                     ForEach(model.items) { row($0) }
-                    if let e = model.loadMoreError {
-                        LoadMoreErrorRow(message: e) { await model.loadMore(api: app.api) }
-                            .listRowSeparator(.hidden)
+                }
+                if let e = model.loadMoreError {
+                    LoadMoreErrorRow(message: e) {
+                        await model.loadMore(api: app.api)
+                        if grouped { await model.loadAll(api: app.api) }
                     }
+                    .listRowSeparator(.hidden)
+                } else if model.loadingMore {
+                    LoadingMoreRow().listRowSeparator(.hidden)
+                } else if grouped, model.hasMorePages, !model.loading {
+                    Button("Showing \(model.items.count) of \(model.total) — load more") { Task { await model.loadAll(api: app.api, limit: model.items.count + 400) } }
+                        .buttonStyle(.link)
+                        .font(.syCaption)
+                        .listRowSeparator(.hidden)
                 }
             }
             .opacity(model.loading && !model.showingCached && !model.items.isEmpty ? 0.55 : 1)
@@ -352,6 +414,7 @@ struct SearchListView: View {
             await reload(typing: typing)
         }
         .onChange(of: app.refreshTick) { Task { await reload(silent: !model.items.isEmpty) } }
+        .onChange(of: text) { _, value in ListFilterMemory.text[memoryKey] = value.isEmpty ? nil : value }
         .onLiveTick { await reload(silent: true) }
     }
 
@@ -370,6 +433,18 @@ struct SearchListView: View {
     private func reload(silent: Bool = false, typing: Bool = false) async {
         await model.load(api: app.api, account: app.cacheAccount, query: query, silent: silent, typing: typing, persist: text.isEmpty)
         if grouped { await model.loadAll(api: app.api) }
+    }
+}
+
+struct LoadingMoreRow: View {
+    var body: some View {
+        HStack(spacing: Space.s) {
+            ProgressView().controlSize(.small)
+            Text("Loading more…").font(.syCaption).foregroundStyle(Color.syMuted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Space.s)
+        .accessibilityElement(children: .combine)
     }
 }
 

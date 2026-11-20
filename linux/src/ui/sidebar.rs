@@ -150,8 +150,8 @@ impl Sidebar {
     fn rebuild(&self) {
         clear(&self.column);
         let mut rows = vec![];
-        for (title, items) in groups() {
-            self.column.append(&label_with(&title, &["sy-section-title"]));
+        for (group, items) in groups() {
+            self.column.append(&label_with(&group, &["sy-section-title"]));
             let list = gtk::ListBox::new();
             list.add_css_class("sy-sidebar-list");
             list.set_selection_mode(gtk::SelectionMode::Single);
@@ -174,8 +174,10 @@ impl Sidebar {
                         app::set_section(section);
                     }
                 });
-                set_label(&row, &title);
-                rows.push(Row { section, title: title.clone(), list: list.clone(), row, count });
+                let spoken = if matches!(section, Section::Prs(_) | Section::Issues(_)) { format!("{group}: {title}") } else { title.clone() };
+                set_label(&row, &spoken);
+                row.set_tooltip_text(Some(&spoken));
+                rows.push(Row { section, title: spoken, list: list.clone(), row, count });
             }
             self.column.append(&list);
         }
@@ -216,14 +218,16 @@ impl Sidebar {
                 }
                 _ => (0, false, ""),
             };
-            r.count.set_text(&if n > 0 { n.to_string() } else { String::new() });
+            let shown = if r.section == Section::Notifications && app::provider().is_github() { crate::list_sort::capped(n.max(0) as usize, crate::api::NOTIFICATION_PAGE_SIZE) } else { n.to_string() };
+            r.count.set_text(&if n > 0 { shown.clone() } else { String::new() });
             r.count.set_visible(n > 0);
             if urgent {
                 r.count.add_css_class("attention");
             } else {
                 r.count.remove_css_class("attention");
             }
-            set_label(&r.row, &if n > 0 { format!("{}, {n} {noun}", r.title) } else { r.title.clone() });
+            set_label(&r.row, &if n > 0 { format!("{}, {shown} {noun}", r.title) } else { r.title.clone() });
+            r.row.set_tooltip_text(Some(&if n > 0 { format!("{} ({shown})", r.title) } else { r.title.clone() }));
         }
     }
 

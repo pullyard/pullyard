@@ -224,9 +224,11 @@ extension GitHubAPI {
         }
     }
 
+    static let notificationPageSize = 100
+
     func notifications(all: Bool, live: Bool = false) async throws -> [NotificationThread] {
         if Demo.isOn { return [] }
-        return try await restPolled("/notifications?all=\(all)&per_page=50", live: live)
+        return try await restPolled("/notifications?all=\(all)&per_page=\(Self.notificationPageSize)", live: live)
     }
 
     func unreadNotificationCount(live: Bool = false) async throws -> Int {

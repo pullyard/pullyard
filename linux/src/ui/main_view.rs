@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -8,7 +8,12 @@ use super::dialogs::Sheet;
 use super::widgets::*;
 use crate::api::models::Route;
 use crate::app::{self, Section};
-use crate::{brand, util};
+use crate::nav_memory::ForwardStack;
+use crate::{brand, settings, util};
+
+const SIDEBAR_MIN: f64 = 180.0;
+const SIDEBAR_MAX: f64 = 320.0;
+const SIDEBAR_GRIP: f64 = 4.0;
 
 pub struct MainView {
     pub widget: gtk::Widget,
@@ -18,6 +23,64 @@ pub struct MainView {
     cache: RefCell<HashMap<String, gtk::Widget>>,
     claude_view: RefCell<Option<gtk::Widget>>,
     routes: RefCell<Vec<(gtk::glib::WeakRef<adw::NavigationPage>, Route)>>,
+    forward: RefCell<ForwardStack>,
+}
+
+fn near_sidebar_edge(split: &adw::OverlaySplitView, x: f64) -> Option<f64> {
+    let width = split.sidebar().map(|s| s.width()).unwrap_or(0) as f64;
+    if width > 0.0 && (x - width).abs() <= SIDEBAR_GRIP {
+        Some(width)
+    } else {
+        None
+    }
+}
+
+fn set_sidebar_width(split: &adw::OverlaySplitView, width: f64) {
+    if width < split.min_sidebar_width() {
+        split.set_min_sidebar_width(width);
+        split.set_max_sidebar_width(width);
+    } else {
+        split.set_max_sidebar_width(width);
+        split.set_min_sidebar_width(width);
+    }
+}
+
+fn install_sidebar_resize(split: &adw::OverlaySplitView) {
+    let stored = settings::read(|s| s.sidebar_width);
+    if stored > 0 {
+        set_sidebar_width(split, (stored as f64).clamp(SIDEBAR_MIN, SIDEBAR_MAX));
+    }
+    let start: Rc<Cell<Option<f64>>> = Rc::new(Cell::new(None));
+    let drag = gtk::GestureDrag::new();
+    drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let (s, st) = (split.downgrade(), start.clone());
+    drag.connect_drag_begin(move |g, x, _| {
+        let edge = s.upgrade().and_then(|split| near_sidebar_edge(&split, x));
+        st.set(edge);
+        g.set_state(if edge.is_some() { gtk::EventSequenceState::Claimed } else { gtk::EventSequenceState::Denied });
+    });
+    let (s, st) = (split.downgrade(), start.clone());
+    drag.connect_drag_update(move |_, dx, _| {
+        if let (Some(split), Some(from)) = (s.upgrade(), st.get()) {
+            set_sidebar_width(&split, (from + dx).clamp(SIDEBAR_MIN, SIDEBAR_MAX));
+        }
+    });
+    let (s, st) = (split.downgrade(), start.clone());
+    drag.connect_drag_end(move |_, _, _| {
+        if let (Some(split), Some(_)) = (s.upgrade(), st.take()) {
+            let width = split.max_sidebar_width().round() as i32;
+            settings::update(|st| st.sidebar_width = width);
+        }
+    });
+    split.add_controller(drag);
+    let motion = gtk::EventControllerMotion::new();
+    let s = split.downgrade();
+    motion.connect_motion(move |_, x, _| {
+        if let Some(split) = s.upgrade() {
+            split.set_cursor_from_name(near_sidebar_edge(&split, x).map(|_| "col-resize"));
+        }
+    });
+    split.add_controller(motion);
 }
 
 fn empty_page() -> adw::NavigationPage {
@@ -33,7 +96,8 @@ fn empty_page() -> adw::NavigationPage {
     let t = label_with(&prompt, &["sy-muted"]);
     t.set_xalign(0.5);
     b.append(&t);
-    let s = label_with("Ctrl+L — open by link", &["sy-dim", "sy-small"]);
+    let hint = if provider.is_github() { "Ctrl+L to open by link · Ctrl+K for the command palette · Ctrl+? for all shortcuts" } else { "Ctrl+K for the command palette · Ctrl+? for all shortcuts" };
+    let s = label_with(hint, &["sy-dim", "sy-small"]);
     s.set_xalign(0.5);
     b.append(&s);
     let (tv, _, _) = toolbar_page("", "", &b);
@@ -51,6 +115,7 @@ impl MainView {
         split.set_sidebar_width_fraction(0.18);
         let sidebar = super::sidebar::Sidebar::new();
         split.set_sidebar(Some(&sidebar.widget));
+        install_sidebar_resize(&split);
 
         let content = adw::Bin::new();
         content.add_css_class("sy-list-pane");
@@ -72,9 +137,17 @@ impl MainView {
         paned.set_wide_handle(false);
         split.set_content(Some(&paned));
 
-        let me = Rc::new(MainView { widget: split.upcast(), content, detail, nav, cache: RefCell::new(HashMap::new()), claude_view: RefCell::new(None), routes: RefCell::new(vec![]) });
+        let me = Rc::new(MainView { widget: split.upcast(), content, detail, nav, cache: RefCell::new(HashMap::new()), claude_view: RefCell::new(None), routes: RefCell::new(vec![]), forward: RefCell::new(ForwardStack::default()) });
         me.nav.connect_visible_page_notify(|_| {
             gtk::glib::idle_add_local_once(app::sync_actions);
+        });
+        let weak = Rc::downgrade(&me);
+        me.nav.connect_popped(move |_, page| {
+            let Some(me) = weak.upgrade() else { return };
+            let route = me.routes.borrow().iter().rev().find(|(w, _)| w.upgrade().as_ref() == Some(page)).map(|(_, r)| r.clone());
+            if let Some(route) = route {
+                me.forward.borrow_mut().popped(route);
+            }
         });
         me.show_section(app::section());
         let weak = Rc::downgrade(&me);
@@ -126,9 +199,13 @@ impl MainView {
         match route {
             None => {
                 self.nav.replace(&[empty_page()]);
+                self.forward.borrow_mut().clear();
             }
             Some(r) => {
                 let page = super::route_page(&r);
+                if push {
+                    self.forward.borrow_mut().pushed(&r);
+                }
                 {
                     let mut routes = self.routes.borrow_mut();
                     routes.retain(|(w, _)| w.upgrade().is_some_and(|p| p.parent().is_some()));
@@ -138,6 +215,7 @@ impl MainView {
                     self.nav.push(&page);
                 } else {
                     self.nav.replace(&[page]);
+                    self.forward.borrow_mut().clear();
                 }
             }
         }
@@ -150,6 +228,17 @@ impl MainView {
 
     pub fn back(&self) {
         self.nav.pop();
+    }
+
+    pub fn can_forward(&self) -> bool {
+        !self.forward.borrow().is_empty()
+    }
+
+    pub fn forward(&self) {
+        let next = self.forward.borrow().peek();
+        if let Some(route) = next {
+            self.show_route(Some(route), true);
+        }
     }
 }
 

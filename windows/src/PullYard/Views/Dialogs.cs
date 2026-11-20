@@ -74,7 +74,11 @@ public static class Dialogs
     {
         if (root is null) return false;
         var d = Create(root, title, message is null ? new Grid() : Ui.Text(message, 13, "muted", wrap: true), button);
-        if (destructive) d.PrimaryButtonStyle = (Style)Application.Current.Resources["AccentButtonStyle"];
+        if (destructive)
+        {
+            d.PrimaryButtonStyle = (Style)Application.Current.Resources["AccentButtonStyle"];
+            Ui.FillResources(d.Resources, "red", accentOnly: true);
+        }
         return await ShowAsync(d) == ContentDialogResult.Primary;
     }
 
@@ -113,9 +117,11 @@ public static class Dialogs
     {
         if (root is null || model.Pr is not { } pr) return;
         var panel = Ui.V(10);
+        if (model.RestoredDrafts)
+            panel.Children.Add(Ui.H(6, Ui.Glyph("\uE81C", 12), Ui.Caption(L.T("Review_Restored", "Restored from your last session"))));
         if (model.PendingCount > 0)
             panel.Children.Add(Ui.H(6, Ui.Glyph("", 12), Ui.Text(L.F("Review_PendingInline", "Inline comments to be submitted: {0}", model.PendingCount), 13, "muted")));
-        var text = Editor(L.T("Review_Summary", "Review summary (optional when approving)"), minHeight: 140);
+        var text = Editor(L.T("Review_Summary", "Review summary (optional when approving)"), model.SummaryDraft, minHeight: 140);
         panel.Children.Add(text);
         var radios = new RadioButtons();
         var comment = new RadioButton { Content = L.T("Review_CommentOnly", "Comment — without approval"), Tag = "COMMENT", IsChecked = true };
@@ -129,12 +135,20 @@ public static class Dialogs
         var d = Create(root, L.F("Review_Title", "Review {0}", model.NumberText), panel, L.T("Review_Submit", "Submit review"), model.PendingCount > 0 ? L.T("Review_Discard", "Discard pending comments") : null);
         string Event() => (radios.SelectedItem as RadioButton)?.Tag as string ?? "COMMENT";
         void Validate() => d.IsPrimaryButtonEnabled = Event() == "APPROVE" || text.Text.Trim().Length > 0 || model.PendingCount > 0;
-        text.TextChanged += (_, _) => Validate();
+        text.TextChanged += (_, _) =>
+        {
+            model.SetSummaryDraft(text.Text);
+            Validate();
+        };
         radios.SelectionChanged += (_, _) => Validate();
         Validate();
         d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, () => model.SubmitReview(Event(), text.Text), args);
-        d.SecondaryButtonClick += (_, _) => model.ClearPending();
+        var discard = false;
+        d.SecondaryButtonClick += (_, _) => discard = true;
         await ShowAsync(d);
+        if (!discard || model.PendingCount == 0) return;
+        if (await Confirm(root, L.F("Review_DiscardQ", "Discard {0} pending comment(s)?", model.PendingCount), L.T("Review_DiscardButton", "Discard"), message: L.T("Review_DiscardBody", "The pending inline comments are deleted. This can't be undone.")))
+            model.ClearPending();
     }
 
     public static async Task Merge(XamlRoot? root, PRDetailViewModel model)
@@ -313,7 +327,7 @@ public static class Dialogs
             ((TextBlock)quote.Children[1]).MaxWidth = 520;
             panel.Children.Add(Ui.Card(quote, 6, "sunken", 8));
         }
-        var text = Editor(L.T("Reply_Placeholder", "Reply (Markdown)"));
+        var text = Editor(L.T("Reply_Placeholder", "Reply (Markdown)"), model.ReplyDraft(thread.Id));
         panel.Children.Add(text);
         var canResolve = thread.ViewerCanResolve && !thread.IsResolved;
         var d = Create(root, L.T("Reply_Title", "Reply to thread"), panel, L.T("Reply_Reply", "Reply"), canResolve ? L.T("Reply_AndResolve", "Reply and resolve") : null);
@@ -323,7 +337,11 @@ public static class Dialogs
             d.IsPrimaryButtonEnabled = ok;
             d.IsSecondaryButtonEnabled = ok;
         }
-        text.TextChanged += (_, _) => Validate();
+        text.TextChanged += (_, _) =>
+        {
+            model.SetReplyDraft(thread.Id, text.Text);
+            Validate();
+        };
         Validate();
         d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, () => model.Reply(thread.Id, text.Text), args);
         d.SecondaryButtonClick += async (_, args) => await RunWhileOpen(d, async () =>
@@ -613,7 +631,7 @@ public static class Dialogs
     public static async Task InlineComment(XamlRoot? root, PRDetailViewModel model, DiffAnchor anchor)
     {
         if (root is null) return;
-        var text = Editor(L.F("Inline_Placeholder", "Comment on line {0} (Markdown)", anchor.Line), minHeight: 100);
+        var text = Editor(L.F("Inline_Placeholder", "Comment on line {0} (Markdown)", anchor.Line), model.ComposerText(anchor), minHeight: 100);
         var panel = Ui.V(8, Ui.Text($"{anchor.Path}:{anchor.Line} ({anchor.Side.ToLowerInvariant()})", 12, "muted", mono: true), text);
         var d = Create(root, L.T("Inline_Title", "Comment on line"), panel, L.T("Inline_Single", "Add single comment"), L.T("Inline_AddToReview", "Add to review"));
         ToolTipService.SetToolTip(d, L.T("Inline_Help", "“Add to review” saves the comment as pending and submits it with the review"));
@@ -623,11 +641,17 @@ public static class Dialogs
             d.IsPrimaryButtonEnabled = ok;
             d.IsSecondaryButtonEnabled = ok;
         }
-        text.TextChanged += (_, _) => Validate();
+        text.TextChanged += (_, _) =>
+        {
+            model.SetComposer(anchor, text.Text);
+            Validate();
+        };
         Validate();
-        d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, () => model.AddInline(anchor, text.Text, true), args);
-        d.SecondaryButtonClick += async (_, args) => await RunWhileOpen(d, () => model.AddInline(anchor, text.Text, false), args);
+        var submitted = false;
+        d.PrimaryButtonClick += async (_, args) => submitted = await RunWhileOpen(d, () => model.AddInline(anchor, text.Text, true), args);
+        d.SecondaryButtonClick += async (_, args) => submitted = await RunWhileOpen(d, () => model.AddInline(anchor, text.Text, false), args);
         await ShowAsync(d);
+        if (!submitted && model.ComposerAnchor == anchor && string.IsNullOrWhiteSpace(model.ComposerDraft)) model.SetComposer(null, "");
     }
 
     public static async Task JobLog(XamlRoot? root, Func<Task<string>> load, CheckContext check, Action<string?>? fix = null)
@@ -656,9 +680,7 @@ public static class Dialogs
                 fixRequested = true;
                 dialog?.Hide();
             }, glyph: "\uE945");
-            var (coral, onCoral) = Palette.Filled("coral");
-            fixButton.Background = coral;
-            fixButton.Foreground = onCoral;
+            Ui.Tint(fixButton, "coral");
             fixButton.HorizontalAlignment = HorizontalAlignment.Right;
             top.Children.Add(fixButton);
         }

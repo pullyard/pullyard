@@ -1,63 +1,5 @@
 import SwiftUI
 
-struct GitRemote: Equatable {
-    enum Kind: Equatable { case github, gitlab, bitbucket, other }
-
-    let host: String
-    let path: String
-    let kind: Kind
-
-    var githubRepo: RepoRef? { host == "github.com" ? RepoRef(full: path) : nil }
-    var webURL: String { "https://\(host)/\(path)" }
-
-    var noun: String { kind == .gitlab ? "merge request" : "pull request" }
-
-    func newRequestURL(branch: String) -> String {
-        let b = branch.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? branch
-        switch kind {
-        case .github: return "\(webURL)/pull/new/\(b)"
-        case .gitlab: return "\(webURL)/-/merge_requests/new?merge_request%5Bsource_branch%5D=\(b)"
-        case .bitbucket: return "\(webURL)/pull-requests/new?source=\(b)"
-        case .other: return webURL
-        }
-    }
-
-    static func parse(_ raw: String) -> GitRemote? {
-        var url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !url.isEmpty else { return nil }
-        while url.hasSuffix("/") { url.removeLast() }
-        if url.hasSuffix(".git") { url.removeLast(4) }
-        var host: String
-        var path: String
-        if let comps = URLComponents(string: url), let h = comps.host, comps.scheme != nil {
-            host = h
-            path = comps.path
-        } else if let at = url.firstIndex(of: "@"), let colon = url[at...].firstIndex(of: ":") {
-            host = String(url[url.index(after: at)..<colon])
-            path = String(url[url.index(after: colon)...])
-        } else {
-            return nil
-        }
-        host = host.lowercased()
-        path = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        if host == "ssh.github.com" { host = "github.com" }
-        if host.hasPrefix("altssh.") { host = String(host.dropFirst(7)) }
-        if host == "bitbucket.org", path.hasPrefix("scm/") { path = String(path.dropFirst(4)) }
-        guard !host.isEmpty, path.contains("/") else { return nil }
-        let kind: Kind
-        if host == "github.com" || host.contains("github") {
-            kind = .github
-        } else if host.contains("gitlab") {
-            kind = .gitlab
-        } else if host == "bitbucket.org" || host.contains("bitbucket") {
-            kind = .bitbucket
-        } else {
-            kind = .other
-        }
-        return GitRemote(host: host, path: path, kind: kind)
-    }
-}
-
 enum AgentShip {
     static func openPRPrompt(branch: String, defaultBranch: String?, hasChanges: Bool, ahead: Int, remote: GitRemote? = nil) -> String {
         let onDefault = defaultBranch.map { $0 == branch } ?? ["main", "master", "develop"].contains(branch)
@@ -103,7 +45,8 @@ enum AgentShip {
         let patterns = [
             #"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+/pull/\d+"#,
             #"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-/]+/-/merge_requests/\d+"#,
-            #"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+/pull-requests/\d+"#
+            #"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+/pull-requests/\d+"#,
+            #"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+/pulls/\d+"#
         ]
         let hits = patterns.compactMap { p in text.range(of: p, options: .regularExpression) }
         guard let first = hits.min(by: { $0.lowerBound < $1.lowerBound }) else { return nil }
@@ -159,44 +102,5 @@ struct CreatedPRCard: View {
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.syViolet.opacity(0.08)))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syViolet.opacity(0.25)))
-    }
-}
-
-struct ForgeShipPanel: View {
-    let tab: ClaudeTab
-    let remote: GitRemote
-    @Environment(AppModel.self) private var app
-
-    private var service: String {
-        switch remote.kind {
-        case .gitlab: return "GitLab"
-        case .bitbucket: return "Bitbucket"
-        default: return remote.host
-        }
-    }
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "arrow.triangle.pull").font(.syTitle2).foregroundStyle(Color.syDim)
-            Text("\(service) · \(remote.path)").font(.syCallout.weight(.medium)).foregroundStyle(Color.syText)
-            if let branch = tab.git.branch, branch != "HEAD" {
-                Text("Branch \(branch)").font(.syCaption).foregroundStyle(Color.syMuted)
-                HStack(spacing: 8) {
-                    Button(remote.kind == .gitlab ? "Open MR with Agent" : "Open PR with Agent") {
-                        app.claude.send(AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead, remote: remote), to: tab)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.syAgentAccent)
-                    .disabled(tab.busy)
-                    Button("Create in Browser") { openInBrowser(remote.newRequestURL(branch: branch)) }
-                }
-                .controlSize(.small)
-            }
-            Button("Open \(service)") { openInBrowser(remote.webURL) }
-                .buttonStyle(.link)
-                .font(.syCaption)
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

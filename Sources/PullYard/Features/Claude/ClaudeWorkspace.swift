@@ -79,6 +79,15 @@ enum ClaudeMode: String, CaseIterable, Identifiable {
         case .auto: return "Auto"
         }
     }
+
+    var detail: String {
+        switch self {
+        case .standard: return "Claude asks before it edits files or runs commands."
+        case .acceptEdits: return "File edits apply without asking. Commands still ask."
+        case .plan: return "Claude reads and plans. Nothing changes until you approve the plan."
+        case .auto: return "Claude decides which actions are safe to run without asking."
+        }
+    }
 }
 
 enum ClaudeTabKind: String { case chat, terminal }
@@ -101,6 +110,7 @@ final class ClaudeTab: Identifiable {
     let chat: ChatSession?
     let configDir: String?
     @ObservationIgnored private var _terminal: ClaudeTerminalView?
+    @ObservationIgnored var pendingHistory: URL?
     @ObservationIgnored var restartChat: (() -> Void)?
     @ObservationIgnored var openNewChat: (() -> Void)?
 
@@ -157,6 +167,12 @@ final class ClaudeTab: Identifiable {
     var chatRunning: Bool { chat?.running ?? false }
 
     func ensureChatRunning() { restartChat?() }
+
+    func loadPendingHistory() {
+        guard let file = pendingHistory else { return }
+        pendingHistory = nil
+        chat?.loadHistory(from: file)
+    }
     func newChatInSameFolder() { openNewChat?() }
 
     var projectName: String { (folder as NSString).lastPathComponent }
@@ -184,27 +200,23 @@ final class ClaudeWorkspace {
     var ciFixes: [ItemRef: CIFixLaunch] = [:]
     var reviewFixes: [ItemRef: ReviewFixLaunch] = [:]
 
-    var model: ClaudeModelOption {
-        get { _ = modelTick; return ClaudeModelOption(rawValue: UserDefaults.standard.string(forKey: "claude.model") ?? "") ?? .standard }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "claude.model"); modelTick += 1 }
-    }
+    var defaults: AgentDefaults { AgentDefaults.shared }
     var effort: ClaudeEffort {
-        get { _ = modelTick; return ClaudeEffort(rawValue: UserDefaults.standard.string(forKey: "claude.effort") ?? "") ?? .standard }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "claude.effort"); modelTick += 1 }
+        get { defaults.effort }
+        set { defaults.effort = newValue }
     }
     var mode: ClaudeMode {
-        get { _ = modelTick; return ClaudeMode(rawValue: UserDefaults.standard.string(forKey: "claude.mode") ?? "default") ?? .standard }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "claude.mode"); modelTick += 1 }
+        get { defaults.mode }
+        set { defaults.mode = newValue }
     }
     var idleMinutes: Int {
-        get { _ = modelTick; return UserDefaults.standard.object(forKey: "claude.idleSleepMinutes") as? Int ?? 15 }
-        set { UserDefaults.standard.set(newValue, forKey: "claude.idleSleepMinutes"); modelTick += 1 }
+        get { defaults.idleMinutes }
+        set { defaults.idleMinutes = newValue }
     }
     var preferredKind: ClaudeTabKind {
-        get { _ = modelTick; return ClaudeTabKind(rawValue: UserDefaults.standard.string(forKey: "claude.ui") ?? "chat") ?? .chat }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "claude.ui"); modelTick += 1 }
+        get { defaults.kind }
+        set { defaults.kind = newValue }
     }
-    private var modelTick = 0
 
     @ObservationIgnored private var gits: [String: GitWorkingCopy] = [:]
     @ObservationIgnored private var monitor: Task<Void, Never>?
@@ -384,9 +396,9 @@ final class ClaudeWorkspace {
         return tab
     }
 
-    func rewind(_ tab: ClaudeTab, to text: String, occurrenceFromEnd: Int, replacement: String) {
+    func rewind(_ tab: ClaudeTab, to text: String, occurrenceFromEnd: Int, replacement: String, images: [ChatImage] = [], filesChanged: Bool = false, keepOriginal: Bool = false) {
         guard let chat = tab.chat, let sid = chat.sessionId, !sid.isEmpty else {
-            tab.chat?.draftRequest = replacement
+            if !keepOriginal { tab.chat?.draftRequest = replacement }
             return
         }
         let configDir = chat.configDir ?? ClaudeProfiles.shared.configDir()
@@ -408,20 +420,30 @@ final class ClaudeWorkspace {
                 let new: ClaudeTab
                 if let info {
                     new = resume(info.retitled(tab.title), kind: .chat)
-                    new.chat?.items.removeAll { $0.id == "nresumed" }
-                    new.chat?.send(replacement)
+                    new.chat?.announceResume = false
+                    if filesChanged {
+                        new.chat?.items.append(.notice(id: UUID().uuidString, text: keepOriginal ? "Forked — file changes made after this point are still on disk" : "Conversation rewound — file changes made after this point stay on disk", isError: false))
+                    }
+                    if keepOriginal {
+                        new.chat?.draftText = replacement
+                        new.chat?.draftImages = images
+                    } else {
+                        new.chat?.send(replacement, images: images)
+                    }
                 } else {
                     try? FileManager.default.removeItem(at: file)
-                    new = newSession(folder: tab.folder, prompt: replacement, name: tab.title, kind: .chat)
+                    new = newSession(folder: tab.folder, prompt: keepOriginal ? nil : replacement, name: tab.title, kind: .chat)
+                    if keepOriginal { new.chat?.draftText = replacement }
                 }
-                new.title = tab.title
-                close(tab)
-                if let index, let current = tabs.firstIndex(where: { $0.id == new.id }), index < current {
-                    tabs.move(fromOffsets: IndexSet(integer: current), toOffset: index)
+                new.title = keepOriginal ? tab.title + " (fork)" : tab.title
+                if !keepOriginal { close(tab) }
+                let slot = keepOriginal ? index.map { $0 + 1 } : index
+                if let slot, let current = tabs.firstIndex(where: { $0.id == new.id }), slot < current {
+                    tabs.move(fromOffsets: IndexSet(integer: current), toOffset: slot)
                 }
                 selectedTabID = new.id
             case .failure(let error):
-                chat.draftRequest = replacement
+                if !keepOriginal { chat.draftRequest = replacement }
                 chat.lastError = error.localizedDescription
             }
         }
@@ -485,6 +507,41 @@ final class ClaudeWorkspace {
 
     var pendingClose: ClaudeTab?
 
+    func exportTranscript(_ tab: ClaudeTab) {
+        guard let chat = tab.chat else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.init(filenameExtension: "md") ?? .plainText]
+        let safe = tab.title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        panel.nameFieldStringValue = (safe.isEmpty ? "conversation" : String(safe.prefix(60))) + ".md"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try chat.markdownTranscript(title: tab.title).write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            chat.lastError = "Couldn't export the conversation: " + error.localizedDescription
+        }
+    }
+
+    func trash(_ s: ClaudeSessionInfo) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Move “\(s.title)” to the Trash?"
+        alert.informativeText = "The conversation transcript goes to the Trash. Files the agent changed are not touched. You can put it back from the Trash."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if let open = tab(forSession: s.id) { close(open) }
+        do {
+            try FileManager.default.trashItem(at: s.file, resultingItemURL: nil)
+        } catch {
+            let failed = NSAlert()
+            failed.messageText = "Couldn't move the session to the Trash"
+            failed.informativeText = error.localizedDescription
+            failed.runModal()
+            return
+        }
+        Task { await reloadProjects() }
+    }
+
     func requestClose(_ tab: ClaudeTab) {
         if tab.state == .working || tab.state == .waiting {
             pendingClose = tab
@@ -500,14 +557,16 @@ final class ClaudeWorkspace {
         tabs.removeAll { $0.id == tab.id }
         if selectedTabID == tab.id { selectedTabID = tabs.last?.id }
         releaseUnusedGits()
+        saveOpenTabs()
     }
 
     func applyModelToCurrent() {
         guard let tab = selectedTab, tab.running else { return }
+        guard let model = defaults.modelArgument else { return }
         if let chat = tab.chat {
-            if model != .standard { chat.setModel(model.rawValue) }
-        } else if model != .standard {
-            tab.terminal.send(txt: "/model \(model.rawValue)\r")
+            chat.setModel(model)
+        } else {
+            tab.terminal.send(txt: "/model \(model)\r")
         }
     }
 
@@ -524,6 +583,10 @@ final class ClaudeWorkspace {
         tab.terminal.window?.makeFirstResponder(tab.terminal)
     }
 
+    func openDemoTab(folder: String, title: String) -> ClaudeTab {
+        makeTab(folder: folder, kind: .chat, title: title, sessionId: "")
+    }
+
     private func makeTab(folder: String, kind: ClaudeTabKind, title: String, sessionId: String) -> ClaudeTab {
         let tab = ClaudeTab(folder: folder, kind: kind, title: title, sessionId: sessionId, git: git(for: folder))
         tab.restartChat = { [weak self, weak tab] in
@@ -534,6 +597,7 @@ final class ClaudeWorkspace {
             guard let self, let tab else { return }
             self.newSession(folder: tab.folder, kind: .chat)
         }
+        wire(tab)
         tabs.append(tab)
         selectedTabID = tab.id
         startMonitoring()
@@ -546,7 +610,23 @@ final class ClaudeWorkspace {
 
     private func startChat(_ tab: ClaudeTab, resume: String?, fork: Bool = false, prompt: String?, mode modeOverride: ClaudeMode?) {
         guard let chat = tab.chat else { return }
-        chat.onSessionId = { [weak tab] sid in tab?.sessionId = sid }
+        let m = modeOverride ?? mode
+        chat.start(
+            resume: resume,
+            fork: fork,
+            model: defaults.modelArgument,
+            effort: defaults.effortArgument,
+            mode: m == .standard ? nil : m.rawValue,
+            initialPrompt: prompt
+        )
+    }
+
+    private func wire(_ tab: ClaudeTab) {
+        guard let chat = tab.chat else { return }
+        chat.onSessionId = { [weak self, weak tab] sid in
+            tab?.sessionId = sid
+            self?.saveOpenTabs()
+        }
         chat.onTurnFinished = { [weak self, weak tab] in
             guard let tab else { return }
             if self?.isWatching(tab) == true {
@@ -562,22 +642,63 @@ final class ClaudeWorkspace {
             let body = request.toolName == "AskUserQuestion" ? "Your agent has a question for you" : request.toolName == "ExitPlanMode" ? "Your agent has a plan ready for review" : "Your agent needs permission: " + request.toolName
             AgentNotifier.post(tab: tab.id, kind: .agentInput, title: tab.title, body: body)
         }
-        let m = modeOverride ?? mode
-        chat.start(
-            resume: resume,
-            fork: fork,
-            model: model == .standard ? nil : model.rawValue,
-            effort: effort == .standard ? nil : effort.rawValue,
-            mode: m == .standard ? nil : m.rawValue,
-            initialPrompt: prompt
-        )
+    }
+
+    private struct SavedTab: Codable {
+        let sessionId: String
+        let folder: String
+        let kind: String
+        let title: String
+        let selected: Bool
+    }
+
+    private struct SavedTabs: Codable {
+        let profile: String
+        let tabs: [SavedTab]
+    }
+
+    private static let openTabsKey = "agents.openTabs"
+    @ObservationIgnored private var restoredTabs = false
+
+    var busyTabCount: Int { tabs.filter { $0.state == .working || $0.state == .waiting }.count }
+
+    func saveOpenTabs() {
+        guard Demo.folder == nil, restoredTabs || !tabs.isEmpty else { return }
+        let saved = tabs.filter { !$0.sessionId.isEmpty }.map {
+            SavedTab(sessionId: $0.sessionId, folder: $0.folder, kind: $0.kind.rawValue, title: $0.title, selected: $0.id == selectedTabID)
+        }
+        let payload = SavedTabs(profile: ClaudeProfiles.shared.activeID, tabs: saved)
+        if let data = try? JSONEncoder().encode(payload) { UserDefaults.standard.set(data, forKey: Self.openTabsKey) }
+    }
+
+    func restoreOpenTabs() {
+        guard !restoredTabs else { return }
+        restoredTabs = true
+        guard defaults.restoreTabs, Demo.folder == nil, tabs.isEmpty,
+              let data = UserDefaults.standard.data(forKey: Self.openTabsKey),
+              let saved = try? JSONDecoder().decode(SavedTabs.self, from: data),
+              saved.profile == ClaudeProfiles.shared.activeID else { return }
+        var selected: UUID?
+        for s in saved.tabs where FileManager.default.fileExists(atPath: s.folder) && tab(forSession: s.sessionId) == nil {
+            let kind = ClaudeTabKind(rawValue: s.kind) ?? .chat
+            let tab = makeTab(folder: s.folder, kind: kind, title: s.title, sessionId: s.sessionId)
+            if let chat = tab.chat {
+                chat.sessionId = s.sessionId
+                chat.sleeping = true
+                tab.pendingHistory = SessionRewind.sessionFile(id: s.sessionId, configDir: tab.configDir)
+            } else {
+                tab.terminalSleeping = true
+            }
+            if s.selected { selected = tab.id }
+        }
+        if let selected { selectedTabID = selected }
     }
 
     private func launchTerminal(_ tab: ClaudeTab, extra: [String], mode modeOverride: ClaudeMode? = nil) {
         let mode = modeOverride ?? self.mode
         var args: [String] = []
-        if model != .standard { args += ["--model", model.rawValue] }
-        if effort != .standard { args += ["--effort", effort.rawValue] }
+        if let model = defaults.modelArgument { args += ["--model", model] }
+        if let effort = defaults.effortArgument { args += ["--effort", effort] }
         if mode != .standard { args += ["--permission-mode", mode.rawValue] }
         args += StackNotesMCP.args
         args += extra

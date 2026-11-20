@@ -167,8 +167,23 @@ fn logged_in() -> bool {
     app::try_get().is_some_and(|a| a.state.borrow().phase == Phase::LoggedIn)
 }
 
+fn forge_link_command(query: &str) -> Vec<Command> {
+    let url = query.trim().to_string();
+    if !url.starts_with("http") || util::parse_github_url(&url, false).is_none() {
+        return vec![];
+    }
+    let target = url.clone();
+    vec![Command::new(Group::Link, "sy-external-symbolic", "sky", "Open in browser", move || util::open_url(&target)).detail("GitHub links open in the app only on a GitHub account").keywords(url)]
+}
+
 fn link_commands(query: &str) -> Vec<Command> {
-    if !logged_in() || app::api().is_none() {
+    if !logged_in() {
+        return vec![];
+    }
+    if app::forge().is_some() {
+        return forge_link_command(query);
+    }
+    if app::api().is_none() {
         return vec![];
     }
     let Some(route) = util::parse_github_url(query, true) else { return vec![] };
@@ -278,13 +293,26 @@ fn action_commands() -> Vec<Command> {
     let ready = logged_in();
     if ready {
         out.push(Command::new(Group::Actions, "view-refresh-symbolic", "sky", "Refresh", || ui_activate("refresh")).shortcut("Ctrl+R").keywords("reload sync"));
-        out.push(Command::new(Group::Actions, "sy-external-symbolic", "sky", "Open by Link…", || ui_activate("open-link")).shortcut("Ctrl+L").keywords("url paste"));
+        if action_enabled("open-link") {
+            out.push(Command::new(Group::Actions, "sy-external-symbolic", "sky", "Open by Link…", || ui_activate("open-link")).shortcut("Ctrl+L").keywords("url paste"));
+        }
         if app::section_allowed(Section::Claude) {
             out.push(Command::new(Group::Actions, "sy-terminal-symbolic", "coral", "Go to Session…", || ui_activate("agents-quick-open")).detail("Agents").shortcut("Ctrl+Shift+K").keywords("agent session"));
             out.push(Command::new(Group::Actions, "list-add-symbolic", "coral", "New Agent Session", || ui_activate("agents-new-session")).detail("Agents").shortcut("Ctrl+N").keywords("agent session new"));
         }
         if app::visible_route().is_some() {
             out.push(Command::new(Group::Actions, "go-previous-symbolic", "muted", "Back", || ui_activate("back")).shortcut("Alt+Left"));
+        }
+        if action_enabled("forward") {
+            out.push(Command::new(Group::Actions, "go-next-symbolic", "muted", "Forward", || ui_activate("forward")).shortcut("Alt+Right"));
+        }
+        if matches!(app::visible_route(), Some(Route::Pr(_))) {
+            out.push(Command::new(Group::Actions, "sy-comment-symbolic", "violet", "Write Review…", || ui_activate("pr-review")).detail("Pull request").shortcut("Ctrl+Shift+R").keywords("review comment"));
+            out.push(Command::new(Group::Actions, "sy-check-symbolic", "green", "Approve…", || ui_activate("pr-approve")).detail("Pull request").shortcut("Ctrl+Shift+A").keywords("review approve"));
+            out.push(Command::new(Group::Actions, "sy-merge-symbolic", "violet", "Merge…", || ui_activate("pr-merge")).detail("Pull request").shortcut("Ctrl+Shift+M").keywords("merge"));
+        }
+        if app::can_lock() {
+            out.push(Command::new(Group::Actions, "sy-lock-symbolic", "muted", "Lock Now", || ui_activate("lock-now")).shortcut("Ctrl+Shift+L").keywords("pin lock"));
         }
         if action_enabled("copy-short-link") {
             let detail = app::visible_route().and_then(|r| r.short_link()).unwrap_or_default();
@@ -416,7 +444,15 @@ impl Palette {
             let row = gtk::ListBoxRow::new();
             row.set_activatable(false);
             row.set_selectable(false);
-            let l = label_with("No results", &["sy-muted"]);
+            let query = self.entry.text().trim().to_string();
+            let text = if query.is_empty() {
+                "No results".to_string()
+            } else if app::forge().is_some() {
+                format!("Nothing matches “{query}” in commands or loaded items")
+            } else {
+                format!("Nothing matches “{query}”")
+            };
+            let l = wrap_label(&text, &["sy-muted"]);
             pad(&l, 16);
             row.set_child(Some(&l));
             self.list.append(&row);
@@ -524,7 +560,7 @@ pub fn show() {
     lead.set_visible_child_name("icon");
     top.append(&lead);
     let entry = gtk::SearchEntry::new();
-    entry.set_placeholder_text(Some("Search commands, pull requests, repositories, or paste a link…"));
+    entry.set_placeholder_text(Some(if app::forge().is_some() { "Search commands and loaded items…" } else { "Search commands, pull requests, repositories, or paste a link…" }));
     entry.set_hexpand(true);
     entry.set_search_delay(80);
     entry.update_property(&[

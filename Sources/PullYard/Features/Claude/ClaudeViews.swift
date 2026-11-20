@@ -41,8 +41,53 @@ struct ClaudeProjectsColumn: View {
     @State private var showArchived = false
     private var prefs: AgentSessionPrefs { AgentSessionPrefs.shared }
     @State private var ready = false
+    @State private var cursor: String?
+    @FocusState private var listFocused: Bool
 
     private var ws: ClaudeWorkspace { app.claude }
+
+    private struct NavTarget {
+        let key: String
+        let open: () -> Void
+    }
+
+    private func nodes(_ project: ClaudeProject) -> [SessionTree.Node] {
+        SessionTree.build(Array(project.sessions.filter { (showArchived || !prefs.isArchived($0)) && !prefs.isPinned($0.id) }.prefix(query.isEmpty ? 40 : 200)))
+    }
+
+    private var pinnedSessions: [ClaudeSessionInfo] {
+        query.isEmpty
+            ? prefs.pinned.compactMap { ws.sessionsByID[$0] }
+            : prefs.pinned.compactMap { id in filtered.lazy.flatMap(\.sessions).first { $0.id == id } }
+    }
+
+    private var navTargets: [NavTarget] {
+        var out = ws.tabs.map { tab in NavTarget(key: "tab:\(tab.id.uuidString)") { ws.selectedTabID = tab.id } }
+        out += pinnedSessions.map { s in NavTarget(key: s.id) { ws.resume(s) } }
+        for project in filtered where expanded.contains(project.id) || !query.isEmpty {
+            for node in nodes(project) {
+                let s = node.session
+                out.append(NavTarget(key: s.id) { ws.resume(s) })
+                guard !collapsedParents.contains(node.id) else { continue }
+                out += node.children.map { child in NavTarget(key: child.id) { ws.resume(child) } }
+            }
+        }
+        return out
+    }
+
+    private func moveCursor(_ delta: Int) {
+        let keys = navTargets.map(\.key)
+        guard !keys.isEmpty else { return }
+        let start = cursor.flatMap { keys.firstIndex(of: $0) } ?? ws.selectedTabID.flatMap { keys.firstIndex(of: "tab:\($0.uuidString)") }
+        let next = start.map { min(max($0 + delta, 0), keys.count - 1) } ?? (delta > 0 ? 0 : keys.count - 1)
+        cursor = keys[next]
+    }
+
+    private func openCursor() -> Bool {
+        guard let target = navTargets.first(where: { $0.key == cursor }) else { return false }
+        target.open()
+        return true
+    }
 
     private var filtered: [ClaudeProject] {
         guard !query.isEmpty else { return ws.projects }
@@ -54,6 +99,7 @@ struct ClaudeProjectsColumn: View {
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 switch ClaudeAccountStore.shared.status {
@@ -94,6 +140,16 @@ struct ClaudeProjectsColumn: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 6)
         }
+        .onChange(of: cursor) { _, key in
+            if let key { withAnimation(Motion.fade) { proxy.scrollTo(key) } }
+        }
+        }
+        .focusable()
+        .focused($listFocused)
+        .focusEffectDisabled()
+        .onKeyPress(.downArrow) { moveCursor(1); return .handled }
+        .onKeyPress(.upArrow) { moveCursor(-1); return .handled }
+        .onKeyPress(.return) { openCursor() ? .handled : .ignored }
         .surface(.list)
         .overlay { if ws.loadingProjects && ws.projects.isEmpty { PullYardLoader(size: 44) } }
         .liveRefresh(updated: ws.projectsUpdated, refreshing: ws.loadingProjects) { await ws.reloadProjects() }
@@ -101,6 +157,10 @@ struct ClaudeProjectsColumn: View {
         .navigationTitle("Agents")
         .panelToolbar {
             ToolbarItemGroup {
+                if FixTour.isAvailable {
+                    Button { FixTour.shared.start(app: app) } label: { Label("Fixes demo", systemImage: "checkmark.seal") }
+                        .help("Walk through the recent chat fixes with mock data")
+                }
                 Button { openFolder() } label: { Label("Open folder", systemImage: "folder.badge.plus") }
                     .disabled(!ClaudeAccountStore.shared.isLoggedIn)
                     .help("New session in folder…")
@@ -114,6 +174,7 @@ struct ClaudeProjectsColumn: View {
             Task { await ClaudeAccountStore.shared.refresh() }
         }
         .task {
+            ws.restoreOpenTabs()
             await ClaudeAccountStore.shared.refresh()
             await ws.reloadProjects(force: false)
             if expanded.isEmpty, let first = ws.projects.first { expanded.insert(first.id) }
@@ -150,10 +211,15 @@ struct ClaudeProjectsColumn: View {
             ForEach(ws.tabs) { tab in
                 OpenTabRow(tab: tab, selected: ws.selectedTabID == tab.id)
                     .padding(.horizontal, 8)
-                    .background(ClaudeRowHighlight(selected: ws.selectedTabID == tab.id))
+                    .background(ClaudeRowHighlight(selected: ws.selectedTabID == tab.id || (listFocused && cursor == "tab:\(tab.id.uuidString)")))
                     .modifier(HoverHighlight(radius: 6))
                     .contentShape(Rectangle())
-                    .onTapGesture { ws.selectedTabID = tab.id }
+                    .id("tab:\(tab.id.uuidString)")
+                    .onTapGesture {
+                        ws.selectedTabID = tab.id
+                        cursor = "tab:\(tab.id.uuidString)"
+                        listFocused = true
+                    }
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(ws.selectedTabID == tab.id ? [.isButton, .isSelected] : .isButton)
                     .accessibilityAction { ws.selectedTabID = tab.id }
@@ -170,9 +236,7 @@ struct ClaudeProjectsColumn: View {
             }
             Rectangle().fill(Color.syLine).frame(height: 1).padding(.horizontal, 8).padding(.vertical, 8)
         }
-        let pinnedSessions: [ClaudeSessionInfo] = query.isEmpty
-            ? prefs.pinned.compactMap { ws.sessionsByID[$0] }
-            : prefs.pinned.compactMap { id in filtered.lazy.flatMap(\.sessions).first { $0.id == id } }
+        let pinnedSessions = pinnedSessions
         if !pinnedSessions.isEmpty {
             HStack(spacing: 5) {
                 Image(systemName: "pin.fill").imageScale(.small)
@@ -202,7 +266,7 @@ struct ClaudeProjectsColumn: View {
                 .padding(.horizontal, 8)
                 Collapsible(open: open) {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(SessionTree.build(Array(project.sessions.filter { (showArchived || !prefs.isArchived($0)) && !prefs.isPinned($0.id) }.prefix(query.isEmpty ? 40 : 200)))) { node in
+                        ForEach(nodes(project)) { node in
                             sessionRow(node.session, children: node.children.count)
                             if !node.children.isEmpty {
                                 Collapsible(open: !collapsedParents.contains(node.id)) {
@@ -245,10 +309,16 @@ struct ClaudeProjectsColumn: View {
             }
         }
         .padding(.horizontal, 8)
+        .background(ClaudeRowHighlight(selected: listFocused && cursor == s.id))
         .modifier(HoverHighlight(radius: 6))
         .rowAppear(s.id, ws.sessionRows)
         .contentShape(Rectangle())
-        .onTapGesture { ws.resume(s) }
+        .id(s.id)
+        .onTapGesture {
+            cursor = s.id
+            listFocused = true
+            ws.resume(s)
+        }
         .contextMenu { sessionMenu(s) }
     }
 
@@ -268,6 +338,7 @@ struct ClaudeProjectsColumn: View {
         Button("Copy session ID") { copyToPasteboard(s.id) }
         Button("Copy resume command") { copyToPasteboard("cd \(ClaudeLauncher.shellQuote(s.cwd)) && claude --resume \(s.id)") }
         Button("Reveal transcript in Finder") { NSWorkspace.shared.activateFileViewerSelecting([s.file]) }
+        Button("Move to Trash…", role: .destructive) { ws.trash(s) }
         if let pr = s.prURL { Button("Open PR") { if let r = GitHubURL.parse(pr) { app.section = .prs(.mine); app.open(r) } } }
     }
 
@@ -528,9 +599,9 @@ struct ClaudeWorkspaceView: View {
         let ws = app.claude
         let account = ClaudeAccountStore.shared
         Group {
-            if case .loggedOut = account.status {
+            if case .loggedOut = account.status, !FixTour.shared.active {
                 ClaudeAuthView()
-            } else if case .notInstalled = account.status {
+            } else if case .notInstalled = account.status, !FixTour.shared.active {
                 ClaudeAuthView()
             } else if let tab = ws.selectedTab {
                 GeometryReader { geo in
@@ -744,13 +815,14 @@ struct ClaudeControlBar: View {
             .layoutPriority(1)
             Spacer(minLength: 8)
             if tab.kind == .terminal {
-            ControlMenu(icon: "cpu", title: ws.model.title, help: "Model") {
-                ForEach(ClaudeModelOption.allCases) { m in
-                    Button { ws.model = m } label: { checkLabel(m.title, ws.model == m) }
+            ControlMenu(icon: "cpu", title: ws.defaults.modelTitle, help: "Model") {
+                Button { ws.defaults.model = "" } label: { checkLabel("Default", ws.defaults.model.isEmpty) }
+                ForEach(ws.defaults.modelChoices) { m in
+                    Button { ws.defaults.model = m.value } label: { checkLabel(m.displayName, ws.defaults.model == m.value) }
                 }
                 Divider()
                 Button("Apply to current session (/model)") { ws.applyModelToCurrent() }
-                    .disabled(!tab.running || ws.model == .standard)
+                    .disabled(!tab.running || ws.defaults.model.isEmpty)
             }
             ControlMenu(icon: "gauge.with.dots.needle.50percent", title: ws.effort == .standard ? "Effort" : ws.effort.rawValue, help: "Effort") {
                 ForEach(ClaudeEffort.allCases) { e in
@@ -811,6 +883,13 @@ struct ClaudeControlBar: View {
                 }
                 Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: tab.folder)]) }
                 Button("Copy session ID") { copyToPasteboard(tab.sessionId) }
+                if let chat = tab.chat {
+                    Divider()
+                    Button("Copy conversation as Markdown") { copyToPasteboard(chat.markdownTranscript(title: tab.title)) }
+                        .disabled(chat.items.isEmpty)
+                    Button("Export conversation…") { ws.exportTranscript(tab) }
+                        .disabled(chat.items.isEmpty)
+                }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
@@ -1069,13 +1148,23 @@ struct BranchPRPanel: View {
         Group {
             if let selected {
                 InspectorPRDetail(tab: tab, ref: selected) { self.selected = nil }
-            } else if repo == nil, let remote = tab.git.remote, remote.kind != .github {
-                ForgeShipPanel(tab: tab, remote: remote)
+            } else if repo == nil, let remote = tab.git.remote {
+                ForgeBranchPanel(tab: tab, remote: remote)
             } else if repo == nil {
                 VStack(spacing: 8) {
                     Image(systemName: "link.badge.plus").font(.syTitle2).foregroundStyle(Color.syDim)
-                    Text("Folder isn't linked to a GitHub repository").foregroundStyle(Color.syMuted)
+                    Text("Folder isn't linked to a remote repository").foregroundStyle(Color.syMuted)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if app.api == nil {
+                VStack(spacing: 8) {
+                    Image(systemName: "person.crop.circle.badge.questionmark").font(.syTitle2).foregroundStyle(Color.syDim)
+                    Text("Switch to a GitHub account to see pull requests for \(repo?.full ?? "this repository")")
+                        .foregroundStyle(Color.syMuted)
+                        .multilineTextAlignment(.center)
+                    if let remote = tab.git.remote { Button("Open in Browser") { openInBrowser(remote.webURL + "/pulls") }.controlSize(.small) }
+                }
+                .padding(20)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 listView
@@ -1230,6 +1319,125 @@ struct BranchPRPanel: View {
             rows.ingest(items.map(\.id), mode: listScope == scope ? .refresh : .cascade)
             listScope = scope
             list = items
+            error = nil
+            lastUpdated = Date()
+        } catch {
+            if isCancellation(error) { return }
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+struct ForgeBranchPanel: View {
+    @Environment(AppModel.self) private var app
+    let tab: ClaudeTab
+    let remote: GitRemote
+    @State private var items: [SearchItem] = []
+    @State private var loading = false
+    @State private var error: String?
+    @State private var lastUpdated: Date?
+
+    private var client: ForgeClient? {
+        guard let forge = app.forge, forge.host.lowercased() == remote.host.lowercased() else { return nil }
+        return forge
+    }
+
+    private var kind: GitRemote.Kind { remote.kind(for: client?.provider) }
+    private var noun: String { remote.requestNoun(kind) }
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let b = tab.git.branch, b != "HEAD" {
+                        HStack(spacing: 8) {
+                            Button("Open \(kind == .gitlab ? "MR" : "PR") with Agent") {
+                                app.claude.send(AgentShip.openPRPrompt(branch: b, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead, remote: remote.with(kind: kind)), to: tab)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.syAgentAccent)
+                            .disabled(tab.busy)
+                            Button("Create in Browser") { openInBrowser(remote.newRequestURL(branch: b, kind: kind)) }
+                        }
+                        .controlSize(.small)
+                    }
+                    Button("Open \(remote.with(kind: kind).service)") { openInBrowser(remote.webURL) }
+                        .buttonStyle(.link)
+                        .font(.syCaption)
+                }
+                .padding(.vertical, 4)
+            } header: {
+                HStack(spacing: 6) {
+                    Text("This branch").font(.sySubheadline.weight(.semibold))
+                    if let b = tab.git.branch { BranchTag(name: b) }
+                }
+                .textCase(nil)
+            }
+            Section {
+                if client == nil {
+                    Text("Switch to an account on \(remote.host) to list your \(noun)s here.")
+                        .font(.syCaption)
+                        .foregroundStyle(Color.syMuted)
+                }
+                if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
+                if client != nil, items.isEmpty, !loading, error == nil {
+                    ListEmptyNote(title: "No open \(noun)s by you or awaiting your review", compact: true)
+                }
+                ForEach(items) { item in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(alignment: .top, spacing: 6) {
+                            StateBadge(state: item.visualState, compact: true)
+                            Text(item.title).font(.syBody).lineLimit(2).fontWeight(.medium).foregroundStyle(Color.syText)
+                        }
+                        HStack(spacing: 6) {
+                            Text("#\(item.number)").foregroundStyle(Color.syMuted)
+                            Text(item.author?.login ?? "").foregroundStyle(Color.syMuted)
+                            Spacer()
+                            Text(Fmt.rel(item.updatedAt)).foregroundStyle(Color.syDim)
+                        }
+                        .font(.syCaption)
+                    }
+                    .padding(.vertical, 2)
+                    .contentShape(Rectangle())
+                    .onTapGesture { openInBrowser(item.url) }
+                    .contextMenu {
+                        Button("Open in browser") { openInBrowser(item.url) }
+                        Button("Copy link") { copyToPasteboard(item.url) }
+                    }
+                }
+            } header: {
+                HStack {
+                    Text(remote.path).font(.sySubheadline.weight(.semibold))
+                    Spacer()
+                    RefreshStatus(updated: lastUpdated, refreshing: loading, error: error, compact: true) {
+                        Task { await load() }
+                    }
+                }
+                .textCase(nil)
+            }
+        }
+        .listStyle(.inset)
+        .surface(.panel)
+        .task(id: "\(remote.host)/\(remote.path)|\(client == nil)") { await load() }
+        .onLiveTick { await load() }
+        .onChange(of: tab.busy) { _, busy in if !busy { Task { await load() } } }
+    }
+
+    private func load() async {
+        guard let client else {
+            items = []
+            return
+        }
+        loading = true
+        defer { loading = false }
+        do {
+            var found: [SearchItem] = []
+            for filter in [PRFilter.mine, .reviewRequested] where app.forgeCaps.pullFilters.contains(filter) {
+                found += try await client.pullRequests(filter, state: .open)
+            }
+            let path = remote.path.lowercased()
+            var seen = Set<String>()
+            items = found.filter { $0.repository.nameWithOwner.lowercased() == path && seen.insert($0.id).inserted }
             error = nil
             lastUpdated = Date()
         } catch {

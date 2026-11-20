@@ -14,6 +14,8 @@ struct ReposView: View {
     @State private var rows = RowAppearTracker.shared("repos")
     @State private var loadedAccount: String?
     @State private var checkingCache = false
+    @State private var loadingMore = false
+    @State private var loadMoreError: String?
 
     private var visible: [RepoSummary] {
         repos.filter { (!hideArchived || !$0.isArchived) && (text.isEmpty || $0.nameWithOwner.localizedCaseInsensitiveContains(text) || ($0.description ?? "").localizedCaseInsensitiveContains(text)) }
@@ -32,6 +34,11 @@ struct ReposView: View {
                         Button("Copy “gh repo clone”") { copyToPasteboard("gh repo clone \(r.nameWithOwner)") }
                     }
                     .onAppear { if r.id == repos.last?.id { Task { await loadMore() } } }
+            }
+            if let loadMoreError {
+                LoadMoreErrorRow(message: loadMoreError) { await loadMore() }.listRowSeparator(.hidden)
+            } else if loadingMore {
+                LoadingMoreRow().listRowSeparator(.hidden)
             }
         }
         .overlay {
@@ -117,22 +124,27 @@ struct ReposView: View {
     }
 
     private func loadMore() async {
-        guard let api = app.api, hasMore, !loading else { return }
-        loading = true
-        defer { loading = false }
-        if let r = try? await api.repos(after: cursor), app.api === api {
+        guard let api = app.api, hasMore, !loading, !loadingMore else { return }
+        loadingMore = true
+        loadMoreError = nil
+        defer { loadingMore = false }
+        do {
+            let r = try await api.repos(after: cursor)
+            guard app.api === api else { return }
             let known = Set(repos.map(\.id))
             let added = r.nodes.filter { !known.contains($0.id) }
             rows.ingest(added.map(\.id), mode: .append)
             repos += added
             cursor = r.pageInfo.endCursor
             hasMore = r.pageInfo.hasNextPage
+        } catch {
+            if !isCancellation(error), app.api === api { loadMoreError = error.localizedDescription }
         }
     }
 
     private func loadAll() async {
         var guardCount = 0
-        while hasMore, guardCount < 20 {
+        while hasMore, loadMoreError == nil, guardCount < 20 {
             await loadMore()
             guardCount += 1
         }
@@ -217,7 +229,10 @@ struct RepoDetailView: View {
         .navigationSubtitle(repo.owner)
         .panelToolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                Button { copyToPasteboard("gh repo clone \(repo.full)") } label: { Label("Copy clone", systemImage: "terminal") }
+                Button {
+                    copyToPasteboard("gh repo clone \(repo.full)", announce: false)
+                    app.showToast("Copied “gh repo clone \(repo.full)”")
+                } label: { Label("Copy clone", systemImage: "terminal") }
                     .help("Copy “gh repo clone”")
                 Button { openInBrowser(code?.webURL ?? "https://github.com/\(repo.full)") } label: { Label("Open in browser", systemImage: "safari") }
                     .help("Open in browser")
@@ -303,6 +318,11 @@ struct RepoDetailView: View {
                 NavigationLink(value: item.route) { ItemRow(item: item).rowAppear(item.id, model.rows) }
                     .contextMenu { ItemContextMenu(item: item) }
                     .onAppear { if item.id == model.items.last?.id { Task { await model.loadMore(api: app.api) } } }
+            }
+            if let e = model.loadMoreError {
+                LoadMoreErrorRow(message: e) { await model.loadMore(api: app.api) }.listRowSeparator(.hidden)
+            } else if model.loadingMore {
+                LoadingMoreRow().listRowSeparator(.hidden)
             }
         }
         .overlay {

@@ -292,6 +292,7 @@ list.sy-sidebar-list > row:selected { background-color: alpha(@sy_text, 0.07); b
 .sy-count { color: @sy_muted; font-feature-settings: "tnum"; }
 .chip { padding: 1px 7px; border-radius: 999px; font-size: 0.82em; font-weight: 500; }
 .chip.mono { font-family: monospace; font-weight: 400; }
+button.chip-button { padding: 0; min-height: 0; min-width: 0; border-radius: 999px; }
 .state-dot { min-width: 22px; min-height: 22px; border-radius: 999px; }
 .state-pill { padding: 3px 10px; border-radius: 999px; font-weight: 600; color: @sy_on_accent; }
 .icon-tile { border-radius: 6px; }
@@ -396,6 +397,7 @@ listview.stack-list > row { padding: 0; margin: 1px 0; background: none; }
 .claude-tab { padding: 4px 10px; border-radius: 8px; background-color: alpha(@sy_text, 0.04); border: 1px solid @sy_line; }
 .claude-tab.selected { background-color: alpha(@sy_accent, 0.14); border-color: alpha(@sy_accent, 0.45); }
 .project-column { background-color: @sy_sunken; border-radius: 12px; }
+.chat-drop-zone:drop(active) { box-shadow: inset 0 0 0 2px @sy_accent; background-color: alpha(@sy_accent, 0.06); }
 .project-column.drop-target { background-color: alpha(@sy_accent, 0.10); border: 2px solid @sy_accent; }
 .project-card { background-color: @sy_raised; border-radius: 8px; padding: 10px; }
 .splash-title { font-size: 32px; font-weight: 700; }

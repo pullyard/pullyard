@@ -42,6 +42,12 @@ public sealed record Section(SectionKind Kind, PRFilter Pr = PRFilter.ReviewRequ
         _ => ""
     };
 
+    public static IReadOnlyList<string> AllKeys { get; } = new[] { Notifications, MyPrsByRepo, Stacks, Repos, Projects, Claude }
+        .Concat(Enum.GetValues<PRFilter>().Select(Prs))
+        .Concat(Enum.GetValues<IssueFilter>().Select(Issues))
+        .Select(s => s.Key)
+        .ToList();
+
     public static Section? FromKey(string key)
     {
         if (key.StartsWith("prs:") && Enum.TryParse<PRFilter>(key[4..], out var p)) return Prs(p);

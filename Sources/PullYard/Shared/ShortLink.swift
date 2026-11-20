@@ -47,7 +47,20 @@ struct ToastBanner: View {
             HStack(spacing: 6) {
                 Image(systemName: app.toastIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
                     .foregroundStyle(app.toastIsError ? Color.syRed : Color.syGreen)
-                Text(text).foregroundStyle(Color.syText).lineLimit(app.toastIsError ? 3 : 1)
+                Text(text).foregroundStyle(Color.syText).lineLimit(app.toastIsError ? 6 : 1)
+                if app.toastIsError {
+                    Button {
+                        copyToPasteboard(text, announce: false)
+                        app.dismissToast()
+                    } label: { Image(systemName: "doc.on.doc") }
+                        .buttonStyle(.borderless)
+                        .help("Copy the message and dismiss")
+                        .accessibilityLabel("Copy the message and dismiss")
+                    Button { app.dismissToast() } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.borderless)
+                        .help("Dismiss")
+                        .accessibilityLabel("Dismiss")
+                }
             }
             .frame(maxWidth: 520)
             .font(.syCallout)
@@ -57,8 +70,7 @@ struct ToastBanner: View {
             .overlay(RoundedRectangle(cornerRadius: Radius.xl, style: .continuous).stroke(app.toastIsError ? Color.syRed.opacity(Tint.strong) : Color.syLineStrong))
             .elevation(.floating)
             .padding(.bottom, bottomInset ?? (app.clipboardRoute == nil && app.rateLimitedUntil == nil ? 16 : 0))
-            .allowsHitTesting(false)
-            .accessibilityElement(children: .combine)
+            .allowsHitTesting(app.toastIsError)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .id(text)
         }

@@ -33,11 +33,12 @@ public static class GitCli
             ["GIT_TERMINAL_PROMPT"] = "0"
         }, timeout: TimeSpan.FromSeconds(30), ct: ct);
 
-    public static async Task<GitRemote?> Remote(string dir)
-    {
-        var url = (await Run(new[] { "remote", "get-url", "origin" }, dir).ConfigureAwait(false)).Out;
-        return GitRemote.Parse(url);
-    }
+    public static async Task<string> RemoteUrl(string dir) =>
+        (await Run(new[] { "remote", "get-url", "origin" }, dir).ConfigureAwait(false)).Out.Trim();
+
+    public static async Task<RepoRef?> RemoteRepo(string dir) => ParseRemote(await RemoteUrl(dir).ConfigureAwait(false));
+
+    public static async Task<GitRemote?> Remote(string dir) => GitRemote.Parse(await RemoteUrl(dir).ConfigureAwait(false));
 
     public static RepoRef? ParseRemote(string url) => GitRemote.Parse(url)?.GitHubRepo;
 

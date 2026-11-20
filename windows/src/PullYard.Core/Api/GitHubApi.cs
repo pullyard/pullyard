@@ -15,6 +15,24 @@ public sealed class ApiException : Exception
     public int Status { get; }
     public bool SchemaError { get; init; }
     public DateTimeOffset? RateLimitedUntil { get; init; }
+    public string? Detail { get; init; }
+
+    public static ApiException Unreadable(string service, Exception error) =>
+        new($"{service} sent a response PullYard couldn't read. Try again; if it keeps happening, check for an update.") { Detail = error.Message };
+
+    public static ApiException Http(string service, int code, string? message)
+    {
+        var detail = string.IsNullOrWhiteSpace(message) ? null : message.Trim().TrimEnd('.');
+        var text = code switch
+        {
+            403 => detail is null ? $"{service} refused the request. Check that your token has the required permissions." : $"{service} refused the request: {detail}.",
+            404 => detail is null or "Not Found" ? $"{service} couldn't find this, or your token has no access to it." : $"{service} couldn't find this: {detail}.",
+            422 => detail is null ? $"{service} rejected the request." : $"{service} rejected the request: {detail}.",
+            >= 500 => $"{service} is having trouble right now ({code}). Try again in a moment.",
+            _ => detail is null ? $"{service} returned an error ({code})." : $"{service} returned an error ({code}): {detail}."
+        };
+        return new ApiException(text, code) { Detail = $"{service} {code}: {message}" };
+    }
 
     public ApiException(string message, int status = 0) : base(message)
     {
@@ -146,7 +164,7 @@ public sealed partial class GitHubApi
         }
         msg ??= response.ReasonPhrase ?? code.ToString();
         if (code == 401) throw new ApiException("Token is invalid or revoked (401)", 401);
-        throw new ApiException($"GitHub {code}: {msg}", code);
+        throw ApiException.Http("GitHub", code, msg);
     }
 
     private sealed class GraphQLError
@@ -207,7 +225,7 @@ public sealed partial class GitHubApi
             catch
             {
             }
-            throw new ApiException($"Failed to parse response: {e.Message}");
+            throw ApiException.Unreadable("GitHub", e);
         }
         if (decoded is null) throw new ApiException("Empty response from GitHub");
         if (decoded.Errors is { Count: > 0 } errors && (strict || decoded.Data is null))
@@ -242,7 +260,7 @@ public sealed partial class GitHubApi
         }
         catch (JsonException e)
         {
-            throw new ApiException($"Failed to parse response: {e.Message}");
+            throw ApiException.Unreadable("GitHub", e);
         }
     }
 
@@ -292,7 +310,7 @@ public sealed partial class GitHubApi
         using var _ = response;
         var code = (int)response.StatusCode;
         if (code == 404) return null;
-        if (code is < 200 or >= 300) throw new ApiException($"GitHub {code}", code);
+        if (code is < 200 or >= 300) throw ApiException.Http("GitHub", code, null);
         return data;
     }
 

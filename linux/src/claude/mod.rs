@@ -3,11 +3,13 @@ pub mod chat;
 pub mod desktop;
 pub mod endpoint;
 pub mod git;
+pub mod git_remote;
 pub mod launcher;
 pub mod memory;
 pub mod notifier;
 pub mod payload;
 pub mod prefs;
+pub mod prompt_library;
 pub mod relogin;
 pub mod rewind;
 pub mod session_cost;
@@ -15,6 +17,7 @@ pub mod session_index;
 pub mod sessions;
 pub mod ship;
 pub mod tool_groups;
+pub mod usage_ledger;
 pub mod workspace;
 pub mod worktree;
 
@@ -87,6 +90,15 @@ impl ClaudeMode {
             ClaudeMode::AcceptEdits => "Accept edits",
             ClaudeMode::Plan => "Plan",
             ClaudeMode::Auto => "Auto",
+        }
+    }
+
+    pub fn detail(&self) -> &'static str {
+        match self {
+            ClaudeMode::Standard => "Claude asks before it edits files or runs commands.",
+            ClaudeMode::AcceptEdits => "File edits apply without asking. Commands still ask.",
+            ClaudeMode::Plan => "Claude reads and plans. Nothing changes until you approve the plan.",
+            ClaudeMode::Auto => "Claude decides which actions are safe to run without asking.",
         }
     }
 

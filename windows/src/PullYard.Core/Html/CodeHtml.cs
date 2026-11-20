@@ -142,7 +142,6 @@ public static class CodeHtml
     td.bl.h6{--heat:color-mix(in srgb,var(--link) 64%,transparent)}td.bl.h7{--heat:color-mix(in srgb,var(--link) 76%,transparent);--tint:color-mix(in srgb,var(--link) 3%,transparent)}
     td.bl.h8{--heat:color-mix(in srgb,var(--link) 88%,transparent);--tint:color-mix(in srgb,var(--link) 5%,transparent)}td.bl.h9{--heat:var(--link);--tint:color-mix(in srgb,var(--link) 8%,transparent)}
     td.bl.h8 a.ba,td.bl.h9 a.ba{color:var(--fg)}
-    .k{color:var(--k)}.n{color:var(--purple)}.s{color:var(--green)}.cm{color:var(--gutter);font-style:italic}
-    :root{--k:#d8513f}@media (prefers-color-scheme: dark){:root{--k:#ee6f5f}}
+    .k{color:var(--k)}.n{color:var(--purple)}.s{color:var(--green)}.cm{color:var(--muted);font-style:italic}
     """;
 }

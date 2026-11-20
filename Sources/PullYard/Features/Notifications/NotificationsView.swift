@@ -11,6 +11,7 @@ struct NotificationsView: View {
     @State private var loadedKey: String?
     @State private var checkingCache = false
     @State private var rows = RowAppearTracker.shared("notifications")
+    @State private var confirmMarkAll = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,6 +30,7 @@ struct NotificationsView: View {
                     NotificationRow(item: n)
                         .rowAppear(n.id, rows)
                         .tag(n.id)
+                        .simultaneousGesture(TapGesture(count: 2).onEnded { if n.route == nil { openExternal(n) } })
                         .contextMenu {
                             if n.unread { Button("Mark as read") { Task { await markRead(n) } } }
                             Button("Done (remove from inbox)") { Task { await markDone(n) } }
@@ -51,12 +53,36 @@ struct NotificationsView: View {
                     )
                 }
             }
+            .onKeyPress(.return) {
+                guard let n = selected, n.route == nil else { return .ignored }
+                openExternal(n)
+                return .handled
+            }
             .liveRefresh(updated: lastUpdated, refreshing: loading, error: items.isEmpty ? nil : error) { await load() }
+            if items.count >= GitHubAPI.notificationPageSize {
+                Text("Showing the latest \(items.count) notifications. Mark some as done to see older ones.")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+            }
+            if let n = selected, n.route == nil {
+                HStack(spacing: 8) {
+                    Image(systemName: "safari").foregroundStyle(Color.syMuted)
+                    Text("This notification opens in the browser").font(.syCallout).foregroundStyle(Color.syMuted).lineLimit(1)
+                    Spacer(minLength: 8)
+                    Button("Open") { openExternal(n) }.controlSize(.small)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .overlay(alignment: .top) { Rectangle().fill(Color.syLine).frame(height: 1) }
+            }
         }
         .navigationTitle("Notifications")
         .panelToolbar {
             ToolbarItem {
-                Button { Task { await markAll() } } label: { Label("Mark all read", systemImage: "checkmark.circle") }
+                Button { confirmMarkAll = true } label: { Label("Mark all read", systemImage: "checkmark.circle") }
                     .help("Mark all as read")
                     .disabled(!items.contains { $0.unread })
             }
@@ -66,9 +92,25 @@ struct NotificationsView: View {
         .onLiveTick { await load(live: true) }
         .onChange(of: selection) { _, id in
             guard let id, let n = items.first(where: { $0.id == id }) else { return }
-            if let route = n.route { app.select(route) } else { openInBrowser(n.webURL) }
+            guard let route = n.route else { return }
+            app.select(route)
             if n.unread { Task { await markRead(n, quiet: true) } }
         }
+        .confirmationDialog("Mark all notifications as read?", isPresented: $confirmMarkAll) {
+            Button("Mark All as Read") { Task { await markAll() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(items.count >= GitHubAPI.notificationPageSize ? "This also marks notifications that aren't loaded in this list." : "Every unread notification in your inbox is marked as read.")
+        }
+    }
+
+    private var selected: NotificationThread? {
+        selection.flatMap { id in items.first { $0.id == id } }
+    }
+
+    private func openExternal(_ n: NotificationThread) {
+        openInBrowser(n.webURL)
+        if n.unread { Task { await markRead(n, quiet: true) } }
     }
 
     private static func cacheKey(_ all: Bool) -> String {

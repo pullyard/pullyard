@@ -7,10 +7,11 @@ use chrono::{DateTime, Utc};
 use gtk::glib;
 
 use super::item_row::{describe_row, item_menu, item_row};
-use super::menu::context_menu;
+use super::menu::{context_menu, Menu};
 use super::widgets::*;
 use crate::api::models::{Route, SearchItem};
-use crate::app;
+use crate::list_sort::ListSort;
+use crate::{app, settings};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum StateFilter {
@@ -37,6 +38,64 @@ impl StateFilter {
             StateFilter::All => "",
         }
     }
+
+    pub fn key(&self) -> &'static str {
+        match self {
+            StateFilter::Open => "open",
+            StateFilter::Closed => "closed",
+            StateFilter::All => "all",
+        }
+    }
+
+    pub fn from_key(k: &str) -> Self {
+        Self::ALL.into_iter().find(|f| f.key() == k).unwrap_or(StateFilter::Open)
+    }
+
+    pub fn stored(kind: &str) -> Self {
+        settings::read(|s| s.list_state.get(kind).map(|k| Self::from_key(k))).unwrap_or(StateFilter::Open)
+    }
+
+    pub fn store(&self, kind: &str) {
+        let key = self.key();
+        if settings::read(|s| s.list_state.get(kind).map(String::as_str) != Some(key)) {
+            settings::update(|s| {
+                s.list_state.insert(kind.to_string(), key.to_string());
+            });
+        }
+    }
+}
+
+pub fn loading_more_row() -> gtk::Widget {
+    let b = hbox(8);
+    b.set_halign(gtk::Align::Center);
+    margins(&b, 8, 0, 8, 0);
+    let s = spinner(12);
+    s.set_spinning(true);
+    b.append(&s);
+    b.append(&label_with("Loading more…", &["sy-muted", "sy-small"]));
+    b.upcast()
+}
+
+pub fn load_more_error_row(message: &str, retry: impl Fn() + 'static) -> gtk::Widget {
+    let b = hbox(8);
+    margins(&b, 6, 0, 6, 0);
+    b.append(&colored_icon("dialog-warning-symbolic", 14, "amber"));
+    let l = wrap_label(&format!("Couldn't load more: {message}"), &["sy-muted", "sy-small"]);
+    l.set_hexpand(true);
+    b.append(&l);
+    let again = button("Retry");
+    again.set_valign(gtk::Align::Center);
+    again.connect_clicked(move |_| retry());
+    b.append(&again);
+    b.upcast()
+}
+
+pub fn footer_row(child: &gtk::Widget) -> gtk::ListBoxRow {
+    let row = gtk::ListBoxRow::new();
+    row.set_selectable(false);
+    row.set_activatable(false);
+    row.set_child(Some(child));
+    row
 }
 
 #[derive(Clone)]
@@ -50,6 +109,22 @@ struct Snapshot {
 
 thread_local! {
     static CACHE: RefCell<HashMap<String, Snapshot>> = RefCell::new(HashMap::new());
+    static FILTERS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+}
+
+fn remembered_filter(key: &str) -> String {
+    FILTERS.with(|f| f.borrow().get(key).cloned().unwrap_or_default())
+}
+
+fn remember_filter(key: &str, text: &str) {
+    FILTERS.with(|f| {
+        let mut f = f.borrow_mut();
+        if text.is_empty() {
+            f.remove(key);
+        } else {
+            f.insert(key.to_string(), text.to_string());
+        }
+    });
 }
 
 pub fn reset_cache() {
@@ -93,6 +168,7 @@ pub struct SearchModel {
     cursor: RefCell<Option<String>>,
     has_more: Cell<bool>,
     loading_more: Cell<bool>,
+    pub load_more_error: RefCell<Option<String>>,
     unconfirmed: Cell<bool>,
     current_query: RefCell<String>,
     generation: Cell<u64>,
@@ -111,11 +187,20 @@ impl SearchModel {
             cursor: RefCell::new(None),
             has_more: Cell::new(false),
             loading_more: Cell::new(false),
+            load_more_error: RefCell::new(None),
             unconfirmed: Cell::new(false),
             current_query: RefCell::new(String::new()),
             generation: Cell::new(0),
             changed: crate::signal::Signal::new(),
         })
+    }
+
+    pub fn loading_more(&self) -> bool {
+        self.loading_more.get()
+    }
+
+    pub fn has_more(&self) -> bool {
+        self.has_more.get()
     }
 
     fn apply(&self, snap: &Snapshot) {
@@ -140,6 +225,7 @@ impl SearchModel {
         if switching {
             *self.current_query.borrow_mut() = query.clone();
             *self.error.borrow_mut() = None;
+            *self.load_more_error.borrow_mut() = None;
             self.unconfirmed.set(snap.is_some());
             match snap {
                 Some(snap) => {
@@ -204,13 +290,26 @@ impl SearchModel {
         }
         let query = self.current_query.borrow().clone();
         self.loading_more.set(true);
+        *self.load_more_error.borrow_mut() = None;
+        self.changed.emit(&());
         let q = query.clone();
         let result = crate::rt::run(async move { api.search(&q, cursor).await }).await;
         self.loading_more.set(false);
-        let Ok(r) = result else { return false };
-        if *self.current_query.borrow() != query {
-            return false;
-        }
+        let same = *self.current_query.borrow() == query;
+        let r = match result {
+            Ok(r) if same => r,
+            Ok(_) => {
+                self.changed.emit(&());
+                return false;
+            }
+            Err(e) => {
+                if same {
+                    *self.load_more_error.borrow_mut() = Some(e.message);
+                }
+                self.changed.emit(&());
+                return false;
+            }
+        };
         let known: HashSet<String> = self.items.borrow().iter().map(|i| i.url.clone()).collect();
         let added: Vec<SearchItem> = r.nodes.into_iter().filter(|n| !known.contains(&n.url)).collect();
         let any = !added.is_empty();
@@ -238,10 +337,11 @@ impl SearchModel {
     }
 }
 
-pub fn state_toggles(on_change: impl Fn(StateFilter) + 'static) -> (gtk::Box, Rc<Cell<StateFilter>>) {
+pub fn state_toggles(initial: StateFilter, on_change: impl Fn(StateFilter) + 'static) -> (gtk::Box, Rc<Cell<StateFilter>>) {
     let b = hbox(0);
     b.add_css_class("linked");
-    let current = Rc::new(Cell::new(StateFilter::Open));
+    b.update_property(&[gtk::accessible::Property::Label("State")]);
+    let current = Rc::new(Cell::new(initial));
     let on_change = Rc::new(on_change);
     let mut first: Option<gtk::ToggleButton> = None;
     for f in StateFilter::ALL {
@@ -250,8 +350,10 @@ pub fn state_toggles(on_change: impl Fn(StateFilter) + 'static) -> (gtk::Box, Rc
         if let Some(g) = &first {
             t.set_group(Some(g));
         } else {
-            t.set_active(true);
             first = Some(t.clone());
+        }
+        if f == initial {
+            t.set_active(true);
         }
         let cur = current.clone();
         let cb = on_change.clone();
@@ -284,6 +386,9 @@ pub struct SearchList {
     rendered: RefCell<String>,
     search: gtk::SearchEntry,
     status_key: RefCell<String>,
+    sort: Cell<ListSort>,
+    sort_button: gtk::MenuButton,
+    memory_key: String,
     me: RefCell<std::rc::Weak<SearchList>>,
 }
 
@@ -298,7 +403,12 @@ impl SearchList {
         spinner.set_visible(false);
         let overlay_stack = gtk::Stack::new();
         let search = gtk::SearchEntry::new();
-        let (toggles, state) = state_toggles(|_| {});
+        let (toggles, state) = state_toggles(StateFilter::stored(kind), |_| {});
+        let memory_key = format!("{kind}|{base_query}|{grouped}");
+        let initial_text = remembered_filter(&memory_key);
+        let sort_button = gtk::MenuButton::new();
+        sort_button.set_icon_name("view-sort-descending-symbolic");
+        sort_button.add_css_class("flat");
         let model_c = model.clone();
         let weak_holder: Rc<RefCell<Option<std::rc::Weak<SearchList>>>> = Rc::new(RefCell::new(None));
         let wh = weak_holder.clone();
@@ -315,7 +425,7 @@ impl SearchList {
             list: list.clone(),
             keys: RefCell::new(vec![]),
             collapsed: RefCell::new(HashSet::new()),
-            text: RefCell::new(String::new()),
+            text: RefCell::new(initial_text.clone()),
             state,
             title: title_w.clone(),
             spinner: spinner.clone(),
@@ -325,10 +435,14 @@ impl SearchList {
             rendered: RefCell::new(String::new()),
             search: search.clone(),
             status_key: RefCell::new(String::new()),
+            sort: Cell::new(ListSort::from_key(&settings::read(|s| s.list_sort.get(kind).cloned().unwrap_or_default()))),
+            sort_button: sort_button.clone(),
+            memory_key,
             me: RefCell::new(std::rc::Weak::new()),
         });
         *weak_holder.borrow_mut() = Some(Rc::downgrade(&me));
         *me.me.borrow_mut() = Rc::downgrade(&me);
+        me.sync_sort_menu();
 
         let weak = Rc::downgrade(&me);
         for child in toggles_children(&toggles) {
@@ -336,6 +450,7 @@ impl SearchList {
             child.connect_toggled(move |t| {
                 if t.is_active() {
                     if let Some(me) = weak.upgrade() {
+                        me.state.get().store(me.kind);
                         glib::idle_add_local_once(move || me.reload(false));
                     }
                 }
@@ -344,10 +459,18 @@ impl SearchList {
 
         search.set_placeholder_text(Some("Filter: text, repo:org/name, label:bug"));
         search.set_hexpand(true);
+        if !initial_text.is_empty() {
+            search.set_text(&initial_text);
+        }
         let weak = Rc::downgrade(&me);
         search.connect_search_changed(move |e| {
             let Some(me) = weak.upgrade() else { return };
-            *me.text.borrow_mut() = e.text().trim().to_string();
+            let text = e.text().trim().to_string();
+            if *me.text.borrow() == text {
+                return;
+            }
+            remember_filter(&me.memory_key, &text);
+            *me.text.borrow_mut() = text;
             if let Some(id) = me.debounce.borrow_mut().take() {
                 id.remove();
             }
@@ -391,11 +514,8 @@ impl SearchList {
         scroll.connect_edge_reached(move |_, pos| {
             if pos == gtk::PositionType::Bottom {
                 if let Some(me) = weak.upgrade() {
-                    if !me.grouped {
-                        let m = me.model.clone();
-                        crate::rt::spawn_local(async move {
-                            m.load_more().await;
-                        });
+                    if !me.grouped && me.model.load_more_error.borrow().is_none() {
+                        me.load_more();
                     }
                 }
             }
@@ -411,6 +531,8 @@ impl SearchList {
         margins(&toggles_bar, 6, 10, 6, 10);
         toggles.set_hexpand(true);
         toggles_bar.append(&toggles);
+        sort_button.set_margin_start(6);
+        toggles_bar.append(&sort_button);
 
         let content = vbox(0);
         content.append(&toggles_bar);
@@ -432,6 +554,9 @@ impl SearchList {
         search_btn.set_tooltip_text(Some("Filter"));
         set_label(&search_btn, "Filter");
         search_btn.bind_property("active", &search_bar, "search-mode-enabled").bidirectional().build();
+        if !initial_text.is_empty() {
+            search_btn.set_active(true);
+        }
         hb.pack_start(&search_btn);
         tv.add_top_bar(&hb);
         tv.add_top_bar(&search_bar);
@@ -476,7 +601,7 @@ impl SearchList {
 
     fn query(&self) -> String {
         let state = self.state.get();
-        let parts = [self.base_query.clone(), format!("is:{}", self.kind), state.query().to_string(), "archived:false".into(), "sort:updated-desc".into(), self.text.borrow().clone()];
+        let parts = [self.base_query.clone(), format!("is:{}", self.kind), state.query().to_string(), "archived:false".into(), self.sort.get().query().to_string(), self.text.borrow().clone()];
         parts.into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" ")
     }
 
@@ -491,6 +616,77 @@ impl SearchList {
                 m.load_all(400).await;
             }
         });
+    }
+
+    fn sync_sort_menu(self: &Rc<Self>) {
+        let current = self.sort.get();
+        let menu = Menu::new();
+        for sort in ListSort::ALL {
+            let weak = Rc::downgrade(self);
+            menu.item(&format!("{}{}", if sort == current { "✓ " } else { "" }, sort.title()), move || {
+                let Some(me) = weak.upgrade() else { return };
+                if me.sort.get() == sort {
+                    return;
+                }
+                me.sort.set(sort);
+                let kind = me.kind;
+                settings::update(|s| {
+                    s.list_sort.insert(kind.to_string(), sort.key().to_string());
+                });
+                glib::idle_add_local_once(move || {
+                    me.sync_sort_menu();
+                    me.reload(false);
+                });
+            });
+        }
+        menu.apply_to(&self.sort_button);
+        let tip = format!("Sort: {}", current.title());
+        self.sort_button.set_tooltip_text(Some(&tip));
+        set_label(&self.sort_button, &tip);
+    }
+
+    fn load_more(&self) {
+        let m = self.model.clone();
+        let grouped = self.grouped;
+        crate::rt::spawn_local(async move {
+            if grouped {
+                let limit = m.items.borrow().len() + 400;
+                m.load_all(limit).await;
+            } else {
+                m.load_more().await;
+            }
+        });
+    }
+
+    fn append_footer(&self, keys: &mut Vec<Option<Route>>) {
+        let m = &self.model;
+        let error = m.load_more_error.borrow().clone();
+        let child: Option<gtk::Widget> = if let Some(e) = error {
+            let weak = self.me.borrow().clone();
+            Some(load_more_error_row(&e, move || {
+                if let Some(me) = weak.upgrade() {
+                    me.load_more();
+                }
+            }))
+        } else if m.loading_more() {
+            Some(loading_more_row())
+        } else if self.grouped && m.has_more() && !m.loading.get() {
+            let more = link_button(&format!("Showing {} of {} — load more", m.items.borrow().len(), m.total.get()));
+            more.set_halign(gtk::Align::Start);
+            let weak = self.me.borrow().clone();
+            more.connect_clicked(move |_| {
+                if let Some(me) = weak.upgrade() {
+                    me.load_more();
+                }
+            });
+            Some(more.upcast())
+        } else {
+            None
+        };
+        if let Some(child) = child {
+            self.list.append(&footer_row(&child));
+            keys.push(None);
+        }
     }
 
     fn render(&self) {
@@ -572,6 +768,8 @@ impl SearchList {
             collapsed.sort();
             sig.push_str(&format!("|{}|{}", collapsed.join(","), self.text.borrow().is_empty()));
         }
+        let m = &self.model;
+        sig.push_str(&format!("|{}|{}|{}|{:?}", m.loading_more(), m.has_more(), m.loading.get(), m.load_more_error.borrow()));
         sig
     }
 
@@ -612,6 +810,7 @@ impl SearchList {
                 keys.push(Some(item.route()));
             }
         }
+        self.append_footer(&mut keys);
         *self.keys.borrow_mut() = keys;
     }
 
@@ -665,4 +864,20 @@ pub fn group_header(full: &str, count: usize, expanded: bool) -> gtk::Box {
     b.append(&chip(&count.to_string(), color, None, false));
     b.set_tooltip_text(Some(full));
     b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_filter_keys_round_trip() {
+        for f in StateFilter::ALL {
+            assert!(StateFilter::from_key(f.key()) == f);
+        }
+        assert!(StateFilter::from_key("") == StateFilter::Open);
+        assert!(StateFilter::from_key("merged") == StateFilter::Open);
+        assert_eq!(StateFilter::Closed.query(), "is:closed");
+        assert_eq!(StateFilter::All.query(), "");
+    }
 }

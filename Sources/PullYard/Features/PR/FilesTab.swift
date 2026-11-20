@@ -3,7 +3,7 @@ import SwiftUI
 struct FilesTab: View {
     @Bindable var model: PRDetailModel
     @Environment(AppModel.self) private var app
-    @State private var showList = true
+    @AppStorage("pr.files.showList") private var showList = true
     @State private var filter = ""
     @State private var navigator = DiffNavigator()
     @State private var splitFits = false
@@ -24,8 +24,25 @@ struct FilesTab: View {
                     }
                     VStack(spacing: 0) {
                         reviewBar
+                        if let e = model.filesError {
+                            diffNotice(icon: "exclamationmark.triangle.fill", color: .syAmber, text: "Couldn't refresh the diff — it may be out of date", help: e, action: "Retry") {
+                                Task { await model.loadFiles(force: true) }
+                            }
+                        }
+                        if model.hiddenThreadCount > 0, let pr = model.pr {
+                            diffNotice(icon: "text.bubble", color: .sySky, text: "Showing the first \(pr.reviewThreads.nodes.count) review threads — \(model.hiddenThreadCount) more are only on the web", help: nil, action: "Open in browser") {
+                                openInBrowser(pr.url + "/files")
+                            }
+                        }
                         if model.diffScope == .sinceReview { interdiffBanner }
                         DiffRefreshHost(model: model) { diff }
+                            .overlay {
+                                if model.displayedFiles.isEmpty, !(model.diffScope == .sinceReview && model.interdiffLoading) {
+                                    ListEmptyNote(title: model.diffScope == .sinceReview ? "No changes since your review" : "No files changed", message: model.diffScope == .sinceReview ? "Switch to All changes to see the whole diff." : "This pull request doesn’t change any files.")
+                                } else if visibleFiles.isEmpty {
+                                    ListEmptyNote(title: "No files match", message: "No changed file matches the filter.", filter: filter) { filter = "" }
+                                }
+                            }
                     }
                     .background(GeometryReader { g in
                         Color.clear
@@ -102,8 +119,29 @@ struct FilesTab: View {
         model.revealFile(path)
     }
 
+    private func diffNotice(icon: String, color: Color, text: String, help: String?, action: String, run: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).foregroundStyle(color)
+            Text(text).foregroundStyle(Color.syText).lineLimit(2)
+            Spacer(minLength: 8)
+            Button(action, action: run).controlSize(.small)
+        }
+        .font(.syCallout)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(color.opacity(0.08))
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.syLine).frame(height: 1) }
+        .help(help ?? "")
+    }
+
     private var reviewBar: some View {
         HStack(spacing: 10) {
+            Button { withAnimation(Motion.quick) { showList.toggle() } } label: {
+                Image(systemName: "sidebar.left").frame(width: 22, height: 20).contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help(showList ? "Hide file list" : "Show file list")
+            .accessibilityLabel(showList ? "Hide file list" : "Show file list")
             HStack(spacing: 2) {
                 navButton("chevron.up", "Previous file", key: "P") { perform("p") }
                 navButton("chevron.down", "Next file", key: "N") { perform("n") }
@@ -388,6 +426,11 @@ private struct FileListPane: View {
             }
             .listStyle(.inset)
             .surface(.list)
+            .overlay {
+                if files.isEmpty {
+                    ListEmptyNote(title: model.displayedFiles.isEmpty ? "No files" : "No files match", compact: true)
+                }
+            }
         }
     }
 
@@ -603,7 +646,7 @@ struct InlineThreadView: View {
                                     Text("· \(Fmt.rel(c.createdAt))").foregroundStyle(Color.syMuted)
                                 }
                                 .font(.syCaption)
-                                MarkdownText(text: c.body).font(.syCallout)
+                                MarkdownView(text: c.body, baseStyle: .callout)
                             }
                             Spacer(minLength: 0)
                         }
@@ -662,21 +705,33 @@ struct InlineThreadView: View {
 struct PendingCommentView: View {
     let model: PRDetailModel
     let comment: PendingComment
+    @Environment(AppModel.self) private var app
+    @State private var confirmDelete = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Text("pending").font(.syCaption2.weight(.semibold)).padding(.horizontal, 6).padding(.vertical, 1)
                 .background(Capsule().fill(Color.ghYellow.opacity(0.25)))
-            MarkdownText(text: comment.body).font(.syCallout)
+            MarkdownView(text: comment.body, baseStyle: .callout)
             Spacer()
+            Button(action: edit) {
+                Image(systemName: "pencil")
+            }
+            .buttonStyle(.borderless)
+            .help("Edit pending comment")
+            .accessibilityLabel("Edit pending comment")
             Button {
-                model.pending.removeAll { $0.id == comment.id }
+                confirmDelete = true
             } label: {
                 Image(systemName: "trash")
             }
             .buttonStyle(.borderless)
             .help("Delete pending comment")
             .accessibilityLabel("Delete pending comment")
+            .confirmationDialog("Delete this pending comment?", isPresented: $confirmDelete) {
+                Button("Delete", role: .destructive) { model.pending.removeAll { $0.id == comment.id } }
+                Button("Cancel", role: .cancel) {}
+            }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.ghYellow.opacity(0.08)))
@@ -685,6 +740,19 @@ struct PendingCommentView: View {
         .padding(.leading, 96)
         .padding(.vertical, 6)
         .frame(maxWidth: 900, alignment: .leading)
+    }
+}
+
+extension PendingCommentView {
+    fileprivate func edit() {
+        let anchor = DiffAnchor(path: comment.path, line: comment.line, side: comment.side)
+        if let open = model.composer, !model.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            app.showToast("Finish or cancel the comment on line \(open.line) first", isError: true)
+            return
+        }
+        model.pending.removeAll { $0.id == comment.id }
+        model.composerDraft = comment.body
+        model.composer = anchor
     }
 }
 

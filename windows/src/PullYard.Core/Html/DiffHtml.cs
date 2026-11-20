@@ -156,7 +156,7 @@ public static class DiffHtml
                 foreach (var t in threads) sb.Append($"<tr class=\"ins\"><td colspan=\"{span}\">{ConversationHtml.InlineThread(t)}</td></tr>");
         if (line.AnchorLine is { } anchor)
             foreach (var p in filePending.Where(p => p.Line == anchor && p.Side == line.AnchorSide))
-                sb.Append($"<tr class=\"ins\"><td colspan=\"{span}\"><div class=\"pending\"><span class=\"tag\">pending</span><div class=\"pbody\">{Esc(p.Body)}</div><button class=\"ghost\" onclick=\"post('deletePending','{p.Id}')\" title=\"Delete pending comment\" aria-label=\"Delete pending comment\">✕</button></div></td></tr>");
+                sb.Append($"<tr class=\"ins\"><td colspan=\"{span}\"><div class=\"pending\"><span class=\"tag\">pending</span><div class=\"pbody\" data-md=\"1\">{Esc(p.Body)}</div><button class=\"ghost\" onclick=\"post('editPending','{p.Id}')\" title=\"Edit pending comment\" aria-label=\"Edit pending comment\">✎</button><button class=\"ghost\" onclick=\"post('deletePending','{p.Id}')\" title=\"Delete pending comment\" aria-label=\"Delete pending comment\">✕</button></div></td></tr>");
     }
 
     public static string SyntaxExt(DiffFile f)
@@ -277,8 +277,7 @@ public static class DiffHtml
     .dt.split td.g.d,.dt.split td.c.d{background:var(--del)}
     .dt.split td.g.e,.dt.split td.c.e{background:var(--sub)}
     .dt.split tr.sp td.g:nth-child(3){border-left:1px solid var(--border)}
-    .dt .k{color:var(--k)}.dt .n{color:var(--purple)}.dt .s{color:var(--green)}.dt .cm{color:var(--gutter);font-style:italic}
-    :root{--k:#d8513f}@media (prefers-color-scheme: dark){:root{--k:#ee6f5f}}
+    .dt .k{color:var(--k)}.dt .n{color:var(--purple)}.dt .s{color:var(--green)}.dt .cm{color:var(--muted);font-style:italic}
     .diff.nw{padding-bottom:14px}
     .hbar{position:fixed;left:0;right:0;bottom:0;height:12px;overflow-x:auto;overflow-y:hidden;z-index:5;display:none}
     .hbar>div{height:1px}
@@ -288,8 +287,11 @@ public static class DiffHtml
     .dt tr.ins td{background:transparent;padding:4px 12px 4px 108px;font-family:"Segoe UI",sans-serif;white-space:normal}
     .thread.inline{margin:4px 0;max-width:900px;background:var(--raised)}
     .pending{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid var(--amber);border-radius:8px;max-width:900px;font:13px "Segoe UI",sans-serif}
-    .pending .tag{font-size:11px;font-weight:600;padding:0 6px;border-radius:8px;background:rgba(232,180,76,.25)}
+    .pending .tag{font-size:11px;font-weight:600;padding:0 6px;border-radius:8px;background:var(--pending)}
     .pending .pbody{flex:1;white-space:pre-wrap}
+    .pending .pbody.rendered{white-space:normal}
+    .pending .pbody.rendered>:first-child{margin-top:0}
+    .pending .pbody.rendered>:last-child{margin-bottom:0}
     .note{padding:8px 12px;color:var(--muted);font:12px "Segoe UI",sans-serif}
     """;
 }

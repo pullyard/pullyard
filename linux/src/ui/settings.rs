@@ -8,6 +8,7 @@ use super::dialogs;
 use super::widgets::*;
 use crate::claude::accounts::{self, Status};
 use crate::claude::session_cost;
+use crate::claude::{prompt_library, usage_ledger, ClaudeMode, ModelOption, TabKind, EFFORTS};
 use crate::git_accounts::{self, GitAccount, GitProvider};
 use crate::{app, auth, settings, theme, updater, util};
 
@@ -69,15 +70,47 @@ fn account_group(dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
             if provider.is_github() && auth::gh_available() {
                 let refresh = button("Refresh token from gh");
                 refresh.set_valign(gtk::Align::Center);
-                refresh.connect_clicked(|b| {
+                let status_row = actions.downgrade();
+                refresh.connect_clicked(move |b| {
                     b.set_sensitive(false);
+                    b.set_label("Refreshing…");
+                    if let Some(row) = status_row.upgrade() {
+                        row.set_subtitle("");
+                    }
                     let b = b.clone();
+                    let status_row = status_row.clone();
                     crate::rt::spawn_local(async move {
-                        app::get().refresh_token_from_gh().await;
+                        let failure = app::get().refresh_token_from_gh().await;
+                        b.set_label("Refresh token from gh");
                         b.set_sensitive(true);
+                        if let Some(row) = status_row.upgrade() {
+                            row.set_subtitle(&match failure {
+                                Some(e) => format!("Couldn’t read the token from gh: {}", util::markup_esc(&e)),
+                                None => "Token refreshed from gh.".to_string(),
+                            });
+                        }
                     });
                 });
                 actions.add_suffix(&refresh);
+            }
+            if let Some(acc) = account.clone() {
+                let lock = button("Lock Now");
+                lock.set_valign(gtk::Align::Center);
+                lock.set_visible(false);
+                let d = dialog.clone();
+                lock.connect_clicked(move |_| {
+                    d.close();
+                    app::get().lock_now();
+                });
+                let shown = lock.downgrade();
+                crate::rt::spawn_local(async move {
+                    if crate::account_lock::is_protected(&acc.id).await {
+                        if let Some(lock) = shown.upgrade() {
+                            lock.set_visible(true);
+                        }
+                    }
+                });
+                actions.add_suffix(&lock);
             }
             let add = button("Add account…");
             add.set_valign(gtk::Align::Center);
@@ -149,6 +182,7 @@ fn pin_row(account: GitAccount) -> adw::SwitchRow {
             g.set(true);
             row.set_active(on);
             g.set(false);
+            app::get().refresh_lockable();
         });
         if want {
             let done = settle.clone();
@@ -238,6 +272,50 @@ fn claude_group(dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
             g.add(&r);
         }
     }
+    let ws = app::get().claude.clone();
+    let kinds = [TabKind::Chat, TabKind::Terminal];
+    let w = ws.clone();
+    g.add(&combo("Open new sessions as", &["Chat", "Terminal"], kinds.iter().position(|k| *k == ws.preferred_kind()).unwrap_or(0), move |i| {
+        w.set_preferred_kind(kinds[i.min(kinds.len() - 1)]);
+    }));
+    let saved_model = ws.model_value();
+    let mut model_keys: Vec<String> = ModelOption::ALL.iter().map(|m| m.key().to_string()).collect();
+    let mut model_titles: Vec<String> = ModelOption::ALL.iter().map(|m| m.title().to_string()).collect();
+    if !model_keys.contains(&saved_model) {
+        model_keys.push(saved_model.clone());
+        model_titles.push(saved_model.clone());
+    }
+    let model_labels: Vec<&str> = model_titles.iter().map(|t| t.as_str()).collect();
+    let w = ws.clone();
+    let selected_model = model_keys.iter().position(|k| *k == saved_model).unwrap_or(0);
+    g.add(&combo("Model for new sessions", &model_labels, selected_model, move |i| {
+        w.set_model_value(&model_keys[i.min(model_keys.len() - 1)]);
+    }));
+    let effort_labels: Vec<&str> = EFFORTS.iter().map(|e| if e.is_empty() { "Default" } else { *e }).collect();
+    let saved_effort = ws.effort();
+    let w = ws.clone();
+    g.add(&combo("Effort for new sessions", &effort_labels, EFFORTS.iter().position(|e| *e == saved_effort).unwrap_or(0), move |i| {
+        w.set_effort(EFFORTS[i.min(EFFORTS.len() - 1)]);
+    }));
+    let mode_labels: Vec<&str> = ClaudeMode::ALL.iter().map(|m| m.title()).collect();
+    let saved_mode = ws.mode();
+    let w = ws.clone();
+    let mode_row = combo("Permission mode for new sessions", &mode_labels, ClaudeMode::ALL.iter().position(|m| *m == saved_mode).unwrap_or(0), move |i| {
+        w.set_mode(ClaudeMode::ALL[i.min(ClaudeMode::ALL.len() - 1)]);
+    });
+    mode_row.set_subtitle(saved_mode.detail());
+    mode_row.set_subtitle_lines(2);
+    mode_row.connect_selected_notify(|r| {
+        r.set_subtitle(ClaudeMode::ALL[(r.selected() as usize).min(ClaudeMode::ALL.len() - 1)].detail());
+    });
+    g.add(&mode_row);
+    let w = ws.clone();
+    g.add(&switch(
+        "Remember changes made in the chat composer",
+        Some("When on, picking a model, effort or mode in a chat also makes it the default for the next chats."),
+        ws.remember_composer(),
+        move |on| w.set_remember_composer(on),
+    ));
     let minutes = [0i64, 5, 15, 30, 60];
     let labels = ["Never", "5 minutes", "15 minutes", "30 minutes", "1 hour"];
     let current = app::get().claude.idle_minutes();
@@ -257,6 +335,71 @@ fn claude_group(dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
     budget.set_subtitle(session_cost::SETTINGS_CAPTION);
     budget.set_subtitle_lines(4);
     g.add(&budget);
+    g
+}
+
+fn saved_prompts_group() -> adw::PreferencesGroup {
+    let g = group("Saved prompts", "sy-star-symbolic", "coral");
+    g.set_description(Some("Save a prompt from the star menu in the chat composer, then pick it there to insert it into a message."));
+    let saved = prompt_library::all();
+    if saved.is_empty() {
+        let row = adw::ActionRow::new();
+        row.set_title("No saved prompts yet");
+        g.add(&row);
+    }
+    for p in saved {
+        let row = adw::ActionRow::new();
+        row.set_use_markup(false);
+        row.set_title(&p.title);
+        row.set_subtitle(&p.text);
+        row.set_subtitle_lines(2);
+        let delete = icon_button("user-trash-symbolic", "Delete prompt");
+        delete.set_valign(gtk::Align::Center);
+        let (group_ref, row_ref) = (g.downgrade(), row.downgrade());
+        delete.connect_clicked(move |_| {
+            prompt_library::remove(&p.id);
+            if let (Some(g), Some(row)) = (group_ref.upgrade(), row_ref.upgrade()) {
+                g.remove(&row);
+            }
+        });
+        row.add_suffix(&delete);
+        g.add(&row);
+    }
+    g
+}
+
+fn usage_group() -> adw::PreferencesGroup {
+    let g = group("Agent usage", "sy-gauge-symbolic", "amber");
+    g.set_description(Some(&format!(
+        "API-equivalent cost reported by Claude Code for chats run in {} on this computer. With a subscription this is not what you are billed.",
+        crate::brand::APP_NAME
+    )));
+    let spans: [(&str, u64); 3] = [("Today", 1), ("Last 7 days", 7), ("Last 30 days", 30)];
+    let mut values: Vec<gtk::Label> = vec![];
+    for (title, days) in spans {
+        let row = adw::ActionRow::new();
+        row.set_title(title);
+        let value = label_with(&usage_ledger::summary(usage_ledger::total(days)), &["sy-muted"]);
+        row.add_suffix(&value);
+        values.push(value);
+        g.add(&row);
+    }
+    let reset = adw::ActionRow::new();
+    reset.set_title("Usage history");
+    reset.set_subtitle("Kept on this computer for the last 120 days with activity.");
+    let clear = button("Clear");
+    clear.set_valign(gtk::Align::Center);
+    clear.set_sensitive(!usage_ledger::is_empty());
+    clear.connect_clicked(move |b| {
+        usage_ledger::clear();
+        let empty = usage_ledger::summary(usage_ledger::Day::default());
+        for v in &values {
+            v.set_text(&empty);
+        }
+        b.set_sensitive(false);
+    });
+    reset.add_suffix(&clear);
+    g.add(&reset);
     g
 }
 
@@ -284,6 +427,14 @@ pub fn show() {
         settings::update(|s| s.appearance = modes[i.min(2)].to_string());
         theme::apply();
     }));
+    let levels: Vec<String> = crate::text_zoom::LEVELS.iter().map(|l| if (l - 1.0).abs() < 0.001 { "100% (default)".to_string() } else { format!("{}%", (l * 100.0).round() as i64) }).collect();
+    let level_refs: Vec<&str> = levels.iter().map(|s| s.as_str()).collect();
+    let scale = crate::text_zoom::scale();
+    let text_size = combo("Text size", &level_refs, crate::text_zoom::LEVELS.iter().position(|l| (l - scale).abs() < 0.001).unwrap_or(2), |i| {
+        crate::text_zoom::set_scale(crate::text_zoom::LEVELS[i.min(crate::text_zoom::LEVELS.len() - 1)]);
+    });
+    text_size.set_subtitle("Also Ctrl++ and Ctrl+− in the main window");
+    appearance.add(&text_size);
     page.add(&appearance);
     page.add(&account_group(&dialog));
 
@@ -304,13 +455,14 @@ pub fn show() {
         browser_row.set_sensitive(false);
     }
     links.add(&browser_row);
+    links.add(&switch("Offer to open a copied pull request or issue link", None, settings::read(|s| s.clipboard_watch), |v| settings::update(|s| s.clipboard_watch = v)));
     page.add(&links);
 
     let refresh = group("Refresh", "view-refresh-symbolic", "green");
     let intervals = [15.0, 30.0, 60.0, 120.0, 300.0, 900.0];
     let ilabels = ["Every 15 seconds", "Every 30 seconds", "Every minute", "Every 2 minutes", "Every 5 minutes", "Every 15 minutes"];
     let cur = settings::read(|s| s.poll_interval);
-    refresh.add(&combo("Auto-refresh pull requests", &ilabels, intervals.iter().position(|v| (*v - cur).abs() < 0.5).unwrap_or(1), move |i| {
+    refresh.add(&combo("Auto-refresh lists", &ilabels, intervals.iter().position(|v| (*v - cur).abs() < 0.5).unwrap_or(1), move |i| {
         settings::update(|s| s.poll_interval = intervals[i.min(intervals.len() - 1)]);
         app::get().start_polling();
     }));
@@ -334,6 +486,8 @@ pub fn show() {
 
     if app::get().state.borrow().phase == app::Phase::LoggedIn {
         page.add(&claude_group(&dialog));
+        page.add(&saved_prompts_group());
+        page.add(&usage_group());
     }
 
     let updates = group("Updates", "sy-download-symbolic", "green");

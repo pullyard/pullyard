@@ -26,7 +26,8 @@ public sealed partial class AppViewModel : ObservableObject
     [ObservableProperty] private RestUser? user;
     [ObservableProperty] private string? account;
     [ObservableProperty] private List<string> scopes = new();
-    [ObservableProperty] private Section section = Section.Prs(PRFilter.ReviewRequested);
+    [ObservableProperty] private Section section = StoredSection();
+    [ObservableProperty] private bool badgesRefreshing;
     [ObservableProperty] private Route? detailRoot;
     [ObservableProperty] private List<SearchItem> reviewRequests = new();
     [ObservableProperty] private List<SearchItem> myPRs = new();
@@ -66,7 +67,61 @@ public sealed partial class AppViewModel : ObservableObject
     private bool viewsStale;
     private SynchronizationContext? context;
     private CancellationTokenSource? rateLimitCts;
+    private Section? lastListSection;
+    private Section? forgeSectionWanted;
+    private bool navMemoryPaused;
     public bool IsActive { get; set; } = true;
+
+    private static bool NavMemoryOff => Demo.IsOn || Program.SmokeTour || Program.SmokeUi;
+
+    private static Section StoredSection()
+    {
+        var fallback = Section.Prs(PRFilter.ReviewRequested);
+        if (NavMemoryOff) return fallback;
+        var key = NavigationMemory.NormalizeSection(Settings.Shared.GetString(Keys.NavSection), Section.AllKeys, fallback.Key, Section.Issues(IssueFilter.Assigned).Key);
+        return key is null ? fallback : Section.FromKey(key) ?? fallback;
+    }
+
+    partial void OnSectionChanged(Section? oldValue, Section newValue)
+    {
+        if (oldValue is null || oldValue == newValue) return;
+        if (oldValue.Kind != SectionKind.Claude) lastListSection = oldValue;
+        if (!NavMemoryOff && Phase == Phase.LoggedIn && Settings.Shared.GetString(Keys.NavSection) != newValue.Key) Settings.Shared.Set(Keys.NavSection, newValue.Key);
+    }
+
+    partial void OnDetailRootChanged(Route? value)
+    {
+        if (navMemoryPaused || NavMemoryOff || Phase != Phase.LoggedIn) return;
+        var stored = value is null ? null : NavigationMemory.Encode(value, Account);
+        if (Settings.Shared.GetString(Keys.NavRoute) == stored) return;
+        if (stored is null) Settings.Shared.Remove(Keys.NavRoute);
+        else Settings.Shared.Set(Keys.NavRoute, stored);
+    }
+
+    private void RestoreRoute()
+    {
+        if (NavMemoryOff || Api is null || DetailRoot is not null || Section.Kind == SectionKind.Claude) return;
+        if (NavigationMemory.Decode(Settings.Shared.GetString(Keys.NavRoute), Account) is not { } route) return;
+        Remember(route);
+        DetailRoot = route;
+    }
+
+    public bool CanLock => Phase == Phase.LoggedIn && GitAccount is { } account && Lock.IsProtected(account.Id);
+
+    public void LockNow()
+    {
+        if (Phase != Phase.LoggedIn || GitAccount is not { } account || !Lock.IsProtected(account.Id)) return;
+        FlushDrafts();
+        pollCts?.Cancel();
+        LockedAccount = account;
+        ClaudeProfiles.Shared.Scope = "";
+        Phase = Phase.Locked;
+    }
+
+    public void FlushDrafts()
+    {
+        foreach (var model in prModels.Values) model.SaveDraftsNow();
+    }
     public Func<bool> IsShown { get; set; } = () => true;
 
     public void Initialize()
@@ -321,10 +376,17 @@ public sealed partial class AppViewModel : ObservableObject
         Account = account.CacheKey;
         User = account.User;
         Scopes = new();
+        navMemoryPaused = true;
         DetailRoot = null;
+        navMemoryPaused = false;
         ForgeSelection = null;
         ForgeCaps = ForgeCapabilities.Initial;
-        if (!ForgeSupports(Section)) Section = Section.Prs(PRFilter.ReviewRequested);
+        forgeSectionWanted = null;
+        if (!ForgeSupports(Section))
+        {
+            forgeSectionWanted = Section;
+            Section = Section.Prs(PRFilter.ReviewRequested);
+        }
         Phase = Phase.LoggedIn;
         StartPolling();
         LoadCapabilities(client).Forget();
@@ -343,6 +405,9 @@ public sealed partial class AppViewModel : ObservableObject
         }
         if (!ReferenceEquals(Forge, client)) return;
         if (!caps.Same(ForgeCaps)) ForgeCaps = caps;
+        var wanted = forgeSectionWanted;
+        forgeSectionWanted = null;
+        if (wanted is not null && Section == Section.Prs(PRFilter.ReviewRequested) && ForgeSupports(wanted)) Section = wanted;
         if (!ForgeSupports(Section)) Section = Section.Prs(caps.PullFilters.FirstOrDefault(ForgeFilter.Mine).Filter());
         await RefreshBadges();
     }
@@ -472,7 +537,8 @@ public sealed partial class AppViewModel : ObservableObject
     {
         var current = GitAccount;
         if (current is not null) await UnbindClaude(current);
-        ResetSession(forgetCache: true);
+        var next = current is null ? null : Accounts.All.FirstOrDefault(a => a.Id != current.Id);
+        ResetSession(forgetCache: true, next is null ? Phase.LoggedOut : Phase.Checking);
         if (current is not null)
         {
             Lock.RemoveLock(current.Id);
@@ -482,6 +548,24 @@ public sealed partial class AppViewModel : ObservableObject
         {
             CredentialStore.Delete();
         }
+        if (next is null) return;
+        if (Lock.IsProtected(next.Id))
+        {
+            Accounts.SetActive(next.Id);
+            LockedAccount = next;
+            ClaudeProfiles.Shared.Scope = "";
+            Phase = Phase.Locked;
+            return;
+        }
+        try
+        {
+            await SwitchAccount(next.Id);
+        }
+        catch (Exception e)
+        {
+            ErrorLog.Write(e, "switching account after sign-out failed");
+        }
+        if (Phase == Phase.Checking) Phase = Phase.LoggedOut;
     }
 
     private void Revoked()
@@ -519,7 +603,9 @@ public sealed partial class AppViewModel : ObservableObject
         GitAccount = null;
         User = null;
         Scopes = new();
+        navMemoryPaused = true;
         DetailRoot = null;
+        navMemoryPaused = false;
         ForgeSelection = null;
         ResetStacks();
         ReviewRequests = new();
@@ -533,6 +619,7 @@ public sealed partial class AppViewModel : ObservableObject
 
     private void ResetStacks()
     {
+        FlushDrafts();
         prModels.Clear();
         prOrder.Clear();
         StackStore.Shared.Reset();
@@ -587,7 +674,8 @@ public sealed partial class AppViewModel : ObservableObject
         Remember(route);
         if (Section.Kind == SectionKind.Claude)
         {
-            Section = Section.Prs(PRFilter.Mine);
+            var back = lastListSection is { } last && (Forge is null || ForgeSupports(last)) ? last : Section.Prs(PRFilter.Mine);
+            Section = back;
             DetailRoot = route;
             RouteRequested?.Invoke(route, false);
             ActivateRequested?.Invoke();
@@ -619,20 +707,36 @@ public sealed partial class AppViewModel : ObservableObject
     }
 
     private string? pendingUrl;
+    private string? pendingActivity;
+
+    public void QueueActivity(string action) => pendingActivity = action;
 
     partial void OnPhaseChanged(Phase value)
     {
-        if (value == Phase.Checking) return;
+        OnPropertyChanged(nameof(CanLock));
+        if (value != Phase.LoggedIn) return;
+        RestoreRoute();
+        if (pendingUrl is null && pendingActivity is null) return;
+        if (context is { } ctx) ctx.Post(_ => ReplayPending(), null);
+        else ReplayPending();
+    }
+
+    private void ReplayPending()
+    {
+        if (Phase != Phase.LoggedIn) return;
         var url = pendingUrl;
+        var activity = pendingActivity;
         pendingUrl = null;
-        if (value == Phase.LoggedIn && url is not null) Handle(url);
+        pendingActivity = null;
+        if (url is not null) Handle(url);
+        if (activity is not null) ActivityNotifier.Handle(activity);
     }
 
     public void Handle(string url)
     {
         if (Phase != Phase.LoggedIn)
         {
-            if (Phase == Phase.Checking) pendingUrl = url;
+            pendingUrl = url;
             return;
         }
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return;
@@ -684,6 +788,11 @@ public sealed partial class AppViewModel : ObservableObject
             Open(route);
             if (route.Kind == RouteKind.PullRequest && GitHubUrl.IsFilesLink(target) && PrModel(route.Item!) is { } model) model.Tab = PRTab.Files;
         }
+        else if (Api is null && GitHubUrl.Parse(target) is not null)
+        {
+            ActivateRequested?.Invoke();
+            Views.ShellView.Toast(L.T("Link_GitHubOnForge", "This link opens a GitHub item. Switch to a GitHub account to view it."), true);
+        }
     }
 
     private async Task ResumeById(string id, ClaudeTabKind? kind)
@@ -705,13 +814,14 @@ public sealed partial class AppViewModel : ObservableObject
             return m;
         }
         m = new PRDetailViewModel(r, backend, Account);
+        m.RestoreDrafts();
         prModels[r] = m;
         prOrder.Add(r);
         if (prOrder.Count > 15)
         {
             var old = prOrder[0];
             prOrder.RemoveAt(0);
-            prModels.Remove(old);
+            if (prModels.Remove(old, out var evicted)) evicted.SaveDraftsNow();
         }
         return m;
     }
@@ -724,6 +834,11 @@ public sealed partial class AppViewModel : ObservableObject
 
     public void CheckClipboard(string? text)
     {
+        if (!Settings.Shared.GetBool(Keys.ClipboardWatch, true))
+        {
+            ClipboardRoute = null;
+            return;
+        }
         if (text is null || text == lastClipboard || Api is null || Provider != GitProvider.GitHub) return;
         lastClipboard = text;
         if (text.Length >= 300 || !text.Contains("github.com") || GitHubUrl.Parse(text, allowShort: false) is not { } route) return;
@@ -793,6 +908,19 @@ public sealed partial class AppViewModel : ObservableObject
     }
 
     public async Task RefreshBadges(bool live = false)
+    {
+        BadgesRefreshing = true;
+        try
+        {
+            await RefreshBadgesCore(live);
+        }
+        finally
+        {
+            BadgesRefreshing = false;
+        }
+    }
+
+    private async Task RefreshBadgesCore(bool live)
     {
         if (Forge is { } forge)
         {
@@ -930,15 +1058,17 @@ public sealed partial class AppViewModel : ObservableObject
         LastBadgeRefresh = DateTimeOffset.Now;
     }
 
-    public async Task RefreshTokenFromGh()
+    public async Task<string?> RefreshTokenFromGh()
     {
-        if (GitAccount is not { } account || !account.Provider.IsGitHub()) return;
+        if (GitAccount is not { } account || !account.Provider.IsGitHub()) return null;
         try
         {
             await AddAccount(account.Provider, account.Host, GitCredential.Of(await GhCli.Token(account.Host)));
+            return null;
         }
-        catch
+        catch (Exception e)
         {
+            return e.Message;
         }
     }
 }

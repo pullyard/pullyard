@@ -8,6 +8,14 @@ struct ChatView: View {
     let chat: ChatSession
     @State private var follow = ChatFollow()
     @State private var awayCount: Int?
+    @State private var search = ChatSearchState()
+
+    private var searchMatches: [String] { search.open ? search.matches(in: chat.items) : [] }
+
+    private var currentMatch: String? {
+        let found = searchMatches
+        return found.isEmpty ? nil : found[min(search.index, found.count - 1)]
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,6 +32,11 @@ struct ChatView: View {
                                     ChatItemView(item: item, chat: chat, folder: tab.folder)
                                 case .tools(let id, let steps):
                                     ToolGroupView(id: id, steps: steps, chat: chat, folder: tab.folder)
+                                }
+                            }
+                            .background {
+                                if currentMatch == entry.id {
+                                    RoundedRectangle(cornerRadius: 10).fill(Color.syAccent.opacity(0.12)).padding(-8)
                                 }
                             }
                             .id(entry.id)
@@ -80,6 +93,15 @@ struct ChatView: View {
                 .onChange(of: follow.resizeTick) { keepPosition(proxy) }
                 .onAppear { jumpToBottom(proxy) }
                 .onChange(of: tab.id) { jumpToBottom(proxy) }
+                .overlay(alignment: .topTrailing) {
+                    if search.open {
+                        ChatSearchBar(state: $search, matches: searchMatches) { id in
+                            follow.stick = false
+                            withAnimation(Motion.quick) { proxy.scrollTo(id, anchor: .center) }
+                        }
+                        .transition(.opacity)
+                    }
+                }
                 .overlay(alignment: .bottom) {
                     ZStack {
                         if !follow.stick, !chat.items.isEmpty {
@@ -116,6 +138,12 @@ struct ChatView: View {
             ChatComposer(tab: tab, chat: chat)
         }
         .background(Theme.isBrand ? Color.syPanel : Color(nsColor: .textBackgroundColor).opacity(0.35))
+        .overlay { ChatDropOverlay(active: chat.dropTargeted) }
+        .task(id: tab.id) { tab.loadPendingHistory() }
+        .background {
+            Button("") { search.open = true }.keyboardShortcut("f", modifiers: [.command]).hidden()
+        }
+        .onDrop(of: ChatDropDelegate.types, delegate: ChatDropDelegate(chat: chat))
     }
 
     private func unlessPinned(_ animation: Animation?) -> Animation? {
@@ -656,24 +684,39 @@ struct ChatItemView: View {
 
     private var canEdit: Bool { !chat.busy && chat.sessionId?.isEmpty == false }
 
-    private func edit(id: String, text: String, replacement: String) {
+    private func edit(id: String, text: String, replacement: String, fork: Bool = false) {
         guard canEdit,
               let tab = app.claude.tabs.first(where: { $0.chat === chat }),
               let index = chat.items.firstIndex(where: { if case .user(let uid, _, _) = $0 { return uid == id } else { return false } }) else {
-            chat.draftRequest = replacement
+            if !fork { chat.draftRequest = replacement }
             return
         }
         let later = chat.items[(index + 1)...].filter {
             if case .user(_, let t, _) = $0 { return t == text }
             return false
         }.count
-        app.claude.rewind(tab, to: text, occurrenceFromEnd: later, replacement: replacement)
+        let images: [ChatImage]
+        if case .user(_, _, let attached) = chat.items[index] { images = attached } else { images = [] }
+        let touchedFiles = chat.items[(index + 1)...].contains {
+            if case .tool(let call) = $0 { return ["Edit", "Write", "MultiEdit", "NotebookEdit"].contains(call.name) }
+            return false
+        }
+        app.claude.rewind(tab, to: text, occurrenceFromEnd: later, replacement: replacement, images: images, filesChanged: touchedFiles, keepOriginal: fork)
     }
 
     var body: some View {
         switch item {
         case .user(let id, let text, let images):
-            UserBubble(text: text, images: images, onEdit: canEdit ? { edit(id: id, text: text, replacement: $0) } : nil)
+            UserBubble(
+                text: text,
+                images: images,
+                queued: chat.queuedIDs.contains(id),
+                onCancelQueued: {
+                    if let prompt = chat.cancelQueued(id), chat.draftText.isEmpty { chat.draftText = prompt }
+                },
+                onEdit: canEdit ? { edit(id: id, text: text, replacement: $0) } : nil,
+                onFork: canEdit ? { edit(id: id, text: text, replacement: text, fork: true) } : nil
+            )
         case .text(let t):
             AssistantText(text: t)
         case .thinking(let t):
@@ -709,7 +752,10 @@ struct ChatItemView: View {
 struct UserBubble: View {
     let text: String
     let images: [ChatImage]
+    var queued = false
+    var onCancelQueued: (() -> Void)?
     var onEdit: ((String) -> Void)?
+    var onFork: (() -> Void)?
     @State private var expanded = false
     @State private var hover = false
     @State private var editing = false
@@ -728,11 +774,28 @@ struct UserBubble: View {
                     .transition(.asymmetric(insertion: .opacity, removal: .identity))
             } else {
                 bubble
+                    .opacity(queued ? 0.6 : 1)
                     .transition(.asymmetric(insertion: .opacity, removal: .identity))
-                MessageActions(visible: hover && !text.isEmpty) {
-                    MessageActionButton(icon: "doc.on.doc", help: "Copy") { copyToPasteboard(text) }
-                    if onEdit != nil {
-                        MessageActionButton(icon: "pencil", help: "Edit message") { beginEditing() }
+                if queued {
+                    HStack(spacing: 6) {
+                        Label("Queued — sends when Claude finishes", systemImage: "clock")
+                            .font(.syCaption)
+                            .foregroundStyle(Color.syMuted)
+                        Button("Cancel") { onCancelQueued?() }
+                            .buttonStyle(.link)
+                            .font(.syCaption)
+                            .help("Remove from the queue and put the text back in the composer")
+                    }
+                } else {
+                    MessageActions(visible: hover && !text.isEmpty) {
+                        MessageActionButton(icon: "doc.on.doc", help: "Copy") { copyToPasteboard(text) }
+                        if onEdit != nil {
+                            MessageActionButton(icon: "arrow.clockwise", help: "Retry from this message") { onEdit?(text) }
+                            MessageActionButton(icon: "pencil", help: "Edit message") { beginEditing() }
+                        }
+                        if let onFork {
+                            MessageActionButton(icon: "arrow.triangle.branch", help: "Fork into a new session from this message") { onFork() }
+                        }
                     }
                 }
             }
@@ -1259,7 +1322,7 @@ struct PermissionCard: View {
                     HStack {
                         Button("Allow") { chat.respond(request, allow: true) }
                             .buttonStyle(.borderedProminent)
-                            .keyboardShortcut(.return, modifiers: [.command])
+                            .keyboardShortcut(chat.pendingPermissions.first(where: { !$0.resolved })?.id == request.id ? KeyboardShortcut(.return, modifiers: [.command]) : nil)
                         Spacer()
                         Text("⌘↩").font(.syCaption).foregroundStyle(Color.syDim)
                     }
@@ -1309,15 +1372,18 @@ struct PermissionCard: View {
             let options = q["options"] as? [[String: Any]] ?? []
             VStack(alignment: .leading, spacing: 6) {
                 Text(text).font(.syCallout.weight(.semibold))
+                let multi = q["multiSelect"] as? Bool == true
+                let labels = options.compactMap { $0["label"] as? String }
                 ForEach(Array(options.enumerated()), id: \.offset) { _, o in
                     let label = o["label"] as? String ?? ""
+                    let picked = QuestionAnswer.contains(answers[text], label: label, multi: multi)
                     Button {
-                        answers[text] = label
+                        answers[text] = QuestionAnswer.toggled(answers[text], label: label, multi: multi, labels: labels)
                     } label: {
                         HStack(alignment: .top) {
-                            Image(systemName: answers[text] == label ? "largecircle.fill.circle" : "circle")
-                                .foregroundStyle(answers[text] == label ? Color.syAccent : Color.syDim)
-                                .accessibilityLabel(answers[text] == label ? "Selected" : "Not selected")
+                            Image(systemName: multi ? (picked ? "checkmark.square.fill" : "square") : (picked ? "largecircle.fill.circle" : "circle"))
+                                .foregroundStyle(picked ? Color.syAccent : Color.syDim)
+                                .accessibilityLabel(picked ? "Selected" : "Not selected")
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(label)
                                 if let d = o["description"] as? String { Text(d).font(.syCaption).foregroundStyle(Color.syMuted) }
@@ -1328,7 +1394,7 @@ struct PermissionCard: View {
                     }
                     .buttonStyle(.plain)
                 }
-                TextField("Other…", text: Binding(get: { options.contains { $0["label"] as? String == answers[text] } ? "" : (answers[text] ?? "") }, set: { answers[text] = $0 }))
+                TextField("Other…", text: Binding(get: { QuestionAnswer.other(answers[text], labels: labels, multi: multi) }, set: { answers[text] = QuestionAnswer.settingOther(answers[text], other: $0, labels: labels, multi: multi) }))
                     .textFieldStyle(.roundedBorder)
             }
         }
@@ -1339,8 +1405,51 @@ struct PermissionCard: View {
                 chat.respond(request, allow: true, updatedInput: input)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(answers.count < questions.count)
+            .disabled(questions.contains { (answers[$0["question"] as? String ?? ""] ?? "").isEmpty })
             Button("Skip") { chat.respond(request, allow: false, message: "The user skipped the question") }
         }
+    }
+}
+
+enum QuestionAnswer {
+    static let separator = ", "
+
+    static func parts(_ answer: String?, labels: [String]) -> (picked: [String], other: String) {
+        guard var rest = answer, !rest.isEmpty else { return ([], "") }
+        var picked: [String] = []
+        for label in labels {
+            if rest == label {
+                picked.append(label)
+                rest = ""
+            } else if rest.hasPrefix(label + separator) {
+                picked.append(label)
+                rest = String(rest.dropFirst(label.count + separator.count))
+            }
+        }
+        return (picked, rest)
+    }
+
+    static func contains(_ answer: String?, label: String, multi: Bool) -> Bool {
+        multi ? parts(answer, labels: [label]).picked.contains(label) || (answer ?? "").components(separatedBy: separator).contains(label) : answer == label
+    }
+
+    static func toggled(_ answer: String?, label: String, multi: Bool, labels: [String]) -> String {
+        guard multi else { return label }
+        let current = parts(answer, labels: labels)
+        var picked = current.picked
+        if let i = picked.firstIndex(of: label) { picked.remove(at: i) } else { picked.append(label) }
+        let ordered = labels.filter { picked.contains($0) }
+        return (ordered + (current.other.isEmpty ? [] : [current.other])).joined(separator: separator)
+    }
+
+    static func other(_ answer: String?, labels: [String], multi: Bool) -> String {
+        if multi { return parts(answer, labels: labels).other }
+        return labels.contains(answer ?? "") ? "" : (answer ?? "")
+    }
+
+    static func settingOther(_ answer: String?, other: String, labels: [String], multi: Bool) -> String {
+        guard multi else { return other }
+        let picked = parts(answer, labels: labels).picked
+        return (picked + (other.isEmpty ? [] : [other])).joined(separator: separator)
     }
 }

@@ -155,10 +155,13 @@ public sealed class TrayIcon : IDisposable
     private IntPtr icon;
     private string tooltip;
     private bool added;
+    private bool hidden;
+
+    public bool Visible => !hidden;
 
     public Func<List<TrayMenuItem>>? MenuProvider { get; set; }
 
-    public TrayIcon(string iconPath, string tooltip)
+    public TrayIcon(string iconPath, string tooltip, bool visible = true)
     {
         this.tooltip = tooltip;
         proc = Handle;
@@ -174,7 +177,8 @@ public sealed class TrayIcon : IDisposable
         hwnd = CreateWindowExW(0, className, className, 0, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, wc.hInstance, IntPtr.Zero);
         taskbarCreated = RegisterWindowMessageW("TaskbarCreated");
         icon = LoadImageW(IntPtr.Zero, iconPath, 1, 16, 16, 0x10);
-        Add();
+        hidden = !visible;
+        if (visible) Add();
     }
 
     private NotifyIconData Data(uint flags) => new()
@@ -196,6 +200,20 @@ public sealed class TrayIcon : IDisposable
         added = Shell_NotifyIconW(NimAdd, ref data);
         data.uVersion = 4;
         Shell_NotifyIconW(NimSetVersion, ref data);
+    }
+
+    public void SetVisible(bool visible)
+    {
+        hidden = !visible;
+        if (visible)
+        {
+            if (!added) Add();
+            return;
+        }
+        if (!added) return;
+        var data = Data(0);
+        Shell_NotifyIconW(NimDelete, ref data);
+        added = false;
     }
 
     public void SetTooltip(string text)
@@ -223,7 +241,8 @@ public sealed class TrayIcon : IDisposable
         }
         if (msg == taskbarCreated && taskbarCreated != 0)
         {
-            Add();
+            added = false;
+            if (!hidden) Add();
             return IntPtr.Zero;
         }
         return DefWindowProcW(h, msg, wParam, lParam);

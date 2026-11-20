@@ -20,10 +20,11 @@ public sealed partial class SearchListViewModel : ObservableObject
     [ObservableProperty] private DateTimeOffset? lastUpdated;
     [ObservableProperty] private string? error;
     [ObservableProperty] private bool checkingCache;
+    [ObservableProperty] private bool loadingMore;
+    [ObservableProperty] private string? loadMoreError;
 
     private string? cursor;
     private bool hasMore;
-    private bool loadingMore;
     private string currentQuery = "";
     private string? currentKey;
     private int generation;
@@ -52,6 +53,7 @@ public sealed partial class SearchListViewModel : ObservableObject
             currentQuery = query;
             fetched = false;
             Error = null;
+            LoadMoreError = null;
             if (Cache.TryGetValue(key, out var snap))
             {
                 CheckingCache = false;
@@ -89,6 +91,7 @@ public sealed partial class SearchListViewModel : ObservableObject
             fetched = true;
             Apply(snapshot, Items.Count == 0 ? RowAppearMode.Cascade : RowAppearMode.Refresh);
             Error = null;
+            LoadMoreError = null;
             if (account is not null && account == Account) ListSnapshotStore.Shared.Save(account, query, new ListSnapshot(r.Nodes, r.IssueCount, snapshot.Updated)).Forget();
         }
         catch (Exception e)
@@ -141,27 +144,31 @@ public sealed partial class SearchListViewModel : ObservableObject
 
     public async Task LoadMore(GitHubApi? api)
     {
-        if (api is null || !hasMore || loadingMore || cursor is null) return;
+        if (!hasMore) LoadMoreError = null;
+        if (api is null || !hasMore || LoadingMore || cursor is null) return;
         var query = currentQuery;
-        loadingMore = true;
+        var key = currentKey;
+        LoadingMore = true;
+        LoadMoreError = null;
         try
         {
             var r = await api.Search(query, cursor);
-            if (query != currentQuery) return;
+            if (query != currentQuery || key != currentKey) return;
             var known = Items.Select(i => i.Id).ToHashSet();
             var added = r.Nodes.Where(n => !known.Contains(n.Id)).ToList();
             AppearMode = RowAppearMode.Silent;
             Items = Items.Concat(added).ToList();
             cursor = r.PageInfo?.EndCursor;
             hasMore = r.PageInfo?.HasNextPage ?? false;
-            if (currentKey is { } key) Cache[key] = new Snapshot(Items, Total, cursor, hasMore, LastUpdated ?? DateTimeOffset.Now);
+            if (key is not null) Cache[key] = new Snapshot(Items, Total, cursor, hasMore, LastUpdated ?? DateTimeOffset.Now);
         }
-        catch
+        catch (Exception e)
         {
+            if (e is not OperationCanceledException && key == currentKey) LoadMoreError = e.Message;
         }
         finally
         {
-            loadingMore = false;
+            LoadingMore = false;
         }
     }
 
@@ -171,7 +178,7 @@ public sealed partial class SearchListViewModel : ObservableObject
         {
             var before = Items.Count;
             await LoadMore(api);
-            if (Items.Count == before) return;
+            if (LoadMoreError is not null || Items.Count == before) return;
         }
     }
 

@@ -133,14 +133,18 @@ impl IssuePage {
         meta.append(&created);
         self.header.append(&meta);
         if !issue.labels.nodes.is_empty() || !issue.assignees.nodes.is_empty() {
-            let row = hbox(6);
+            let row = gtk::FlowBox::new();
+            row.set_selection_mode(gtk::SelectionMode::None);
+            row.set_max_children_per_line(40);
+            row.set_column_spacing(6);
+            row.set_row_spacing(4);
             for l in &issue.labels.nodes {
-                row.append(&label_chip(l));
+                row.insert(&label_chip(l), -1);
             }
             if !issue.assignees.nodes.is_empty() {
-                row.append(&label_with("Assignees:", &["sy-muted", "sy-small"]));
+                row.insert(&label_with("Assignees:", &["sy-muted", "sy-small"]), -1);
                 for a in &issue.assignees.nodes {
-                    row.append(&tooltip(avatar(a.avatar_url.as_deref(), 18, None), &a.login));
+                    row.insert(&tooltip(avatar(a.avatar_url.as_deref(), 18, None), &a.login), -1);
                 }
             }
             self.header.append(&row);
@@ -150,10 +154,19 @@ impl IssuePage {
             let open = issue.issue_state == "OPEN";
             let b = icon_button(if open { "sy-issue-done-symbolic" } else { "sy-issue-symbolic" }, if open { "Close issue" } else { "Reopen issue" });
             let w = Rc::downgrade(self);
+            let number = issue.number;
             b.connect_clicked(move |_| {
-                if let Some(me) = w.upgrade() {
-                    me.set_open(!open);
+                let Some(me) = w.upgrade() else { return };
+                if !open {
+                    me.set_open(true);
+                    return;
                 }
+                let w = w.clone();
+                dialogs::confirm(&format!("Close issue #{number}?"), Some("You can reopen it later."), "Close Issue", true, move || {
+                    if let Some(me) = w.upgrade() {
+                        me.set_open(false);
+                    }
+                });
             });
             self.actions.append(&b);
         }
@@ -168,7 +181,7 @@ impl IssuePage {
         self.actions.append(&super::item_row::short_link_button(&route));
         let menu = super::menu::Menu::new();
         let url = issue.url.clone();
-        menu.item("Copy link", move || util::copy(&url));
+        menu.item("Copy link", move || app::copy(&url, "Copied link"));
         menu.item("Copy short link", move || super::item_row::copy_short_link(&route));
         let url = issue.url.clone();
         menu.item("Open in browser", move || util::open_url(&url));
@@ -294,6 +307,20 @@ pub fn page_child(r: &ItemRef) -> gtk::Widget {
     send.connect_clicked(move |_| s());
     let s = submit.clone();
     composer.on_submit(move || s());
+    if app::drafts_enabled() {
+        let host = app::api().map(|a| a.host().to_string()).unwrap_or_else(|| crate::api::GITHUB_HOST.to_string());
+        let draft_key = crate::drafts::key(&app::cache_account(), &host, &r.repo.full(), r.number, "issue");
+        let saved = crate::drafts::with(|s| s.text(&draft_key));
+        if !saved.is_empty() {
+            composer.set_text(&saved);
+        }
+        let draft_comp = Rc::downgrade(&composer);
+        composer.on_changed(move || {
+            if let Some(c) = draft_comp.upgrade() {
+                crate::drafts::with(|s| s.set_text(&c.text(), &draft_key));
+            }
+        });
+    }
     html.on_link(|url| match util::parse_github_url(&url, false) {
         Some(r) => app::open(r, true),
         None => {

@@ -41,15 +41,21 @@ fn scope_hint() -> gtk::Box {
     b.append(&cmdbox);
     let row = hbox(6);
     let copy = button("Copy Command");
-    copy.connect_clicked(|_| util::copy("gh auth refresh -s read:project,project"));
+    copy.connect_clicked(|_| app::copy("gh auth refresh -s read:project,project", "Copied command"));
     let refresh = button("Refresh Token from gh");
     refresh.connect_clicked(|b| {
         b.set_sensitive(false);
         let b = b.clone();
         crate::rt::spawn_local(async move {
-            app::get().refresh_token_from_gh().await;
+            let failure = app::get().refresh_token_from_gh().await;
             b.set_sensitive(true);
-            app::get().user_refresh();
+            match failure {
+                Some(e) => app::toast_error(&format!("Couldn’t read the token from gh: {e}")),
+                None => {
+                    app::toast("Token refreshed from gh.");
+                    app::get().user_refresh();
+                }
+            }
         });
     });
     row.append(&copy);
@@ -514,7 +520,7 @@ impl Board {
                 if let Some(route) = util::parse_github_url(&u, false).filter(|r| r.short_link().is_some()) {
                     m.item("Copy Short Link", move || super::item_row::copy_short_link(&route));
                 }
-                m.item("Copy Link", move || util::copy(&u));
+                m.item("Copy Link", move || app::copy(&u, "Copied link"));
             }
             m
         });

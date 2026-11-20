@@ -144,7 +144,7 @@ struct CommandPalette: View {
                 } else {
                     Image(systemName: "magnifyingglass").foregroundStyle(Color.syMuted).accessibilityHidden(true)
                 }
-                TextField("Search commands, pull requests, repositories, or paste a link…", text: $query)
+                TextField(app.forge == nil ? "Search commands, pull requests, repositories, or paste a link…" : "Search commands and loaded items…", text: $query)
                     .textFieldStyle(.plain)
                     .font(.sy(size: 16))
                     .focused($focused)
@@ -224,7 +224,7 @@ struct CommandPalette: View {
                             .accessibilityAction { selection = index; run(list) }
                     }
                     if list.isEmpty {
-                        Text("No results")
+                        Text(query.isEmpty ? "No results" : app.forge == nil ? "Nothing matches “\(query)”" : "Nothing matches “\(query)” in commands or loaded items")
                             .foregroundStyle(Color.syMuted)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 20)
@@ -316,6 +316,11 @@ struct CommandPalette: View {
 
     private var linkCommands: [PaletteCommand] {
         guard let route = GitHubURL.parse(query) else { return [] }
+        if app.forge != nil {
+            let url = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard url.hasPrefix("http") else { return [] }
+            return [PaletteCommand(id: "link", section: .link, icon: "safari", tint: .sySky, title: "Open in browser", detail: "GitHub links open in the app only on a GitHub account", keywords: query) { openInBrowser(url) }]
+        }
         let open = { app.open(route) }
         switch route {
         case .pr(let ref):
@@ -383,6 +388,10 @@ struct CommandPalette: View {
         }
         out.append(destination(.claude, "Agents", "terminal.fill", .syCoral, group: "AI", shortcut: shortcut(.claude)))
         out.append(PaletteCommand(id: "go-settings", section: .goTo, icon: "gearshape.fill", tint: .sySlate, title: "Settings", detail: "PullYard", shortcut: "⌘,", keywords: "preferences") {
+            openSettings()
+        })
+        out.append(PaletteCommand(id: "go-agent-settings", section: .goTo, icon: "terminal.fill", tint: .syCoral, title: "Agent Settings", detail: "Model, mode and effort for new chats", shortcut: nil, keywords: "preferences claude model effort permission ask auto plan default") {
+            UserDefaults.standard.set("agents", forKey: "settings.tab")
             openSettings()
         })
         return out
@@ -486,13 +495,15 @@ struct CommandPalette: View {
     private var actionCommands: [PaletteCommand] {
         var out: [PaletteCommand] = [
             PaletteCommand(id: "refresh", section: .actions, icon: "arrow.clockwise", tint: .sySky, title: "Refresh", shortcut: "⌘R", keywords: "reload sync") { app.refresh() },
-            PaletteCommand(id: "open-link", section: .actions, icon: "link", tint: .sySky, title: "Open by Link…", shortcut: "⌘L", keywords: "url paste") { app.showOpenLink = true },
             PaletteCommand(id: "quick-open", section: .actions, icon: "terminal", tint: .syCoral, title: "Go to Session…", detail: "Agents", shortcut: "⇧⌘K", keywords: "agent session") { app.showQuickOpen = true },
             PaletteCommand(id: "new-agent", section: .actions, icon: "plus.bubble", tint: .syCoral, title: "New Agent Session", detail: "Agents", shortcut: "⌘N", keywords: "agent session new") { app.newAgentSession() },
             PaletteCommand(id: "sidebar", section: .actions, icon: "sidebar.left", tint: .syMuted, title: sidebarHidden ? "Show Sidebar" : "Hide Sidebar", keywords: "toggle sidebar") {
                 sidebarHidden.toggle()
             },
         ]
+        if app.forge == nil {
+            out.insert(PaletteCommand(id: "open-link", section: .actions, icon: "link", tint: .sySky, title: "Open by Link…", shortcut: "⌘L", keywords: "url paste") { app.showOpenLink = true }, at: 1)
+        }
         if !app.detailPath.isEmpty {
             out.append(PaletteCommand(id: "back", section: .actions, icon: "chevron.left", tint: .syMuted, title: "Back", shortcut: "⌘[") {
                 if !app.detailPath.isEmpty { app.detailPath.removeLast() }

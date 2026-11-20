@@ -6,7 +6,7 @@ for code. It talks to the same GitHub GraphQL/REST endpoints as the macOS app an
 stores the token in the Secret Service keyring.
 
 Baseline: Ubuntu 24.04 / GNOME 46 (GTK 4.14, libadwaita 1.5, VTE 0.76,
-WebKitGTK 2.44). The Flatpak uses the GNOME 47 runtime.
+WebKitGTK 2.44). The Flatpak uses the GNOME 50 runtime.
 
 ## Install
 
@@ -31,7 +31,7 @@ flatpak install --user PullYard-linux-x86_64.flatpak
 flatpak run io.github.pullyard.PullYard
 ```
 
-The Flatpak needs the GNOME 47 runtime from Flathub
+The Flatpak needs the GNOME 50 runtime from Flathub
 (`flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`).
 It has access to your home folder so the Claude Code workspace can open your
 projects, and it runs `git`, `gh` and `claude` on the host through `flatpak-spawn`.

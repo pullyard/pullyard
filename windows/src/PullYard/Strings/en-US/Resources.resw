@@ -136,31 +136,41 @@
   <data name="ChatWeb_Unpushed" xml:space="preserve"><value>{0} unpushed</value></data>
   <data name="ChatWeb_WaitingSignIn" xml:space="preserve"><value>Waiting for sign-in…</value></data>
   <data name="ChatWeb_WelcomeIntro" xml:space="preserve"><value>Describe a task. The agent reads the code, proposes changes and asks before acting.</value></data>
+  <data name="Chat_AgentSettings" xml:space="preserve"><value>Agent Settings…</value></data>
   <data name="Chat_Allow" xml:space="preserve"><value>Allow</value></data>
   <data name="Chat_AskedQuestion" xml:space="preserve"><value>Claude asked a question — answer above</value></data>
   <data name="Chat_AttachImage" xml:space="preserve"><value>Attach image</value></data>
   <data name="Chat_BudgetContinue" xml:space="preserve"><value>Continue (+{0})</value></data>
   <data name="Chat_BudgetHint" xml:space="preserve"><value>New messages wait until you continue. Change the limit in Settings › Agents.</value></data>
   <data name="Chat_BudgetReached" xml:space="preserve"><value>Session cost {0} reached your {1} limit</value></data>
+  <data name="Chat_CancelQueued" xml:space="preserve"><value>Cancel the last queued message and put it back in the composer</value></data>
   <data name="Chat_ContextHelp" xml:space="preserve"><value>Context {0}% — click for usage and limits</value></data>
   <data name="Chat_ContextHint" xml:space="preserve"><value>Show usage and limits</value></data>
   <data name="Chat_ContextName" xml:space="preserve"><value>Context {0}% used</value></data>
   <data name="Chat_Deny" xml:space="preserve"><value>Deny</value></data>
+  <data name="Chat_IsDefault" xml:space="preserve"><value>Default for new chats</value></data>
   <data name="Chat_ModeHelp" xml:space="preserve"><value>Permission mode (Shift+Tab to cycle)</value></data>
   <data name="Chat_NeedsPermission" xml:space="preserve"><value>Claude needs permission: {0}</value></data>
   <data name="Chat_Placeholder" xml:space="preserve"><value>Ask Claude or describe a task…</value></data>
+  <data name="Chat_Prompts" xml:space="preserve"><value>Prompts</value></data>
+  <data name="Chat_PromptsHelp" xml:space="preserve"><value>Saved prompts</value></data>
   <data name="Chat_Queued" xml:space="preserve"><value>Message will be queued…</value></data>
+  <data name="Chat_QueuedCount" xml:space="preserve"><value>{0} queued</value></data>
   <data name="Chat_RemoveImage" xml:space="preserve"><value>Remove</value></data>
+  <data name="Chat_RemovePrompt" xml:space="preserve"><value>Remove saved prompt</value></data>
+  <data name="Chat_SavePrompt" xml:space="preserve"><value>Save current message as prompt</value></data>
   <data name="Chat_Send" xml:space="preserve"><value>Send (Enter)</value></data>
   <data name="Chat_SendName" xml:space="preserve"><value>Send</value></data>
   <data name="Chat_Sleeping" xml:space="preserve"><value>Session is sleeping — process stopped, memory freed. A new message resumes it.</value></data>
   <data name="Chat_Stop" xml:space="preserve"><value>Stop (Esc)</value></data>
+  <data name="Chat_UseForNew" xml:space="preserve"><value>Use for new chats</value></data>
   <data name="Chat_WaitingPlan" xml:space="preserve"><value>Claude is waiting for plan approval above</value></data>
   <data name="Check_Failed" xml:space="preserve"><value>Failed</value></data>
   <data name="Check_Neutral" xml:space="preserve"><value>Neutral</value></data>
   <data name="Check_Passed" xml:space="preserve"><value>Passed</value></data>
   <data name="Check_Pending" xml:space="preserve"><value>Pending</value></data>
   <data name="Check_Skipped" xml:space="preserve"><value>Skipped</value></data>
+  <data name="Checks_Hidden" xml:space="preserve"><value>{0} more checks are not shown — open in browser</value></data>
   <data name="Checks_Log" xml:space="preserve"><value>Log</value></data>
   <data name="Checks_None" xml:space="preserve"><value>No checks for the latest commit</value></data>
   <data name="Checks_Rerun" xml:space="preserve"><value>Re-run failed jobs ({0} workflow)</value></data>
@@ -213,11 +223,15 @@
   <data name="Claude_ContinueInTerminal" xml:space="preserve"><value>Continue in Windows Terminal</value></data>
   <data name="Claude_CopyCommand" xml:space="preserve"><value>Copy command</value></data>
   <data name="Claude_CopyId" xml:space="preserve"><value>Copy session ID</value></data>
+  <data name="Claude_CopyMarkdown" xml:space="preserve"><value>Copy conversation as Markdown</value></data>
   <data name="Claude_CopyResume" xml:space="preserve"><value>Copy resume command</value></data>
   <data name="Claude_Create" xml:space="preserve"><value>Create</value></data>
   <data name="Claude_CreateAndSignIn" xml:space="preserve"><value>Create and sign in</value></data>
   <data name="Claude_CustomEndpoint" xml:space="preserve"><value>Custom endpoint</value></data>
   <data name="Claude_Default" xml:space="preserve"><value>Default</value></data>
+  <data name="Claude_DefaultEffort" xml:space="preserve"><value>Effort for new sessions</value></data>
+  <data name="Claude_DefaultMode" xml:space="preserve"><value>Permission mode for new sessions</value></data>
+  <data name="Claude_DefaultModel" xml:space="preserve"><value>Model for new sessions</value></data>
   <data name="Claude_DefaultModels" xml:space="preserve"><value>Default models</value></data>
   <data name="Claude_Docs" xml:space="preserve"><value>Docs</value></data>
   <data name="Claude_EditEndpoint" xml:space="preserve"><value>Edit endpoint</value></data>
@@ -254,6 +268,7 @@
   <data name="Claude_NotInstalledTitle" xml:space="preserve"><value>Claude Code isn't installed</value></data>
   <data name="Claude_NotSignedIn" xml:space="preserve"><value>Not signed in to Claude</value></data>
   <data name="Claude_Open" xml:space="preserve"><value>Open</value></data>
+  <data name="Claude_OpenAs" xml:space="preserve"><value>Open new sessions as</value></data>
   <data name="Claude_OpenFolder" xml:space="preserve"><value>New session in folder…</value></data>
   <data name="Claude_OpenNewAs" xml:space="preserve"><value>Open new sessions as</value></data>
   <data name="Claude_OpenPR" xml:space="preserve"><value>Open PR</value></data>
@@ -268,6 +283,8 @@
   <data name="Claude_ProfileName" xml:space="preserve"><value>Name, e.g. “Personal” or “Work”</value></data>
   <data name="Claude_ProfileNameOpenRouter" xml:space="preserve"><value>Name, e.g. “OpenRouter”</value></data>
   <data name="Claude_RefreshStatus" xml:space="preserve"><value>Refresh status</value></data>
+  <data name="Claude_RememberComposer" xml:space="preserve"><value>Remember changes made in the chat composer</value></data>
+  <data name="Claude_RememberComposerHelp" xml:space="preserve"><value>When on, picking a model, effort or mode in a chat also makes it the default for the next chats.</value></data>
   <data name="Claude_RemoveAccount" xml:space="preserve"><value>Remove “{0}”…</value></data>
   <data name="Claude_RemoveButton" xml:space="preserve"><value>Sign out and remove “{0}”</value></data>
   <data name="Claude_RemoveHelp" xml:space="preserve"><value>The app signs out of this account and removes it from the list. Its history folder stays on disk: {0}</value></data>
@@ -302,7 +319,10 @@
   <data name="Claude_SwitchAccount" xml:space="preserve"><value>Switch Claude account</value></data>
   <data name="Claude_Terminal" xml:space="preserve"><value>Terminal</value></data>
   <data name="Claude_TerminalIn" xml:space="preserve"><value>Terminal in {0}</value></data>
+  <data name="Claude_UsageCosts" xml:space="preserve"><value>Today ${0:0.00} · 7 days ${1:0.00} · 30 days ${2:0.00}</value></data>
   <data name="Claude_UsagePage" xml:space="preserve"><value>Usage page</value></data>
+  <data name="Claude_UsageTotals" xml:space="preserve"><value>Chat usage on this PC</value></data>
+  <data name="Claude_UsageTurns" xml:space="preserve"><value>Turns: {0} today, {1} in 7 days, {2} in 30 days. Cost is what the claude CLI reports per turn.</value></data>
   <data name="Claude_WakeUp" xml:space="preserve"><value>Wake up</value></data>
   <data name="Clipboard_InClipboard" xml:space="preserve"><value>In clipboard: {0}</value></data>
   <data name="CloseLoop_Banner" xml:space="preserve"><value>{0} since Fix with agent · {1}</value></data>
@@ -347,9 +367,9 @@
   <data name="Common_Back" xml:space="preserve"><value>Back</value></data>
   <data name="Common_BackHint" xml:space="preserve"><value>Back (Alt+Left)</value></data>
   <data name="Common_Cancel" xml:space="preserve"><value>Cancel</value></data>
-  <data name="Common_ClickToCopy" xml:space="preserve"><value>Click to copy</value></data>
   <data name="Common_Close" xml:space="preserve"><value>Close</value></data>
   <data name="Common_CouldntLoad" xml:space="preserve"><value>Couldn’t load</value></data>
+  <data name="Common_Delete" xml:space="preserve"><value>Delete</value></data>
   <data name="Common_Dismiss" xml:space="preserve"><value>Dismiss</value></data>
   <data name="Common_Done" xml:space="preserve"><value>Done</value></data>
   <data name="Common_Error" xml:space="preserve"><value>Error</value></data>
@@ -366,7 +386,7 @@
   <data name="Composer_Sending" xml:space="preserve"><value>Sending…</value></data>
   <data name="Composer_WriteFirst" xml:space="preserve"><value>Write a comment to send it</value></data>
   <data name="Detail_Empty" xml:space="preserve"><value>Select a pull request, issue or project</value></data>
-  <data name="Detail_EmptyHint" xml:space="preserve"><value>Ctrl+L — open by link</value></data>
+  <data name="Detail_EmptyHints" xml:space="preserve"><value>Ctrl+L to open by link · Ctrl+K for the command palette · Ctrl+/ for all shortcuts</value></data>
   <data name="Diagnostics_ByName" xml:space="preserve"><value>By name</value></data>
   <data name="Diagnostics_Clear" xml:space="preserve"><value>Clear</value></data>
   <data name="Diagnostics_ColAvg" xml:space="preserve"><value>Avg ms</value></data>
@@ -449,16 +469,26 @@
   <data name="Files_Binary" xml:space="preserve"><value>Binary or large file</value></data>
   <data name="Files_CodeOwners" xml:space="preserve"><value>Code owners</value></data>
   <data name="Files_CodeOwnersApproved" xml:space="preserve"><value>approved</value></data>
+  <data name="Files_ContinueComment" xml:space="preserve"><value>Continue</value></data>
   <data name="Files_Count" xml:space="preserve"><value>Files</value></data>
   <data name="Files_DiffLayout" xml:space="preserve"><value>Diff layout</value></data>
   <data name="Files_Filter" xml:space="preserve"><value>Filter files</value></data>
+  <data name="Files_HiddenThreads" xml:space="preserve"><value>Showing the first {0} review threads — {1} more are only on the web</value></data>
+  <data name="Files_HideList" xml:space="preserve"><value>Hide file list</value></data>
   <data name="Files_LayoutNarrow" xml:space="preserve"><value>Widen the window to use split view</value></data>
   <data name="Files_LayoutTip" xml:space="preserve"><value>Unified or side-by-side diff (S)</value></data>
   <data name="Files_NextFile" xml:space="preserve"><value>Next file</value></data>
   <data name="Files_NextHunk" xml:space="preserve"><value>Next hunk</value></data>
+  <data name="Files_NoChangesSince" xml:space="preserve"><value>No changes since your review</value></data>
+  <data name="Files_NoChangesSinceHint" xml:space="preserve"><value>Switch to All changes to see the whole diff.</value></data>
+  <data name="Files_NoFiles" xml:space="preserve"><value>No files changed</value></data>
+  <data name="Files_NoFilesHint" xml:space="preserve"><value>This pull request does not change any files.</value></data>
+  <data name="Files_NoMatch" xml:space="preserve"><value>No files match</value></data>
+  <data name="Files_NoMatchHint" xml:space="preserve"><value>No changed file matches the filter.</value></data>
   <data name="Files_Pick" xml:space="preserve"><value>Pick a file</value></data>
   <data name="Files_PrevFile" xml:space="preserve"><value>Previous file</value></data>
   <data name="Files_PrevHunk" xml:space="preserve"><value>Previous hunk</value></data>
+  <data name="Files_RefreshFailed" xml:space="preserve"><value>Couldn't refresh the diff — it may be out of date</value></data>
   <data name="Files_ReviewBar" xml:space="preserve"><value>Review navigation</value></data>
   <data name="Files_ScopeAll" xml:space="preserve"><value>All changes</value></data>
   <data name="Files_ScopeName" xml:space="preserve"><value>Changes to show</value></data>
@@ -467,7 +497,9 @@
   <data name="Files_ScopeSinceOne" xml:space="preserve"><value>Since your review · 1 commit</value></data>
   <data name="Files_ScopeTip" xml:space="preserve"><value>Show only what changed since your last review</value></data>
   <data name="Files_ShortcutTip" xml:space="preserve"><value>{0} ({1})</value></data>
+  <data name="Files_ShowList" xml:space="preserve"><value>Show file list</value></data>
   <data name="Files_Split" xml:space="preserve"><value>Split</value></data>
+  <data name="Files_UnfinishedComment" xml:space="preserve"><value>Unfinished comment on {0}:{1}</value></data>
   <data name="Files_Unified" xml:space="preserve"><value>Unified</value></data>
   <data name="Files_Viewed" xml:space="preserve"><value>Viewed</value></data>
   <data name="Files_WrapLines" xml:space="preserve"><value>Wrap lines</value></data>
@@ -507,14 +539,19 @@
   <data name="Forge_AllCaughtUpMessage" xml:space="preserve"><value>New review requests and mentions show up here.</value></data>
   <data name="Forge_CopyName" xml:space="preserve"><value>Copy Name</value></data>
   <data name="Forge_FilterRepos" xml:space="preserve"><value>Filter {0}</value></data>
+  <data name="Forge_InboxOpensInBrowser" xml:space="preserve"><value>Inbox items open in the browser — press Enter or double-click a row</value></data>
   <data name="Forge_Into" xml:space="preserve"><value>into {0}</value></data>
   <data name="Forge_LaterNote" xml:space="preserve"><value>Changed files, comments and review for {0} are coming in a later version. Open the {1} in the browser to review it.</value></data>
+  <data name="Forge_ListCapped" xml:space="preserve"><value>Showing the {0} most recently updated. Older ones are on {1}.</value></data>
   <data name="Forge_MarkDone" xml:space="preserve"><value>Mark as done</value></data>
   <data name="Forge_MarkDoneFailed" xml:space="preserve"><value>Couldn't mark as done</value></data>
   <data name="Forge_OpenedUpdated" xml:space="preserve"><value>opened {0} · updated {1}</value></data>
   <data name="Forge_ReposMessage" xml:space="preserve"><value>{0} you can access show up here.</value></data>
+  <data name="Forge_ReposOpenInBrowser" xml:space="preserve"><value>{0} open in the browser — press Enter or double-click a row</value></data>
   <data name="Forge_SearchPlaceholder" xml:space="preserve"><value>Filter: title, repository, author</value></data>
   <data name="Forge_Select" xml:space="preserve"><value>Select a {0}</value></data>
+  <data name="Forge_SelectIssue" xml:space="preserve"><value>Select an issue</value></data>
+  <data name="Forge_TheWeb" xml:space="preserve"><value>the web</value></data>
   <data name="Forge_Unavailable" xml:space="preserve"><value>Not available for {0} yet</value></data>
   <data name="Forge_Updated" xml:space="preserve"><value>updated {0}</value></data>
   <data name="Html_WebViewMissing" xml:space="preserve"><value>Couldn't start the HTML view: {0}. Install the Microsoft Edge WebView2 Runtime.</value></data>
@@ -561,6 +598,8 @@
   <data name="Interdiff_ReadOnly" xml:space="preserve"><value>Read-only: comments are hidden while comparing with your last review. Switch to All changes to comment.</value></data>
   <data name="Interdiff_Rebased" xml:space="preserve"><value>The branch was rebased or force-pushed after your review, so this can include changes from {0}.</value></data>
   <data name="Issue_Close" xml:space="preserve"><value>Close issue</value></data>
+  <data name="Issue_CloseConfirm" xml:space="preserve"><value>Close issue #{0}?</value></data>
+  <data name="Issue_CloseConfirmMessage" xml:space="preserve"><value>You can reopen it later.</value></data>
   <data name="Issue_CloseShort" xml:space="preserve"><value>Close</value></data>
   <data name="Issue_Reopen" xml:space="preserve"><value>Reopen issue</value></data>
   <data name="Issue_ReopenShort" xml:space="preserve"><value>Reopen</value></data>
@@ -615,6 +654,9 @@
   <data name="Jira_Unassigned" xml:space="preserve"><value>Unassigned</value></data>
   <data name="Jira_Unlink" xml:space="preserve"><value>Unlink</value></data>
   <data name="Jira_UpdatedTip" xml:space="preserve"><value>Updated</value></data>
+  <data name="Link_GitHubOnForge" xml:space="preserve"><value>This link opens a GitHub item. Switch to a GitHub account to view it.</value></data>
+  <data name="List_LoadMoreFailed" xml:space="preserve"><value>Couldn’t load more results</value></data>
+  <data name="List_LoadingMore" xml:space="preserve"><value>Loading more…</value></data>
   <data name="Loader_Loading" xml:space="preserve"><value>Loading</value></data>
   <data name="Loader_Running" xml:space="preserve"><value>Running</value></data>
   <data name="Lock_Blocked" xml:space="preserve"><value>Too many wrong PINs. Reset the PIN to continue. This also signs out the Agents accounts linked to this account.</value></data>
@@ -626,12 +668,18 @@
   <data name="Lock_HelloReason" xml:space="preserve"><value>Unlock {0} in {1}</value></data>
   <data name="Lock_HelloResetReason" xml:space="preserve"><value>Reset the PIN for {0}</value></data>
   <data name="Lock_NewPin" xml:space="preserve"><value>New PIN</value></data>
+  <data name="Lock_Now" xml:space="preserve"><value>Lock Now</value></data>
+  <data name="Lock_NowHint" xml:space="preserve"><value>Lock {0} until the PIN is entered again</value></data>
   <data name="Lock_Pin" xml:space="preserve"><value>PIN</value></data>
   <data name="Lock_PinFormat" xml:space="preserve"><value>Use 4 to 6 digits.</value></data>
   <data name="Lock_PinMismatch" xml:space="preserve"><value>The PINs don't match.</value></data>
   <data name="Lock_RepeatPin" xml:space="preserve"><value>Repeat PIN</value></data>
   <data name="Lock_RequirePin" xml:space="preserve"><value>Require PIN for this account</value></data>
   <data name="Lock_ResetButton" xml:space="preserve"><value>Remove PIN and Sign Out</value></data>
+  <data name="Lock_ResetConfirmButton" xml:space="preserve"><value>Reset PIN…</value></data>
+  <data name="Lock_ResetConfirmHello" xml:space="preserve"><value>You'll confirm with Windows Hello. The PIN is removed and the Agents accounts linked to this account are signed out.</value></data>
+  <data name="Lock_ResetConfirmNoHello" xml:space="preserve"><value>Windows Hello isn't available on this PC, so the PIN can't be reset on its own. The PIN is removed, the Agents accounts linked to this account are signed out, and this account is signed out too. You'll need to sign in again with a token or the CLI.</value></data>
+  <data name="Lock_ResetConfirmTitle" xml:space="preserve"><value>Reset the PIN?</value></data>
   <data name="Lock_ResetHelloButton" xml:space="preserve"><value>Reset PIN with Windows Hello</value></data>
   <data name="Lock_ResetWithHello" xml:space="preserve"><value>Verify with Windows Hello to remove the PIN. The Claude Code accounts linked to this account are signed out.</value></data>
   <data name="Lock_ResetWithoutHello" xml:space="preserve"><value>Removing the PIN also signs out of this account and of the Claude Code accounts linked to it. You'll sign in again with a token or the CLI.</value></data>
@@ -760,7 +808,7 @@
   <data name="Nav_OpenCount" xml:space="preserve"><value>{0} open</value></data>
   <data name="Nav_PullRequests" xml:space="preserve"><value>Pull requests</value></data>
   <data name="Nav_RunningCount" xml:space="preserve"><value>{0} running</value></data>
-  <data name="Nav_UnreadCount" xml:space="preserve"><value>{0} unread</value></data>
+  <data name="Nav_UnreadCountLabel" xml:space="preserve"><value>{0} unread</value></data>
   <data name="Nav_WaitingCount" xml:space="preserve"><value>{0} waiting</value></data>
   <data name="Notes_Add" xml:space="preserve"><value>Add note</value></data>
   <data name="Notes_AddName" xml:space="preserve"><value>Add a note</value></data>
@@ -777,13 +825,19 @@
   <data name="Notes_Placeholder" xml:space="preserve"><value>Write a note</value></data>
   <data name="Notes_Question" xml:space="preserve"><value>Question</value></data>
   <data name="Notes_Title" xml:space="preserve"><value>Notes on #{0}</value></data>
+  <data name="Notifications_Capped" xml:space="preserve"><value>Showing the latest {0} notifications. Mark some as done to see older ones.</value></data>
   <data name="Notifications_CaughtUp" xml:space="preserve"><value>All caught up</value></data>
   <data name="Notifications_CaughtUpMessage" xml:space="preserve"><value>You’ve read everything. New activity shows up here.</value></data>
   <data name="Notifications_Done" xml:space="preserve"><value>Done (remove from inbox)</value></data>
+  <data name="Notifications_MarkAllButton" xml:space="preserve"><value>Mark All as Read</value></data>
+  <data name="Notifications_MarkAllCapped" xml:space="preserve"><value>This also marks notifications that aren't loaded in this list.</value></data>
+  <data name="Notifications_MarkAllConfirm" xml:space="preserve"><value>Mark all notifications as read?</value></data>
+  <data name="Notifications_MarkAllMessage" xml:space="preserve"><value>Every unread notification in your inbox is marked as read.</value></data>
   <data name="Notifications_MarkAllRead" xml:space="preserve"><value>Mark all as read</value></data>
   <data name="Notifications_MarkRead" xml:space="preserve"><value>Mark as read</value></data>
   <data name="Notifications_None" xml:space="preserve"><value>No notifications</value></data>
   <data name="Notifications_NoneMessage" xml:space="preserve"><value>Activity on your repositories shows up here.</value></data>
+  <data name="Notifications_OpensInBrowser" xml:space="preserve"><value>This notification opens in the browser</value></data>
   <data name="Notifications_Unread" xml:space="preserve"><value>Unread</value></data>
   <data name="Notify_AgentFinished" xml:space="preserve"><value>Agent finished</value></data>
   <data name="Notify_AgentInput" xml:space="preserve"><value>Agent needs permission or an answer</value></data>
@@ -814,6 +868,7 @@
   <data name="PR_ApproveQ" xml:space="preserve"><value>Approve this pull request?</value></data>
   <data name="PR_Assignees" xml:space="preserve"><value>Assignees:</value></data>
   <data name="PR_BlameAtHead" xml:space="preserve"><value>Blame this file at the pull request head</value></data>
+  <data name="PR_BranchName" xml:space="preserve"><value>Branch {0}</value></data>
   <data name="PR_BranchUpdated" xml:space="preserve"><value>Branch updated from {0}</value></data>
   <data name="PR_BrowserAndMore" xml:space="preserve"><value>Browser and more</value></data>
   <data name="PR_ChecksSummary" xml:space="preserve"><value>{0} failed, {1} pending, {2} passed</value></data>
@@ -824,6 +879,7 @@
   <data name="PR_CommentPlaceholder" xml:space="preserve"><value>Comment (Markdown) — Ctrl+Enter to send</value></data>
   <data name="PR_ConvertToDraft" xml:space="preserve"><value>Convert to draft</value></data>
   <data name="PR_CopyBranch" xml:space="preserve"><value>Copy branch name</value></data>
+  <data name="PR_CopyBranchHint" xml:space="preserve"><value>Copies the branch name</value></data>
   <data name="PR_CopyCheckout" xml:space="preserve"><value>Copy “gh pr checkout {0}”</value></data>
   <data name="PR_DeleteBranch" xml:space="preserve"><value>Delete branch {0}…</value></data>
   <data name="PR_DeleteBranchButton" xml:space="preserve"><value>Delete branch</value></data>
@@ -834,8 +890,9 @@
   <data name="PR_DownStack" xml:space="preserve"><value>Down the stack</value></data>
   <data name="PR_Edit" xml:space="preserve"><value>Edit title and description…</value></data>
   <data name="PR_FixWithAgent" xml:space="preserve"><value>Send review comments to a new agent session</value></data>
-  <data name="PR_Merge" xml:space="preserve"><value>Merge pull request</value></data>
+  <data name="PR_LatestCommits" xml:space="preserve"><value>Showing the latest {0} of {1} commits</value></data>
   <data name="PR_MergeButton" xml:space="preserve"><value>Merge</value></data>
+  <data name="PR_MergeHint" xml:space="preserve"><value>Merge pull request (Ctrl+Shift+M)</value></data>
   <data name="PR_MergeQueue" xml:space="preserve"><value>merge queue</value></data>
   <data name="PR_NextThreadMany" xml:space="preserve"><value>{0} unresolved · Next</value></data>
   <data name="PR_NextThreadOne" xml:space="preserve"><value>1 unresolved · Next</value></data>
@@ -854,6 +911,7 @@
   <data name="PR_Stack" xml:space="preserve"><value>Stack</value></data>
   <data name="PR_StackPosition" xml:space="preserve"><value>{0} of {1}</value></data>
   <data name="PR_SubmitReview" xml:space="preserve"><value>Submit review</value></data>
+  <data name="PR_SubmitReviewHint" xml:space="preserve"><value>Submit review (Ctrl+Shift+R)</value></data>
   <data name="PR_TabChecks" xml:space="preserve"><value>Checks</value></data>
   <data name="PR_TabCommits" xml:space="preserve"><value>Commits</value></data>
   <data name="PR_TabConversation" xml:space="preserve"><value>Conversation</value></data>
@@ -870,6 +928,8 @@
   <data name="Palette_CopiedLink" xml:space="preserve"><value>Copied link</value></data>
   <data name="Palette_Current" xml:space="preserve"><value>Current</value></data>
   <data name="Palette_CurrentItem" xml:space="preserve"><value>Current item</value></data>
+  <data name="Palette_Forward" xml:space="preserve"><value>Forward</value></data>
+  <data name="Palette_GitHubOnly" xml:space="preserve"><value>GitHub links open in the app only on a GitHub account</value></data>
   <data name="Palette_GoTo" xml:space="preserve"><value>Go to</value></data>
   <data name="Palette_GoToSession" xml:space="preserve"><value>Go to Session…</value></data>
   <data name="Palette_Help" xml:space="preserve"><value>Type to filter. Use the up and down arrow keys to choose, Enter to run, Escape to close.</value></data>
@@ -878,11 +938,15 @@
   <data name="Palette_Issue" xml:space="preserve"><value>Issue</value></data>
   <data name="Palette_Items" xml:space="preserve"><value>Pull requests &amp; issues</value></data>
   <data name="Palette_Name" xml:space="preserve"><value>Command palette</value></data>
+  <data name="Palette_NoMatch" xml:space="preserve"><value>Nothing matches “{0}”</value></data>
+  <data name="Palette_NoMatchLoaded" xml:space="preserve"><value>Nothing matches “{0}” in commands or loaded items</value></data>
   <data name="Palette_NoResults" xml:space="preserve"><value>No results</value></data>
   <data name="Palette_OpenByLink" xml:space="preserve"><value>Open by Link…</value></data>
+  <data name="Palette_OpenInBrowser" xml:space="preserve"><value>Open in browser</value></data>
   <data name="Palette_OpenItem" xml:space="preserve"><value>Open {0}</value></data>
   <data name="Palette_OpenLink" xml:space="preserve"><value>Open link</value></data>
   <data name="Palette_Placeholder" xml:space="preserve"><value>Search commands, pull requests, repositories, or paste a link…</value></data>
+  <data name="Palette_PlaceholderLoaded" xml:space="preserve"><value>Search commands and loaded items…</value></data>
   <data name="Palette_Project" xml:space="preserve"><value>Project</value></data>
   <data name="Palette_PullRequest" xml:space="preserve"><value>Pull request</value></data>
   <data name="Palette_Recent" xml:space="preserve"><value>Recently viewed</value></data>
@@ -896,6 +960,8 @@
   <data name="Palette_Theme" xml:space="preserve"><value>Theme: {0}</value></data>
   <data name="Palette_ZoomIn" xml:space="preserve"><value>Zoom In</value></data>
   <data name="Palette_ZoomOut" xml:space="preserve"><value>Zoom Out</value></data>
+  <data name="Pending_DeleteQ" xml:space="preserve"><value>Delete this pending comment?</value></data>
+  <data name="Pending_FinishFirst" xml:space="preserve"><value>Finish or cancel the comment on line {0} first</value></data>
   <data name="Project_Closed" xml:space="preserve"><value>closed</value></data>
   <data name="Projects_ClosedHidden" xml:space="preserve"><value>Closed projects are hidden.</value></data>
   <data name="Projects_CopyCommand" xml:space="preserve"><value>Copy Command</value></data>
@@ -914,8 +980,8 @@
   <data name="Provider_Projects" xml:space="preserve"><value>Projects</value></data>
   <data name="Provider_PullRequest" xml:space="preserve"><value>pull request</value></data>
   <data name="Provider_ToDoList" xml:space="preserve"><value>To-Do List</value></data>
-  <data name="RateLimit_Hint" xml:space="preserve"><value>GitHub rate limit reached. Live polling and refreshes are paused until the limit resets.</value></data>
   <data name="RateLimit_Paused" xml:space="preserve"><value>Rate limited — live updates resume at {0}</value></data>
+  <data name="RateLimit_ProviderHint" xml:space="preserve"><value>{0} rate limit reached. Live polling and refreshes are paused until the limit resets.</value></data>
   <data name="ReReview_Other" xml:space="preserve"><value>Other…</value></data>
   <data name="ReReview_Request" xml:space="preserve"><value>Re-request review</value></data>
   <data name="ReReview_RequestN" xml:space="preserve"><value>Re-request review ({0})</value></data>
@@ -950,9 +1016,13 @@
   <data name="Review_ChangesRequested" xml:space="preserve"><value>Changes requested</value></data>
   <data name="Review_CommentOnly" xml:space="preserve"><value>Comment — without approval</value></data>
   <data name="Review_Discard" xml:space="preserve"><value>Discard pending comments</value></data>
+  <data name="Review_DiscardBody" xml:space="preserve"><value>The pending inline comments are deleted. This can't be undone.</value></data>
+  <data name="Review_DiscardButton" xml:space="preserve"><value>Discard</value></data>
+  <data name="Review_DiscardQ" xml:space="preserve"><value>Discard {0} pending comment(s)?</value></data>
   <data name="Review_PendingInline" xml:space="preserve"><value>Inline comments to be submitted: {0}</value></data>
   <data name="Review_RequestChanges" xml:space="preserve"><value>Request changes</value></data>
   <data name="Review_Required" xml:space="preserve"><value>Review required</value></data>
+  <data name="Review_Restored" xml:space="preserve"><value>Restored from your last session</value></data>
   <data name="Review_Submit" xml:space="preserve"><value>Submit review</value></data>
   <data name="Review_Summary" xml:space="preserve"><value>Review summary (optional when approving)</value></data>
   <data name="Review_Title" xml:space="preserve"><value>Review {0}</value></data>
@@ -979,9 +1049,10 @@
   <data name="Settings_About" xml:space="preserve"><value>About</value></data>
   <data name="Settings_Account" xml:space="preserve"><value>Account</value></data>
   <data name="Settings_Appearance" xml:space="preserve"><value>Appearance</value></data>
-  <data name="Settings_AutoRefresh" xml:space="preserve"><value>Auto-refresh pull requests</value></data>
+  <data name="Settings_AutoRefreshLists" xml:space="preserve"><value>Auto-refresh lists</value></data>
   <data name="Settings_AutoUpdates" xml:space="preserve"><value>Check for updates automatically</value></data>
   <data name="Settings_CheckNow" xml:space="preserve"><value>Check Now</value></data>
+  <data name="Settings_ClipboardWatch" xml:space="preserve"><value>Offer to open a copied pull request or issue link</value></data>
   <data name="Settings_CloseToTray" xml:space="preserve"><value>Keep running in the notification area when the window is closed</value></data>
   <data name="Settings_CurrentVersion" xml:space="preserve"><value>Current version {0}</value></data>
   <data name="Settings_Dark" xml:space="preserve"><value>Dark</value></data>
@@ -995,6 +1066,8 @@
   <data name="Settings_Every30s" xml:space="preserve"><value>Every 30 seconds</value></data>
   <data name="Settings_Every5m" xml:space="preserve"><value>Every 5 minutes</value></data>
   <data name="Settings_EveryMinute" xml:space="preserve"><value>Every minute</value></data>
+  <data name="Settings_GhFailed" xml:space="preserve"><value>Couldn’t read the token from gh: {0}</value></data>
+  <data name="Settings_GhRefreshed" xml:space="preserve"><value>Token refreshed from gh.</value></data>
   <data name="Settings_Light" xml:space="preserve"><value>Light</value></data>
   <data name="Settings_Links" xml:space="preserve"><value>Links</value></data>
   <data name="Settings_MatchSystem" xml:space="preserve"><value>Match system</value></data>
@@ -1005,13 +1078,57 @@
   <data name="Settings_OpenLinksIn" xml:space="preserve"><value>Open links in</value></data>
   <data name="Settings_Refresh" xml:space="preserve"><value>Refresh</value></data>
   <data name="Settings_RefreshFromGh" xml:space="preserve"><value>Refresh token from gh</value></data>
+  <data name="Settings_RefreshingFromGh" xml:space="preserve"><value>Refreshing…</value></data>
   <data name="Settings_Scopes" xml:space="preserve"><value>Token scopes</value></data>
   <data name="Settings_Service" xml:space="preserve"><value>Service</value></data>
   <data name="Settings_SignOut" xml:space="preserve"><value>Sign out</value></data>
   <data name="Settings_System" xml:space="preserve"><value>System</value></data>
   <data name="Settings_SystemDefault" xml:space="preserve"><value>System default</value></data>
+  <data name="Settings_TextSize" xml:space="preserve"><value>Text size</value></data>
+  <data name="Settings_TextSizeDefault" xml:space="preserve"><value>{0}% (default)</value></data>
   <data name="Settings_Theme" xml:space="preserve"><value>Theme</value></data>
+  <data name="Settings_TrayShow" xml:space="preserve"><value>Show {0} in the notification area</value></data>
   <data name="Settings_Updates" xml:space="preserve"><value>Updates</value></data>
+  <data name="Shortcuts_Approve" xml:space="preserve"><value>Approve</value></data>
+  <data name="Shortcuts_Back" xml:space="preserve"><value>Back</value></data>
+  <data name="Shortcuts_Blame" xml:space="preserve"><value>Blame</value></data>
+  <data name="Shortcuts_CycleMode" xml:space="preserve"><value>Switch permission mode in the message box</value></data>
+  <data name="Shortcuts_CycleSession" xml:space="preserve"><value>Next and previous session</value></data>
+  <data name="Shortcuts_Files" xml:space="preserve"><value>Files changed</value></data>
+  <data name="Shortcuts_FocusComposer" xml:space="preserve"><value>Focus the message box</value></data>
+  <data name="Shortcuts_Forward" xml:space="preserve"><value>Forward</value></data>
+  <data name="Shortcuts_GoToFile" xml:space="preserve"><value>Go to file in a repository</value></data>
+  <data name="Shortcuts_GoToSession" xml:space="preserve"><value>Go to session</value></data>
+  <data name="Shortcuts_Lock" xml:space="preserve"><value>Lock now</value></data>
+  <data name="Shortcuts_Merge" xml:space="preserve"><value>Merge</value></data>
+  <data name="Shortcuts_Navigation" xml:space="preserve"><value>Navigation</value></data>
+  <data name="Shortcuts_NewLine" xml:space="preserve"><value>New line in the message box</value></data>
+  <data name="Shortcuts_NewSession" xml:space="preserve"><value>New agent session</value></data>
+  <data name="Shortcuts_NextFile" xml:space="preserve"><value>Next and previous file</value></data>
+  <data name="Shortcuts_NextHunk" xml:space="preserve"><value>Next and previous hunk</value></data>
+  <data name="Shortcuts_OpenLink" xml:space="preserve"><value>Open by link</value></data>
+  <data name="Shortcuts_Palette" xml:space="preserve"><value>Command palette</value></data>
+  <data name="Shortcuts_PullRequest" xml:space="preserve"><value>Pull request</value></data>
+  <data name="Shortcuts_Quit" xml:space="preserve"><value>Quit {0}</value></data>
+  <data name="Shortcuts_Refresh" xml:space="preserve"><value>Refresh</value></data>
+  <data name="Shortcuts_Sections" xml:space="preserve"><value>Review requests, mine, notifications, repositories, projects, agents</value></data>
+  <data name="Shortcuts_SendComment" xml:space="preserve"><value>Send comment</value></data>
+  <data name="Shortcuts_Settings" xml:space="preserve"><value>Settings</value></data>
+  <data name="Shortcuts_ShortLink" xml:space="preserve"><value>Copy short link</value></data>
+  <data name="Shortcuts_Split" xml:space="preserve"><value>Split view</value></data>
+  <data name="Shortcuts_Tabs" xml:space="preserve"><value>Switch tab</value></data>
+  <data name="Shortcuts_TextSize" xml:space="preserve"><value>Text size</value></data>
+  <data name="Shortcuts_This" xml:space="preserve"><value>Keyboard shortcuts</value></data>
+  <data name="Shortcuts_Title" xml:space="preserve"><value>Keyboard Shortcuts</value></data>
+  <data name="Shortcuts_View" xml:space="preserve"><value>View</value></data>
+  <data name="Shortcuts_Viewed" xml:space="preserve"><value>Mark file as viewed</value></data>
+  <data name="Shortcuts_Wrap" xml:space="preserve"><value>Wrap lines</value></data>
+  <data name="Shortcuts_WriteReview" xml:space="preserve"><value>Write review</value></data>
+  <data name="Sidebar_ResizeHint" xml:space="preserve"><value>Drag to resize the sidebar. Double-click to reset.</value></data>
+  <data name="Sort_MostCommented" xml:space="preserve"><value>Most commented</value></data>
+  <data name="Sort_Newest" xml:space="preserve"><value>Newest</value></data>
+  <data name="Sort_RecentlyUpdated" xml:space="preserve"><value>Recently updated</value></data>
+  <data name="Sort_Tooltip" xml:space="preserve"><value>Sort: {0}</value></data>
   <data name="Stack_ActualSize" xml:space="preserve"><value>Actual size</value></data>
   <data name="Stack_AddNote" xml:space="preserve"><value>Add a note</value></data>
   <data name="Stack_AddNoteMenu" xml:space="preserve"><value>Add note…</value></data>
@@ -1084,8 +1201,15 @@
   <data name="Terminal_Ended" xml:space="preserve"><value>Session ended</value></data>
   <data name="Terminal_Resume" xml:space="preserve"><value>Resume session</value></data>
   <data name="Terminal_Sleeping" xml:space="preserve"><value>Session is sleeping — memory freed</value></data>
+  <data name="Toast_CopiedCheckout" xml:space="preserve"><value>Copied checkout command</value></data>
+  <data name="Toast_CopiedCommand" xml:space="preserve"><value>Copied command</value></data>
+  <data name="Toast_CopiedContents" xml:space="preserve"><value>Copied contents</value></data>
   <data name="Toast_CopiedLink" xml:space="preserve"><value>Copied link</value></data>
+  <data name="Toast_CopiedPath" xml:space="preserve"><value>Copied path</value></data>
+  <data name="Toast_CopiedQuoted" xml:space="preserve"><value>Copied “{0}”</value></data>
   <data name="Toast_CopiedShortLink" xml:space="preserve"><value>Copied {0}</value></data>
+  <data name="Toast_CopiedValue" xml:space="preserve"><value>Copied {0}</value></data>
+  <data name="Toast_CopyAndDismiss" xml:space="preserve"><value>Copy the message and dismiss</value></data>
   <data name="Tray_MyOpenMRs" xml:space="preserve"><value>My open MRs</value></data>
   <data name="Tray_MyOpenPRs" xml:space="preserve"><value>My open PRs</value></data>
   <data name="Tray_NoOpenMRs" xml:space="preserve"><value>No open MRs</value></data>
@@ -1093,9 +1217,11 @@
   <data name="Tray_Open" xml:space="preserve"><value>Open {0}</value></data>
   <data name="Tray_Pizza" xml:space="preserve"><value>Buy Me a Pizza…</value></data>
   <data name="Tray_Quit" xml:space="preserve"><value>Quit</value></data>
+  <data name="Tray_Refreshing" xml:space="preserve"><value>Refreshing…</value></data>
   <data name="Tray_ReviewCount" xml:space="preserve"><value>{0} review requests</value></data>
   <data name="Tray_ReviewRequests" xml:space="preserve"><value>Review requests</value></data>
   <data name="Tray_SignIn" xml:space="preserve"><value>Sign in…</value></data>
+  <data name="Tray_Unlock" xml:space="preserve"><value>Unlock…</value></data>
   <data name="Update_Available" xml:space="preserve"><value>A new version of {0} is available</value></data>
   <data name="Update_CheckFailed" xml:space="preserve"><value>Couldn't check for updates</value></data>
   <data name="Update_Checking" xml:space="preserve"><value>Checking for updates…</value></data>

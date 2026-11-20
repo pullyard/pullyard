@@ -139,7 +139,9 @@ public sealed class CommandPalette
 
     private void Open()
     {
-        box.PlaceholderText = L.T("Palette_Placeholder", "Search commands, pull requests, repositories, or paste a link…");
+        box.PlaceholderText = app.Forge is not null
+            ? L.T("Palette_PlaceholderLoaded", "Search commands and loaded items…")
+            : L.T("Palette_Placeholder", "Search commands, pull requests, repositories, or paste a link…");
         box.FontSize = 15;
         box.BorderThickness = new Thickness(0);
         box.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
@@ -201,8 +203,8 @@ public sealed class CommandPalette
         card.VerticalAlignment = VerticalAlignment.Top;
         card.Margin = new Thickness(0, 72, 0, 0);
         card.CornerRadius = new CornerRadius(14);
-        card.Background = Palette.Brush("raised");
-        card.BorderBrush = Palette.Brush("text", 0.14);
+        card.Background = Palette.Brush("overlay");
+        card.BorderBrush = Palette.Brush("lineStrong");
         card.BorderThickness = new Thickness(1);
         card.Shadow = new ThemeShadow();
         card.Translation = new System.Numerics.Vector3(0, 0, 32);
@@ -358,7 +360,8 @@ public sealed class CommandPalette
         var next = new List<object>();
         foreach (var section in Enum.GetValues<PaletteSection>())
         {
-            var ranked = PaletteMatch.Rank(Commands(section), tokens, c => c.Title, c => c.Detail + " " + c.Keywords).Take(Limit(section, searching)).ToList();
+            var matched = section == PaletteSection.Link ? Commands(section) : PaletteMatch.Rank(Commands(section), tokens, c => c.Title, c => c.Detail + " " + c.Keywords);
+            var ranked = matched.Take(Limit(section, searching)).ToList();
             if (ranked.Count == 0) continue;
             next.Add(new PaletteHeader(SectionTitle(section)));
             next.AddRange(ranked);
@@ -368,8 +371,18 @@ public sealed class CommandPalette
         var index = selectedId is null ? -1 : rows.FindIndex(r => r is PaletteCommand c && c.Id == selectedId);
         if (index < 0) index = rows.FindIndex(r => r is PaletteCommand);
         if (index >= 0) list.SelectedIndex = index;
+        if (rows.Count == 0) empty.Text = EmptyText();
         empty.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         list.Visibility = rows.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private string EmptyText()
+    {
+        var query = box.Text.Trim();
+        if (query.Length == 0) return L.T("Palette_NoResults", "No results");
+        return app.Forge is not null
+            ? L.F("Palette_NoMatchLoaded", "Nothing matches “{0}” in commands or loaded items", query)
+            : L.F("Palette_NoMatch", "Nothing matches “{0}”", query);
     }
 
     private List<PaletteCommand> Commands(PaletteSection section) => section switch
@@ -384,7 +397,19 @@ public sealed class CommandPalette
     private List<PaletteCommand> LinkCommands()
     {
         var query = box.Text.Trim();
-        if (app.Api is null || GitHubUrl.Parse(query) is not { } route) return new();
+        if (GitHubUrl.Parse(query) is not { } route) return new();
+        if (app.Forge is not null)
+        {
+            if (!Uri.TryCreate(query, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)) return new();
+            return new()
+            {
+                new PaletteCommand("link", PaletteSection.Link, "\uE774", "sky", L.T("Palette_OpenInBrowser", "Open in browser"), () => LinkBrowser.Open(query))
+                {
+                    Detail = L.T("Palette_GitHubOnly", "GitHub links open in the app only on a GitHub account")
+                }
+            };
+        }
+        if (app.Api is null) return new();
         void Go() => app.Open(route);
         var command = route.Kind switch
         {
@@ -546,9 +571,13 @@ public sealed class CommandPalette
         {
             new("refresh", PaletteSection.Actions, "", "sky", L.T("Palette_Refresh", "Refresh"), app.Refresh) { Shortcut = "Ctrl+R", Keywords = "reload sync" }
         };
-        output.Add(new PaletteCommand("open-link", PaletteSection.Actions, "\uE71B", "sky", L.T("Palette_OpenByLink", "Open by Link…"), app.RequestOpenLink) { Shortcut = "Ctrl+L", Keywords = "url paste" });
+        if (app.Forge is null) output.Add(new PaletteCommand("open-link", PaletteSection.Actions, "\uE71B", "sky", L.T("Palette_OpenByLink", "Open by Link…"), app.RequestOpenLink) { Shortcut = "Ctrl+L", Keywords = "url paste" });
         if (ClaudeAccountStore.Shared.IsLoggedIn)
             output.Add(new PaletteCommand("quick-open", PaletteSection.Actions, "\uE945", "coral", L.T("Palette_GoToSession", "Go to Session…"), () => AgentQuickOpen.Show(root).Forget()) { Detail = L.T("Section_Claude", "Agents"), Shortcut = "Ctrl+Shift+K", Keywords = "agent session" });
+        if (ShellView.Current?.CanGoForward == true)
+            output.Add(new PaletteCommand("forward", PaletteSection.Actions, "\uE72A", "muted", L.T("Palette_Forward", "Forward"), () => ShellView.Current?.GoForward()) { Shortcut = "Alt+Right", Keywords = "next history navigate" });
+        if (app.CanLock)
+            output.Add(new PaletteCommand("lock", PaletteSection.Actions, "\uE72E", "amber", L.T("Lock_Now", "Lock Now"), app.LockNow) { Shortcut = "Ctrl+Alt+L", Keywords = "pin protect secure" });
         if (ShellView.Current is { } shell)
         {
             var title = shell.IsPaneOpen ? L.T("Palette_HidePane", "Hide Navigation Pane") : L.T("Palette_ShowPane", "Show Navigation Pane");
@@ -599,6 +628,7 @@ public sealed class CommandPalette
         if (TextZoom.CanZoomIn) output.Add(new PaletteCommand("zoom-in", PaletteSection.Actions, "", "muted", L.T("Palette_ZoomIn", "Zoom In"), TextZoom.ZoomIn) { Shortcut = "Ctrl+=", Keywords = "text size bigger" });
         if (TextZoom.CanZoomOut) output.Add(new PaletteCommand("zoom-out", PaletteSection.Actions, "", "muted", L.T("Palette_ZoomOut", "Zoom Out"), TextZoom.ZoomOut) { Shortcut = "Ctrl+-", Keywords = "text size smaller" });
         if (!TextZoom.IsDefault) output.Add(new PaletteCommand("zoom-reset", PaletteSection.Actions, "", "muted", L.T("Palette_ActualSize", "Actual Size"), TextZoom.Reset) { Shortcut = "Ctrl+0", Keywords = "text size zoom reset" });
+        output.Add(new PaletteCommand("shortcuts", PaletteSection.Actions, "\uE765", "muted", L.T("Shortcuts_Title", "Keyboard Shortcuts"), () => ShortcutsDialog.Show(root).Forget()) { Shortcut = "Ctrl+/", Keywords = "keys hotkeys help" });
         output.Add(new PaletteCommand("updates", PaletteSection.Actions, "", "sky", L.T("Menu_CheckForUpdates", "Check for Updates…"), () => app.Updater.Check(true).Forget()) { Keywords = "version upgrade" });
         return output;
     }

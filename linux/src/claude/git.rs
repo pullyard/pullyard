@@ -5,8 +5,8 @@ use std::time::Duration;
 use gtk::prelude::*;
 use gtk::{gio, glib};
 
+use super::git_remote::GitRemote;
 use crate::api::models::{PrFile, RepoRef};
-use crate::claude::ship::GitRemote;
 use crate::diff::{self, DiffFile};
 use crate::host::{self, HostCmd};
 use crate::signal::Signal;

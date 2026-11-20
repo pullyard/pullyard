@@ -2,136 +2,11 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::api::models::RepoRef;
+pub use super::git_remote::{GitRemote, RemoteKind};
 
-static PR_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+/pull/\d+").expect("pr url regex"));
-static MR_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-/]+/-/merge_requests/\d+").expect("mr url regex"));
-static BB_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+/pull-requests/\d+").expect("bitbucket pr url regex"));
+static PR_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https://[A-Za-z0-9.\-]+/[A-Za-z0-9_.\-/]+/(pull|pulls|pull-requests|-/merge_requests)/\d+").expect("pr url regex"));
 
 pub const CREATE_COMMANDS: [&str; 3] = ["gh pr create", "glab mr create", "merge_request.create"];
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RemoteKind {
-    Github,
-    Gitlab,
-    Bitbucket,
-    Other,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GitRemote {
-    pub host: String,
-    pub path: String,
-    pub kind: RemoteKind,
-}
-
-fn query_escape(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || b"-._~!$&'()*+,;=:@/?".contains(&b) {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
-}
-
-impl GitRemote {
-    pub fn new(host: &str, path: &str, kind: RemoteKind) -> Self {
-        GitRemote { host: host.into(), path: path.into(), kind }
-    }
-
-    pub fn github_repo(&self) -> Option<RepoRef> {
-        if self.host == "github.com" {
-            RepoRef::from_full(&self.path)
-        } else {
-            None
-        }
-    }
-
-    pub fn web_url(&self) -> String {
-        format!("https://{}/{}", self.host, self.path)
-    }
-
-    pub fn noun(&self) -> &'static str {
-        if self.kind == RemoteKind::Gitlab {
-            "merge request"
-        } else {
-            "pull request"
-        }
-    }
-
-    pub fn service(&self) -> String {
-        match self.kind {
-            RemoteKind::Github => "GitHub".into(),
-            RemoteKind::Gitlab => "GitLab".into(),
-            RemoteKind::Bitbucket => "Bitbucket".into(),
-            RemoteKind::Other => self.host.clone(),
-        }
-    }
-
-    pub fn new_request_url(&self, branch: &str) -> String {
-        let b = query_escape(branch);
-        let web = self.web_url();
-        match self.kind {
-            RemoteKind::Github => format!("{web}/pull/new/{b}"),
-            RemoteKind::Gitlab => format!("{web}/-/merge_requests/new?merge_request%5Bsource_branch%5D={b}"),
-            RemoteKind::Bitbucket => format!("{web}/pull-requests/new?source={b}"),
-            RemoteKind::Other => web,
-        }
-    }
-
-    pub fn parse(raw: &str) -> Option<GitRemote> {
-        let mut url = raw.trim();
-        if url.is_empty() {
-            return None;
-        }
-        url = url.trim_end_matches('/');
-        url = url.strip_suffix(".git").unwrap_or(url);
-        let (mut host, mut path) = if let Some((_, rest)) = url.split_once("://").filter(|(s, _)| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))) {
-            let (authority, path) = match rest.find('/') {
-                Some(i) => (&rest[..i], &rest[i..]),
-                None => (rest, ""),
-            };
-            let authority = authority.rsplit_once('@').map(|(_, h)| h).unwrap_or(authority);
-            let host = authority.split(':').next().unwrap_or("");
-            (host.to_string(), path.to_string())
-        } else if let Some(at) = url.find('@') {
-            let after = &url[at + 1..];
-            let colon = after.find(':')?;
-            (after[..colon].to_string(), after[colon + 1..].to_string())
-        } else {
-            return None;
-        };
-        host = host.to_lowercase();
-        path = path.trim_matches('/').to_string();
-        if host == "ssh.github.com" {
-            host = "github.com".into();
-        }
-        if let Some(h) = host.strip_prefix("altssh.") {
-            host = h.to_string();
-        }
-        if host == "bitbucket.org" {
-            if let Some(p) = path.strip_prefix("scm/") {
-                path = p.to_string();
-            }
-        }
-        if host.is_empty() || !path.contains('/') {
-            return None;
-        }
-        let kind = if host.contains("github") {
-            RemoteKind::Github
-        } else if host.contains("gitlab") {
-            RemoteKind::Gitlab
-        } else if host.contains("bitbucket") {
-            RemoteKind::Bitbucket
-        } else {
-            RemoteKind::Other
-        };
-        Some(GitRemote { host, path, kind })
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreatedRequest {
@@ -186,7 +61,8 @@ pub fn open_request_prompt(branch: &str, default_branch: Option<&str>, has_chang
     }
     let target = default_branch.unwrap_or("the default branch");
     steps.push("Push the branch to origin and set the upstream.".into());
-    match remote.map(|r| r.kind).unwrap_or(RemoteKind::Github) {
+    let kind = remote.map(|r| r.kind).unwrap_or(RemoteKind::Github);
+    match kind {
         RemoteKind::Github => {
             steps.push("Open a pull request with `gh pr create`. Write a concise title and a description with a short summary, the list of changes and how it was tested.".into());
             steps.push("Reply with the pull request URL on its own line.".into());
@@ -201,10 +77,10 @@ pub fn open_request_prompt(branch: &str, default_branch: Option<&str>, has_chang
             steps.push(format!("Reply with the create link {link} on its own line."));
         }
         RemoteKind::Other => {
-            steps.push("If the push output contains a link to create a pull request, reply with it on its own line, together with a concise title and description. Otherwise just confirm the push.".into());
+            steps.push("Open a pull request with the CLI for this host if one is installed (for example `tea`), with a concise title and description, and reply with its URL on its own line. If none is available, do not guess: if the push output contains a link to create a pull request, reply with it on its own line, together with a concise title and description. Otherwise just confirm the push.".into());
         }
     }
-    let noun = remote.map(|r| r.noun()).unwrap_or("pull request");
+    let noun = kind.request_noun();
     let list: Vec<String> = steps.iter().enumerate().map(|(i, s)| format!("{}. {s}", i + 1)).collect();
     format!("Open a {noun} for this work:\n{}", list.join("\n"))
 }
@@ -214,7 +90,7 @@ pub fn commit_prompt(pr: i64) -> String {
 }
 
 pub fn pull_request_url(text: &str) -> Option<String> {
-    [&*PR_URL, &*MR_URL, &*BB_URL].iter().filter_map(|r| r.find(text)).min_by_key(|m| m.start()).map(|m| m.as_str().to_string())
+    PR_URL.find(text).map(|m| m.as_str().to_string())
 }
 
 pub fn is_pr_create(command: &str) -> bool {
@@ -227,11 +103,11 @@ pub fn pr_number(url: &str) -> String {
 
 pub fn pr_repo(url: &str) -> String {
     let parts: Vec<&str> = url.split('/').filter(|p| !p.is_empty()).collect();
-    if parts.len() >= 5 {
-        format!("{}/{}", parts[2], parts[3])
-    } else {
-        String::new()
+    if parts.len() < 5 {
+        return String::new();
     }
+    let end = parts.iter().rposition(|p| matches!(*p, "pull" | "pulls" | "pull-requests" | "-")).filter(|i| *i > 2).unwrap_or(4);
+    parts[2..end].join("/")
 }
 
 #[cfg(test)]
@@ -313,6 +189,7 @@ mod tests {
         assert_eq!(GitRemote::new("gitlab.com", "g/a", RemoteKind::Gitlab).new_request_url("fix"), "https://gitlab.com/g/a/-/merge_requests/new?merge_request%5Bsource_branch%5D=fix");
         assert_eq!(GitRemote::new("bitbucket.org", "acme/api", RemoteKind::Bitbucket).new_request_url("fix"), "https://bitbucket.org/acme/api/pull-requests/new?source=fix");
         assert_eq!(GitRemote::new("gitlab.com", "g/a", RemoteKind::Gitlab).noun(), "merge request");
+        assert_eq!(GitRemote::new("git.example.com", "t/a", RemoteKind::Other).new_request_url("x"), "https://git.example.com/t/a/pulls");
         assert_eq!(GitRemote::new("git.example.com", "t/a", RemoteKind::Other).web_url(), "https://git.example.com/t/a");
     }
 
@@ -350,6 +227,36 @@ mod tests {
         assert_eq!(describe("https://github.com/o/r/pull/12").repo, "o/r");
         assert_eq!(describe("https://gitlab.com/g/a/-/merge_requests/3").title(), "Merge request !3 is open");
         assert!(is_pr_create("git push -u origin HEAD -o merge_request.create"));
+        assert!(is_pr_create("glab mr create --fill"));
+    }
+
+    #[test]
+    fn open_prompt_matches_host() {
+        let lab = open_request_prompt("feat/x", Some("main"), true, 0, Some(&GitRemote::new("gitlab.com", "g/a", RemoteKind::Gitlab)));
+        assert!(lab.starts_with("Open a merge request for this work:\n1. Commit the current changes"));
+        assert!(lab.contains("glab mr create"));
+        assert!(!lab.contains("gh pr create"));
+        assert!(lab.ends_with("Reply with the merge request URL on its own line."));
+        let other = open_request_prompt("feat/x", Some("main"), true, 0, Some(&GitRemote::new("git.example.com", "t/a", RemoteKind::Other)));
+        assert!(other.starts_with("Open a pull request for this work:"));
+        assert!(other.contains("do not guess"));
+        assert!(!other.contains("gh pr create"));
+    }
+
+    #[test]
+    fn finds_requests_on_other_hosts() {
+        let lab = "https://gitlab.com/group/sub/app/-/merge_requests/12";
+        assert_eq!(pull_request_url(&format!("done: {lab} ok")).as_deref(), Some(lab));
+        assert_eq!(pr_number(lab), "12");
+        assert_eq!(pr_repo(lab), "group/sub/app");
+        assert!(describe(lab).merge_request);
+        let bucket = "https://bitbucket.org/team/app/pull-requests/3";
+        assert_eq!(pull_request_url(bucket).as_deref(), Some(bucket));
+        assert_eq!(pr_repo(bucket), "team/app");
+        assert_eq!(describe(bucket).repo, "team/app");
+        assert_eq!(pull_request_url("https://github.com/acme/app/pull/7").as_deref(), Some("https://github.com/acme/app/pull/7"));
+        assert!(!describe("https://github.com/acme/app/pull/7").merge_request);
+        assert_eq!(pull_request_url("https://gitlab.com/group/app/-/issues/4"), None);
         assert!(is_pr_create("glab mr create --fill"));
     }
 }

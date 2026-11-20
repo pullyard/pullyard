@@ -49,6 +49,10 @@ pub fn reset() {
     set(1.0);
 }
 
+pub fn set_scale(value: f64) {
+    set(nearest(value));
+}
+
 fn set(value: f64) {
     if (value - scale()).abs() < 0.001 {
         return;

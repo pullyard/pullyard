@@ -39,7 +39,6 @@ pub struct FilesTab {
     view: gtk::ListView,
     file_list: gtk::ListBox,
     file_keys: RefCell<Vec<String>>,
-    side: gtk::Box,
     filter: RefCell<String>,
     viewed_label: gtk::Label,
     scope_box: gtk::Box,
@@ -50,7 +49,33 @@ pub struct FilesTab {
     expanded_threads: RefCell<std::collections::HashMap<String, bool>>,
     pending_reveal: RefCell<Option<String>>,
     suppress_select: Cell<bool>,
+    notices: gtk::Box,
+    empty: gtk::Box,
+    empty_key: RefCell<String>,
+    list_toggle: gtk::ToggleButton,
+    filter_entry: gtk::SearchEntry,
     owner_badges: RefCell<std::collections::HashMap<String, OwnerBadge>>,
+}
+
+fn notice(icon_name: &str, color: &str, text: &str, detail: Option<&str>, action: &str, run: impl Fn() + 'static) -> gtk::Box {
+    let row = hbox(8);
+    row.add_css_class("diff-review-bar");
+    row.add_css_class(&format!("bg-{color}"));
+    let glyph = colored_icon(icon_name, 14, color);
+    decorative(&glyph);
+    row.append(&glyph);
+    let l = wrap_label(text, &["sy-text", "sy-small"]);
+    l.set_xalign(0.0);
+    l.set_hexpand(true);
+    row.append(&l);
+    let b = button(action);
+    b.set_valign(gtk::Align::Center);
+    b.connect_clicked(move |_| run());
+    row.append(&b);
+    if let Some(d) = detail {
+        row.set_tooltip_text(Some(d));
+    }
+    row
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -212,6 +237,14 @@ impl FilesTab {
 
         let review_bar = hbox(10);
         review_bar.add_css_class("diff-review-bar");
+        let show_list = crate::settings::read(|s| s.files_show_list);
+        let list_toggle = gtk::ToggleButton::new();
+        list_toggle.set_icon_name("sidebar-show-symbolic");
+        list_toggle.add_css_class("flat");
+        list_toggle.set_active(show_list);
+        list_toggle.set_tooltip_text(Some(if show_list { "Hide file list" } else { "Show file list" }));
+        set_label(&list_toggle, "File list");
+        review_bar.append(&list_toggle);
         let file_nav = hbox(2);
         let prev_file = nav_button("go-up-symbolic", "Previous file", "P");
         let next_file = nav_button("go-down-symbolic", "Next file", "N");
@@ -251,9 +284,16 @@ impl FilesTab {
 
         let diff_column = vbox(0);
         diff_column.append(&review_bar);
+        let notices = vbox(0);
+        notices.set_visible(false);
+        diff_column.append(&notices);
         let banner = vbox(0);
         banner.set_visible(false);
         diff_column.append(&banner);
+        let empty = vbox(0);
+        empty.set_vexpand(true);
+        empty.set_visible(false);
+        diff_column.append(&empty);
         diff_column.append(&diff_scroll);
         diff_column.append(&hscroll.bar);
         let diff_area = adw::BreakpointBin::new();
@@ -264,6 +304,16 @@ impl FilesTab {
         let side = vbox(0);
         side.add_css_class("sy-list-pane");
         side.set_size_request(260, -1);
+        side.set_visible(show_list);
+        let toggled_side = side.clone();
+        list_toggle.connect_toggled(move |t| {
+            let on = t.is_active();
+            toggled_side.set_visible(on);
+            t.set_tooltip_text(Some(if on { "Hide file list" } else { "Show file list" }));
+            if crate::settings::read(|s| s.files_show_list != on) {
+                crate::settings::update(|s| s.files_show_list = on);
+            }
+        });
         let filter_row = hbox(6);
         pad(&filter_row, 8);
         let filter = gtk::SearchEntry::new();
@@ -313,7 +363,6 @@ impl FilesTab {
             view,
             file_list: file_list.clone(),
             file_keys: RefCell::new(vec![]),
-            side,
             filter: RefCell::new(String::new()),
             viewed_label,
             scope_box,
@@ -325,6 +374,11 @@ impl FilesTab {
             pending_reveal: RefCell::new(None),
             owner_badges: RefCell::new(std::collections::HashMap::new()),
             suppress_select: Cell::new(false),
+            notices,
+            empty,
+            empty_key: RefCell::new(String::new()),
+            list_toggle,
+            filter_entry: filter.clone(),
         });
 
         factory.connect_setup(|_, item| {
@@ -526,6 +580,8 @@ impl FilesTab {
         self.sync_scope();
         let filter = self.filter.borrow().clone();
         let flat = m.flat_rows(&filter);
+        self.sync_notices();
+        self.sync_empty(flat.is_empty(), &filter);
         let wrap = diff_view::wrap();
         let split = self.split_active();
         let rows: Vec<ViewRow> = if split { split_rows(flat, &m.displayed_files()) } else { flat.into_iter().map(ViewRow::Flat).collect() };
@@ -565,6 +621,54 @@ impl FilesTab {
         if let Some(p) = self.pending_reveal.borrow_mut().take() {
             let me = self.clone();
             glib::idle_add_local_once(move || me.reveal(&p));
+        }
+    }
+
+    fn sync_notices(&self) {
+        let m = &self.model;
+        clear(&self.notices);
+        if let Some(e) = m.files_error.borrow().clone() {
+            let mm = m.clone();
+            self.notices.append(&notice("dialog-warning-symbolic", "amber", "Couldn't refresh the diff — it may be out of date", Some(&e), "Retry", move || {
+                let mm = mm.clone();
+                crate::rt::spawn_local(async move { mm.load_files(true).await });
+            }));
+        }
+        let hidden = m.hidden_thread_count();
+        if hidden > 0 {
+            let shown = m.pr.borrow().as_ref().map(|p| (p.review_threads.nodes.len(), format!("{}/files", p.url)));
+            if let Some((count, url)) = shown {
+                self.notices.append(&notice("sy-comment-symbolic", "sky", &format!("Showing the first {count} review threads — {hidden} more are only on the web"), None, "Open in browser", move || util::open_url(&url)));
+            }
+        }
+        self.notices.set_visible(self.notices.first_child().is_some());
+    }
+
+    fn sync_empty(&self, no_rows: bool, filter: &str) {
+        let m = &self.model;
+        let since = m.diff_scope.get() == DiffScope::SinceReview;
+        let total = m.displayed_files().len();
+        let waiting = since && (m.interdiff_loading.get() || m.interdiff_error.borrow().is_some());
+        let key = if total == 0 && !waiting {
+            if since { "since".to_string() } else { "none".to_string() }
+        } else if total > 0 && no_rows {
+            format!("filter:{filter}")
+        } else {
+            String::new()
+        };
+        self.empty.set_visible(!key.is_empty());
+        self.diff_scroll.set_visible(key.is_empty());
+        if self.empty_key.replace(key.clone()) == key {
+            return;
+        }
+        match key.as_str() {
+            "" => clear(&self.empty),
+            "since" => set_status(&self.empty, &empty_note("No changes since your review", Some("Switch to All changes to see the whole diff."))),
+            "none" => set_status(&self.empty, &empty_note("No files changed", Some("This pull request doesn’t change any files."))),
+            _ => {
+                let entry = self.filter_entry.clone();
+                set_status(&self.empty, &no_matches(filter, move || entry.set_text("")));
+            }
         }
     }
 
@@ -714,6 +818,7 @@ impl FilesTab {
             let Some(anchor) = line.anchor_line() else { return };
             *m.composer.borrow_mut() = Some(DiffAnchor { path: path.clone(), line: anchor, side: line.anchor_side().to_string() });
             m.composer_text.borrow_mut().clear();
+            m.save_drafts_now();
             m.emit(Change::Diff);
         }))
     }
@@ -983,6 +1088,15 @@ impl FilesTab {
             self.file_list.append(&row);
             keys.push(f.id.clone());
         }
+        if keys.is_empty() {
+            let row = gtk::ListBoxRow::new();
+            row.set_selectable(false);
+            row.set_activatable(false);
+            let note = label_with(if files.is_empty() { "No files" } else { "No files match" }, &["sy-muted", "sy-small"]);
+            pad(&note, 10);
+            row.set_child(Some(&note));
+            self.file_list.append(&row);
+        }
         *self.file_keys.borrow_mut() = keys;
         self.suppress_select.set(false);
     }
@@ -1084,7 +1198,7 @@ impl FilesTab {
         b.append(&viewed);
         let menu = Menu::new();
         let id = f.id.clone();
-        menu.item("Copy file path", move || util::copy(&id));
+        menu.item("Copy file path", move || crate::app::copy(&id, "Copied file path"));
         if f.status != "removed" && m.features.blame {
             let mm = m.clone();
             let id = f.id.clone();
@@ -1093,8 +1207,8 @@ impl FilesTab {
                 None => crate::app::toast("Blame unavailable for this file"),
             });
         }
-        let side = self.side.clone();
-        menu.item(if self.side.is_visible() { "Hide file list" } else { "Show file list" }, move || side.set_visible(!side.is_visible()));
+        let list_toggle = self.list_toggle.clone();
+        menu.item(if self.list_toggle.is_active() { "Hide file list" } else { "Show file list" }, move || list_toggle.set_active(!list_toggle.is_active()));
         let mm = m.clone();
         menu.item("Collapse all", move || {
             let all: std::collections::HashSet<String> = mm.displayed_files().iter().map(|f| f.id.clone()).collect();
@@ -1207,7 +1321,7 @@ impl FilesTab {
                 meta.append(&label_with(c.author.as_ref().map(|a| a.login.as_str()).unwrap_or("ghost"), &["sy-bold", "sy-small", "sy-text"]));
                 meta.append(&label_with(&format!("· {}", util::rel(Some(c.created_at))), &["sy-muted", "sy-small"]));
                 col.append(&meta);
-                col.append(&crate::ui::markdown::inline_label(&c.body));
+                col.append(&crate::ui::markdown::view(&c.body));
                 row.append(&col);
                 card.append(&row);
             }
@@ -1216,6 +1330,19 @@ impl FilesTab {
                 let reply_box = vbox(6);
                 pad(&reply_box, 8);
                 let composer = Composer::new("Reply", 50);
+                let draft = self.model.reply_drafts.borrow().get(&t.id).cloned().unwrap_or_default();
+                let has_draft = !draft.trim().is_empty();
+                if has_draft {
+                    composer.set_text(&draft);
+                }
+                let draft_model = self.model.clone();
+                let draft_id = t.id.clone();
+                let draft_comp = Rc::downgrade(&composer);
+                composer.on_changed(move || {
+                    if let Some(c) = draft_comp.upgrade() {
+                        draft_model.set_reply_draft(&draft_id, &c.text());
+                    }
+                });
                 let actions = hbox(6);
                 actions.set_halign(gtk::Align::End);
                 let cancel = button("Cancel");
@@ -1228,6 +1355,10 @@ impl FilesTab {
                 let start = link_button("Reply…");
                 start.set_halign(gtk::Align::Start);
                 margins(&start, 4, 6, 4, 6);
+                if has_draft {
+                    reply_box.set_visible(true);
+                    start.set_visible(false);
+                }
                 let rb = reply_box.clone();
                 let st = start.clone();
                 let comp = Rc::downgrade(&composer);
@@ -1240,9 +1371,13 @@ impl FilesTab {
                 });
                 let rb = reply_box.clone();
                 let st = start.clone();
+                let cancel_comp = Rc::downgrade(&composer);
                 cancel.connect_clicked(move |_| {
                     rb.set_visible(false);
                     st.set_visible(true);
+                    if let Some(c) = cancel_comp.upgrade() {
+                        c.set_text("");
+                    }
                 });
                 let m = self.model.clone();
                 let id = t.id.clone();
@@ -1278,15 +1413,39 @@ impl FilesTab {
         card.add_css_class("pending");
         pad(&card, 10);
         card.append(&chip("pending", "amber", None, false));
-        let body = crate::ui::markdown::inline_label(&p.body);
+        let body = crate::ui::markdown::view(&p.body);
         body.set_hexpand(true);
         card.append(&body);
+        let edit = icon_button("document-edit-symbolic", "Edit pending comment");
+        edit.set_valign(gtk::Align::Start);
+        let m = self.model.clone();
+        let target = p.clone();
+        edit.connect_clicked(move |_| {
+            let open = m.composer.borrow().clone();
+            if let Some(open) = open {
+                if !m.composer_text.borrow().trim().is_empty() {
+                    crate::app::toast(&format!("Finish or cancel the comment on line {} first", open.line));
+                    return;
+                }
+            }
+            m.pending.borrow_mut().retain(|x| x.id != target.id);
+            *m.composer_text.borrow_mut() = target.body.clone();
+            *m.composer.borrow_mut() = Some(DiffAnchor { path: target.path.clone(), line: target.line, side: target.side.clone() });
+            m.save_drafts_now();
+            m.emit(Change::Diff);
+        });
+        card.append(&edit);
         let del = icon_button("user-trash-symbolic", "Delete pending comment");
+        del.set_valign(gtk::Align::Start);
         let m = self.model.clone();
         let id = p.id.clone();
         del.connect_clicked(move |_| {
-            m.pending.borrow_mut().retain(|x| x.id != id);
-            m.emit(Change::Diff);
+            let (m, id) = (m.clone(), id.clone());
+            crate::ui::dialogs::confirm("Delete this pending comment?", None, "Delete", true, move || {
+                m.pending.borrow_mut().retain(|x| x.id != id);
+                m.save_drafts_now();
+                m.emit(Change::Diff);
+            });
         });
         card.append(&del);
         card
@@ -1303,6 +1462,7 @@ impl FilesTab {
         composer.on_changed(move || {
             if let Some(c) = c2.upgrade() {
                 *m.composer_text.borrow_mut() = c.text();
+                m.drafts_changed();
             }
         });
         card.append(&composer.widget);
@@ -1312,6 +1472,7 @@ impl FilesTab {
         cancel.connect_clicked(move |_| {
             *m.composer.borrow_mut() = None;
             m.composer_text.borrow_mut().clear();
+            m.save_drafts_now();
             m.emit(Change::Diff);
         });
         actions.append(&cancel);

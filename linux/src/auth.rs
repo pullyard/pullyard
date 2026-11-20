@@ -122,9 +122,33 @@ fn str_field(obj: &Value, k: &str) -> Option<String> {
     obj.get(k).and_then(|v| v.as_str()).map(|s| s.to_string())
 }
 
+pub fn friendly_device_error(code: &str, description: Option<&str>) -> String {
+    match code {
+        "access_denied" => "Sign-in was cancelled in the browser.".into(),
+        "expired_token" => "The sign-in code expired. Request a new code and try again.".into(),
+        "incorrect_client_credentials" | "invalid_client" | "unauthorized_client" => "The client ID was not accepted. Check it in Preferences.".into(),
+        "device_flow_disabled" => "Device sign-in is turned off for this OAuth app. Enable it in the app's settings or sign in with a token.".into(),
+        "incorrect_device_code" | "invalid_grant" => "The sign-in code is no longer valid. Request a new code and try again.".into(),
+        _ => match description.filter(|d| !d.trim().is_empty()) {
+            Some(d) => d.to_string(),
+            None => {
+                let words = code.replace('_', " ");
+                let mut chars = words.chars();
+                match chars.next() {
+                    Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
+                    None => "Sign-in failed.".into(),
+                }
+            }
+        },
+    }
+}
+
 pub async fn device_start(client_id: String, endpoint: Endpoint) -> ApiResult<DeviceCode> {
     let obj = post(&endpoint.code_url, &[("client_id", &client_id), ("scope", &endpoint.scopes)], &endpoint.service).await?;
-    if let Some(e) = str_field(&obj, "error_description").or_else(|| str_field(&obj, "error")) {
+    if let Some(e) = str_field(&obj, "error") {
+        return Err(ApiError::new(friendly_device_error(&e, str_field(&obj, "error_description").as_deref())));
+    }
+    if let Some(e) = str_field(&obj, "error_description") {
         return Err(ApiError::new(e));
     }
     match (str_field(&obj, "device_code"), str_field(&obj, "user_code"), str_field(&obj, "verification_uri")) {
@@ -169,11 +193,11 @@ pub async fn device_poll(client_id: String, code: DeviceCode, endpoint: Endpoint
         match obj.get("error").and_then(|v| v.as_str()) {
             Some("authorization_pending") => continue,
             Some("slow_down") => interval += 5,
-            Some(e) => return Err(ApiError::new(obj.get("error_description").and_then(|v| v.as_str()).unwrap_or(e))),
+            Some(e) => return Err(ApiError::new(friendly_device_error(e, obj.get("error_description").and_then(|v| v.as_str())))),
             None => return Err(ApiError::new(format!("Unexpected response from {}", endpoint.service))),
         }
     }
-    Err(ApiError::new("Timed out"))
+    Err(ApiError::new("The sign-in code expired before it was confirmed. Request a new code and try again."))
 }
 
 pub async fn refresh(client_id: &str, refresh_token: &str, endpoint: &Endpoint) -> ApiResult<DeviceToken> {
@@ -195,6 +219,18 @@ mod tests {
         let gl = Endpoint::for_provider(GitProvider::Gitlab, "gitlab.example.com");
         assert_eq!(gl.code_url, "https://gitlab.example.com/oauth/authorize_device");
         assert_eq!(gl.scopes, "api");
+    }
+
+    #[test]
+    fn device_errors_read_as_sentences() {
+        assert_eq!(friendly_device_error("access_denied", Some("The user has denied your application access.")), "Sign-in was cancelled in the browser.");
+        assert!(friendly_device_error("expired_token", None).contains("expired"));
+        assert!(friendly_device_error("invalid_client", None).contains("client ID"));
+        assert!(friendly_device_error("device_flow_disabled", None).contains("Device sign-in is turned off"));
+        assert_eq!(friendly_device_error("server_error", Some("Try later")), "Try later");
+        assert_eq!(friendly_device_error("server_error", Some("  ")), "Server error");
+        assert_eq!(friendly_device_error("unsupported_grant_type", None), "Unsupported grant type");
+        assert_eq!(friendly_device_error("", None), "Sign-in failed.");
     }
 
     #[test]

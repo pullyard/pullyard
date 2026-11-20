@@ -63,6 +63,7 @@ pub struct Settings {
     pub claude_effort: String,
     pub claude_mode: String,
     pub claude_idle_minutes: i64,
+    pub claude_remember_composer: bool,
     pub claude_ui: String,
     pub claude_target: String,
     pub claude_launch_mode: String,
@@ -101,6 +102,13 @@ pub struct Settings {
     pub inspector_width: Option<i32>,
     pub diff_wrap: bool,
     pub diff_split: bool,
+    pub nav_section: String,
+    pub nav_route: Option<String>,
+    pub list_state: HashMap<String, String>,
+    pub list_sort: HashMap<String, String>,
+    pub files_show_list: bool,
+    pub sidebar_width: i32,
+    pub clipboard_watch: bool,
 }
 
 impl Default for Settings {
@@ -121,6 +129,7 @@ impl Default for Settings {
             claude_effort: String::new(),
             claude_mode: "default".into(),
             claude_idle_minutes: 15,
+            claude_remember_composer: false,
             claude_ui: "chat".into(),
             claude_target: "app".into(),
             claude_launch_mode: "default".into(),
@@ -159,6 +168,13 @@ impl Default for Settings {
             inspector_width: None,
             diff_wrap: true,
             diff_split: false,
+            nav_section: String::new(),
+            nav_route: None,
+            list_state: HashMap::new(),
+            list_sort: HashMap::new(),
+            files_show_list: true,
+            sidebar_width: 0,
+            clipboard_watch: true,
         }
     }
 }

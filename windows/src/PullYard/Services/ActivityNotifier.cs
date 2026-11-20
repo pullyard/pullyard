@@ -75,7 +75,11 @@ public static class ActivityNotifier
     {
         if (ActivityTarget.Decode(action) is not { } target) return false;
         var app = AppViewModel.Shared;
-        if (app.Phase != Phase.LoggedIn) return true;
+        if (app.Phase != Phase.LoggedIn)
+        {
+            app.QueueActivity(action);
+            return true;
+        }
         if (target.Account is not null && target.Account != app.Account)
         {
             LinkBrowser.Open(target.Url);

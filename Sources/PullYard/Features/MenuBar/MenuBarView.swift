@@ -21,28 +21,51 @@ struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var rows = RowAppearTracker()
     @State private var ready = false
+    @State private var refreshing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 20, height: 20)
                 Text("PullYard").font(.syHeadline).foregroundStyle(Color.syText)
-                if let u = app.user { Text("@\(u.login)").foregroundStyle(Color.syMuted) }
+                if app.phase == .loggedIn, let subtitle = app.accountSubtitle {
+                    Text(subtitle).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.middle).help("\(app.provider.title) — \(subtitle)")
+                }
                 Spacer()
-                Button { Task { await app.refreshBadges() } } label: { Image(systemName: "arrow.clockwise").foregroundStyle(Color.syMuted) }
-                    .buttonStyle(.borderless)
-                    .help("Refresh")
-                    .accessibilityLabel("Refresh")
+                if refreshing {
+                    ProgressView().controlSize(.small).accessibilityLabel("Refreshing")
+                } else {
+                    Button {
+                        refreshing = true
+                        Task {
+                            await app.refreshBadges()
+                            refreshing = false
+                        }
+                    } label: { Image(systemName: "arrow.clockwise").foregroundStyle(Color.syMuted) }
+                        .buttonStyle(.borderless)
+                        .disabled(app.phase != .loggedIn)
+                        .help("Refresh")
+                        .accessibilityLabel("Refresh")
+                }
             }
             .padding(12)
             .background(Theme.isBrand ? Color.syBar : Color.clear)
             Rectangle().fill(Color.syLine).frame(height: 1)
             if let until = app.rateLimitedUntil {
-                Label("GitHub rate limit — live updates paused until \(until.formatted(date: .omitted, time: .shortened))", systemImage: "hourglass")
+                Label("\(app.provider.title) rate limit — live updates paused until \(until.formatted(date: .omitted, time: .shortened))", systemImage: "hourglass")
                     .font(.syCaption)
                     .foregroundStyle(Color.syMuted)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
+                Rectangle().fill(Color.syLine).frame(height: 1)
+            }
+            if let error = app.syncError, app.rateLimitedUntil == nil {
+                Label("Can't refresh — showing the last known data", systemImage: "wifi.exclamationmark")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .help(error)
                 Rectangle().fill(Color.syLine).frame(height: 1)
             }
             if let version = Updater.shared.availableVersion {
@@ -62,7 +85,7 @@ struct MenuBarView: View {
                 Rectangle().fill(Color.syLine).frame(height: 1)
             }
             if app.phase != .loggedIn {
-                Button("Sign in…") { show(nil) }.padding(12)
+                Button(app.phase == .locked ? "Unlock…" : "Sign in…") { show(nil) }.padding(12)
             } else if ready {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
@@ -77,7 +100,7 @@ struct MenuBarView: View {
                                     IconTile(systemImage: "bell.fill", color: .syAmber, size: 16)
                                     Text(app.forgeCaps.inboxTitle.flatMap { app.forge == nil ? nil : $0 } ?? "Notifications").foregroundStyle(Color.syText)
                                     Spacer()
-                                    if app.unreadCount > 0 { ChipView(text: app.unreadCount >= 50 ? "50+" : "\(app.unreadCount)", color: .syAmber) }
+                                    if app.unreadCount > 0 { ChipView(text: app.unreadCount >= GitHubAPI.notificationPageSize ? "\(GitHubAPI.notificationPageSize)+" : "\(app.unreadCount)", color: .syAmber) }
                                 }
                                 .contentShape(Rectangle())
                             }
@@ -150,7 +173,10 @@ struct MenuBarView: View {
             .accessibilityLabel(menuLabel(item))
             .contextMenu {
                 Button("Open in Browser") { openInBrowser(item.url) }
-                Button("Copy Link") { copyToPasteboard(item.url) }
+                Button("Copy Link") {
+                    copyToPasteboard(item.url, announce: false)
+                    app.showToast("Copied link")
+                }
                 if app.forge == nil {
                     Button("Copy Short Link") { app.copyShortLink(item.ref) }
                 }
@@ -170,13 +196,14 @@ struct MenuBarView: View {
     private func open(_ item: SearchItem) {
         guard app.forge != nil else { return show(item.route) }
         openWindow(id: "main")
+        if app.section == .claude || app.section == nil { app.section = .prs(app.forgeCaps.pullFilters.first ?? .mine) }
         app.forgeSelection = item
         NSApp.activate(ignoringOtherApps: true)
     }
 
     private func show(_ route: Route?) {
         openWindow(id: "main")
-        if let route { app.select(route) }
+        if let route { app.open(route) }
         NSApp.activate(ignoringOtherApps: true)
     }
 }

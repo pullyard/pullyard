@@ -20,6 +20,8 @@ final class ChatTextView: NSTextView {
         super.keyDown(with: event)
     }
 
+    override var acceptableDragTypes: [NSPasteboard.PasteboardType] { [.string] }
+
     override func paste(_ sender: Any?) {
         let pb = NSPasteboard.general
         if let png = pb.data(forType: .png) {
@@ -139,19 +141,26 @@ struct CompletionItem: Identifiable, Hashable {
 }
 
 struct ChatComposer: View {
+    @Environment(\.openSettings) private var openSettings
+    @State private var historyIndex: Int?
     let tab: ClaudeTab
     let chat: ChatSession
-    @State private var text = ""
+    private var text: String {
+        get { chat.draftText }
+        nonmutating set { chat.draftText = newValue }
+    }
+    private var images: [ChatImage] {
+        get { chat.draftImages }
+        nonmutating set { chat.draftImages = newValue }
+    }
     @State private var height: CGFloat = 34
     @State private var caret = 0
-    @State private var images: [ChatImage] = []
     @State private var completion: CompletionKind?
     @State private var query = ""
     @State private var selected = 0
     @State private var files: [String] = []
     @State private var focusToken = 0
     @State private var completionMemo = CompletionMemo()
-    @State private var dropTarget = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -198,8 +207,8 @@ struct ChatComposer: View {
                     }
                 }
                 ZStack(alignment: .topLeading) {
-                    ChatInputView(text: $text, height: $height, caret: $caret, focusToken: focusToken, onSubmit: submit, onKey: handleKey, onPasteImage: { data, type in
-                        images.append(ChatImage(data: data, mediaType: type))
+                    ChatInputView(text: Binding(get: { chat.draftText }, set: { chat.draftText = $0 }), height: $height, caret: $caret, focusToken: focusToken, onSubmit: submit, onKey: handleKey, onPasteImage: { data, type in
+                        attach(ChatImage(data: data, mediaType: type))
                     })
                     .frame(height: height)
                     if text.isEmpty {
@@ -214,23 +223,6 @@ struct ChatComposer: View {
             }
             .padding(10)
             .card(radius: 12)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(LinearGradient(colors: [BrandMark.violet, BrandMark.sky], startPoint: .leading, endPoint: .trailing), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
-                    .opacity(dropTarget ? 1 : 0)
-            )
-            .overlay {
-                if dropTarget {
-                    Label("Drop images to attach, files to mention", systemImage: "arrow.down.doc")
-                        .font(.syCallout.weight(.medium))
-                        .foregroundStyle(Color.syText)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(.regularMaterial))
-                        .transition(.opacity)
-                }
-            }
-            .animation(Motion.fade, value: dropTarget)
             .padding(12)
         }
         .onChange(of: text) { updateCompletion() }
@@ -242,20 +234,10 @@ struct ChatComposer: View {
             focusToken += 1
             chat.draftRequest = nil
         }
-        .onDrop(of: [.fileURL, .image], isTargeted: $dropTarget) { providers in
-            for p in providers {
-                if p.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                    _ = p.loadObject(ofClass: URL.self) { url, _ in
-                        guard let url else { return }
-                        DispatchQueue.main.async { dropped(url) }
-                    }
-                } else {
-                    _ = p.loadDataRepresentation(for: .png) { data, _ in
-                        if let data { DispatchQueue.main.async { images.append(ChatImage(data: data, mediaType: "image/png")) } }
-                    }
-                }
-            }
-            return true
+        .onChange(of: chat.droppedItems.count) { consumeDrops() }
+        .onAppear {
+            caret = (text as NSString).length
+            consumeDrops()
         }
         .background {
             Button("") { cycleMode() }.keyboardShortcut(.tab, modifiers: .shift).hidden()
@@ -267,8 +249,10 @@ struct ChatComposer: View {
         HStack(spacing: 8) {
             Menu {
                 ForEach(ClaudeMode.allCases) { m in
-                    Button { chat.setPermissionMode(m.rawValue) } label: { checked(m.title, chat.permissionMode == m.rawValue) }
+                    Button { pickMode(m.rawValue) } label: { checked(m.title, chat.permissionMode == m.rawValue) }
                 }
+                defaultsFooter(isDefault: defaults.mode.rawValue == chat.permissionMode) { defaults.adopt(mode: chat.permissionMode) }
+                permissionRuleItems
             } label: {
                 Label(modeTitle, systemImage: modeIcon)
             }
@@ -277,8 +261,9 @@ struct ChatComposer: View {
             .help("Permission mode (⇧⇥ to cycle)")
             Menu {
                 ForEach(chat.models) { m in
-                    Button { chat.setModel(m.value) } label: { checked("\(m.displayName) — \(m.description)", chat.modelValue == m.value) }
+                    Button { pickModel(m.value) } label: { checked(m.description.isEmpty ? m.displayName : "\(m.displayName) — \(m.description)", chat.modelValue == m.value) }
                 }
+                defaultsFooter(isDefault: defaults.model == (chat.modelValue == "default" ? "" : chat.modelValue)) { defaults.adopt(model: chat.modelValue) }
             } label: {
                 Label(modelTitle, systemImage: "cpu")
             }
@@ -287,16 +272,57 @@ struct ChatComposer: View {
             .disabled(chat.models.isEmpty)
             if !effortLevels.isEmpty {
                 Menu {
-                    Button { chat.setEffort("") } label: { checked("Default", chat.effort.isEmpty) }
+                    Button { pickEffort("") } label: { checked("Default", chat.effort.isEmpty) }
                     ForEach(effortLevels, id: \.self) { e in
-                        Button { chat.setEffort(e) } label: { checked(e, chat.effort == e) }
+                        Button { pickEffort(e) } label: { checked(e, chat.effort == e) }
                     }
+                    defaultsFooter(isDefault: defaults.effort.rawValue == chat.effort) { defaults.adopt(effort: chat.effort) }
                 } label: {
                     Label(chat.effort.isEmpty ? "effort" : chat.effort, systemImage: "gauge.with.dots.needle.50percent")
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
             }
+            if !chat.mcpServers.isEmpty {
+                let broken = chat.mcpServers.filter { !$0.healthy && !$0.pending }
+                Menu {
+                    ForEach(chat.mcpServers) { server in
+                        Text("\(server.healthy ? "●" : server.pending ? "◌" : "▲") \(server.name) — \(server.title)")
+                    }
+                    if !broken.isEmpty {
+                        Divider()
+                        Text("Run /mcp in a terminal session to sign in or fix a server")
+                    }
+                } label: {
+                    Label(broken.isEmpty ? "\(chat.mcpServers.count)" : "\(broken.count) down", systemImage: broken.isEmpty ? "puzzlepiece.extension" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(broken.isEmpty ? Color.syMuted : Color.syAmber)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help(broken.isEmpty ? "MCP servers: all connected" : "MCP servers: \(broken.map(\.name).joined(separator: ", ")) not connected")
+                .accessibilityLabel("MCP servers")
+            }
+            Menu {
+                let saved = PromptLibrary.shared.prompts
+                ForEach(saved) { prompt in
+                    Button(prompt.title) { insertSaved(prompt) }
+                }
+                if !saved.isEmpty { Divider() }
+                Button("Save current text as a prompt") { PromptLibrary.shared.add(text: text) }
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Manage saved prompts…") {
+                    UserDefaults.standard.set("agents", forKey: "settings.tab")
+                    openSettings()
+                }
+            } label: {
+                Image(systemName: "bookmark")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .foregroundStyle(Color.syMuted)
+            .help("Saved prompts")
+            .accessibilityLabel("Saved prompts")
             Button { attachImage() } label: { Image(systemName: "photo.badge.plus") }
                 .buttonStyle(.borderless)
                 .foregroundStyle(Color.syMuted)
@@ -322,6 +348,12 @@ struct ChatComposer: View {
         .font(.syCaption)
         .controlSize(.small)
         .animation(Motion.smooth, value: chat.busy)
+    }
+
+    private func insertSaved(_ prompt: SavedPrompt) {
+        let current = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        text = current.isEmpty ? prompt.text : current + "\n\n" + prompt.text
+        focusToken += 1
     }
 
     private func dictate() {
@@ -350,15 +382,57 @@ struct ChatComposer: View {
         chat.models.first { $0.value == chat.modelValue }?.efforts ?? chat.models.first?.efforts ?? []
     }
 
+    private var defaults: AgentDefaults { AgentDefaults.shared }
+
+    private func pickMode(_ value: String) {
+        chat.setPermissionMode(value)
+        defaults.composerChanged(mode: value)
+    }
+
+    private func pickModel(_ value: String) {
+        chat.setModel(value)
+        defaults.composerChanged(model: value)
+    }
+
+    private func pickEffort(_ value: String) {
+        chat.setEffort(value)
+        defaults.composerChanged(effort: value)
+    }
+
+    @ViewBuilder
+    private func defaultsFooter(isDefault: Bool, adopt: @escaping () -> Void) -> some View {
+        Divider()
+        if isDefault {
+            Text("Default for new chats")
+        } else {
+            Button("Use for new chats", action: adopt)
+        }
+        Button("Agent Settings…") {
+            UserDefaults.standard.set("agents", forKey: "settings.tab")
+            openSettings()
+        }
+    }
+
+    @ViewBuilder
+    private var permissionRuleItems: some View {
+        let project = URL(fileURLWithPath: chat.folder).appendingPathComponent(".claude/settings.local.json")
+        let user = URL(fileURLWithPath: chat.configDir ?? ClaudeProfiles.shared.configDir()).appendingPathComponent("settings.json")
+        Divider()
+        Button("Saved rules for this project…") { NSWorkspace.shared.open(project) }
+            .disabled(!FileManager.default.fileExists(atPath: project.path))
+        Button("Saved rules for all projects…") { NSWorkspace.shared.open(user) }
+            .disabled(!FileManager.default.fileExists(atPath: user.path))
+    }
+
     @ViewBuilder
     private func checked(_ title: String, _ on: Bool) -> some View {
         if on { Label(title, systemImage: "checkmark") } else { Text(title) }
     }
 
     private func cycleMode() {
-        let order = ["default", "acceptEdits", "plan"]
+        let order = ClaudeMode.allCases.map(\.rawValue)
         let i = order.firstIndex(of: chat.permissionMode) ?? 0
-        chat.setPermissionMode(order[(i + 1) % order.count])
+        pickMode(order[(i + 1) % order.count])
     }
 
     private func submit() {
@@ -382,6 +456,9 @@ struct ChatComposer: View {
             if chat.busy { chat.interrupt(); return true }
             return false
         }
+        if completion == nil, e.keyCode == 126 || e.keyCode == 125 {
+            return recallPrompt(older: e.keyCode == 126)
+        }
         guard completion != nil, !completionItems.isEmpty else { return false }
         switch e.keyCode {
         case 125: selected = min(selected + 1, completionItems.count - 1); return true
@@ -391,6 +468,32 @@ struct ChatComposer: View {
             return true
         default: return false
         }
+    }
+
+    private func recallPrompt(older: Bool) -> Bool {
+        let history = chat.sentPrompts
+        guard !history.isEmpty else { return false }
+        if let index = historyIndex, history.indices.contains(index), history[index] == text {
+            let next = index + (older ? -1 : 1)
+            if next < 0 { return true }
+            if next >= history.count {
+                historyIndex = nil
+                text = ""
+                caret = 0
+                return true
+            }
+            show(history[next], at: next)
+            return true
+        }
+        guard older, text.isEmpty else { return false }
+        show(history[history.count - 1], at: history.count - 1)
+        return true
+    }
+
+    private func show(_ prompt: String, at index: Int) {
+        historyIndex = index
+        text = prompt
+        caret = (prompt as NSString).length
     }
 
     private var tokenRange: NSRange? {
@@ -497,14 +600,27 @@ struct ChatComposer: View {
         }
     }
 
+    private func consumeDrops() {
+        guard !chat.droppedItems.isEmpty else { return }
+        let items = chat.droppedItems
+        chat.droppedItems = []
+        for item in items {
+            switch item {
+            case .file(let url): dropped(url)
+            case .image(let data, let type): attach(ChatImage(data: data, mediaType: type))
+            }
+        }
+        focusToken += 1
+    }
+
     private func dropped(_ url: URL) {
         let ext = url.pathExtension.lowercased()
         if ["png", "jpg", "jpeg", "gif", "webp", "heic"].contains(ext), let data = try? Data(contentsOf: url) {
             let type = ext == "jpg" ? "image/jpeg" : "image/" + ext
             if ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "gif" || ext == "webp" {
-                images.append(ChatImage(data: data, mediaType: type))
+                attach(ChatImage(data: data, mediaType: type))
             } else if let rep = NSBitmapImageRep(data: data), let png = rep.representation(using: .png, properties: [:]) {
-                images.append(ChatImage(data: png, mediaType: "image/png"))
+                attach(ChatImage(data: png, mediaType: "image/png"))
             }
             return
         }
@@ -521,12 +637,15 @@ struct ChatComposer: View {
         panel.allowedContentTypes = [.png, .jpeg, .gif, .webP]
         panel.allowsMultipleSelection = true
         guard panel.runModal() == .OK else { return }
-        for url in panel.urls {
-            if let data = try? Data(contentsOf: url) {
-                let ext = url.pathExtension.lowercased()
-                images.append(ChatImage(data: data, mediaType: ext == "png" ? "image/png" : ext == "gif" ? "image/gif" : ext == "webp" ? "image/webp" : "image/jpeg"))
-            }
+        for url in panel.urls { dropped(url) }
+    }
+
+    private func attach(_ image: ChatImage) {
+        guard let fitted = ChatImage.fitted(image) else {
+            chat.items.append(.notice(id: UUID().uuidString, text: "Image is too large to attach, even after downscaling", isError: true))
+            return
         }
+        images.append(fitted)
     }
 }
 

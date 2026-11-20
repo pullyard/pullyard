@@ -169,6 +169,12 @@ struct ForgeListView: View {
                 } else {
                     ForEach(items) { row($0, showRepo: true) }
                 }
+                if model.items.count >= ForgeLimits.listCap {
+                    Text("Showing the \(ForgeLimits.listCap) most recently updated. Older ones are on \(app.forge?.host ?? "the web").")
+                        .font(.syCaption)
+                        .foregroundStyle(Color.syMuted)
+                        .selectionDisabled()
+                }
             }
             .opacity(model.loading && !model.items.isEmpty ? 0.55 : 1)
             .animation(.easeOut(duration: 0.15), value: model.loading)
@@ -188,7 +194,7 @@ struct ForgeListView: View {
         }
         .toolbarSearch(text: $text, prompt: "Filter: title, repository, author")
         .navigationTitle(kind.title(app.provider))
-        .navigationSubtitle(items.isEmpty ? "" : "\(items.count)")
+        .navigationSubtitle(items.isEmpty ? "" : plural(items.count, "result", "results") + (model.items.count >= ForgeLimits.listCap ? " (latest)" : ""))
         .task(id: "\(stateFilter.rawValue)|\(app.account?.id ?? "")") { await reload() }
         .onChange(of: app.refreshTick) { Task { await reload(silent: !model.items.isEmpty) } }
         .onLiveTick { await reload(silent: true) }
@@ -252,8 +258,8 @@ private extension ForgeDetailColumn {
     var placeholder: String {
         switch app.section {
         case .issues?: return "Select an issue"
-        case .notifications?: return "Select an item from \(app.forgeCaps.inboxTitle ?? "the inbox")"
-        case .repos?: return "Select a \(app.provider == .gitlab ? "project" : "repository")"
+        case .notifications?: return "Inbox items open in the browser — press ↩ or double-click a row"
+        case .repos?: return "\(app.provider.repositoriesTitle) open in the browser — press ↩ or double-click a row"
         default: return "Select a \(app.provider.requestTitle)"
         }
     }

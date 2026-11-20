@@ -289,9 +289,9 @@ public class GitLabReviewTests
         stub.Routes["/merge_requests/7/merge"] = (HttpStatusCode.MethodNotAllowed, """{"message":"405 Method Not Allowed"}""");
         stub.Routes["/merge_requests/7/discussions/d4"] = (HttpStatusCode.BadRequest, """{"message":{"base":["Discussion is not resolvable"]}}""");
         var merge = await Assert.ThrowsAsync<ApiException>(() => backend.Merge(Ref, pr, "MERGE", null, null, false));
-        Assert.Equal("GitLab 405: 405 Method Not Allowed", merge.Message);
+        Assert.Equal("GitLab 405: 405 Method Not Allowed", merge.Detail);
         var resolve = await Assert.ThrowsAsync<ApiException>(() => backend.SetResolved(Ref, "d4", true));
-        Assert.Equal("GitLab 400: Discussion is not resolvable", resolve.Message);
+        Assert.Equal("GitLab 400: Discussion is not resolvable", resolve.Detail);
         Assert.Equal("title is too long; is invalid", ForgeHttp.Message("""{"message":["title is too long","is invalid"]}"""u8.ToArray()));
         Assert.Equal("Discussion is locked; title is too long", ForgeHttp.Message("""{"message":{"title":["is too long"],"base":["Discussion is locked"]}}"""u8.ToArray()));
     }

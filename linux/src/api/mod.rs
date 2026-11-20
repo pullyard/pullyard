@@ -29,6 +29,12 @@ const RATE_LIMIT_MAX_PAUSE_SECS: i64 = 3600;
 const LIVE_RESOURCES: [&str; 2] = ["core", "graphql"];
 const RETRY_NOTE: &str = "retry";
 
+pub const NOTIFICATION_PAGE_SIZE: usize = 100;
+
+pub fn unreadable_message(service: &str) -> String {
+    format!("{service} sent a response {} couldn't read. Try again; if it keeps happening, check for an update.", brand::APP_NAME)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ErrorKind {
     #[default]
@@ -52,6 +58,11 @@ impl ApiError {
 
     pub fn with_status(message: impl Into<String>, status: u16) -> Self {
         ApiError { message: message.into(), status, kind: ErrorKind::Other }
+    }
+
+    pub fn unreadable(service: &str, error: impl fmt::Display) -> Self {
+        eprintln!("{service}: unreadable response: {error}");
+        ApiError::new(unreadable_message(service))
     }
 
     pub fn with_kind(mut self, kind: ErrorKind) -> Self {
@@ -497,7 +508,7 @@ impl GitHubApi {
         let bytes = net(&mut probe, resp.bytes().await)?;
         probe.body(bytes.len());
         probe.track(checked(status, &headers, &bytes, Bucket::Graphql))?;
-        let value: Value = probe.track(serde_json::from_slice(&bytes).map_err(|e| ApiError::new(format!("Failed to parse response: {e}"))))?;
+        let value: Value = probe.track(serde_json::from_slice(&bytes).map_err(|e| ApiError::unreadable("GitHub", &e)))?;
         let errors = value.get("errors").and_then(|e| e.as_array()).cloned().unwrap_or_default();
         let data = value.get("data").cloned().unwrap_or(Value::Null);
         if let Some(first) = errors.first() {
@@ -513,7 +524,7 @@ impl GitHubApi {
         }
         probe.track(serde_json::from_value::<T>(data).map_err(|e| match errors.first() {
             Some(first) => graphql_error(first, &headers),
-            None => ApiError::new(format!("Failed to parse response: {e}")),
+            None => ApiError::unreadable("GitHub", &e),
         }))
     }
 
@@ -570,7 +581,7 @@ impl GitHubApi {
 
     pub async fn rest<T: DeserializeOwned>(&self, method: Method, path: &str, body: Option<Value>) -> ApiResult<T> {
         let mut ex = self.exchange(method, path, body, None).await?;
-        ex.probe.track(serde_json::from_slice(&ex.bytes).map_err(|e| ApiError::new(format!("Failed to parse response: {e}"))))
+        ex.probe.track(serde_json::from_slice(&ex.bytes).map_err(|e| ApiError::unreadable("GitHub", &e)))
     }
 
     pub async fn rest_polled(&self, path: &str, force: bool) -> ApiResult<Vec<u8>> {
@@ -747,6 +758,15 @@ mod tests {
             h.insert(*k, HeaderValue::from_str(v).expect("header"));
         }
         h
+    }
+
+    #[test]
+    fn unreadable_responses_hide_the_decoder_dump() {
+        let err = ApiError::unreadable("GitHub", "missing field `id` at line 1 column 2");
+        assert_eq!(err.message, unreadable_message("GitHub"));
+        assert!(err.message.starts_with("GitHub sent a response"));
+        assert!(!err.message.contains("missing field"));
+        assert_eq!(err.status, 0);
     }
 
     #[test]

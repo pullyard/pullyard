@@ -57,6 +57,12 @@ pub fn review(model: Rc<PrModel>) {
     let f = model.features;
     let sheet = Sheet::new(&format!("Review {}{}", f.number_prefix(), pr.number), 560, -1);
     let pending = model.pending.borrow().len();
+    if model.restored_drafts.get() {
+        let l = hbox(6);
+        l.append(&icon("sy-clock-symbolic", 13));
+        l.append(&label_with("Restored from your last session", &["sy-muted", "sy-small"]));
+        sheet.body.append(&l);
+    }
     if pending > 0 {
         let l = hbox(6);
         l.append(&icon("sy-comment-symbolic", 13));
@@ -64,6 +70,15 @@ pub fn review(model: Rc<PrModel>) {
         sheet.body.append(&l);
     }
     let composer = Composer::new("Review summary (optional when approving)", 140);
+    composer.set_text(&model.summary_draft.borrow());
+    let draft_model = model.clone();
+    let draft_comp = Rc::downgrade(&composer);
+    composer.on_changed(move || {
+        if let Some(c) = draft_comp.upgrade() {
+            *draft_model.summary_draft.borrow_mut() = c.text();
+            draft_model.drafts_changed();
+        }
+    });
     sheet.body.append(&composer.widget);
     let comment = gtk::CheckButton::with_label("Comment — without approval");
     comment.set_active(true);
@@ -88,6 +103,8 @@ pub fn review(model: Rc<PrModel>) {
             let heading = format!("Discard {count} pending comment{}?", if count == 1 { "" } else { "s" });
             crate::ui::dialogs::confirm(&heading, Some("The inline comments you haven’t submitted yet will be lost."), "Discard", true, move || {
                 m.pending.borrow_mut().clear();
+                m.restored_drafts.set(false);
+                m.save_drafts_now();
                 m.emit(Change::Diff);
                 m.emit(Change::Pr);
                 d.close();
@@ -460,6 +477,15 @@ pub fn reply(model: Rc<PrModel>, thread: ReviewThread) {
         sheet.body.append(&row);
     }
     let composer = Composer::new("Reply (Markdown)", 120);
+    composer.set_text(model.reply_drafts.borrow().get(&thread.id).map(String::as_str).unwrap_or(""));
+    let draft_model = model.clone();
+    let draft_comp = Rc::downgrade(&composer);
+    let draft_id = thread.id.clone();
+    composer.on_changed(move || {
+        if let Some(c) = draft_comp.upgrade() {
+            draft_model.set_reply_draft(&draft_id, &c.text());
+        }
+    });
     sheet.body.append(&composer.widget);
     let done = close_on_success(&sheet);
     let send = {

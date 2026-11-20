@@ -463,7 +463,7 @@ public sealed class SessionRow : CodeRow
 
     private static FrameworkElement TreeGuide(bool last)
     {
-        var brush = Palette.Brush("text", ThemeService.IsDark ? 0.22 : 0.18);
+        var brush = Palette.Brush("lineStrong");
         var g = new Grid { Width = 12, Margin = new Thickness(8, 0, 0, 0) };
         g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });

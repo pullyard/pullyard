@@ -73,9 +73,61 @@ func openInBrowser(_ s: String?) {
     LinkBrowser.open(u)
 }
 
-func copyToPasteboard(_ s: String) {
+extension Notification.Name {
+    static let didCopyToPasteboard = Notification.Name("pullyard.didCopyToPasteboard")
+}
+
+func copyToPasteboard(_ s: String, announce: Bool = true) {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(s, forType: .string)
+    if announce { NotificationCenter.default.post(name: .didCopyToPasteboard, object: nil) }
+}
+
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+    var lineSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(subviews, width: proposal.width ?? .infinity)
+        return CGSize(width: rows.map(\.width).max() ?? 0, height: rows.last.map { $0.y + $0.height } ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for row in arrange(subviews, width: bounds.width) {
+            var x = bounds.minX
+            for index in row.items {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: bounds.minY + row.y + (row.height - size.height) / 2), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+        }
+    }
+
+    private struct Row {
+        var items: [Int] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+        var y: CGFloat = 0
+    }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> [Row] {
+        var rows: [Row] = []
+        var current = Row()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let next = current.items.isEmpty ? size.width : current.width + spacing + size.width
+            if !current.items.isEmpty, next > width {
+                rows.append(current)
+                current = Row(items: [index], width: size.width, height: size.height, y: current.y + current.height + lineSpacing)
+            } else {
+                current.items.append(index)
+                current.width = next
+                current.height = max(current.height, size.height)
+            }
+        }
+        if !current.items.isEmpty { rows.append(current) }
+        return rows
+    }
 }
 
 extension Color {
