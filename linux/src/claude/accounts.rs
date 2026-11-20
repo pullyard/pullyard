@@ -239,7 +239,9 @@ pub fn browser_command() -> String {
     if chosen != "system" && !util::is_flatpak() {
         use gtk::prelude::*;
         if let Some(info) = gtk::gio::AppInfo::all_for_type("x-scheme-handler/https").into_iter().find(|i| i.id().map(|s| s.as_str() == chosen).unwrap_or(false)) {
-            if let Some(exe) = info.executable().to_str() {
+            // gio returns PathBuf or Option<PathBuf> here depending on the resolved version
+            let exe: Option<std::path::PathBuf> = info.executable().into();
+            if let Some(exe) = exe.as_deref().and_then(|p| p.to_str()) {
                 if !exe.is_empty() {
                     return exe.to_string();
                 }

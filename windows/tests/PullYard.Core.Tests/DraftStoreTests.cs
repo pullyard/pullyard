@@ -17,7 +17,7 @@ public class DraftStoreTests : IDisposable
     {
         var key = DraftStore.Key("me", "github.com", "acme/app", 7);
         var store = new DraftStore(dir);
-        var draft = new ReviewDraft
+        var draft = new SavedReviewDraft
         {
             Pending = { new DraftComment("a/b.cs", 12, "RIGHT", "Rename this") },
             Composer = new DraftComment("a/b.cs", 20, "LEFT", "half typed"),
@@ -27,7 +27,7 @@ public class DraftStoreTests : IDisposable
         store.Save(draft, key);
         Assert.True(draft.SameAs(new DraftStore(dir).Review(key)));
         Assert.Null(new DraftStore(dir).Review(DraftStore.Key("me", "github.com", "acme/app", 8)));
-        store.Save(new ReviewDraft { Replies = { ["T1"] = "  " }, Comment = "\n" }, key);
+        store.Save(new SavedReviewDraft { Replies = { ["T1"] = "  " }, Comment = "\n" }, key);
         Assert.Null(new DraftStore(dir).Review(key));
         Assert.Empty(Directory.GetFiles(dir));
     }
@@ -64,9 +64,9 @@ public class DraftStoreTests : IDisposable
     {
         var memory = new DraftStore(null);
         var key = DraftStore.Key("me", "github.com", "acme/app", 1);
-        memory.Save(new ReviewDraft { Comment = "hello" }, key);
+        memory.Save(new SavedReviewDraft { Comment = "hello" }, key);
         Assert.Equal("hello", memory.Review(key)?.Comment);
-        memory.Save(new ReviewDraft(), key);
+        memory.Save(new SavedReviewDraft(), key);
         Assert.Null(memory.Review(key));
         var disk = new DraftStore(dir);
         disk.SetText("{not json", key);
@@ -76,9 +76,9 @@ public class DraftStoreTests : IDisposable
     [Fact]
     public void IsEmptyIgnoresWhitespace()
     {
-        Assert.True(new ReviewDraft().IsEmpty);
-        Assert.True(new ReviewDraft { Composer = new DraftComment("a", 1, "RIGHT", " "), Summary = "\t" }.IsEmpty);
-        Assert.False(new ReviewDraft { Composer = new DraftComment("a", 1, "RIGHT", "x") }.IsEmpty);
-        Assert.False(new ReviewDraft { Replies = { ["T"] = "x" } }.IsEmpty);
+        Assert.True(new SavedReviewDraft().IsEmpty);
+        Assert.True(new SavedReviewDraft { Composer = new DraftComment("a", 1, "RIGHT", " "), Summary = "\t" }.IsEmpty);
+        Assert.False(new SavedReviewDraft { Composer = new DraftComment("a", 1, "RIGHT", "x") }.IsEmpty);
+        Assert.False(new SavedReviewDraft { Replies = { ["T"] = "x" } }.IsEmpty);
     }
 }

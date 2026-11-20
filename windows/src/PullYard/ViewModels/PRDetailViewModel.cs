@@ -119,7 +119,7 @@ public sealed partial class PRDetailViewModel : ObservableObject
 
     private string DraftKey => DraftStore.Key(CacheAccount, Api?.Host ?? Provider.ToString(), Ref.Repo.Full, Ref.Number);
 
-    public ReviewDraft CurrentDraft => new()
+    public SavedReviewDraft CurrentDraft => new()
     {
         Pending = Pending.Select(p => new DraftComment(p.Path, p.Line, p.Side, p.Body)).ToList(),
         Composer = ComposerAnchor is { } a ? new DraftComment(a.Path, a.Line, a.Side, ComposerDraft) : null,

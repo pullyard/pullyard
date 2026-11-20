@@ -6,7 +6,7 @@ namespace PullYard.Core.Drafts;
 
 public sealed record DraftComment(string Path, int Line, string Side, string Body);
 
-public sealed class ReviewDraft
+public sealed class SavedReviewDraft
 {
     public List<DraftComment> Pending { get; set; } = new();
     public DraftComment? Composer { get; set; }
@@ -21,7 +21,7 @@ public sealed class ReviewDraft
         && string.IsNullOrWhiteSpace(Comment)
         && string.IsNullOrWhiteSpace(Summary);
 
-    public bool SameAs(ReviewDraft? other) =>
+    public bool SameAs(SavedReviewDraft? other) =>
         other is not null
         && Pending.SequenceEqual(other.Pending)
         && Equals(Composer, other.Composer)
@@ -100,12 +100,12 @@ public sealed class DraftStore
         }
     }
 
-    public ReviewDraft? Review(string key)
+    public SavedReviewDraft? Review(string key)
     {
         if (Read(key) is not { } data) return null;
         try
         {
-            return JsonSerializer.Deserialize<ReviewDraft>(data, Json.Plain);
+            return JsonSerializer.Deserialize<SavedReviewDraft>(data, Json.Plain);
         }
         catch
         {
@@ -113,7 +113,7 @@ public sealed class DraftStore
         }
     }
 
-    public void Save(ReviewDraft draft, string key) =>
+    public void Save(SavedReviewDraft draft, string key) =>
         Write(draft.IsEmpty ? null : JsonSerializer.SerializeToUtf8Bytes(draft, Json.Plain), key);
 
     public string Text(string key) => Read(key) is { } data ? Encoding.UTF8.GetString(data) : "";

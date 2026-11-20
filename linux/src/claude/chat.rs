@@ -1747,7 +1747,7 @@ mod tests {
                 assert_eq!(text, "Couldn't change model: Unknown model");
             }
             _ => panic!("expected a notice"),
-        }
+        };
     }
 
     #[test]
@@ -1794,7 +1794,7 @@ mod tests {
         match chat.items.borrow().last() {
             Some(ChatItem::Notice { is_error, .. }) => assert!(*is_error),
             _ => panic!("expected a notice"),
-        }
+        };
     }
 
     #[test]
