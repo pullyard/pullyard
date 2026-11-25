@@ -564,10 +564,12 @@ struct SidebarIcon: View {
             .frame(width: side, height: side)
             .accessibilityHidden(true)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.syText.opacity(0.05)))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(LinearGradient(colors: [Color.white.opacity(0.28), .clear], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.35)), lineWidth: 1)
-            )
+            .overlay {
+                if !GlassSupport.isAvailable {
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(LinearGradient(colors: [Color.white.opacity(0.28), .clear], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.35)), lineWidth: 1)
+                }
+            }
     }
 }
 

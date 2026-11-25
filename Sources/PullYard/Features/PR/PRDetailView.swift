@@ -69,10 +69,9 @@ struct PRDetailContent: View {
                 CompactPRBar(model: model, pr: pr) { expandedOverride = true }
             } else {
                 VStack(spacing: 0) {
-                    PRHeaderView(model: model, pr: pr, onMerge: { showMerge = true }, onRequestReview: { showReviewers = true }, onFixChecks: pr.isOpen ? { ciFix = CIFixRequest() } : nil, onCollapse: collapsible ? { expandedOverride = false } : nil)
+                    PRHeaderView(model: model, pr: pr, onMerge: { showMerge = true }, onRequestReview: { showReviewers = true }, onFixChecks: pr.isOpen ? { ciFix = CIFixRequest() } : nil, onRerun: canRerun ? { confirm = .rerunFailed } : nil, onCollapse: collapsible ? { expandedOverride = false } : nil)
                     ReReviewBanner(model: model, pr: pr) { showReviewers = true }
                     ClaudeFixBanner(pr: pr) { showFix = true }
-                    CIFailureBanner(model: model, pr: pr, onFix: { ciFix = CIFixRequest() }, onRerun: { confirm = .rerunFailed })
                 }
             }
             TabStrip(items: tabItems, selection: $model.tab, shortcuts: true)
@@ -263,6 +262,14 @@ struct PRDetailContent: View {
         pr.isOpen && !pr.isDraft && model.canWrite
     }
 
+    private var canRerun: Bool {
+        model.canWrite && pr.checks.contains { $0.outcome == .failure && $0.runId != nil }
+    }
+
+    private var hasFailingChecks: Bool {
+        pr.checks.contains { $0.outcome == .failure }
+    }
+
     private var mergeBlocker: MergeRequirement? {
         model.requirements.first { $0.state == .missing } ?? model.requirements.first { $0.state == .pending }
     }
@@ -307,9 +314,23 @@ struct PRDetailContent: View {
         }
         if pr.isOpen {
             ToolbarItem(id: "pr.fix", placement: .primaryAction) {
-                Button { showFix = true } label: { Label("Fix with agent", systemImage: "wrench.and.screwdriver") }
-                    .labelStyle(.titleAndIcon)
-                    .help("Send review comments to a new agent session")
+                Menu {
+                    Button("Review comments…") { showFix = true }
+                    Button("Failing checks…") { ciFix = CIFixRequest() }
+                        .disabled(!hasFailingChecks)
+                    Button("Conflicts…") { model.showResolveConflicts = true }
+                        .disabled(!MergeConflicts.applies(pr))
+                } label: {
+                    Label("Fix with agent", systemImage: "wrench.and.screwdriver")
+                } primaryAction: {
+                    if hasFailingChecks, pr.reviewThreads.nodes.allSatisfy({ $0.isResolved || $0.isOutdated }) {
+                        ciFix = CIFixRequest()
+                    } else {
+                        showFix = true
+                    }
+                }
+                .labelStyle(.titleAndIcon)
+                .help("Start an agent session: review comments, failing checks or conflicts")
             }
         }
         if canMerge {
@@ -431,6 +452,7 @@ struct PRHeaderView: View {
     let onMerge: () -> Void
     var onRequestReview: () -> Void = {}
     var onFixChecks: (() -> Void)?
+    var onRerun: (() -> Void)?
     var onCollapse: (() -> Void)?
 
     var body: some View {
@@ -485,7 +507,7 @@ struct PRHeaderView: View {
                 StackStrip(tree: tree, repo: model.ref.repo) { model.tab = .stack }
                     .transition(.opacity)
             }
-            MergeStatusBar(model: model, pr: pr, onMerge: onMerge, onRequestReview: onRequestReview, onFixChecks: onFixChecks)
+            MergeStatusBar(model: model, pr: pr, onMerge: onMerge, onRequestReview: onRequestReview, onFixChecks: onFixChecks, onRerun: onRerun)
         }
         .animation(Motion.smooth, value: model.stackTree)
         .padding(.horizontal, 16)
@@ -634,6 +656,7 @@ struct MergeStatusBar: View {
     let onMerge: () -> Void
     var onRequestReview: () -> Void = {}
     var onFixChecks: (() -> Void)?
+    var onRerun: (() -> Void)?
     @Environment(AppModel.self) private var app
     @AppStorage("pr.mergeRequirementsExpanded") private var expanded = true
     @State private var showConflicts = false
@@ -700,7 +723,7 @@ struct MergeStatusBar: View {
                     }
                 }
                 if expanded, !requirements.isEmpty {
-                    MergeRequirementsList(requirements: requirements, ownership: model.ownership, canPerform: canPerform, perform: perform, agentFix: agentFix)
+                    MergeRequirementsList(requirements: requirements, ownership: model.ownership, canPerform: canPerform, perform: perform, agentFix: agentFix, rerun: onRerun)
                         .transition(.opacity)
                 }
             }
@@ -724,7 +747,7 @@ struct MergeStatusBar: View {
     private func agentFix(_ kind: RequirementKind) -> (() -> Void)? {
         switch kind {
         case .conflicts where MergeConflicts.applies(pr): return { model.showResolveConflicts = true }
-        case .checks: return onFixChecks
+        case .checks, .optionalChecks: return onFixChecks
         default: return nil
         }
     }

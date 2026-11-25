@@ -6,6 +6,7 @@ struct MergeRequirementsList: View {
     let canPerform: (RequirementAction) -> Bool
     let perform: (RequirementAction) -> Void
     var agentFix: (RequirementKind) -> (() -> Void)? = { _ in nil }
+    var rerun: (() -> Void)?
 
     private var ordered: [MergeRequirement] {
         let rank: (RequirementState) -> Int = {
@@ -54,7 +55,13 @@ struct MergeRequirementsList: View {
                 }
             }
             Spacer(minLength: 8)
-            if r.state == .missing, let fix = agentFix(r.kind) {
+            if (r.kind == .checks || r.kind == .optionalChecks), r.state == .missing || r.state == .advisory, let rerun {
+                Button("Re-run failed", action: rerun)
+                    .font(.syCaption)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Color.syLink)
+            }
+            if r.state == .missing || (r.kind == .optionalChecks && r.state == .advisory), let fix = agentFix(r.kind) {
                 Button(r.kind == .conflicts ? "Resolve with agent" : "Fix with agent", action: fix)
                     .font(.syCaption.weight(.semibold))
                     .buttonStyle(.borderless)

@@ -424,6 +424,7 @@ struct ComposerBox: View {
         }
         .frame(minHeight: minHeight)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.sySunken))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.syLine))
     }
 }
 

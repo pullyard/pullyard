@@ -31,7 +31,7 @@ struct NotificationsView: View {
                     NotificationRow(item: n, onDone: { requestDone(n) })
                         .rowAppear(n.id, rows)
                         .tag(n.id)
-                        .simultaneousGesture(TapGesture(count: 2).onEnded { if n.route == nil { openExternal(n) } })
+                        .simultaneousGesture(TapGesture(count: 2).onEnded { open(n) })
                         .contextMenu {
                             if n.unread { Button("Mark as read") { Task { await markRead(n) } } }
                             Button("Done (remove from inbox)") { requestDone(n) }
@@ -55,8 +55,8 @@ struct NotificationsView: View {
                 }
             }
             .onKeyPress(.return) {
-                guard let n = selected, n.route == nil else { return .ignored }
-                openExternal(n)
+                guard let n = selected else { return .ignored }
+                open(n)
                 return .handled
             }
             .onKeyPress(characters: CharacterSet(charactersIn: "e")) { _ in
@@ -100,7 +100,6 @@ struct NotificationsView: View {
             guard let id, let n = items.first(where: { $0.id == id }) else { return }
             guard let route = n.route else { return }
             app.select(route)
-            if n.unread { Task { await markRead(n, quiet: true) } }
         }
         .confirmationDialog("Mark all notifications as read?", isPresented: $confirmMarkAll) {
             Button("Mark All as Read") { Task { await markAll() } }
@@ -112,6 +111,12 @@ struct NotificationsView: View {
 
     private var selected: NotificationThread? {
         selection.flatMap { id in items.first { $0.id == id } }
+    }
+
+    private func open(_ n: NotificationThread) {
+        guard let route = n.route else { return openExternal(n) }
+        app.select(route)
+        if n.unread { Task { await markRead(n, quiet: true) } }
     }
 
     private func openExternal(_ n: NotificationThread) {

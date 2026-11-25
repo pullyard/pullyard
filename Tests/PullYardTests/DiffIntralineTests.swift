@@ -30,3 +30,26 @@ final class DiffIntralineTests: XCTestCase {
         XCTAssertNil(pairs["a2"])
     }
 }
+
+final class DiffExpandTests: XCTestCase {
+    func testFullFileFillsGapsAroundHunk() {
+        let patch = "@@ -3,2 +3,2 @@\n line3\n-old4\n+new4"
+        let lines = DiffParser.parse(patch)
+        let full = DiffExpand.fullFile(lines, newText: ["line1", "line2", "line3", "new4", "line5"])
+        XCTAssertEqual(full.map(\.text), ["line1", "line2", "line3", "old4", "new4", "line5"])
+        XCTAssertEqual(full.first?.oldLine, 1)
+        XCTAssertEqual(full.first?.outsideHunk, true)
+        XCTAssertEqual(full.last?.newLine, 5)
+        XCTAssertEqual(full.last?.oldLine, 5)
+        XCTAssertFalse(full.first?.commentable ?? true)
+        XCTAssertTrue(full[2].commentable)
+    }
+
+    func testHeaderParsesCountsAndDefaults() {
+        let h = DiffExpand.header("@@ -10 +12,3 @@ func")
+        XCTAssertEqual(h?.oldStart, 10)
+        XCTAssertEqual(h?.oldCount, 1)
+        XCTAssertEqual(h?.newStart, 12)
+        XCTAssertEqual(h?.newCount, 3)
+    }
+}

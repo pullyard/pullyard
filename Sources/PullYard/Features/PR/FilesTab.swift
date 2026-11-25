@@ -583,6 +583,23 @@ struct FileHeader: View {
             .textSelection(.enabled)
             DiffStat(additions: file.additions, deletions: file.deletions)
             Spacer()
+            if model.diffScope != .sinceReview, file.hasPatch, file.status != "removed" {
+                if model.expandingFiles.contains(file.id) {
+                    PYLoader(size: 12, label: "Loading the full file")
+                } else if model.expandedFiles[file.id] != nil {
+                    Button("Show changes only") { model.collapseFile(file.id) }
+                        .buttonStyle(.link)
+                        .font(.syCaption)
+                } else {
+                    Button { Task { await model.expandFile(file) } } label: {
+                        Label("Full file", systemImage: "arrow.up.and.down.text.horizontal")
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+                    .help("Show the whole file with the changes in place")
+                }
+            }
             Toggle("Viewed", isOn: Binding(get: { viewed }, set: { _ in Task { await model.toggleViewed(file.id) } }))
                 .toggleStyle(.checkbox)
                 .controlSize(.small)
@@ -864,6 +881,11 @@ struct InlineComposer: View {
                     Button("Keep editing", role: .cancel) {}
                 }
                 Spacer()
+                if anchor.side == "RIGHT", let original = suggestionSource {
+                    Button("Suggest change") { insertSuggestion(original) }
+                        .keyboardShortcut("g", modifiers: .command)
+                        .help("Insert a suggestion block GitHub can apply (⌘G)")
+                }
                 Button("Add to review") { submit(immediately: false) }
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(empty)
@@ -885,6 +907,17 @@ struct InlineComposer: View {
     }
 
     private var empty: Bool { model.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    private var suggestionSource: String? {
+        let lines = model.expandedFiles[anchor.path] ?? model.files.first { $0.id == anchor.path }?.lines ?? []
+        return lines.first { $0.newLine == anchor.line && $0.kind != .del }?.text
+    }
+
+    private func insertSuggestion(_ original: String) {
+        let block = "```suggestion\n\(original)\n```"
+        let current = model.composerDraft
+        model.composerDraft = current.isEmpty ? block : current + "\n\n" + block
+    }
 
     private func cancel() {
         model.composerDraft = ""
