@@ -410,6 +410,7 @@ struct SearchListView: View {
     @State private var loadedText = ""
     @State private var collapsed: Set<String> = []
     @AppStorage(ListDensity.key) private var density: ListDensity = .roomy
+    @State private var showSnoozed = false
     private let memoryKey: String
 
     init(title: String, kind: String, baseQuery: String, grouped: Bool = false) {
@@ -484,7 +485,19 @@ struct SearchListView: View {
                         }
                     }
                 } else {
-                    ForEach(model.items) { row($0) }
+                    let queue = QueueStore.shared
+                    let active = model.items.filter { queue.snoozedUntil($0.ref) == nil }
+                    let sleeping = model.items.filter { queue.snoozedUntil($0.ref) != nil }
+                    ForEach(active) { row($0) }
+                    if !sleeping.isEmpty {
+                        Section(isExpanded: $showSnoozed) {
+                            ForEach(sleeping) { row($0).opacity(0.7) }
+                        } header: {
+                            Label("Snoozed · \(sleeping.count)", systemImage: "moon.zzz")
+                                .font(.syCaption.weight(.semibold))
+                                .foregroundStyle(Color.syMuted)
+                        }
+                    }
                 }
                 if let e = model.loadMoreError {
                     LoadMoreErrorRow(message: e) {
@@ -641,6 +654,22 @@ struct ItemContextMenu: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
+        let queue = QueueStore.shared
+        if let until = queue.snoozedUntil(item.ref) {
+            Button("Wake Up (snoozed until \(until.formatted(date: .abbreviated, time: .shortened)))") { queue.wake(item.ref) }
+        } else {
+            Menu("Snooze") {
+                ForEach(QueueStore.presets(), id: \.title) { preset in
+                    Button(preset.title) {
+                        queue.snooze(item.ref, until: preset.date)
+                        app.showToast("Snoozed \(ShortLink.make(item.ref))", action: ToastAction(title: "Undo") { queue.wake(item.ref) })
+                    }
+                }
+            }
+        }
+        Button("Mark as Seen") { queue.markSeen(item.ref) }
+            .disabled(!queue.hasNews(item))
+        Divider()
         Button("Open in Browser") { openInBrowser(item.url) }
         Button("Copy Link") { copyToPasteboard(item.url) }
         Button("Copy Short Link") { app.copyShortLink(item.ref) }
@@ -655,6 +684,19 @@ struct ItemRow: View {
     var showRepo = true
     var numberPrefix = "#"
     @AppStorage(ListDensity.key) private var density: ListDensity = .roomy
+
+    private var news: Bool { QueueStore.shared.hasNews(item) }
+
+    private var newsDot: some View {
+        Circle()
+            .fill(Color.syCoral)
+            .frame(width: 7, height: 7)
+            .overlay(Circle().strokeBorder(Color.syList, lineWidth: 1.5))
+            .opacity(news ? 1 : 0)
+            .help("New activity since you last opened it")
+            .accessibilityHidden(!news)
+            .accessibilityLabel("New activity")
+    }
 
     private var reference: String {
         showRepo ? "\(item.repository.nameWithOwner)\(numberPrefix)\(item.number)" : "\(numberPrefix)\(item.number)"
@@ -718,6 +760,7 @@ struct ItemRow: View {
                 .font(.syIcon(10))
                 .foregroundStyle(item.visualState.color)
                 .frame(width: 16)
+                .overlay(alignment: .topTrailing) { newsDot.offset(x: 3, y: -3) }
                 .accessibilityHidden(true)
             Text(item.title)
                 .font(.syBody.weight(.medium))
@@ -738,6 +781,7 @@ struct ItemRow: View {
     private var standardRow: some View {
         HStack(alignment: .top, spacing: 10) {
             StateBadge(state: item.visualState, compact: true)
+                .overlay(alignment: .topTrailing) { newsDot.offset(x: 2, y: -1) }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(item.title)
@@ -773,6 +817,7 @@ struct ItemRow: View {
     private var roomyRow: some View {
         HStack(alignment: .top, spacing: 10) {
             StateBadge(state: item.visualState, compact: true)
+                .overlay(alignment: .topTrailing) { newsDot.offset(x: 2, y: -1) }
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
                     .font(.syBody.weight(.medium))

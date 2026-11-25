@@ -30,6 +30,52 @@ enum DiffTableRow {
     }
 }
 
+enum DiffIntraline {
+    static func changedRange(_ text: String, _ other: String) -> NSRange? {
+        let a = Array(text.utf16), b = Array(other.utf16)
+        guard !a.isEmpty, a.count < 500, b.count < 500 else { return nil }
+        var prefix = 0
+        while prefix < a.count, prefix < b.count, a[prefix] == b[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < a.count - prefix, suffix < b.count - prefix, a[a.count - 1 - suffix] == b[b.count - 1 - suffix] { suffix += 1 }
+        let common = prefix + suffix
+        let length = a.count - common
+        guard length > 0, common > 0, Double(common) / Double(max(a.count, b.count)) >= 0.4 else { return nil }
+        return NSRange(location: prefix, length: length)
+    }
+
+    static func partners(_ rows: [DiffTableRow]) -> [String: String] {
+        var out: [String: String] = [:]
+        var dels: [(id: String, text: String)] = []
+        var matched = 0
+        for row in rows {
+            guard case .line(let id, let line, _, _) = row else {
+                dels = []
+                matched = 0
+                continue
+            }
+            switch line.kind {
+            case .del:
+                if matched > 0 {
+                    dels = []
+                    matched = 0
+                }
+                dels.append((id, line.text))
+            case .add:
+                if matched < dels.count {
+                    out[dels[matched].id] = line.text
+                    out[id] = dels[matched].text
+                    matched += 1
+                }
+            default:
+                dels = []
+                matched = 0
+            }
+        }
+        return out
+    }
+}
+
 private enum DiffStyle {
     private(set) static var scale: CGFloat = 1
     private(set) static var font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -111,11 +157,14 @@ private enum DiffStyle {
         return p
     }
 
-    static func attributed(_ line: DiffLine, ext: String, codeWidth: CGFloat, wrap: Bool, highlight: Bool) -> NSAttributedString {
+    static func attributed(_ line: DiffLine, ext: String, codeWidth: CGFloat, wrap: Bool, highlight: Bool, partner: String? = nil) -> NSAttributedString {
         let text = codeText(line)
         let s = NSMutableAttributedString(string: text, attributes: [.font: font, .paragraphStyle: paragraph(line, codeWidth: codeWidth, wrap: wrap), .foregroundColor: color(line.kind)])
         if highlight, isCode(line.kind), !ext.isEmpty, s.length > 1, s.length <= maxHighlightLength {
             SyntaxHighlighter.highlight(s, range: NSRange(location: 1, length: s.length - 1), ext: ext)
+        }
+        if let partner, line.kind == .add || line.kind == .del, let range = DiffIntraline.changedRange(DiffText.expandTabs(line.text), DiffText.expandTabs(partner)) {
+            s.addAttribute(.backgroundColor, value: line.kind == .add ? NSColor.syAddWord : NSColor.syDelWord, range: NSRange(location: 1 + range.location, length: range.length))
         }
         return s
     }
@@ -566,7 +615,10 @@ struct DiffTableView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         weak var table: NSTableView?
         weak var bar: DiffHorizontalBar?
-        var rows: [DiffTableRow] = []
+        var rows: [DiffTableRow] = [] {
+            didSet { partners = DiffIntraline.partners(rows) }
+        }
+        private var partners: [String: String] = [:]
         var ids: [String] = []
         var signature: [Int] = []
         var version = -1
@@ -865,11 +917,11 @@ struct DiffTableView: NSViewRepresentable {
             }
         }
 
-        private func text(_ key: String, _ line: DiffLine?, ext: String, codeWidth: CGFloat) -> NSAttributedString? {
+        private func text(_ key: String, _ line: DiffLine?, ext: String, codeWidth: CGFloat, partner: String? = nil) -> NSAttributedString? {
             guard let line else { return nil }
             if let cached = texts[key] { return cached }
             if texts.count > 4000 { texts.removeAll() }
-            let s = DiffStyle.attributed(line, ext: ext, codeWidth: codeWidth, wrap: state.wrap, highlight: true)
+            let s = DiffStyle.attributed(line, ext: ext, codeWidth: codeWidth, wrap: state.wrap, highlight: true, partner: partner)
             texts[key] = s
             return s
         }
@@ -882,7 +934,7 @@ struct DiffTableView: NSViewRepresentable {
                 cell.line = line
                 cell.left = nil
                 cell.right = nil
-                cell.text = text(id, line, ext: ext, codeWidth: DiffStyle.unifiedCodeWidth(width))
+                cell.text = text(id, line, ext: ext, codeWidth: DiffStyle.unifiedCodeWidth(width), partner: partners[id])
                 cell.commentable = commentable
                 cell.onComment = { [weak self] l in self?.onComment?(id, l) }
             case .split(let id, let left, let right, let commentable, let ext):
@@ -891,8 +943,8 @@ struct DiffTableView: NSViewRepresentable {
                 cell.line = nil
                 cell.left = left
                 cell.right = right
-                cell.leftText = text(id + "|L", left, ext: ext, codeWidth: w)
-                cell.rightText = text(id + "|R", right, ext: ext, codeWidth: w)
+                cell.leftText = text(id + "|L", left, ext: ext, codeWidth: w, partner: right?.text)
+                cell.rightText = text(id + "|R", right, ext: ext, codeWidth: w, partner: left?.text)
                 cell.commentable = commentable
                 cell.onComment = { [weak self] l in self?.onComment?(id, l) }
             case .view:

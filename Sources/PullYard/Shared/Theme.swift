@@ -124,6 +124,8 @@ extension NSColor {
     static let syAddBG = Theme.color("addBG", light: 0x2E8A57, dark: 0x5DBE8A, lightAlpha: 0.11, darkAlpha: 0.10, system: NSColor.systemGreen.withAlphaComponent(0.14))
     static let syDelBG = Theme.color("delBG", light: 0xC2412F, dark: 0xE8746A, lightAlpha: 0.10, darkAlpha: 0.11, system: NSColor.systemRed.withAlphaComponent(0.14))
     static let syHunkBG = Theme.color("hunkBG", light: 0x1F7FB8, dark: 0x5BB8EC, lightAlpha: 0.08, darkAlpha: 0.08, system: NSColor.controlAccentColor.withAlphaComponent(0.08))
+    static let syAddWord = Theme.color("addWord", light: 0x2E8A57, dark: 0x5DBE8A, lightAlpha: 0.26, darkAlpha: 0.28, system: NSColor.systemGreen.withAlphaComponent(0.3))
+    static let syDelWord = Theme.color("delWord", light: 0xC2412F, dark: 0xE8746A, lightAlpha: 0.22, darkAlpha: 0.28, system: NSColor.systemRed.withAlphaComponent(0.3))
     static let syAddText = Theme.color("addText", light: 0x1E5A3A, dark: 0xC2E9D2, system: .textColor)
     static let syDelText = Theme.color("delText", light: 0x7A2A20, dark: 0xF3C4BE, system: .textColor)
     static let syHunkText = Theme.color("hunkText", light: 0x1F6E9E, dark: 0x8CCBEE, system: .secondaryLabelColor)

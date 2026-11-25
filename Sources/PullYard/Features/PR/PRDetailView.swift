@@ -94,7 +94,11 @@ struct PRDetailContent: View {
         .transaction(value: headerCollapsed) { $0.animation = nil }
         .onChange(of: model.tab) { expandedOverride = false }
         .detailTitle(pr.title, subtitle: "\(model.ref.repo.full) #\(pr.number)")
-        .task(id: pr.url) { app.noteCanonical(model.ref, url: pr.url) }
+        .task(id: pr.url) {
+            app.noteCanonical(model.ref, url: pr.url)
+            QueueStore.shared.markSeen(model.ref)
+        }
+        .onDisappear { QueueStore.shared.markSeen(model.ref) }
         .focusedSceneValue(\.prActions, front ? actions : nil)
         .panelToolbar(id: "pr-detail") { toolbar }
         .sheet(isPresented: $showReview) { ReviewSheet(model: model, pr: pr, initialEvent: reviewEvent) }
@@ -957,45 +961,25 @@ struct ChecksTab: View {
     let onRerun: () -> Void
     @State private var logTarget: CheckContext?
     @State private var fixAfterLog: CIFixRequest?
+    @State private var expanded: [String: Bool] = [:]
 
     var body: some View {
         let checks = pr.checks.sorted { ($0.outcome.rawValue, $0.title) < ($1.outcome.rawValue, $1.title) }
         let failedRuns = Set(checks.filter { $0.outcome == .failure }.compactMap(\.runId))
+        let groups = Self.groups(checks)
         List {
             if checks.isEmpty {
                 Text("No checks for the latest commit").font(.syBody).foregroundStyle(Color.syMuted)
+            } else {
+                summary(checks, failedRuns: failedRuns)
+                    .listRowSeparator(.hidden)
             }
-            if !failedRuns.isEmpty, model.canWrite {
-                Button(action: onRerun) {
-                    Label("Re-run failed jobs (\(plural(failedRuns.count, "workflow", "workflows")))", systemImage: "arrow.clockwise")
+            ForEach(groups, id: \.name) { group in
+                Section(isExpanded: binding(for: group)) {
+                    ForEach(group.checks) { c in row(c) }
+                } header: {
+                    groupHeader(group)
                 }
-                .disabled(model.busy)
-            }
-            ForEach(checks) { c in
-                HStack(spacing: 10) {
-                    OutcomeIcon(outcome: c.outcome)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(c.workflowName.map { "\($0) / \(c.title)" } ?? c.title).font(.syBody).lineLimit(1)
-                        Text(subtitle(c)).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
-                    }
-                    Spacer()
-                    if CIFailureCollector.isFixable(c), pr.isOpen {
-                        Button("Fix with agent") { onFix(CIFixRequest(focus: c.id)) }
-                            .controlSize(.small)
-                            .tint(Color.syCoralFill)
-                    }
-                    if c.isActionsJob, c.outcome != .pending, c.outcome != .skipped {
-                        Button("Log") { logTarget = c }.controlSize(.small)
-                    }
-                    if let link = c.link {
-                        Button { openInBrowser(link) } label: { Image(systemName: "arrow.up.right.square") }
-                            .buttonStyle(.borderless)
-                            .help("Open in browser")
-                            .accessibilityLabel("Open in browser")
-                    }
-                }
-                .padding(.vertical, 2)
-                .rowAppear(c.id, model.checkRows)
             }
             if model.hiddenCheckCount > 0 {
                 Button("\(model.hiddenCheckCount) more checks are not shown — open in browser") { openInBrowser(pr.url + "/checks") }
@@ -1011,6 +995,121 @@ struct ChecksTab: View {
         }) { c in
             JobLogSheet(api: model.api, repo: model.ref.repo, check: c, onFix: CIFailureCollector.isFixable(c) && pr.isOpen ? { log in fixAfterLog = CIFixRequest(focus: c.id, log: log); logTarget = nil } : nil)
         }
+    }
+
+    struct CheckGroup {
+        let name: String
+        let checks: [CheckContext]
+        var failed: Int { checks.filter { $0.outcome == .failure }.count }
+        var running: Int { checks.filter { $0.outcome == .pending }.count }
+        var passed: Int { checks.filter { $0.outcome == .success }.count }
+        var outcome: CheckOutcome { failed > 0 ? .failure : running > 0 ? .pending : passed > 0 ? .success : .neutral }
+    }
+
+    static func groups(_ checks: [CheckContext]) -> [CheckGroup] {
+        var order: [String] = []
+        var map: [String: [CheckContext]] = [:]
+        for c in checks {
+            let name = c.workflowName ?? "Other checks"
+            if map[name] == nil { order.append(name) }
+            map[name, default: []].append(c)
+        }
+        let groups = order.map { CheckGroup(name: $0, checks: map[$0] ?? []) }
+        return groups.sorted { a, b in
+            let rank: (CheckGroup) -> Int = { $0.failed > 0 ? 0 : $0.running > 0 ? 1 : 2 }
+            return (rank(a), a.name) < (rank(b), b.name)
+        }
+    }
+
+    private func binding(for group: CheckGroup) -> Binding<Bool> {
+        Binding(
+            get: { expanded[group.name] ?? (group.failed > 0 || group.running > 0) },
+            set: { expanded[group.name] = $0 }
+        )
+    }
+
+    private func summary(_ checks: [CheckContext], failedRuns: Set<Int>) -> some View {
+        let failed = checks.filter { $0.outcome == .failure }.count
+        let running = checks.filter { $0.outcome == .pending }.count
+        let passed = checks.filter { $0.outcome == .success }.count
+        let skipped = checks.count - failed - running - passed
+        let required = checks.filter { $0.isRequired == true }
+        return HStack(spacing: 6) {
+            if failed > 0 { StatusChip(text: "\(failed) failing", icon: "xmark.circle.fill", color: .ghRed) }
+            if running > 0 { StatusChip(text: "\(running) running", icon: "circle.dashed", color: .syAmberInk) }
+            StatusChip(text: "\(passed) passing", icon: "checkmark.circle.fill", color: .ghGreen)
+            if skipped > 0 { StatusChip(text: "\(skipped) skipped", icon: "minus.circle", color: .syMuted) }
+            if !required.isEmpty {
+                let ok = required.filter { $0.outcome == .success }.count
+                Text("Required \(ok)/\(required.count)")
+                    .font(.syCaption.weight(.medium))
+                    .foregroundStyle(ok == required.count ? Color.ghGreen : Color.syMuted)
+                    .padding(.leading, 4)
+            }
+            Spacer()
+            if !failedRuns.isEmpty, model.canWrite {
+                Button(action: onRerun) {
+                    Label("Re-run failed (\(plural(failedRuns.count, "workflow", "workflows")))", systemImage: "arrow.clockwise")
+                }
+                .controlSize(.small)
+                .disabled(model.busy)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func groupHeader(_ group: CheckGroup) -> some View {
+        HStack(spacing: 8) {
+            OutcomeIcon(outcome: group.outcome)
+            Text(group.name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
+            Text(groupCounts(group)).font(.syCaption).foregroundStyle(Color.syMuted)
+            Spacer()
+        }
+    }
+
+    private func groupCounts(_ group: CheckGroup) -> String {
+        var parts: [String] = []
+        if group.failed > 0 { parts.append("\(group.failed) failed") }
+        if group.running > 0 { parts.append("\(group.running) running") }
+        parts.append("\(group.passed)/\(group.checks.count) passed")
+        return parts.joined(separator: " · ")
+    }
+
+    private func row(_ c: CheckContext) -> some View {
+        HStack(spacing: 10) {
+            OutcomeIcon(outcome: c.outcome)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(c.title).font(.syBody).lineLimit(1)
+                    if c.isRequired == true {
+                        Text("Required")
+                            .font(.sy(size: 10, weight: .semibold))
+                            .foregroundStyle(Color.syMuted)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .overlay(Capsule().strokeBorder(Color.syLineStrong))
+                    }
+                }
+                Text(subtitle(c)).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
+            }
+            Spacer()
+            if CIFailureCollector.isFixable(c), pr.isOpen {
+                Button("Fix with agent") { onFix(CIFixRequest(focus: c.id)) }
+                    .controlSize(.small)
+                    .tint(Color.syCoralFill)
+            }
+            if c.isActionsJob, c.outcome != .pending, c.outcome != .skipped {
+                Button("Log") { logTarget = c }.controlSize(.small)
+            }
+            if let link = c.link {
+                Button { openInBrowser(link) } label: { Image(systemName: "arrow.up.right.square") }
+                    .buttonStyle(.borderless)
+                    .help("Open in browser")
+                    .accessibilityLabel("Open in browser")
+            }
+        }
+        .padding(.vertical, 2)
+        .rowAppear(c.id, model.checkRows)
     }
 
     private func subtitle(_ c: CheckContext) -> String {
