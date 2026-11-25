@@ -28,6 +28,7 @@
 		568B3FF6AD57088C3560CEA7 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30670A8D6390E4CF24450643 /* SettingsView.swift */; };
 		691EC5C347D72EA884A20DDC /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B3A0459840F2BE02F504DC5 /* WidgetSnapshot.swift */; };
 		6BF8DA74F5AFD7D499A42E08 /* Snooze.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9662C0C9DC3339E5CD6B7A47 /* Snooze.swift */; };
+		726AA9D25FB3D0D5CC3C8ABE /* KeyboardDismisser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435E8F2A21391A7806B96123 /* KeyboardDismisser.swift */; };
 		824047CDCB66FD452D27E23E /* WidgetFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDE41B0C24CD4D522D241B3 /* WidgetFetcher.swift */; };
 		840E10398ADEAF707B1F21E9 /* Markdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = 132760422E5715524A7D210F /* Markdown.swift */; };
 		84F9EA1D56B69704A234D705 /* FilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D1252337A283C4B3F84BE /* FilesView.swift */; };
@@ -122,6 +123,7 @@
 		30670A8D6390E4CF24450643 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		3087B4E6E836EBC234BDFAF7 /* IssueDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueDetailView.swift; sourceTree = "<group>"; };
 		3CF0EA1A483B65C3A656E233 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		435E8F2A21391A7806B96123 /* KeyboardDismisser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDismisser.swift; sourceTree = "<group>"; };
 		492802CE69238D7B67870B90 /* LinkClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkClient.swift; sourceTree = "<group>"; };
 		4E906B2E7B97FCF8016A2F05 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		4FEA9E8ED657C416009BF3B6 /* PullYardWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PullYardWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -234,6 +236,7 @@
 				120660E6D50C51E2C99B570E /* Glass.swift */,
 				2EF4EBD49C399A1EBB703665 /* InboxAndPullsView.swift */,
 				3087B4E6E836EBC234BDFAF7 /* IssueDetailView.swift */,
+				435E8F2A21391A7806B96123 /* KeyboardDismisser.swift */,
 				F6E1C772FE09ECA4404FF0B3 /* LiveActivities.swift */,
 				D7C5751F2F7DBE975941D203 /* LocalCache.swift */,
 				3CF0EA1A483B65C3A656E233 /* Localizable.xcstrings */,
@@ -450,6 +453,7 @@
 				553B9AF410D2BEF9AAD62485 /* Glass.swift in Sources */,
 				20B23EC4331D918C39410462 /* InboxAndPullsView.swift in Sources */,
 				506C6041378E535399DE85EA /* IssueDetailView.swift in Sources */,
+				726AA9D25FB3D0D5CC3C8ABE /* KeyboardDismisser.swift in Sources */,
 				F126D8433948F1AF3BE7B615 /* LinkClient.swift in Sources */,
 				C070820FA7D4B882307E041E /* LiveActivities.swift in Sources */,
 				92E83F11231596E157BCF6AF /* LocalCache.swift in Sources */,

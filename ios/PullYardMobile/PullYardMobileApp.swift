@@ -131,10 +131,12 @@ struct RootView: View {
             router.open(route, in: model.selectedTab)
         }
         .onOpenURL { url in handleURL(url) }
+        .onAppear { DispatchQueue.main.async { KeyboardDismisser.install() } }
         .tint(MobileTheme.accent)
         .preferredColorScheme(AppearanceMode(rawValue: appearanceRaw)?.colorScheme)
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                KeyboardDismisser.install()
                 model.reloadFocus()
                 model.handleForeground()
                 consumePendingLink()
