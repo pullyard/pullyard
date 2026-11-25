@@ -326,14 +326,16 @@ struct PYLoader: View {
     var style: PYLoaderStyle = .inline
     var size: CGFloat?
     var label = "Loading"
+    var fadeIn = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var start = Date()
     @State private var visible = false
 
     var body: some View {
         content
-            .opacity(visible ? 1 : 0)
+            .opacity(visible || !fadeIn ? 1 : 0)
             .task {
+                guard fadeIn else { return }
                 try? await Task.sleep(nanoseconds: 180_000_000)
                 withAnimation(.easeOut(duration: Motion.Dur.fast)) { visible = true }
             }

@@ -28,14 +28,18 @@ struct ChatView: View {
                         let entries = chat.displayItems
                         let starts = Self.turnStarts(entries)
                         ForEach(entries) { entry in
-                            VStack(alignment: .leading, spacing: 6) {
-                                if starts.contains(entry.id) { AgentTurnMark() }
+                            let start = starts.contains(entry.id)
+                            Group {
                                 switch entry {
                                 case .item(let item):
                                     ChatItemView(item: item, chat: chat, folder: tab.folder)
                                 case .tools(let id, let steps):
                                     ToolGroupView(id: id, steps: steps, chat: chat, folder: tab.folder)
                                 }
+                            }
+                            .padding(.top, start ? 28 : 0)
+                            .overlay(alignment: .topLeading) {
+                                if start { AgentTurnMark() }
                             }
                             .background {
                                 if currentMatch == entry.id {
@@ -608,7 +612,7 @@ struct WorkingIndicator: View {
     var body: some View {
         HStack(spacing: 10) {
             HStack(spacing: 8) {
-                PYLoader(size: 16, label: "Working")
+                PYLoader(size: 16, label: "Working", fadeIn: false)
                     .frame(width: 18, height: 18)
                 Text(chat.status ?? (chat.pendingCount > 0 ? "Waiting for you" : "Working…"))
                     .foregroundStyle(Color.syText)
@@ -1321,7 +1325,6 @@ struct PermissionCard: View {
     let folder: String
     @State private var feedback = ""
     @State private var answers: [String: String] = [:]
-    @State private var pulse = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1350,7 +1353,7 @@ struct PermissionCard: View {
                         .foregroundStyle(Color.syAmberInk)
                         .frame(width: 28, height: 28)
                         .background(Circle().fill(Color.syAmber.opacity(0.18)))
-                        .scaleEffect(pulse ? 1.06 : 1)
+
                     VStack(alignment: .leading, spacing: 2) {
                         Text(question).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText)
                         if let d = request.description, !d.isEmpty {
@@ -1405,11 +1408,6 @@ struct PermissionCard: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.syRaised))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.syAmber.opacity(0.55), lineWidth: 1.5))
         .shadow(color: Color.syAmber.opacity(0.18), radius: 12, y: 3)
-        .onAppear {
-            guard !Motion.reduced else { return }
-            withAnimation(.easeInOut(duration: 1.1).repeatCount(3, autoreverses: true)) { pulse = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.4) { withAnimation(Motion.fade) { pulse = false } }
-        }
     }
 
     private var question: String {
@@ -1523,27 +1521,10 @@ enum QuestionAnswer {
 
 struct ShimmerLabel: View {
     let text: String
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var phase: CGFloat = -1
 
     var body: some View {
         Text(text)
-            .foregroundStyle(Color.syMuted)
-            .overlay {
-                if !reduceMotion {
-                    GeometryReader { geo in
-                        LinearGradient(colors: [.clear, Color.syViolet.opacity(0.9), Color.syAccent.opacity(0.9), .clear], startPoint: .leading, endPoint: .trailing)
-                            .frame(width: geo.size.width * 0.6)
-                            .offset(x: phase * geo.size.width * 1.3)
-                    }
-                    .mask(Text(text))
-                    .allowsHitTesting(false)
-                }
-            }
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) { phase = 1 }
-            }
+            .foregroundStyle(LinearGradient(colors: [Color.syViolet, Color.syAccent], startPoint: .leading, endPoint: .trailing))
     }
 }
 

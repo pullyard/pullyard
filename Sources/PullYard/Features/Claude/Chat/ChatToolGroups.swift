@@ -164,8 +164,6 @@ struct ToolGroupView: View {
     let chat: ChatSession
     let folder: String
 
-    @State private var hovering = false
-
     private var calls: [ChatToolCall] { steps.compactMap(\.call) }
     private var groupKey: String { "g" + id }
 
@@ -202,12 +200,11 @@ struct ToolGroupView: View {
                     .font(.syCallout)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Capsule().fill(Color.syText.opacity(hovering ? 0.07 : 0.035)))
+                    .background(Capsule().fill(Color.syText.opacity(0.04)))
                     .overlay(Capsule().strokeBorder(Color.syLine))
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .onHover { hovering = $0 }
                 .accessibilityValue(open ? "Expanded" : "Collapsed")
                 if open {
                     VStack(alignment: .leading, spacing: 0) {
