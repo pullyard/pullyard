@@ -749,7 +749,7 @@ public sealed class ShellView : Grid
             }
             toast.Child = row;
         }
-        toast.IsHitTestVisible = true;
+        toast.IsHitTestVisible = isError || action is not null;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toast, actionTitle is null ? text : $"{text}, {actionTitle}");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(toast, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         toast.Padding = new Thickness(14, 7, actionTitle is null ? 16 : 8, 7);

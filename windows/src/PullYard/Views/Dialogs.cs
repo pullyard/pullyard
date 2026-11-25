@@ -370,11 +370,11 @@ public static class Dialogs
             if (e.PropertyName is nameof(PRDetailViewModel.Pr) or nameof(PRDetailViewModel.RulesState)) d.DispatcherQueue.TryEnqueue(Apply);
         }
         model.PropertyChanged += OnModel;
-        d.Closed += (_, _) => model.PropertyChanged -= OnModel;
         var choice = "";
         d.PrimaryButtonClick += (_, _) => choice = primary;
         d.SecondaryButtonClick += (_, _) => choice = secondary;
         await ShowAsync(d);
+        model.PropertyChanged -= OnModel;
         switch (choice)
         {
             case "auto":

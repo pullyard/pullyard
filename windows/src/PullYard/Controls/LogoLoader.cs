@@ -419,7 +419,7 @@ public sealed class WakeBar : Grid
         SizeChanged += (_, e) =>
         {
             Clip = new RectangleGeometry { Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height) };
-            sweep.Width = Math.Max(80, e.NewSize.Width * 0.35);
+            sweep.Width = board is null ? 0 : Math.Max(80, e.NewSize.Width * 0.35);
             Restart();
         };
         board = Motion.Enabled ? new Storyboard { RepeatBehavior = RepeatBehavior.Forever } : null;
