@@ -17,7 +17,7 @@ use crate::ui::widgets::*;
 pub fn state_badge(state: TabState, memory_bytes: Option<i64>, compact: bool) -> gtk::Box {
     let b = hbox(4);
     if state == TabState::Working {
-        b.append(&spinner(10));
+        b.append(&wake_spinner(10));
     } else {
         b.append(&colored_icon(state.icon(), if state == TabState::Active { 8 } else { 11 }, state.color()));
     }

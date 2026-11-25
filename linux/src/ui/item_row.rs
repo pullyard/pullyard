@@ -80,14 +80,11 @@ pub fn item_row(item: &SearchItem, show_repo: bool) -> gtk::Box {
     info.append(&spacer());
     let status = hbox(8);
     if item.is_pr() {
-        if let Some(ci) = ci_icon(item.ci_state().as_deref()) {
-            status.append(&ci);
+        if let Some(review) = review_chip(item.review_decision.as_deref()) {
+            status.append(&review);
         }
-        match item.review_decision.as_deref() {
-            Some("APPROVED") => status.append(&status_icon("sy-check-symbolic", 12, "green", "Approved")),
-            Some("CHANGES_REQUESTED") => status.append(&status_icon("sy-plusminus-symbolic", 12, "red", "Changes requested")),
-            Some("REVIEW_REQUIRED") => status.append(&status_icon("sy-eye-symbolic", 12, "muted", "Review required")),
-            _ => {}
+        if let Some(ci) = ci_chip(item.ci_state().as_deref()) {
+            status.append(&ci);
         }
     }
     if item.comments.total_count > 0 {

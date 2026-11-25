@@ -21,11 +21,11 @@ const BRAND_LIGHT: Palette = Palette {
         ("raised", "#FFFFFF"),
         ("sunken", "#F1EEE8"),
         ("bar", "#F5F3EE"),
-        ("line", "alpha(#1A2333, 0.08)"),
-        ("line_strong", "alpha(#1A2333, 0.15)"),
+        ("line", "alpha(#1A2333, 0.12)"),
+        ("line_strong", "alpha(#1A2333, 0.20)"),
         ("text", "#1A2333"),
         ("muted", "#5F6B7E"),
-        ("dim", "#7C8494"),
+        ("dim", "#646C80"),
         ("accent", "#2A8BC8"),
         ("sky", brand::SKY.0),
         ("violet", brand::VIOLET.0),
@@ -44,7 +44,19 @@ const BRAND_LIGHT: Palette = Palette {
         ("add_text", "#1E5A3A"),
         ("del_text", "#7A2A20"),
         ("hunk_text", "#1F6E9E"),
-        ("gutter", "#9AA2B0"),
+        ("gutter", "#687084"),
+        ("link", "#1F6FA3"),
+        ("accent_fill", "#1D70A6"),
+        ("coral_ink", "#B8412F"),
+        ("coral_fill", "#C24533"),
+        ("on_coral", "#FFFFFF"),
+        ("amber_ink", "#9A6416"),
+        ("green_fill", "#2B7F50"),
+        ("red_fill", "#B23A2A"),
+        ("harbor_line", "alpha(#1F6FA3, 0.22)"),
+        ("wake", "alpha(#1F6FA3, 0.55)"),
+        ("add_word", "alpha(#2E8A57, 0.28)"),
+        ("del_word", "alpha(#C2412F, 0.28)"),
     ],
 };
 
@@ -57,11 +69,11 @@ const BRAND_DARK: Palette = Palette {
         ("raised", "#152036"),
         ("sunken", "#0A101C"),
         ("bar", "#111A2C"),
-        ("line", "alpha(#A0AEC4, 0.10)"),
-        ("line_strong", "alpha(#A0AEC4, 0.18)"),
+        ("line", "alpha(#A0AEC4, 0.14)"),
+        ("line_strong", "alpha(#A0AEC4, 0.22)"),
         ("text", "#E6EBF2"),
         ("muted", "#8693A8"),
-        ("dim", "#6B778C"),
+        ("dim", "#7D899F"),
         ("accent", "#5BB8EC"),
         ("sky", brand::SKY.1),
         ("violet", brand::VIOLET.1),
@@ -80,7 +92,19 @@ const BRAND_DARK: Palette = Palette {
         ("add_text", "#C2E9D2"),
         ("del_text", "#F3C4BE"),
         ("hunk_text", "#8CCBEE"),
-        ("gutter", "#4A5670"),
+        ("gutter", "#7D899F"),
+        ("link", "#5BB8EC"),
+        ("accent_fill", "#1D70A6"),
+        ("coral_ink", "#EE6F5F"),
+        ("coral_fill", "#EE6F5F"),
+        ("on_coral", "#1A0B09"),
+        ("amber_ink", "#E8B44C"),
+        ("green_fill", "#2B7F50"),
+        ("red_fill", "#B23A2A"),
+        ("harbor_line", "alpha(#7DD3FC, 0.20)"),
+        ("wake", "alpha(#7DD3FC, 0.75)"),
+        ("add_word", "alpha(#5DBE8A, 0.30)"),
+        ("del_word", "alpha(#E8746A, 0.30)"),
     ],
 };
 
@@ -117,6 +141,18 @@ const SYSTEM_LIGHT: Palette = Palette {
         ("del_text", "@window_fg_color"),
         ("hunk_text", "alpha(@window_fg_color, 0.65)"),
         ("gutter", "alpha(@window_fg_color, 0.4)"),
+        ("link", "@accent_color"),
+        ("accent_fill", "@accent_bg_color"),
+        ("coral_ink", "@red_4"),
+        ("coral_fill", "@red_4"),
+        ("on_coral", "#FFFFFF"),
+        ("amber_ink", "mix(@warning_color, @window_fg_color, 0.35)"),
+        ("green_fill", "@success_bg_color"),
+        ("red_fill", "@destructive_bg_color"),
+        ("harbor_line", "alpha(@accent_color, 0.22)"),
+        ("wake", "alpha(@accent_color, 0.55)"),
+        ("add_word", "alpha(@success_color, 0.30)"),
+        ("del_word", "alpha(@error_color, 0.30)"),
     ],
 };
 
@@ -153,6 +189,18 @@ const SYSTEM_DARK: Palette = Palette {
         ("del_text", "@window_fg_color"),
         ("hunk_text", "alpha(@window_fg_color, 0.65)"),
         ("gutter", "alpha(@window_fg_color, 0.4)"),
+        ("link", "@accent_color"),
+        ("accent_fill", "@accent_bg_color"),
+        ("coral_ink", "@red_1"),
+        ("coral_fill", "@red_2"),
+        ("on_coral", "#1A0B09"),
+        ("amber_ink", "mix(@warning_color, @window_fg_color, 0.15)"),
+        ("green_fill", "@success_bg_color"),
+        ("red_fill", "@destructive_bg_color"),
+        ("harbor_line", "alpha(@accent_color, 0.22)"),
+        ("wake", "alpha(@accent_color, 0.55)"),
+        ("add_word", "alpha(@success_color, 0.30)"),
+        ("del_word", "alpha(@error_color, 0.30)"),
     ],
 };
 
@@ -216,9 +264,10 @@ fn palette_css() -> String {
     let (mark_violet, mark_sky, mark_coral) = (brand::MARK_VIOLET, brand::MARK_SKY, brand::MARK_CORAL);
     css.push_str(&format!("@define-color sy_mark_violet {mark_violet};\n@define-color sy_mark_sky {mark_sky};\n@define-color sy_mark_coral {mark_coral};\n"));
     if is_high_contrast() {
-        css.push_str("@define-color sy_line alpha(@sy_text, 0.45);\n@define-color sy_line_strong alpha(@sy_text, 0.65);\n@define-color sy_muted alpha(@sy_text, 0.85);\n@define-color sy_dim alpha(@sy_text, 0.72);\n");
+        css.push_str("@define-color sy_line alpha(@sy_text, 0.45);\n@define-color sy_line_strong alpha(@sy_text, 0.65);\n@define-color sy_muted alpha(@sy_text, 0.85);\n@define-color sy_dim @sy_muted;\n@define-color sy_gutter @sy_muted;\n@define-color sy_harbor_line alpha(@sy_accent, 0.45);\n");
+        css.push_str(".chip, .status-chip { border: 1px solid alpha(currentColor, 0.6); }\n.refresh-pill { border: 1px solid @sy_line_strong; }\n");
     }
-    css.push_str("@define-color sy_hover alpha(@sy_text, 0.05);\n@define-color sy_ring @sy_line_strong;\n@define-color sy_on_accent @accent_fg_color;\n");
+    css.push_str("@define-color sy_hover alpha(@sy_text, 0.05);\n@define-color sy_ring @sy_line_strong;\n@define-color sy_on_accent @accent_fg_color;\n@define-color sy_on_fill #FFFFFF;\n");
     if brand {
         let overrides = [
             ("window_bg_color", "@sy_window", "--window-bg-color"),
@@ -236,8 +285,8 @@ fn palette_css() -> String {
             ("popover_fg_color", "@sy_text", "--popover-fg-color"),
             ("dialog_bg_color", "@sy_panel", "--dialog-bg-color"),
             ("dialog_fg_color", "@sy_text", "--dialog-fg-color"),
-            ("accent_bg_color", "@sy_accent", "--accent-bg-color"),
-            ("accent_color", "@sy_accent", "--accent-color"),
+            ("accent_bg_color", "@sy_accent_fill", "--accent-bg-color"),
+            ("accent_color", "@sy_link", "--accent-color"),
             ("destructive_bg_color", "@sy_red", "--destructive-bg-color"),
             ("success_color", "@sy_green", "--success-color"),
             ("warning_color", "@sy_amber", "--warning-color"),
@@ -440,13 +489,53 @@ button.comment-send:disabled { background-color: alpha(@sy_text, 0.08); color: @
 .onboarding-tagline { font-size: 1.05em; color: @sy_muted; }
 .onboarding-card { background-color: alpha(@sy_raised, 0.86); border: 1px solid @sy_line; border-radius: 12px; padding: 12px 14px; }
 .onboarding-card .sy-status-message { font-size: 0.88em; }
+.sy-link { color: @sy_link; }
+.sy-display { font-family: "Noto Serif", "DejaVu Serif", serif; font-size: 26px; font-weight: 600; color: @sy_text; }
+.sy-eyebrow { font-size: 0.74em; font-weight: 700; letter-spacing: 0.06em; color: @sy_muted; }
+.sy-meta-num { font-feature-settings: "tnum"; }
+.refresh-pill { padding: 2px 8px; min-height: 24px; border-radius: 999px; color: @sy_muted; font-size: 0.85em; font-feature-settings: "tnum"; background: none; box-shadow: none; }
+.refresh-pill:hover { background-color: @sy_hover; }
+.refresh-pill.stale, .refresh-status.stale { color: @sy_amber_ink; }
+.refresh-pill.failed { color: @sy_amber_ink; }
+.status-chip { padding: 1px 7px; min-height: 18px; border-radius: 999px; font-size: 0.8em; font-weight: 600; }
+.status-chip.outline { background: none; border: 1px solid currentColor; }
+button.status-chip-button { padding: 0; min-height: 0; min-width: 0; border-radius: 999px; background: none; box-shadow: none; }
+.keycap { font-family: monospace; font-size: 0.82em; font-weight: 500; padding: 1px 6px; border-radius: 5px; background-color: @sy_raised; border: 1px solid @sy_line_strong; color: @sy_muted; }
+.harbor-water { min-height: 2px; border-radius: 2px; background-color: @sy_harbor_line; }
+.empty-hero { background-image: radial-gradient(circle at 30% 20%, alpha(@sy_mark_violet, 0.07), transparent 45%), radial-gradient(circle at 75% 35%, alpha(@sy_mark_sky, 0.07), transparent 45%), radial-gradient(circle at 50% 85%, alpha(@sy_mark_coral, 0.05), transparent 50%); }
+.wake-bar { min-height: 2px; background-image: linear-gradient(90deg, transparent, @sy_wake, transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: sy-wake 1.4s ease-in-out infinite; }
+@keyframes sy-wake { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+.next-card { background-color: @sy_raised; border: 1px solid @sy_line; border-radius: 10px; padding: 12px 14px; }
+button.next-card:hover { background-color: shade(@sy_raised, 0.98); border-color: @sy_line_strong; }
+.news-dot { background-color: @sy_coral; border-radius: 999px; min-width: 6px; min-height: 6px; }
 "#;
+
+pub fn ink_token(name: &str) -> &str {
+    match name {
+        "coral" => "coral_ink",
+        "amber" => "amber_ink",
+        "accent" | "sky" => "link",
+        other => other,
+    }
+}
+
+pub fn fill_token(name: &str) -> (&str, &str) {
+    match name {
+        "coral" => ("coral_fill", "on_coral"),
+        "green" => ("green_fill", "on_fill"),
+        "red" => ("red_fill", "on_fill"),
+        "accent" | "sky" => ("accent_fill", "on_fill"),
+        other => (other, "on_accent"),
+    }
+}
 
 fn color_css() -> String {
     let mut css = String::new();
     for name in ACCENTS {
+        let ink = ink_token(name);
+        let (fill, on) = fill_token(name);
         css.push_str(&format!(
-            ".fg-{name} {{ color: @sy_{name}; }}\n.bg-{name} {{ background-color: alpha(@sy_{name}, 0.12); }}\n.tile-{name} {{ background-color: alpha(@sy_{name}, 0.14); color: @sy_{name}; }}\n.chip.{name} {{ background-color: alpha(@sy_{name}, 0.12); color: @sy_{name}; }}\n.state-dot.{name} {{ background-color: alpha(@sy_{name}, 0.15); color: @sy_{name}; }}\n.state-pill.{name} {{ background-color: @sy_{name}; }}\n.banner-box.{name} {{ background-color: alpha(@sy_{name}, 0.08); }}\nbutton.tint-{name} {{ background-color: @sy_{name}; color: @sy_on_accent; }}\n.edge-{name} {{ background-color: @sy_{name}; min-width: 3px; border-radius: 2px; }}\n.jira-status.{name} {{ background-color: alpha(@sy_{name}, 0.14); color: @sy_{name}; }}\n.jira-status.{name} .jira-dot {{ background-color: @sy_{name}; }}\n"
+            ".fg-{name} {{ color: @sy_{name}; }}\n.ink-{name} {{ color: @sy_{ink}; }}\n.bg-{name} {{ background-color: alpha(@sy_{name}, 0.12); }}\n.tile-{name} {{ background-color: alpha(@sy_{name}, 0.14); color: @sy_{name}; }}\n.chip.{name}, .status-chip.{name} {{ background-color: alpha(@sy_{ink}, 0.12); color: @sy_{ink}; }}\n.status-chip.{name}:hover {{ background-color: alpha(@sy_{ink}, 0.20); }}\n.state-dot.{name} {{ background-color: alpha(@sy_{name}, 0.15); color: @sy_{name}; }}\n.state-pill.{name} {{ background-color: @sy_{fill}; color: @sy_{on}; }}\n.banner-box.{name} {{ background-color: alpha(@sy_{name}, 0.08); }}\nbutton.tint-{name} {{ background-color: @sy_{fill}; color: @sy_{on}; }}\nbutton.tint-{name}:hover {{ background-color: shade(@sy_{fill}, 1.06); }}\nbutton.tint-{name}:active {{ background-color: shade(@sy_{fill}, 0.92); }}\nbutton.tint-{name}:disabled {{ opacity: 0.4; }}\n.edge-{name} {{ background-color: @sy_{name}; min-width: 3px; border-radius: 2px; }}\n.jira-status.{name} {{ background-color: alpha(@sy_{name}, 0.14); color: @sy_{name}; }}\n.jira-status.{name} .jira-dot {{ background-color: @sy_{name}; }}\n"
         ));
     }
     css

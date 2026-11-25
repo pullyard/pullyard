@@ -322,7 +322,7 @@ fn linger_hover(target: &impl IsA<gtk::Widget>, actions: &gtk::Box, enabled: imp
 fn status_glyph(c: &ToolCall, pending_permission: bool) -> Option<gtk::Widget> {
     match c.status.get() {
         ToolStatus::Running if pending_permission => Some(colored_icon("sy-attention-symbolic", 14, "amber").upcast()),
-        ToolStatus::Running => Some(spinner(12).upcast()),
+        ToolStatus::Running => Some(wake_spinner(12).upcast()),
         ToolStatus::Done => None,
         ToolStatus::Error => Some(colored_icon("sy-x-symbolic", 14, "red").upcast()),
         ToolStatus::Denied => Some(colored_icon("sy-issue-skip-symbolic", 14, "amber").upcast()),
@@ -357,7 +357,7 @@ impl ChatView {
         column.append(&pr_card);
 
         let working = hbox(8);
-        working.append(&spinner(14));
+        working.append(&wake_spinner(14));
         let working_label = label_with("Working…", &["sy-muted"]);
         working.append(&working_label);
         let working_time = label_with("", &["sy-dim", "sy-small", "sy-mono"]);
@@ -1500,7 +1500,7 @@ impl ChatView {
         let hb = hbox(6);
         let (title, running) = tool_groups::group_header(&calls, &folder);
         if running {
-            hb.append(&spinner(12));
+            hb.append(&wake_spinner(12));
         }
         let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
         for (icon_name, tint) in tool_groups::kind_icons(&names) {

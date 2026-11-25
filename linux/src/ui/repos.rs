@@ -2011,7 +2011,7 @@ pub fn detail_page(repo: &RepoRef) -> adw::NavigationPage {
     let browser_btn = icon_button("sy-external-symbolic", "Open in browser");
     let cm = me.code_model.clone();
     browser_btn.connect_clicked(move |_| util::open_url(&cm.web_url()));
-    hb.pack_end(&me.status.header_button());
+    hb.pack_end(&me.status.detail_pill());
     hb.pack_end(&browser_btn);
     hb.pack_end(&clone_btn);
     me.render_header();

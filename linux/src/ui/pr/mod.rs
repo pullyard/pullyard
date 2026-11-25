@@ -31,7 +31,6 @@ pub struct PrPage {
     page: gtk::glib::WeakRef<adw::NavigationPage>,
     title: adw::WindowTitle,
     actions: gtk::Box,
-    busy: Loader,
     status: Rc<RefreshStatus>,
     header_box: gtk::Box,
     banners: gtk::Box,
@@ -103,8 +102,6 @@ impl PrPage {
         hb.set_title_widget(Some(&title));
         toolbar.add_css_class("sy-panel-pane");
         let actions = hbox(4);
-        let busy = spinner(14);
-        busy.set_visible(false);
         let holder: Rc<RefCell<Option<std::rc::Weak<PrPage>>>> = Rc::new(RefCell::new(None));
         let h = holder.clone();
         let status = RefreshStatus::new(true, move || {
@@ -112,17 +109,14 @@ impl PrPage {
                 me.model.load(true);
             }
         });
-        hb.pack_end(&status.header_button());
+        hb.pack_end(&status.detail_pill());
         hb.pack_end(&actions);
-        hb.pack_end(&status.widget);
-        hb.pack_end(&busy);
         let page = adw::NavigationPage::new(&toolbar, &model.r.title());
         let me = Rc::new(PrPage {
             model: model.clone(),
             page: page.downgrade(),
             title,
             actions,
-            busy,
             status,
             header_box,
             banners,
@@ -219,8 +213,7 @@ impl PrPage {
                 }
             }
             Change::Busy => {
-                self.busy.set_visible(self.model.busy.get());
-                self.status.update(self.model.last_updated.get(), self.model.loading.get(), self.model.refresh_error.borrow().clone());
+                self.status.update(self.model.last_updated.get(), self.model.loading.get() || self.model.busy.get(), self.model.refresh_error.borrow().clone());
             }
             Change::Stack => self.on_stack(),
             Change::Tab => self.show_tab(),
@@ -510,15 +503,15 @@ impl PrPage {
         let failed = checks.iter().filter(|c| c.outcome() == CheckOutcome::Failure).count();
         let pending = checks.iter().filter(|c| c.outcome() == CheckOutcome::Pending).count();
         let (text, color) = if checks.is_empty() {
-            ("0".to_string(), "muted")
+            ("0".to_string(), None)
         } else if failed > 0 {
-            (format!("✕{failed}"), "red")
+            (format!("{failed} failing"), Some("red"))
         } else if pending > 0 {
-            (format!("…{pending}"), "amber")
+            (format!("{pending} running"), Some("amber"))
         } else {
-            (format!("✓{}", checks.len()), "green")
+            (format!("{} passing", checks.len()), Some("green"))
         };
-        self.tabs.set_badge("checks", Some(&text), Some(color));
+        self.tabs.set_badge("checks", Some(&text), color);
         self.tabs.set_badge("files", Some(&pr.changed_files.to_string()), None);
         if let Some(c) = self.conversation.borrow().as_ref() {
             let h = self.model.html.borrow().clone();
@@ -1127,22 +1120,18 @@ pub fn merge_status_bar(model: &Rc<PrModel>, pr: &PullRequestDetail, on_merge: R
         let ok = checks.iter().filter(|c| c.outcome() == CheckOutcome::Success).count();
         let btn = gtk::Button::new();
         btn.add_css_class("flat");
-        btn.set_tooltip_text(Some("Checks"));
-        let c = hbox(6);
-        let add = |icon_name: &str, n: usize, color: &str| {
-            let x = hbox(2);
-            x.append(&colored_icon(icon_name, 12, color));
-            x.append(&label_with(&n.to_string(), &[&format!("fg-{color}"), "sy-small"]));
-            x
+        btn.add_css_class("status-chip-button");
+        btn.set_tooltip_text(Some("Show checks"));
+        let (color, glyph) = if failed > 0 {
+            ("red", "sy-x-circle-symbolic")
+        } else if pending > 0 {
+            ("amber", "sy-clock-symbolic")
+        } else {
+            ("green", "sy-check-circle-symbolic")
         };
-        if failed > 0 {
-            c.append(&add("sy-x-symbolic", failed, "red"));
-        }
-        if pending > 0 {
-            c.append(&add("sy-clock-symbolic", pending, "amber"));
-        }
-        c.append(&add("sy-check-symbolic", ok, "green"));
-        btn.set_child(Some(&c));
+        let summary = checks_summary(failed, pending, ok);
+        btn.set_child(Some(&status_chip(&summary, color, Some(glyph))));
+        set_label(&btn, &format!("Checks: {summary}"));
         let m = model.clone();
         btn.connect_clicked(move |_| m.set_tab(PrTab::Checks));
         b.append(&btn);
