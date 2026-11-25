@@ -330,6 +330,7 @@ public sealed class PRContent : Grid, IShortcutHost
                 break;
             case nameof(PRDetailViewModel.CiFix):
                 RenderBanners();
+                RenderHeader();
                 break;
         }
     }
@@ -337,8 +338,8 @@ public sealed class PRContent : Grid, IShortcutHost
     private void RenderAll()
     {
         if (model.Pr is null) return;
-        RenderHeader();
         RenderBanners();
+        RenderHeader();
         RenderToolbar();
         RenderTabs();
         ShowTab();
@@ -364,8 +365,9 @@ public sealed class PRContent : Grid, IShortcutHost
         var branchHead = BranchChip(pr.HeadRefName, "violet");
         var time = Ui.Caption(Fmt.Rel(pr.CreatedAt));
         Ui.Tip(time, Fmt.Full(pr.CreatedAt));
+        if (agentChip?.Parent is Panel oldChipParent) oldChipParent.Children.Remove(agentChip);
         header.Children.Add(new WrapPanel(8, Ui.StateBadge(pr.VisualState), Ui.Avatar(pr.Author?.AvatarUrl, 18), Ui.Text(pr.Author?.Login ?? "ghost", 13, "text", FontWeights.SemiBold),
-            branchBase, Ui.Glyph("", 11, "dim"), branchHead, Ui.DiffStat(pr.Additions, pr.Deletions), time));
+            branchBase, Ui.Glyph("", 11, "dim"), branchHead, Ui.DiffStat(pr.Additions, pr.Deletions), time, agentChip));
         var reviewers = model.Reviewers;
         if (pr.Labels.Items.Count > 0 || reviewers.Count > 0 || pr.Assignees.Items.Count > 0)
         {
@@ -517,6 +519,7 @@ public sealed class PRContent : Grid, IShortcutHost
             }
         }
         var panel = Ui.V(4);
+        var fixOffered = false;
         Ui.Named(panel, L.T("Merge_Requirements", "Merge requirements"));
         foreach (var r in requirements.Select((r, i) => (r, i)).OrderBy(x => Rank(x.r.State)).ThenBy(x => x.i).Select(x => x.r))
         {
@@ -544,9 +547,23 @@ public sealed class PRContent : Grid, IShortcutHost
                 };
                 action = Ui.Link(title, () => Perform(a));
             }
+            if (r.Action == RequirementAction.ShowChecks && r.State == RequirementState.Missing && model.FailingChecks.Count > 0)
+            {
+                action = FailingActions(model, panel, action);
+                fixOffered = true;
+            }
             var line = Ui.Columns((Ui.Glyph(glyph, 12, color), Ui.Auto), (text, Ui.Star), (action, Ui.Auto));
             Ui.Named(line, r.Title, spoken);
             panel.Children.Add(line);
+        }
+        if (!fixOffered && model.FailingChecks is { Count: > 0 } failing)
+        {
+            var title = failing.Count == 1 ? L.T("CiFix_OneFailing", "1 check failing") : L.F("CiFix_Failing", "{0} checks failing", failing.Count);
+            var names = Ui.Caption(string.Join(", ", failing.Take(3).Select(c => c.FullTitle)) + (failing.Count > 3 ? ", …" : ""));
+            names.TextTrimming = TextTrimming.CharacterEllipsis;
+            var line = Ui.Columns((Ui.Glyph(Palette.CheckGlyph(CheckOutcome.Failure), 12, "red"), Ui.Auto), (Ui.V(1, Ui.Text(title, 13, "text", wrap: true), names), Ui.Star), (FailingActions(model, panel, null), Ui.Auto));
+            Ui.Named(line, title, L.T("Merge_ReqAdvisory", "doesn’t block"));
+            panel.Children.Insert(0, line);
         }
         if (model.Ownership is { } ownership && (ownership.Groups.Count > 0 || ownership.Unowned.Count > 0))
         {
@@ -555,6 +572,17 @@ public sealed class PRContent : Grid, IShortcutHost
             panel.Children.Add(owners);
         }
         return panel;
+    }
+
+    private static FrameworkElement FailingActions(PRDetailViewModel model, FrameworkElement anchor, UIElement? existing)
+    {
+        var row = Ui.H(10);
+        if (model.CanWrite && model.FailedRuns > 0) row.Children.Add(Ui.Link(L.T("Checks_RerunShort", "Re-run failed"), () => ConfirmRerun(anchor.XamlRoot, model).Forget()));
+        var fix = Ui.Link(L.T("Fix_Button", "Fix with agent"), () => Dialogs.FixCi(anchor.XamlRoot, model).Forget());
+        fix.Foreground = Palette.Brush("coralInk");
+        row.Children.Add(fix);
+        if (existing is not null) row.Children.Add(existing);
+        return row;
     }
 
     private const int OwnerGroupLimit = 6;
@@ -627,7 +655,7 @@ public sealed class PRContent : Grid, IShortcutHost
         var launch = model.CiFix is { } l && l.HeadOid == Pr.HeadRefOid ? l : null;
         var fixTab = launch?.Tab is { } t && app.Claude.Tabs.Contains(t) ? t : null;
         WatchFixTab(fixTab);
-        if (CiBanner(model, launch, fixTab, () => Dialogs.FixCi(XamlRoot, model).Forget(), () => ConfirmRerun().Forget(), () => OpenFixTab(fixTab)) is { } ciBanner) banners.Children.Add(ciBanner);
+        agentChip = AgentChip(launch, fixTab, () => OpenFixTab(fixTab));
         banners.Visibility = banners.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -644,7 +672,36 @@ public sealed class PRContent : Grid, IShortcutHost
     private void OnFixTab(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName != nameof(ClaudeTab.State)) return;
-        DispatcherQueue.TryEnqueue(RenderBanners);
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            RenderBanners();
+            RenderHeader();
+        });
+    }
+
+    private FrameworkElement? agentChip;
+
+    public static FrameworkElement? AgentChip(CiFixLaunch? launch, ClaudeTab? fixTab, Action openTab)
+    {
+        if (fixTab is { } tab)
+        {
+            var label = tab.Running ? L.F("Agent_RunningFor", "Agent running · {0}", Fmt.Rel(launch?.At ?? DateTimeOffset.Now)) : tab.State.Title();
+            var running = new Button
+            {
+                Content = Ui.StatusChip(label, tab.Running ? "violet" : tab.State.ColorKey(), "\uE945"),
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+                MinHeight = 0
+            };
+            Ui.Tip(running, L.T("CiFix_OpenSession", "Open the agent session"));
+            Ui.Named(running, label, L.T("CiFix_OpenSession", "Open the agent session"));
+            running.Click += (_, _) => openTab();
+            return running;
+        }
+        if (launch is { Tab: null } external)
+            return Ui.StatusChip(L.F("CiFix_Launched", "Fix launched in {0} · {1}", external.Target.Title(), Fmt.Rel(external.At)), "slate", "\uE945");
+        return null;
     }
 
     private void OpenFixTab(ClaudeTab? tab)
@@ -654,56 +711,15 @@ public sealed class PRContent : Grid, IShortcutHost
         app.Claude.SelectedTab = tab;
     }
 
-    private async Task ConfirmRerun()
+    private Task ConfirmRerun() => ConfirmRerun(XamlRoot, model);
+
+    internal static async Task ConfirmRerun(XamlRoot? root, PRDetailViewModel model)
     {
         var runs = model.FailedRuns;
         if (runs == 0) return;
         var message = runs == 1 ? L.T("Checks_RerunOne", "GitHub Actions will re-run the failed jobs of 1 workflow run on the latest commit.") : L.F("Checks_RerunMany", "GitHub Actions will re-run the failed jobs of {0} workflow runs on the latest commit.", runs);
-        if (await Dialogs.Confirm(XamlRoot, L.T("Checks_RerunTitle", "Re-run failed jobs?"), L.T("Checks_RerunButton", "Re-run"), destructive: false, message: message))
+        if (await Dialogs.Confirm(root, L.T("Checks_RerunTitle", "Re-run failed jobs?"), L.T("Checks_RerunButton", "Re-run"), destructive: false, message: message))
             await model.RerunFailed();
-    }
-
-    public static FrameworkElement? CiBanner(PRDetailViewModel model, CiFixLaunch? launch, ClaudeTab? fixTab, Action fix, Action rerun, Action openTab)
-    {
-        if (model.Pr is not { IsOpen: true }) return null;
-        var failing = model.FailingChecks;
-        if (failing.Count == 0) return null;
-        var text = failing.Count == 1 ? L.T("CiFix_OneFailing", "1 check failing") : L.F("CiFix_Failing", "{0} checks failing", failing.Count);
-        var row = Ui.H(8, Ui.IconTile("\uEA39", "red", 18), Ui.Text(text, 13));
-        var names = Ui.Text("· " + string.Join(", ", failing.Take(3).Select(c => c.FullTitle)) + (failing.Count > 3 ? ", …" : ""), 13, "muted");
-        names.TextTrimming = TextTrimming.CharacterEllipsis;
-        names.MaxWidth = 520;
-        row.Children.Add(names);
-        if (fixTab is { } tab)
-        {
-            var label = tab.Running ? L.T("CiFix_Running", "Fix running") : L.T("CiFix_Session", "Fix session");
-            var running = new Button
-            {
-                Content = Ui.Chip(label + " · " + tab.State.Title(), tab.State.ColorKey(), "\uE945"),
-                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-                BorderThickness = new Thickness(0),
-                Padding = new Thickness(0)
-            };
-            Ui.Tip(running, L.T("CiFix_OpenSession", "Open the agent session"));
-            Ui.Named(running, label + " · " + tab.State.Title(), L.T("CiFix_OpenSession", "Open the agent session"));
-            running.Click += (_, _) => openTab();
-            row.Children.Add(running);
-        }
-        else if (launch is { Tab: null } external)
-        {
-            row.Children.Add(Ui.Chip(L.F("CiFix_Launched", "Fix launched in {0} · {1}", external.Target.Title(), Fmt.Rel(external.At)), "slate", "\uE945"));
-        }
-        else if (launch is { Tab: not null })
-        {
-            row.Children.Add(Ui.Chip(L.T("CiFix_SessionClosed", "Fix session closed"), "dim", "\uE945"));
-        }
-        var actions = Ui.H(6);
-        if (model.CanWrite && model.FailedRuns > 0) actions.Children.Add(Ui.Button(L.T("Checks_RerunShort", "Re-run failed"), rerun));
-        var button = Ui.Button(L.T("Fix_Button", "Fix with agent"), fix, accent: true);
-        Ui.Tint(button, "coral");
-        actions.Children.Add(button);
-        var grid = Ui.Columns((row, Ui.Star), (actions, Ui.Auto));
-        return new Border { Background = Palette.Brush("red", 0.08), CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 6, 8, 6), Child = grid };
     }
 
     public static FrameworkElement? ReReviewBanner(PRDetailViewModel model, Action more)
@@ -781,10 +797,16 @@ public sealed class PRContent : Grid, IShortcutHost
             Ui.Named(review, reviewText, L.T("PR_SubmitReview", "Submit review"));
             toolbar.Children.Add(review);
         }
-        var fix = Ui.Button(L.T("Fix_Button", "Fix with agent"), () => Dialogs.FixWithClaude(XamlRoot, model).Forget(), glyph: "", tooltip: L.T("PR_FixWithAgent", "Send review comments to a new agent session"));
-        toolbar.Children.Add(fix);
+        toolbar.Children.Add(FixSplit(pr));
         if (pr.IsOpen && !pr.IsDraft && model.CanWrite)
-            toolbar.Children.Add(Ui.Button(L.T("PR_MergeButton", "Merge"), () => Dialogs.Merge(XamlRoot, model).Forget(), glyph: "", tooltip: L.T("PR_MergeHint", "Merge pull request (Ctrl+Shift+M)")));
+        {
+            var s = PRDetailViewModel.Headline(pr, model.Requirements);
+            var merge = Ui.Button(L.T("PR_MergeButton", "Merge"), () => Dialogs.Merge(XamlRoot, model).Forget(), glyph: "\uE8A0", tooltip: s.ready ? L.T("PR_MergeHint", "Merge pull request (Ctrl+Shift+M)") : L.F("PR_MergeBlockedHint", "{0} · Merge… (Ctrl+Shift+M)", s.text));
+            if (s.ready) Ui.Tint(merge, "green");
+            else merge.Opacity = 0.72;
+            merge.Margin = new Thickness(6, 0, 0, 0);
+            toolbar.Children.Add(merge);
+        }
         var more = Ui.IconButton("", L.T("Common_MoreActions", "More actions"), () => { }, "text");
         more.Flyout = MoreMenu();
         var group = Ui.H(0,
@@ -802,6 +824,34 @@ public sealed class PRContent : Grid, IShortcutHost
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(groupHost, L.T("PR_BrowserAndMore", "Browser and more"));
         toolbar.Children.Add(groupHost);
+    }
+
+    private FrameworkElement FixSplit(PullRequestDetail pr)
+    {
+        var unresolved = pr.ReviewThreads.Items.Count(t => !t.IsResolved && !t.IsOutdated);
+        var failing = model.FailingChecks.Count;
+        var conflicts = pr.Mergeable == "CONFLICTING" || pr.MergeStateStatus == "DIRTY";
+        var checksFirst = failing > 0 && unresolved == 0;
+        void Comments() => Dialogs.FixWithClaude(XamlRoot, model).Forget();
+        void Checks() => Dialogs.FixCi(XamlRoot, model).Forget();
+        var split = new SplitButton
+        {
+            Content = Ui.H(6, Ui.Glyph("\uE945", 13, "coralInk"), new TextBlock { Text = L.T("Fix_Button", "Fix with agent") })
+        };
+        split.Click += (_, _) =>
+        {
+            if (checksFirst) Checks();
+            else Comments();
+        };
+        var menu = Ui.Menu(
+            Ui.MenuItem(unresolved > 0 ? L.F("Fix_MenuCommentsN", "Review comments ({0})", unresolved) : L.T("Fix_MenuComments", "Review comments"), Comments, "\uE8BD"),
+            Ui.MenuItem(failing > 0 ? L.F("Fix_MenuChecksN", "Failing checks ({0})", failing) : L.T("Fix_MenuChecks", "Failing checks"), Checks, "\uEA39", failing > 0),
+            Ui.MenuItem(L.T("Fix_MenuConflicts", "Conflicts"), () => LinkBrowser.Open(pr.Url + "/conflicts"), "\uE7BA", conflicts));
+        split.Flyout = menu;
+        var tip = checksFirst ? L.T("Fix_SplitChecks", "Send the failing checks to a new agent session") : L.T("PR_FixWithAgent", "Send review comments to a new agent session");
+        Ui.Tip(split, tip);
+        Ui.Named(split, L.T("Fix_Button", "Fix with agent"), tip);
+        return TextZoom.Track(split, 14);
     }
 
     private void CopyShortLink() => ShellView.CopyShortLink(ShortLink.Of(model.Ref));
