@@ -54,6 +54,7 @@ struct PRDetailContent: View {
     @State private var showFix = false
     @State private var ciFix: CIFixRequest?
     @State private var expandedOverride = false
+    @State private var showReviewPanel = false
     @AppStorage("pr.header.autoCollapse") private var autoCollapse = true
 
     private var collapsible: Bool {
@@ -101,6 +102,10 @@ struct PRDetailContent: View {
         .onDisappear { QueueStore.shared.markSeen(model.ref) }
         .focusedSceneValue(\.prActions, front ? actions : nil)
         .panelToolbar(id: "pr-detail") { toolbar }
+        .inspector(isPresented: $showReviewPanel) {
+            ReviewPanel(model: model, pr: pr) { showReviewPanel = false }
+                .inspectorColumnWidth(min: 280, ideal: 320, max: 440)
+        }
         .sheet(isPresented: $showReview) { ReviewSheet(model: model, pr: pr, initialEvent: reviewEvent) }
         .sheet(isPresented: $showMerge) { MergeSheet(model: model, pr: pr) }
         .sheet(isPresented: $showEdit) { EditPRSheet(model: model, pr: pr) }
@@ -273,6 +278,7 @@ struct PRDetailContent: View {
             ToolbarItem(id: "pr.review", placement: .primaryAction) {
                 Menu {
                     Button("Write review…") { reviewEvent = "COMMENT"; showReview = true }
+                    Button(showReviewPanel ? "Hide Review Panel" : "Review in Side Panel") { showReviewPanel.toggle() }
                     if !pr.viewerDidAuthor {
                         Button("Approve") { confirm = .approve }
                     }
@@ -286,6 +292,13 @@ struct PRDetailContent: View {
                 }
                 .labelStyle(.titleAndIcon)
                 .help(model.pending.isEmpty ? "Write a review (⇧⌘R)" : "Submit review with \(plural(model.pending.count, "pending comment", "pending comments")) (⇧⌘R)")
+            }
+            ToolbarItem(id: "pr.reviewPanel", placement: .primaryAction) {
+                Button { showReviewPanel.toggle() } label: {
+                    Label("Review panel", systemImage: "sidebar.right")
+                }
+                .help(showReviewPanel ? "Hide the review panel (⌥⌘I)" : "Review next to the diff (⌥⌘I)")
+                .keyboardShortcut("i", modifiers: [.command, .option])
             }
             ToolbarItem(id: "pr.requestReview", placement: .primaryAction, showsByDefault: false) {
                 Button { showReviewers = true } label: { Label("Request review", systemImage: "person.crop.circle.badge.plus") }
@@ -914,36 +927,57 @@ struct CommitsTab: View {
     let pr: PullRequestDetail
     @Environment(AppModel.self) private var app
 
+    private var days: [(title: String, commits: [CommitInfoNode])] {
+        let cal = Calendar.current
+        var order: [String] = []
+        var map: [String: [CommitInfoNode]] = [:]
+        for node in pr.allCommits.nodes.reversed() {
+            let date = node.commit.committedDate
+            let title: String
+            if cal.isDateInToday(date) { title = "Today" }
+            else if cal.isDateInYesterday(date) { title = "Yesterday" }
+            else { title = date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()) }
+            if map[title] == nil { order.append(title) }
+            map[title, default: []].append(node)
+        }
+        return order.map { ($0, map[$0] ?? []) }
+    }
+
     var body: some View {
+        let reviewed = model.lastReviewed?.oid
         List {
             if (pr.allCommits.totalCount ?? 0) > pr.allCommits.nodes.count {
                 Label("Showing the latest \(pr.allCommits.nodes.count) of \(pr.allCommits.totalCount ?? 0) commits", systemImage: "clock.arrow.circlepath")
                     .font(.syCaption)
                     .foregroundStyle(Color.syMuted)
             }
-            ForEach(pr.allCommits.nodes.reversed(), id: \.commit.oid) { node in
-                let c = node.commit
-                NavigationLink(value: Route.commit(model.ref.repo, c.oid)) {
-                    HStack(spacing: 10) {
-                        Avatar(url: c.author?.avatarUrl, size: 22)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(c.messageHeadline).font(.syBody).lineLimit(2)
-                            Text("\(c.author?.user?.login ?? c.author?.name ?? "") · \(Fmt.rel(c.committedDate))")
-                                .font(.syCaption).foregroundStyle(Color.syMuted)
+            ForEach(days, id: \.title) { day in
+                Section {
+                    ForEach(Array(day.commits.enumerated()), id: \.element.commit.oid) { index, node in
+                        let c = node.commit
+                        if c.oid == reviewed {
+                            reviewMarker
                         }
-                        Spacer()
-                        CIIcon(state: c.statusCheckRollup?.state)
-                        Text(c.abbreviatedOid).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
+                        NavigationLink(value: Route.commit(model.ref.repo, c.oid)) {
+                            CommitTimelineRow(commit: node, first: index == 0, last: index == day.commits.count - 1, tint: index.isMultiple(of: 2) ? .syViolet : .syAccent)
+                                .rowAppear(c.oid, model.commitRows)
+                        }
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 14))
+                        .contextMenu {
+                            Button("Copy SHA") {
+                                copyToPasteboard(c.oid, announce: false)
+                                app.showToast("Copied \(c.abbreviatedOid)")
+                            }
+                            Button("Open in browser") { openInBrowser(c.url) }
+                        }
                     }
-                    .padding(.vertical, 2)
-                    .rowAppear(c.oid, model.commitRows)
-                }
-                .contextMenu {
-                    Button("Copy SHA") {
-                        copyToPasteboard(c.oid, announce: false)
-                        app.showToast("Copied \(c.abbreviatedOid)")
-                    }
-                    Button("Open in browser") { openInBrowser(c.url) }
+                } header: {
+                    Text(day.title)
+                        .font(.sy(size: 11, weight: .semibold))
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+                        .foregroundStyle(Color.syMuted)
                 }
             }
             if (pr.allCommits.totalCount ?? 0) > pr.allCommits.nodes.count {
@@ -951,6 +985,73 @@ struct CommitsTab: View {
             }
         }
         .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, button: false) { await model.load(full: true) }
+    }
+
+    private var reviewMarker: some View {
+        HStack(spacing: 8) {
+            Rectangle().fill(Color.syCoral.opacity(0.5)).frame(height: 1)
+            Text("Your last review")
+                .font(.sy(size: 10, weight: .semibold))
+                .textCase(.uppercase)
+                .tracking(0.5)
+                .foregroundStyle(Color.syCoralInk)
+                .fixedSize()
+            Rectangle().fill(Color.syCoral.opacity(0.5)).frame(height: 1)
+        }
+        .listRowSeparator(.hidden)
+        .padding(.vertical, 2)
+    }
+}
+
+private struct CommitTimelineRow: View {
+    let commit: CommitInfoNode
+    let first: Bool
+    let last: Bool
+    let tint: Color
+    @Environment(AppModel.self) private var app
+    @State private var hovering = false
+
+    var body: some View {
+        let c = commit.commit
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                VStack(spacing: 0) {
+                    Rectangle().fill(first ? Color.clear : Color.syLineStrong).frame(width: 2)
+                    Rectangle().fill(last ? Color.clear : Color.syLineStrong).frame(width: 2)
+                }
+                Circle()
+                    .strokeBorder(tint, lineWidth: 2.5)
+                    .background(Circle().fill(Color.syPanel))
+                    .frame(width: 12, height: 12)
+            }
+            .frame(width: 14)
+            Avatar(url: c.author?.avatarUrl, size: 24, ring: true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(c.messageHeadline).font(.syBody.weight(.medium)).foregroundStyle(Color.syText).lineLimit(2)
+                Text("\(c.author?.user?.login ?? c.author?.name ?? "") · \(Fmt.rel(c.committedDate))")
+                    .font(.syCaption).foregroundStyle(Color.syMuted)
+            }
+            Spacer(minLength: 8)
+            CIChip(state: c.statusCheckRollup?.state)
+            Button {
+                copyToPasteboard(c.oid, announce: false)
+                app.showToast("Copied \(c.abbreviatedOid)")
+            } label: {
+                HStack(spacing: 4) {
+                    Text(c.abbreviatedOid).font(.syCaption.monospaced())
+                    Image(systemName: "doc.on.doc").font(.syIcon(9)).opacity(hovering ? 1 : 0)
+                }
+                .foregroundStyle(Color.syMuted)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(Color.syText.opacity(hovering ? 0.07 : 0.04)))
+            }
+            .buttonStyle(.plain)
+            .help("Copy full SHA")
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
     }
 }
 

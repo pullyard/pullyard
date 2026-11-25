@@ -160,16 +160,8 @@ struct AppShell: View {
             }
         }
         .animation(Motion.smooth, value: compact)
-        .edgeReveal(.leading, enabled: hidden, width: Self.sidebarWidth + 1 + CGFloat(listWidth)) {
-            HStack(spacing: 0) {
-                SidebarView()
-                    .frame(width: Self.sidebarWidth)
-                    .surface(.sidebar)
-                Rectangle().fill(Color.syLine).frame(width: 1)
-                ContentColumn()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .surface(.list)
-            }
+        .edgeReveal(.leading, enabled: hidden, width: showsList ? Self.sidebarWidth + 1 + CGFloat(listWidth) : Self.sidebarWidth) {
+            EdgePanelContent(sidebarWidth: Self.sidebarWidth)
             .environment(app)
             .font(.syBody)
             .tint(Color.syAccent)
@@ -899,6 +891,25 @@ struct SidebarPulseCard: View {
                 .font(.syCaption)
                 .foregroundStyle(Color.syMuted)
                 .lineLimit(1)
+        }
+    }
+}
+
+private struct EdgePanelContent: View {
+    let sidebarWidth: CGFloat
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        HStack(spacing: 0) {
+            SidebarView()
+                .frame(width: sidebarWidth)
+                .surface(.sidebar)
+            if !(app.section == .overview && app.forge == nil) {
+                Rectangle().fill(Color.syLine).frame(width: 1)
+                ContentColumn()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .surface(.list)
+            }
         }
     }
 }

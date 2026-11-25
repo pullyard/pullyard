@@ -86,28 +86,27 @@ final class OverviewModel {
 
     func load(api: GitHubAPI?, force: Bool = false) async {
         guard let api, !loading else { return }
-        if !force, let lastUpdated, Date().timeIntervalSince(lastUpdated) < 120 { return }
+        if !force, let lastUpdated, Date().timeIntervalSince(lastUpdated) < 120, !counts.isEmpty { return }
         loading = true
         defer { loading = false }
-        var next: [OverviewTileKind: Int] = [:]
-        var failure: String?
-        await withTaskGroup(of: (OverviewTileKind, Result<Int, Error>).self) { group in
-            for kind in OverviewTileKind.allCases {
-                guard let q = kind.query else { continue }
-                group.addTask {
-                    do { return (kind, .success(try await api.search(q).issueCount)) } catch { return (kind, .failure(error)) }
-                }
+        let kinds = OverviewTileKind.allCases.filter { $0.query != nil }
+        let fields = kinds.map { "\($0.rawValue): search(type: ISSUE, first: 0, query: $\($0.rawValue)) { issueCount }" }.joined(separator: " ")
+        let params = kinds.map { "$\($0.rawValue): String!" }.joined(separator: ", ")
+        let query = "query(\(params)) { \(fields) }"
+        var vars: [String: Any?] = [:]
+        for kind in kinds { vars[kind.rawValue] = kind.query }
+        struct Count: Decodable { let issueCount: Int }
+        do {
+            let result: [String: Count] = try await api.graphQL(query, vars)
+            for kind in kinds {
+                if let n = result[kind.rawValue]?.issueCount { counts[kind] = n }
             }
-            for await (kind, result) in group {
-                switch result {
-                case .success(let n): next[kind] = n
-                case .failure(let e): if !isCancellation(e) { failure = e.localizedDescription }
-                }
-            }
+            error = nil
+            lastUpdated = Date()
+        } catch {
+            if isCancellation(error) { return }
+            self.error = error.localizedDescription
         }
-        counts.merge(next) { _, new in new }
-        error = next.isEmpty ? failure : nil
-        lastUpdated = Date()
     }
 }
 
@@ -157,9 +156,9 @@ struct OverviewView: View {
                 }
             }
         }
-        .task {
+        .task(id: "\(app.cacheAccount ?? "")|\(app.api != nil)") {
             appeared = true
-            await reload(force: false)
+            await reload(force: model.counts.isEmpty)
         }
         .onChange(of: app.refreshTick) { Task { await reload(force: true) } }
     }
