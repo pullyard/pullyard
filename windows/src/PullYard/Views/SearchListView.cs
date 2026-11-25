@@ -304,13 +304,22 @@ public sealed class NotificationsView : ListPane
             if (syncing) return;
             var n = List.SelectedItem as NotificationThread;
             selectedId = n?.Id;
-            if (n?.Route is { } r)
-            {
-                Model.Select(r);
-                if (n.Unread) MarkRead(n).Forget();
-            }
+            if (n?.Route is { } r) Model.Select(r);
             UpdateNotice();
         };
+        List.KeyDown += (_, e) =>
+        {
+            if (e.Key != Windows.System.VirtualKey.E || List.SelectedItem is not NotificationThread n) return;
+            if (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down)) return;
+            e.Handled = true;
+            MarkDone(n).Forget();
+        };
+        Loaded += (_, _) =>
+        {
+            NotificationRow.DoneRequested -= OnRowDone;
+            NotificationRow.DoneRequested += OnRowDone;
+        };
+        Unloaded += (_, _) => NotificationRow.DoneRequested -= OnRowDone;
         OnRowOpen(item =>
         {
             if (item is NotificationThread n) Open(n);
@@ -326,6 +335,11 @@ public sealed class NotificationsView : ListPane
                 ShortLink.Of(n.Route) is { } shortLink ? Ui.MenuItem(L.T("Menu_CopyShortLink", "Copy Short Link"), () => ShellView.CopyShortLink(shortLink)) : null);
             menu.ShowAt((FrameworkElement)args.OriginalSource);
         };
+    }
+
+    private void OnRowDone(NotificationThread n)
+    {
+        if (items.Any(i => i.Id == n.Id)) MarkDone(n).Forget();
     }
 
     protected override void OnAttached() => Load(true).Forget();
@@ -356,7 +370,7 @@ public sealed class NotificationsView : ListPane
                 return;
             }
             if (items.Count == 0 || loadedMode != mode) appear = RowAppearMode.Cascade;
-            items = fetched;
+            items = fetched.Where(i => !pendingDone.ContainsKey(i.Id)).ToList();
             loadedMode = mode;
             if (!showAll) Model.UnreadCount = items.Count;
         }
@@ -439,9 +453,37 @@ public sealed class NotificationsView : ListPane
         Render();
     }
 
+    private static readonly Dictionary<string, CancellationTokenSource> pendingDone = new();
+
     private async Task MarkDone(NotificationThread n)
     {
-        if (Model.Api is not { } api) return;
+        if (Model.Api is not { } api || pendingDone.ContainsKey(n.Id)) return;
+        var index = items.FindIndex(i => i.Id == n.Id);
+        if (index < 0) return;
+        var cancel = new CancellationTokenSource();
+        pendingDone[n.Id] = cancel;
+        items.RemoveAt(index);
+        if (n.Unread) Model.UnreadCount = Math.Max(0, Model.UnreadCount - 1);
+        if (selectedId == n.Id) selectedId = items.Count > index ? items[index].Id : items.LastOrDefault()?.Id;
+        Render();
+        if (selectedId is not null) List.Focus(FocusState.Programmatic);
+        ShellView.Toast(L.T("Notifications_MarkedDone", "Marked as done"), false, L.T("Common_Undo", "Undo"), () =>
+        {
+            cancel.Cancel();
+            pendingDone.Remove(n.Id);
+            items.Insert(Math.Min(index, items.Count), n);
+            if (n.Unread) Model.UnreadCount++;
+            Render();
+        }, "\uE73E", "green");
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), cancel.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+        pendingDone.Remove(n.Id);
         try
         {
             await api.MarkNotificationDone(n.Id);
@@ -449,9 +491,6 @@ public sealed class NotificationsView : ListPane
         catch
         {
         }
-        items.RemoveAll(i => i.Id == n.Id);
-        if (n.Unread) Model.UnreadCount = Math.Max(0, Model.UnreadCount - 1);
-        Render();
     }
 
     private async Task MarkAll()

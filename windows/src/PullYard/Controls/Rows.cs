@@ -209,6 +209,8 @@ public sealed record GroupedSearchItem(SearchItem Item);
 
 public sealed class NotificationRow : CodeRow
 {
+    public static event Action<NotificationThread>? DoneRequested;
+
     protected override UIElement? Build(object item)
     {
         if (item is not NotificationThread n) return null;
@@ -240,15 +242,24 @@ public sealed class NotificationRow : CodeRow
             "security_alert" => "security alert",
             var r => r.Replace('_', ' ')
         };
-        var dot = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 7, Height = 7, Fill = n.Unread ? Palette.Brush("sky") : new SolidColorBrush(Microsoft.UI.Colors.Transparent), Margin = new Thickness(0, 7, 0, 0), VerticalAlignment = VerticalAlignment.Top };
+        var dot = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 7, Height = 7, Fill = n.Unread ? Palette.Brush("coral") : new SolidColorBrush(Microsoft.UI.Colors.Transparent), Margin = new Thickness(0, 7, 0, 0), VerticalAlignment = VerticalAlignment.Top };
         var tile = Ui.IconTile(glyph, color, 22);
         tile.VerticalAlignment = VerticalAlignment.Top;
         var title = Ui.Text(n.Subject.Title, 13.5, n.Unread ? "text" : "muted", n.Unread ? FontWeights.SemiBold : FontWeights.Normal, maxLines: 2);
         Ui.Tip(title, n.Subject.Title);
         Ui.Tip(tile, TypeTitle(n.Subject.Type));
         var meta = Ui.H(5, Ui.Avatar(n.Repository.Owner?.AvatarUrl, 13, ring: true), Ui.Caption(n.Repository.FullName), Ui.Caption("·", "dim"), Ui.Caption(reason, reasonColor), Ui.Caption("·", "dim"), Ui.Caption(Fmt.Rel(n.UpdatedAt), "dim"));
-        var grid = Ui.Columns((dot, Ui.Auto), (tile, Ui.Auto), (Ui.V(3, title, meta), Ui.Star));
+        var done = Ui.IconButton("\uE73E", L.T("Notifications_DoneHint", "Done (E)"), () => DoneRequested?.Invoke(n), "muted");
+        done.Padding = new Thickness(6, 4, 6, 4);
+        done.Opacity = 0;
+        done.VerticalAlignment = VerticalAlignment.Center;
+        var grid = Ui.Columns((dot, Ui.Auto), (tile, Ui.Auto), (Ui.V(3, title, meta), Ui.Star), (done, Ui.Auto));
         grid.Padding = new Thickness(0, 5, 0, 5);
+        grid.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        grid.PointerEntered += (_, _) => done.Opacity = 1;
+        grid.PointerExited += (_, _) => done.Opacity = 0;
+        done.GotFocus += (_, _) => done.Opacity = 1;
+        done.LostFocus += (_, _) => done.Opacity = 0;
         return grid;
     }
 
