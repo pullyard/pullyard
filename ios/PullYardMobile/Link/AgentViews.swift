@@ -822,6 +822,7 @@ struct AgentChatView: View {
         }
         .navigationTitle(chat?.title ?? L("Agent"))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if chat?.state.busy == true {
