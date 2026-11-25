@@ -156,12 +156,7 @@ struct RootView: View {
             router.open(route, in: model.selectedTab)
         }
         .onOpenURL { url in handleURL(url) }
-        .onAppear {
-            DispatchQueue.main.async {
-                KeyboardDismisser.install()
-                IslandPresenter.shared.install(feedback: model.feedback)
-            }
-        }
+        .onAppear { DispatchQueue.main.async { KeyboardDismisser.install() } }
         .tint(MobileTheme.accent)
         .preferredColorScheme(AppearanceMode(rawValue: appearanceRaw)?.colorScheme)
         .onChange(of: scenePhase) { _, phase in

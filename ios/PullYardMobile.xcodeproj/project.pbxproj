@@ -53,7 +53,6 @@
 		A0B2207DDD4EB19A571B3DE2 /* BackgroundSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25B274088D0F1FDAC407D400 /* BackgroundSync.swift */; };
 		A35600335EFD66F8457AEEC2 /* GitHubClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 075F9FC47F2B64F2FC5BA017 /* GitHubClient.swift */; };
 		A5C63EF30A6A9F50E262E55B /* PullRequestDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6D80172FDB710BD8881905F /* PullRequestDetailView.swift */; };
-		A639B0DC38AB3D4D3994BEC8 /* IslandRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D82D5D14831D65916821F0CA /* IslandRenderTests.swift */; };
 		A73200079D9632C212D17A9F /* AppShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A695F8DF43A5AF140D29255 /* AppShortcuts.swift */; };
 		ABF8CACE9E29CDBFF2B168D6 /* PullYardShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BAA821B14496A8A2E7564C1D /* PullYardShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		AD7A5FF8A6B142D0098B47A5 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = D84E1D600AC299AC39B48E39 /* Models.swift */; };
@@ -63,7 +62,6 @@
 		B3A6057C181D5CD52957DB81 /* Outbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84B06A7A58C99EBB0092CBDF /* Outbox.swift */; };
 		B3AAE7789CAB50805BDCBB31 /* AccountButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = CECF9D56E8C81A04CF10EBAF /* AccountButton.swift */; };
 		B7F186FA168D1403810754FA /* CIActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0C66F8D185CD5194B079AE /* CIActivity.swift */; };
-		BADB316E9D4E6AB1BA45E3DC /* IslandToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF55C401DD6D19B424806791 /* IslandToast.swift */; };
 		BB2F3FACC07E463B7D375E51 /* PullYardMobileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 825268025F1A9721844AE423 /* PullYardMobileTests.swift */; };
 		C070820FA7D4B882307E041E /* LiveActivities.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E1C772FE09ECA4404FF0B3 /* LiveActivities.swift */; };
 		C3A92D0D40D42786058EDC4C /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E906B2E7B97FCF8016A2F05 /* AppTheme.swift */; };
@@ -183,11 +181,9 @@
 		CE425C9086597B1189109F0E /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
 		CECF9D56E8C81A04CF10EBAF /* AccountButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountButton.swift; sourceTree = "<group>"; };
 		D7C5751F2F7DBE975941D203 /* LocalCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCache.swift; sourceTree = "<group>"; };
-		D82D5D14831D65916821F0CA /* IslandRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandRenderTests.swift; sourceTree = "<group>"; };
 		D84E1D600AC299AC39B48E39 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		D8AAB054FDE6EB8D7BD4069E /* RepoViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoViews.swift; sourceTree = "<group>"; };
 		DB4C92BC2581DAE0A5BD419C /* AgentDiff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDiff.swift; sourceTree = "<group>"; };
-		DF55C401DD6D19B424806791 /* IslandToast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandToast.swift; sourceTree = "<group>"; };
 		E371F51D2299F6292593D247 /* AgentDiffBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDiffBuilderTests.swift; sourceTree = "<group>"; };
 		E7ACC95A77417C6758DB98D1 /* JiraKeyFinderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraKeyFinderTests.swift; sourceTree = "<group>"; };
 		E89E11B5D2A4EE80E9B6378A /* JiraViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraViews.swift; sourceTree = "<group>"; };
@@ -286,7 +282,6 @@
 				075F9FC47F2B64F2FC5BA017 /* GitHubClient.swift */,
 				120660E6D50C51E2C99B570E /* Glass.swift */,
 				2EF4EBD49C399A1EBB703665 /* InboxAndPullsView.swift */,
-				DF55C401DD6D19B424806791 /* IslandToast.swift */,
 				3087B4E6E836EBC234BDFAF7 /* IssueDetailView.swift */,
 				435E8F2A21391A7806B96123 /* KeyboardDismisser.swift */,
 				F6E1C772FE09ECA4404FF0B3 /* LiveActivities.swift */,
@@ -322,7 +317,6 @@
 			children = (
 				E371F51D2299F6292593D247 /* AgentDiffBuilderTests.swift */,
 				6D854E33B7127DD7D9C8A882 /* AgentTurnSummaryTests.swift */,
-				D82D5D14831D65916821F0CA /* IslandRenderTests.swift */,
 				E7ACC95A77417C6758DB98D1 /* JiraKeyFinderTests.swift */,
 				825268025F1A9721844AE423 /* PullYardMobileTests.swift */,
 				EEFDE3973B2CC94C18370636 /* VoyageTests.swift */,
@@ -520,7 +514,6 @@
 				A35600335EFD66F8457AEEC2 /* GitHubClient.swift in Sources */,
 				553B9AF410D2BEF9AAD62485 /* Glass.swift in Sources */,
 				20B23EC4331D918C39410462 /* InboxAndPullsView.swift in Sources */,
-				BADB316E9D4E6AB1BA45E3DC /* IslandToast.swift in Sources */,
 				506C6041378E535399DE85EA /* IssueDetailView.swift in Sources */,
 				8328112F372F52C1C66FA8DE /* JiraStore.swift in Sources */,
 				228D58DECC871A8C3AB8E280 /* JiraViews.swift in Sources */,
@@ -575,7 +568,6 @@
 			files = (
 				1585D4C476311F322268CA2D /* AgentDiffBuilderTests.swift in Sources */,
 				9C9A41575FD72EDC4E015021 /* AgentTurnSummaryTests.swift in Sources */,
-				A639B0DC38AB3D4D3994BEC8 /* IslandRenderTests.swift in Sources */,
 				FE3185933D64017FD5F03977 /* JiraKeyFinderTests.swift in Sources */,
 				BB2F3FACC07E463B7D375E51 /* PullYardMobileTests.swift in Sources */,
 				D4F07CCFDBC294ABE56885C3 /* VoyageTests.swift in Sources */,

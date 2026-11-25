@@ -119,7 +119,51 @@ struct FeedbackChrome: ViewModifier {
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
+            .overlay(alignment: .bottom) {
+                if let toast = feedback.toast {
+                    ToastView(toast: toast) {
+                        toast.action?()
+                        withAnimation(.snappy) { feedback.dismissToast() }
+                    } dismiss: {
+                        withAnimation(.snappy) { feedback.dismissToast() }
+                    }
+                    .padding(.horizontal, 16).padding(.bottom, 12)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
             .animation(.snappy, value: feedback.banner)
+            .animation(.snappy, value: feedback.toast?.id)
+    }
+}
+
+private struct ToastView: View {
+    let toast: FeedbackCenter.Toast
+    let perform: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol).foregroundStyle(tint)
+            Text(L(toast.message)).mobileFont(size: 13, weight: .medium).foregroundStyle(MobileTheme.ink).lineLimit(3)
+            Spacer(minLength: 4)
+            if let title = toast.actionTitle {
+                Button(title, action: perform).mobileFont(size: 13, weight: .bold).foregroundStyle(MobileTheme.accent)
+            }
+        }
+        .padding(.horizontal, 18).padding(.vertical, 13)
+        .pyGlass(in: Capsule(), tint: tint.opacity(0.12), interactive: true)
+        .shadow(color: .black.opacity(GlassSupport.isAvailable ? 0.08 : 0.12), radius: 14, y: 6)
+        .onTapGesture { if toast.actionTitle == nil { dismiss() } }
+        .gesture(DragGesture(minimumDistance: 12).onEnded { value in if value.translation.height > 10 { dismiss() } })
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(toast.actionTitle == nil ? [] : .isButton)
+    }
+
+    private var symbol: String {
+        switch toast.style { case .success: "checkmark.circle.fill"; case .info: "info.circle.fill"; case .error: "exclamationmark.circle.fill" }
+    }
+    private var tint: Color {
+        switch toast.style { case .success: MobileTheme.green; case .info: MobileTheme.accent; case .error: MobileTheme.coral }
     }
 }
 
