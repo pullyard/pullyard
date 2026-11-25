@@ -376,6 +376,12 @@ struct AgentChatView: View {
     @ObservedObject private var link = LinkClient.shared
     @State private var draft = ""
     @State private var busySince: Date?
+    @State private var atBottom = true
+    @State private var unseen = false
+    @State private var settled = false
+    @State private var followUntil = Date.distantPast
+    @State private var viewportHeight: CGFloat = 0
+    @State private var scrollRequest = 0
     @FocusState private var focused: Bool
 
     private var chat: AgentChat? { link.chats[session] }
@@ -383,7 +389,7 @@ struct AgentChatView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 10) {
                     if let chat {
                         ForEach(chat.items) { item in AgentItemView(item: item).id(item.id) }
                         ForEach(chat.state.pending) { permission in
@@ -404,16 +410,44 @@ struct AgentChatView: View {
                             .frame(maxWidth: .infinity).padding(.vertical, 60)
                     }
                     Color.clear.frame(height: 1).id("bottom")
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named("agentChat")).minY } action: { minY in
+                            trackBottom(minY)
+                        }
                 }
                 .padding(16)
             }
+            .coordinateSpace(.named("agentChat"))
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                let follow = atBottom && viewportHeight > 0 && height != viewportHeight
+                viewportHeight = height
+                if follow { scrollToEnd(proxy, animated: false) }
+            }
             .background(BrandBackdrop())
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: chat?.items.count) { _, _ in withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) } }
-            .onChange(of: chat?.state.pending.count) { _, _ in withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .overlay(alignment: .bottom) {
+                if settled && !atBottom {
+                    JumpToLatestButton(unseen: unseen) { scrollToEnd(proxy, animated: true) }
+                        .padding(.bottom, 12)
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                }
+            }
+            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: settled && !atBottom)
+            .onChange(of: contentSignature) { _, _ in
+                if !settled || atBottom || Date() < followUntil {
+                    scrollToEnd(proxy, animated: false)
+                } else {
+                    unseen = true
+                }
+            }
+            .onChange(of: scrollRequest) { _, _ in scrollToEnd(proxy, animated: true) }
             .onChange(of: chat?.state.busy, initial: true) { _, busy in busySince = busy == true ? (busySince ?? Date()) : nil }
+            .onAppear { scrollToEnd(proxy, animated: false) }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+        .onChange(of: focused) { _, on in
+            guard on, atBottom else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { scrollRequest += 1 }
+        }
         .navigationTitle(chat?.title ?? L("Agent"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
@@ -432,6 +466,47 @@ struct AgentChatView: View {
         .onDisappear { link.unsubscribe(session) }
     }
 
+    private var contentSignature: String {
+        guard let chat else { return "none" }
+        let last = chat.items.last
+        return "\(chat.items.count)|\(last?.id ?? "")|\(last?.text.count ?? 0)|\(last?.status ?? "")|\(chat.state.pending.count)|\(chat.state.busy)|\(chat.state.error != nil)"
+    }
+
+    private func trackBottom(_ minY: CGFloat) {
+        guard viewportHeight > 0 else { return }
+        let bottom = minY <= viewportHeight + 48
+        if !bottom, Date() < followUntil { return }
+        if bottom != atBottom { atBottom = bottom }
+        if bottom, unseen { unseen = false }
+    }
+
+    private func scrollToEnd(_ proxy: ScrollViewProxy, animated: Bool) {
+        followUntil = Date().addingTimeInterval(animated ? 0.6 : 0.15)
+        atBottom = true
+        unseen = false
+        if animated {
+            withAnimation(.snappy(duration: 0.4)) { proxy.scrollTo("bottom", anchor: .bottom) }
+        } else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { proxy.scrollTo("bottom", anchor: .bottom) }
+        }
+        DispatchQueue.main.async {
+            guard !animated else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { proxy.scrollTo("bottom", anchor: .bottom) }
+            if chat?.items.isEmpty == false { settled = true }
+        }
+        if animated {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+        }
+    }
+
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 10) {
             TextField("Message the agent", text: $draft, axis: .vertical)
@@ -445,6 +520,7 @@ struct AgentChatView: View {
                 guard !text.isEmpty else { return }
                 link.send(text, to: session)
                 draft = ""
+                scrollRequest += 1
             } label: {
                 Image(systemName: "arrow.up").mobileFont(size: 17, weight: .bold).foregroundStyle(.white)
                     .frame(width: 44, height: 44)
@@ -456,6 +532,43 @@ struct AgentChatView: View {
             .accessibilityLabel("Send")
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
+    }
+}
+
+private struct JumpToLatestButton: View {
+    let unseen: Bool
+    let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                if unseen && !reduceMotion {
+                    PhaseAnimator([false, true]) { expanded in
+                        Circle()
+                            .stroke(MobileTheme.accent.opacity(expanded ? 0 : 0.6), lineWidth: 2)
+                            .frame(width: 42, height: 42)
+                            .scaleEffect(expanded ? 1.5 : 1)
+                    } animation: { expanded in
+                        expanded ? .easeOut(duration: 1.2) : .linear(duration: 0.01)
+                    }
+                }
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(unseen ? Color.white : MobileTheme.ink)
+                    .phaseAnimator(reduceMotion ? [CGFloat(0)] : [0, 3, 0]) { content, offset in
+                        content.offset(y: offset)
+                    } animation: { _ in .easeInOut(duration: 0.7) }
+                    .frame(width: 42, height: 42)
+                    .contentShape(Circle())
+                    .pyGlass(in: Circle(), tint: unseen ? MobileTheme.accentFill : nil, interactive: true, fallback: unseen ? MobileTheme.accentFill : MobileTheme.card)
+                    .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+            }
+            .frame(width: 64, height: 64)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.pyPlain)
+        .accessibilityLabel("Scroll to the latest message")
     }
 }
 
