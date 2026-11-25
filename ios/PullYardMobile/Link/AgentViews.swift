@@ -54,10 +54,8 @@ struct MacLinkSection: View {
         }
         .pyRow()
         .sheet(isPresented: $scanning) {
-            PairingScanner { code in
-                scanning = false
-                guard let pairing = PYLinkPairing.parse(code) else { pairingError = "That isn't a PullYard pairing code."; return }
-                Task { await pair(pairing) }
+            PairingScanner { pairing in
+                try await link.pair(pairing)
             }
             .pySheetStyle()
         }
@@ -96,83 +94,306 @@ extension Notification.Name {
 }
 
 struct PairingScanner: View {
-    let found: (String) -> Void
+    let pair: (PYLinkPairing) async throws -> Void
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var router: AppRouter
+    @EnvironmentObject private var model: AppModel
     @State private var pasted = ""
+    @State private var phase: Phase = .scanning
+    @State private var cameraReady = false
+    @State private var cameraDenied = false
+    @State private var scanToken = 0
+
+    enum Phase: Equatable {
+        case scanning
+        case pairing(String)
+        case paired(String)
+        case failed(String)
+    }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                QRScannerView(found: found)
-                    .frame(height: 320)
-                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(MobileTheme.accent, lineWidth: 2))
-                Text("Point the camera at the code in PullYard on your Mac (Settings → iPhone).")
-                    .mobileFont(size: 14).foregroundStyle(MobileTheme.muted).multilineTextAlignment(.center)
-                HStack {
-                    TextField("…or paste the pairing link", text: $pasted).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Button("Pair") { found(pasted) }.disabled(pasted.isEmpty)
+            VStack(spacing: 18) {
+                ZStack {
+                    QRScannerView(token: scanToken, onReady: { withAnimation(.easeOut(duration: 0.3)) { cameraReady = true } }, onDenied: { cameraDenied = true }, found: handle)
+                        .opacity(cameraReady && phase == .scanning ? 1 : 0.35)
+                    if phase == .scanning {
+                        Viewfinder().padding(48)
+                        if !cameraReady {
+                            VStack(spacing: 10) {
+                                if cameraDenied {
+                                    Image(systemName: "camera.fill").font(.system(size: 28)).foregroundStyle(.white.opacity(0.8))
+                                    Text("PullYard can't use the camera. Allow it in Settings, or paste the pairing link below.")
+                                        .mobileFont(size: 14).foregroundStyle(.white.opacity(0.85)).multilineTextAlignment(.center)
+                                    Button("Open Settings") { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
+                                        .mobileFont(size: 14, weight: .semibold)
+                                } else {
+                                    PullYardLoader(size: 40, style: .monochrome(.white))
+                                    Text("Starting the camera…").mobileFont(size: 14).foregroundStyle(.white.opacity(0.8))
+                                }
+                            }
+                            .padding(24)
+                            .transition(.opacity)
+                        }
+                    } else {
+                        statusCard.transition(.scale(scale: 0.92).combined(with: .opacity))
+                    }
                 }
-                .padding(12)
-                .background(MobileTheme.card, in: Capsule())
+                .frame(height: 340)
+                .background(Color(hex: 0x0C1220))
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(borderColor, lineWidth: 2))
+                .animation(.spring(response: 0.4, dampingFraction: 0.85), value: phase)
+                if phase == .scanning {
+                    Text("Point the camera at the code in PullYard on your Mac (Settings → iPhone).")
+                        .mobileFont(size: 14).foregroundStyle(MobileTheme.muted).multilineTextAlignment(.center)
+                    HStack {
+                        TextField("…or paste the pairing link", text: $pasted).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        Button("Pair") { handle(pasted) }.disabled(pasted.isEmpty)
+                    }
+                    .padding(12)
+                    .background(MobileTheme.card, in: Capsule())
+                } else {
+                    actions
+                }
                 Spacer()
             }
             .padding(18)
             .background(BrandBackdrop())
             .navigationTitle("Pair with Mac")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    if case .paired = phase {} else { Button("Cancel") { dismiss() } }
+                }
+            }
+            .interactiveDismissDisabled(phase.isBusy)
+        }
+    }
+
+    private var borderColor: Color {
+        switch phase {
+        case .paired: MobileTheme.green
+        case .failed: MobileTheme.red
+        default: MobileTheme.accent
+        }
+    }
+
+    @ViewBuilder private var statusCard: some View {
+        VStack(spacing: 14) {
+            switch phase {
+            case let .pairing(name):
+                PullYardLoader(size: 64, style: .monochrome(.white))
+                Text(String(format: L("Pairing with %@…"), name)).mobileFont(size: 17, weight: .semibold).foregroundStyle(.white)
+            case let .paired(name):
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 64))
+                    .foregroundStyle(MobileTheme.green)
+                    .symbolEffect(.bounce, value: name)
+                Text(String(format: L("Paired with %@"), name)).mobileFont(size: 19, weight: .semibold, design: .serif).foregroundStyle(.white)
+                Text("Your iPhone can now start agent fixes and follow them live.").mobileFont(size: 13).foregroundStyle(.white.opacity(0.7)).multilineTextAlignment(.center)
+            case let .failed(message):
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 48)).foregroundStyle(MobileTheme.amber)
+                Text(message).mobileFont(size: 14).foregroundStyle(.white.opacity(0.85)).multilineTextAlignment(.center)
+            case .scanning:
+                EmptyView()
+            }
+        }
+        .padding(24)
+    }
+
+    @ViewBuilder private var actions: some View {
+        switch phase {
+        case .paired:
+            VStack(spacing: 10) {
+                Button {
+                    dismiss()
+                    router.showSettings = false
+                    model.selectedTab = .agents
+                } label: {
+                    Label("Open Agents", systemImage: "wand.and.stars")
+                        .mobileFont(size: 16, weight: .semibold).foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 52).contentShape(Capsule())
+                        .pyGlass(in: Capsule(), tint: MobileTheme.coral, interactive: true, fallback: MobileTheme.coral)
+                }
+                .buttonStyle(.pyPlain)
+                Button("Done") { dismiss() }.mobileFont(size: 15, weight: .semibold)
+            }
+        case .failed:
+            Button {
+                pasted = ""
+                withAnimation { phase = .scanning }
+                scanToken += 1
+            } label: {
+                Label("Scan again", systemImage: "qrcode.viewfinder")
+                    .mobileFont(size: 16, weight: .semibold).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 52).contentShape(Capsule())
+                    .pyGlass(in: Capsule(), tint: MobileTheme.accentFill, interactive: true, fallback: MobileTheme.accentFill)
+            }
+            .buttonStyle(.pyPlain)
+        default:
+            EmptyView()
+        }
+    }
+
+    private func handle(_ code: String) {
+        guard phase == .scanning || phase.isFailure else { return }
+        guard let pairing = PYLinkPairing.parse(code) else {
+            withAnimation { phase = .failed(L("That isn't a PullYard pairing code.")) }
+            return
+        }
+        withAnimation { phase = .pairing(pairing.name) }
+        Task {
+            let started = Date()
+            do {
+                try await pair(pairing)
+                let wait = max(0, 0.6 - Date().timeIntervalSince(started))
+                try? await Task.sleep(for: .seconds(wait))
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                withAnimation { phase = .paired(pairing.name) }
+            } catch {
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                withAnimation { phase = .failed(error.localizedDescription) }
+            }
         }
     }
 }
 
+private extension PairingScanner.Phase {
+    var isBusy: Bool { if case .pairing = self { return true }; return false }
+    var isFailure: Bool { if case .failed = self { return true }; return false }
+}
+
+private struct Viewfinder: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { geo in
+            let side = min(geo.size.width, geo.size.height)
+            let corner: CGFloat = 28
+            ZStack {
+                ForEach(0..<4, id: \.self) { index in
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: corner))
+                        path.addLine(to: CGPoint(x: 0, y: 8))
+                        path.addQuadCurve(to: CGPoint(x: 8, y: 0), control: .zero)
+                        path.addLine(to: CGPoint(x: corner, y: 0))
+                    }
+                    .stroke(.white, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .frame(width: corner, height: corner)
+                    .rotationEffect(.degrees(Double(index) * 90))
+                    .offset(x: (index == 1 || index == 2 ? 1 : -1) * (side / 2 - corner / 2), y: (index >= 2 ? 1 : -1) * (side / 2 - corner / 2))
+                }
+            }
+            .frame(width: side, height: side)
+            .position(x: geo.size.width / 2, y: geo.size.height / 2)
+            .phaseAnimator(reduceMotion ? [1.0] : [1.0, 0.94]) { content, scale in
+                content.scaleEffect(scale)
+            } animation: { _ in .easeInOut(duration: 1.1) }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
 struct QRScannerView: UIViewControllerRepresentable {
+    let token: Int
+    let onReady: () -> Void
+    let onDenied: () -> Void
     let found: (String) -> Void
 
     func makeUIViewController(context: Context) -> ScannerController {
         let controller = ScannerController()
         controller.found = found
+        controller.onReady = onReady
+        controller.onDenied = onDenied
+        controller.token = token
         return controller
     }
 
-    func updateUIViewController(_ controller: ScannerController, context: Context) {}
+    func updateUIViewController(_ controller: ScannerController, context: Context) {
+        controller.found = found
+        if controller.token != token {
+            controller.token = token
+            controller.resume()
+        }
+    }
 
     final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
         var found: ((String) -> Void)?
+        var onReady: (() -> Void)?
+        var onDenied: (() -> Void)?
+        var token = 0
         private let session = AVCaptureSession()
+        private let sessionQueue = DispatchQueue(label: "pullyard.scanner")
+        private let preview = AVCaptureVideoPreviewLayer()
         private var delivered = false
 
         override func viewDidLoad() {
             super.viewDidLoad()
-            view.backgroundColor = .black
-            guard let device = AVCaptureDevice.default(for: .video), let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) else { return }
-            session.addInput(input)
-            let output = AVCaptureMetadataOutput()
-            guard session.canAddOutput(output) else { return }
-            session.addOutput(output)
-            output.setMetadataObjectsDelegate(self, queue: .main)
-            output.metadataObjectTypes = [.qr]
-            let preview = AVCaptureVideoPreviewLayer(session: session)
+            view.backgroundColor = .clear
             preview.videoGravity = .resizeAspectFill
-            preview.frame = view.bounds
             view.layer.addSublayer(preview)
-            DispatchQueue.global(qos: .userInitiated).async { [session] in session.startRunning() }
+            switch AVCaptureDevice.authorizationStatus(for: .video) {
+            case .authorized:
+                configure()
+            case .notDetermined:
+                AVCaptureDevice.requestAccess(for: .video) { granted in
+                    DispatchQueue.main.async { granted ? self.configure() : self.onDenied?() }
+                }
+            default:
+                onDenied?()
+            }
+        }
+
+        private func configure() {
+            sessionQueue.async { [weak self] in
+                guard let self else { return }
+                self.session.beginConfiguration()
+                guard let device = AVCaptureDevice.default(for: .video), let input = try? AVCaptureDeviceInput(device: device), self.session.canAddInput(input) else {
+                    self.session.commitConfiguration()
+                    return
+                }
+                self.session.addInput(input)
+                let output = AVCaptureMetadataOutput()
+                guard self.session.canAddOutput(output) else {
+                    self.session.commitConfiguration()
+                    return
+                }
+                self.session.addOutput(output)
+                output.setMetadataObjectsDelegate(self, queue: .main)
+                output.metadataObjectTypes = [.qr]
+                self.session.commitConfiguration()
+                self.session.startRunning()
+                DispatchQueue.main.async {
+                    self.preview.session = self.session
+                    self.onReady?()
+                }
+            }
+        }
+
+        func resume() {
+            delivered = false
+            sessionQueue.async { [weak self] in
+                guard let self, !self.session.isRunning, !self.session.inputs.isEmpty else { return }
+                self.session.startRunning()
+            }
         }
 
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
-            view.layer.sublayers?.first?.frame = view.bounds
+            preview.frame = view.bounds
         }
 
         override func viewWillDisappear(_ animated: Bool) {
             super.viewWillDisappear(animated)
-            session.stopRunning()
+            sessionQueue.async { [session] in session.stopRunning() }
         }
 
         func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput objects: [AVMetadataObject], from connection: AVCaptureConnection) {
             guard !delivered, let value = (objects.first as? AVMetadataMachineReadableCodeObject)?.stringValue, value.hasPrefix("pullyard://pair") else { return }
             delivered = true
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            sessionQueue.async { [session] in session.stopRunning() }
             found?(value)
         }
     }

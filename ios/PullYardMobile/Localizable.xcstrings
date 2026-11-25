@@ -6000,6 +6000,86 @@
           }
         }
       }
+    },
+    "PullYard can't use the camera. Allow it in Settings, or paste the pairing link below." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PullYard не может использовать камеру. Разрешите доступ в Настройках или вставьте ссылку ниже."
+          }
+        }
+      }
+    },
+    "Starting the camera…" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Запускаю камеру…"
+          }
+        }
+      }
+    },
+    "Pairing with %@…" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Связываю с %@…"
+          }
+        }
+      }
+    },
+    "Your iPhone can now start agent fixes and follow them live." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Теперь iPhone может запускать исправления агентом и следить за ними вживую."
+          }
+        }
+      }
+    },
+    "Open Agents" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Открыть Агенты"
+          }
+        }
+      }
+    },
+    "Scan again" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сканировать снова"
+          }
+        }
+      }
+    },
+    "That isn't a PullYard pairing code." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Это не код привязки PullYard."
+          }
+        }
+      }
+    },
+    "Done" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Готово"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
