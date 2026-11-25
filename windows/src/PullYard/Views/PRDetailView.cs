@@ -1109,6 +1109,8 @@ public sealed class PRContent : Grid, IShortcutHost
         return list;
     }
 
+    private readonly Dictionary<string, bool> checkGroupsOpen = new();
+
     private FrameworkElement BuildChecks(FrameworkElement? existing)
     {
         var list = existing as ListView ?? ListSupport.Create("GenericRowTemplate", ListViewSelectionMode.None);
@@ -1117,19 +1119,56 @@ public sealed class PRContent : Grid, IShortcutHost
             list.ItemClick += (_, e) =>
             {
                 if (e.ClickedItem is ActionRowItem a) a.Action();
+                else if (e.ClickedItem is CheckGroupItem g)
+                {
+                    checkGroupsOpen[g.Name] = !g.Expanded;
+                    tabViews[PRTab.Checks] = BuildChecks(list);
+                }
             };
         }
         if (model.Pr is { } pr)
         {
-            var checks = pr.Checks.OrderBy(c => (int)c.Outcome).ThenBy(c => c.Title).ToList();
+            var checks = pr.Checks;
+            var breakdown = MergeReadiness.Checks(checks, null);
+            var required = breakdown.Required.Select(c => c.Id).ToHashSet();
             var failedRuns = model.FailedRuns;
             var items = new List<object>();
             if (checks.Count == 0) items.Add(new TextRowItem(L.T("Checks_None", "No checks for the latest commit")));
-            if (failedRuns > 0 && model.CanWrite) items.Add(new ActionRowItem(L.F("Checks_Rerun", "Re-run failed jobs ({0} workflow)", failedRuns), () => ConfirmRerun().Forget(), ""));
-            foreach (var c in checks)
+            else
             {
-                void Fix() => Dialogs.FixCi(XamlRoot, model, c).Forget();
-                items.Add(new CheckRowItem(c, () => Dialogs.JobLog(XamlRoot, model.Api, model.Ref.Repo, c, log => Dialogs.FixCi(XamlRoot, model, c, log).Forget()).Forget(), CiFailures.IsFixable(c) ? new Action(Fix) : null));
+                var failed = checks.Count(c => c.Outcome == CheckOutcome.Failure);
+                var pending = checks.Count(c => c.Outcome == CheckOutcome.Pending);
+                var passed = checks.Count(c => c.Outcome == CheckOutcome.Success);
+                var requiredDone = breakdown.Required.Count(c => c.Outcome == CheckOutcome.Success);
+                items.Add(new CheckSummaryItem(failed, pending, passed, requiredDone, breakdown.Required.Count));
+            }
+            if (failedRuns > 0 && model.CanWrite) items.Add(new ActionRowItem(L.F("Checks_Rerun", "Re-run failed jobs ({0} workflow)", failedRuns), () => ConfirmRerun().Forget(), "\uE72C"));
+            static int Rank(CheckOutcome o) => o switch
+            {
+                CheckOutcome.Failure => 0,
+                CheckOutcome.Pending => 1,
+                CheckOutcome.Success => 3,
+                _ => 2
+            };
+            var groups = checks
+                .GroupBy(c => c.WorkflowName ?? (c.Typename == "StatusContext" ? L.T("Checks_Statuses", "Statuses") : L.T("Checks_Other", "Other checks")))
+                .Select(g => (Name: g.Key, Checks: g.OrderBy(c => Rank(c.Outcome)).ThenBy(c => c.Title).ToList()))
+                .OrderBy(g => g.Checks.Min(c => Rank(c.Outcome)))
+                .ThenBy(g => g.Name)
+                .ToList();
+            foreach (var (name, groupChecks) in groups)
+            {
+                var gFailed = groupChecks.Count(c => c.Outcome == CheckOutcome.Failure);
+                var gPending = groupChecks.Count(c => c.Outcome == CheckOutcome.Pending);
+                var gPassed = groupChecks.Count(c => c.Outcome == CheckOutcome.Success);
+                var open = checkGroupsOpen.TryGetValue(name, out var stored) ? stored : gFailed > 0 || gPending > 0;
+                if (groups.Count > 1) items.Add(new CheckGroupItem(name, gFailed, gPending, gPassed, groupChecks.Count, open));
+                if (!open && groups.Count > 1) continue;
+                foreach (var c in groupChecks)
+                {
+                    void Fix() => Dialogs.FixCi(XamlRoot, model, c).Forget();
+                    items.Add(new CheckRowItem(c, () => Dialogs.JobLog(XamlRoot, model.Api, model.Ref.Repo, c, log => Dialogs.FixCi(XamlRoot, model, c, log).Forget()).Forget(), CiFailures.IsFixable(c) ? new Action(Fix) : null, required.Contains(c.Id), groups.Count > 1));
+                }
             }
             if (model.HiddenCheckCount > 0)
                 items.Add(new ActionRowItem(L.F("Checks_Hidden", "{0} more checks are not shown — open in browser", model.HiddenCheckCount), () => LinkBrowser.Open(pr.Url + "/checks")));
@@ -1628,7 +1667,37 @@ public sealed record CommitRowItem(CommitInfo Commit) : IRowContent
     }
 }
 
-public sealed record CheckRowItem(CheckContext Check, Action ShowLog, Action? Fix = null) : IRowContent
+public sealed record CheckSummaryItem(int Failed, int Pending, int Passed, int RequiredDone, int RequiredTotal) : IRowContent
+{
+    public UIElement BuildRow()
+    {
+        var row = Ui.CheckChips(Failed, Pending, Passed);
+        if (RequiredTotal > 0) row.Children.Add(Ui.StatusChip(L.F("Checks_RequiredOf", "Required {0}/{1}", RequiredDone, RequiredTotal), RequiredDone == RequiredTotal ? "green" : "slate", "\uE72E"));
+        row.Margin = new Thickness(0, 8, 0, 6);
+        AutomationProperties.SetName(row, Ui.CheckSummary(Failed, Pending, Passed));
+        return row;
+    }
+}
+
+public sealed record CheckGroupItem(string Name, int Failed, int Pending, int Passed, int Total, bool Expanded) : IRowContent
+{
+    public UIElement BuildRow()
+    {
+        var color = Failed > 0 ? "red" : Pending > 0 ? "amber" : "green";
+        var title = Ui.Text(Name, 13, "text", FontWeights.SemiBold);
+        var grid = Ui.Columns(
+            (Ui.Glyph(Expanded ? "\uE70D" : "\uE76C", 10, "dim"), Ui.Auto),
+            (Ui.Glyph(Palette.CheckGlyph(Failed > 0 ? CheckOutcome.Failure : Pending > 0 ? CheckOutcome.Pending : CheckOutcome.Success), 13, color), Ui.Auto),
+            (title, Ui.Star),
+            (Ui.Caption(Ui.CheckSummary(Failed, Pending, Passed)), Ui.Auto));
+        grid.ColumnSpacing = 8;
+        grid.Padding = new Thickness(0, 6, 0, 4);
+        Ui.Expandable(grid, $"{Name}, {Ui.CheckSummary(Failed, Pending, Passed)}", Expanded);
+        return grid;
+    }
+}
+
+public sealed record CheckRowItem(CheckContext Check, Action ShowLog, Action? Fix = null, bool Required = false, bool Indented = false) : IRowContent
 {
     public UIElement BuildRow()
     {
@@ -1646,15 +1715,17 @@ public sealed record CheckRowItem(CheckContext Check, Action ShowLog, Action? Fi
         };
         if (c.Duration is { } d) parts.Add(d);
         if (!string.IsNullOrEmpty(c.Description)) parts.Add(c.Description);
-        var body = Ui.V(1, Ui.Text(c.FullTitle, 13), Ui.Caption(string.Join(" · ", parts)));
+        var name = Ui.H(6, Ui.Text(Indented ? c.Title : c.FullTitle, 13));
+        if (Required) name.Children.Add(Ui.StatusChip(L.T("Checks_Required", "Required"), "slate"));
+        var body = Ui.V(1, name, Ui.Caption(string.Join(" · ", parts)));
         var right = Ui.H(4);
-        if (Fix is not null) right.Children.Add(Ui.Button(L.T("Fix_Button", "Fix with agent"), Fix, glyph: "\uE945", tooltip: L.T("CiFix_RowHelp", "Send this check's log and the PR context to Claude Code")));
+        if (Fix is not null) right.Children.Add(Ui.Button(L.T("Fix_Button", "Fix with agent"), Fix, glyph: "\uE945", tooltip: L.T("CiFix_RowHelp", "Send this check's log and the PR context to an agent")));
         if (c.IsActionsJob && c.Outcome is not CheckOutcome.Pending and not CheckOutcome.Skipped)
             right.Children.Add(Ui.Button(L.T("Checks_Log", "Log"), ShowLog));
         if (c.Link is { } link) right.Children.Add(Ui.IconButton("", L.T("Menu_OpenInBrowser", "Open in Browser"), () => LinkBrowser.Open(link)));
         var grid = Ui.Columns((Ui.CheckIcon(c.Outcome, 15), Ui.Auto), (body, Ui.Star), (right, Ui.Auto));
         grid.ColumnSpacing = 10;
-        grid.Padding = new Thickness(0, 4, 0, 4);
+        grid.Padding = new Thickness(Indented ? 18 : 0, 4, 0, 4);
         return grid;
     }
 }
