@@ -426,6 +426,7 @@ public sealed class SessionRow : CodeRow
             s.Session.Title,
             s.Open ? L.T("A11y_OpenTab", "open") : null,
             s.Session.PrNumber is { } n ? $"PR #{n}" : null,
+            ClaudeProfiles.Shared.HasSeveral && ClaudeProfiles.Shared.Profile(ClaudeWorkspace.OwnerId(s.Session)) is { } owner ? L.F("Agents_AccountChip", "Account {0}", owner.Label) : null,
             s.ChildCount > 0 ? Fmt.Plural(s.ChildCount, "sub-session", "sub-sessions") + ", " + (s.Collapsed ? L.T("A11y_Collapsed", "Collapsed") : L.T("A11y_Expanded", "Expanded")) : null,
             L.F("Agents_Updated", "Updated {0}", Fmt.Rel(s.Session.Modified))
         }.Where(x => x is not null)),
@@ -484,6 +485,7 @@ public sealed class SessionRow : CodeRow
         cols.Add((title, Ui.Star));
         if (s.PrNumber is not null) cols.Add((Ui.StatusGlyph("", 11, "violet", L.T("A11y_PullRequest", "Pull request")), Ui.Auto));
         if (item.ChildCount > 0) cols.Add((Ui.Text(item.ChildCount.ToString(Fmt.Culture), 11.5, "dim"), Ui.Auto));
+        if (AgentAccount.Chip(ClaudeProfiles.Shared.Profile(ClaudeWorkspace.OwnerId(s)), compact: true) is { } chip) cols.Add((chip, Ui.Auto));
         cols.Add((Ui.Text(Fmt.Rel(s.Modified), 11.5, "dim"), Ui.Auto));
         cols.Add((SessionDot.ForSession(s, ws), Ui.Auto));
         var grid = Ui.Columns(cols.ToArray());
@@ -564,7 +566,7 @@ public sealed class SessionRow : CodeRow
         var title = Ui.Text(tab.Title, 13, "text", item.Selected ? FontWeights.SemiBold : FontWeights.Normal);
         var project = Ui.Text(tab.ProjectName, 12, "dim");
         project.MaxWidth = 120;
-        var grid = Ui.Columns((bar, Ui.Auto), (title, Ui.Star), (project, Ui.Auto), (SessionDot.ForTab(tab), Ui.Auto));
+        var grid = Ui.Columns((bar, Ui.Auto), (title, Ui.Star), (project, Ui.Auto), (AgentAccount.Chip(tab.Profile, compact: true), Ui.Auto), (SessionDot.ForTab(tab), Ui.Auto));
         grid.ColumnSpacing = 8;
         grid.MinHeight = 34;
         grid.Padding = new Thickness(6, 7, 4, 7);

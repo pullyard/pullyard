@@ -44,6 +44,11 @@
   <data name="Activity_ChecksFailed" xml:space="preserve"><value>Checks failed</value></data>
   <data name="Activity_ReviewRequested" xml:space="preserve"><value>Review requested</value></data>
   <data name="Agent_RunningFor" xml:space="preserve"><value>Agent running · {0}</value></data>
+  <data name="Agents_AccountAll" xml:space="preserve"><value>All</value></data>
+  <data name="Agents_AccountAllHint" xml:space="preserve"><value>Sessions from all accounts</value></data>
+  <data name="Agents_AccountChip" xml:space="preserve"><value>Account {0}</value></data>
+  <data name="Agents_AccountFilter" xml:space="preserve"><value>Filter sessions by account</value></data>
+  <data name="Agents_AccountOnlyHint" xml:space="preserve"><value>Only sessions from {0}</value></data>
   <data name="Agents_AnotherApp" xml:space="preserve"><value>another app</value></data>
   <data name="Agents_Archive" xml:space="preserve"><value>Archive</value></data>
   <data name="Agents_BranchDetail" xml:space="preserve"><value>Branch: {0}</value></data>
@@ -56,6 +61,8 @@
   <data name="Agents_IndicatorDone" xml:space="preserve"><value>Finished — not viewed yet</value></data>
   <data name="Agents_IndicatorWaiting" xml:space="preserve"><value>Waiting for you</value></data>
   <data name="Agents_IndicatorWorking" xml:space="preserve"><value>Working</value></data>
+  <data name="Agents_NewChatAs" xml:space="preserve"><value>New chat as</value></data>
+  <data name="Agents_NewSessionAs" xml:space="preserve"><value>New session as {0}</value></data>
   <data name="Agents_NewSessionIn" xml:space="preserve"><value>New session in</value></data>
   <data name="Agents_Notify" xml:space="preserve"><value>Notify when a session finishes or needs you</value></data>
   <data name="Agents_NotifyAgentFinished" xml:space="preserve"><value>Agent finished · {0}</value></data>

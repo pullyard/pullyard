@@ -582,7 +582,7 @@ public sealed class ChatView : Grid
 
     private FrameworkElement UsageOverlay()
     {
-        var usage = ClaudeUsageStore.Shared;
+        var usage = ClaudeUsageStore.Shared.SnapshotFor(chat.ConfigDir);
         var panel = Ui.V(10);
         panel.Width = 360;
         var ctxPanel = Ui.V(8);
@@ -602,7 +602,7 @@ public sealed class ChatView : Grid
             ctxPanel.Children.Add(Ui.Columns((Ui.Text(L.T("Usage_Context", "Context window"), 13, "muted"), Ui.Star), (Ui.Text(chat.Running ? L.T("Common_Loading", "Loading…") : L.T("Usage_Sleeping", "session is sleeping"), 12.5, "dim"), Ui.Auto)));
         }
         panel.Children.Add(Ui.Card(ctxPanel, 10, "raised", 12));
-        var limits = Ui.V(8, Ui.Columns((Ui.Text(L.T("Usage_Limits", "Your usage limits") + (usage.Subscription is { } s ? $" · {s}" : ""), 13, "text", FontWeights.Medium), Ui.Star),
+        var limits = Ui.V(8, Ui.Columns((Ui.Text(UsageTitle(usage), 13, "text", FontWeights.Medium), Ui.Star),
             (Ui.IconButton("", L.T("Claude_UsagePage", "Usage page"), () => LinkBrowser.Open("https://claude.ai/settings/usage")), Ui.Auto)));
         if (usage.Windows.Count == 0) limits.Children.Add(Ui.Text(L.T("Usage_AfterFirstReply", "Shows up after Claude's first reply"), 12, "dim"));
         foreach (var w in usage.Windows)
@@ -625,6 +625,14 @@ public sealed class ChatView : Grid
             panel.Children.Add(new Expander { Header = L.T("Usage_Breakdown", "Detailed breakdown"), Content = details, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch });
         }
         return panel;
+    }
+
+    private string UsageTitle(UsageSnapshot usage)
+    {
+        var parts = new List<string> { L.T("Usage_Limits", "Your usage limits") };
+        if (usage.Subscription is { } plan) parts.Add(plan);
+        if (ClaudeProfiles.Shared.HasSeveral) parts.Add(ClaudeProfiles.Shared.ProfileFor(chat.ConfigDir)?.Label ?? "Main");
+        return string.Join(" · ", parts);
     }
 
     private static string CategoryColor(string name, string kind)
@@ -838,7 +846,7 @@ public sealed class ChatView : Grid
         {
             input.Text = "";
             HideCompletion();
-            AppViewModel.Shared.Claude.NewSession(tab.Folder, kind: ClaudeTabKind.Chat);
+            AppViewModel.Shared.Claude.NewSession(tab.Folder, kind: ClaudeTabKind.Chat, profileId: tab.Profile?.Id);
             return;
         }
         var text = input.Text;

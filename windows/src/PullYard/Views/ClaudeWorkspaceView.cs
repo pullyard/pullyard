@@ -135,7 +135,7 @@ public sealed class ClaudeWorkspaceView : Grid
     {
         var status = ClaudeAccountStore.Shared.Status;
         App.MainWindow?.SetSubtitle(Ws.SelectedTab is { } st ? $"{st.Title} — {Fmt.HomeRelative(st.Folder)}" : L.T("Section_Claude", "Agents"));
-        if (status is ClaudeAccountStatus.LoggedOut or ClaudeAccountStatus.NotInstalled)
+        if (status is ClaudeAccountStatus.NotInstalled || (status is ClaudeAccountStatus.LoggedOut && Ws.Tabs.Count == 0))
         {
             authView ??= new ClaudeAuthView();
             host.Content = authView;
@@ -278,7 +278,7 @@ public sealed class ClaudeWorkspaceView : Grid
             var path = p.Path;
             var row = Ui.Columns((Ui.IconTile("", Palette.ProjectKey(p.Path), 22), Ui.Auto), (Ui.Text(p.Name, 13, "text", FontWeights.Medium), Ui.Star), (Ui.Caption(Fmt.Rel(p.LastActivity), "dim"), Ui.Auto), (Ui.Glyph("", 13, "coral"), Ui.Auto));
             var b = new Button { Content = row, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(12, 8, 12, 8), Background = Palette.Brush("raised"), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(10) };
-            b.Click += (_, _) => Ws.NewSession(path);
+            b.Click += (_, _) => Ws.NewSession(path, profileId: Ws.AccountFilter);
             list.Children.Add(b);
         }
         var panel = Ui.V(16, tile, title, sub, list);
@@ -295,7 +295,8 @@ public sealed class ClaudeWorkspaceView : Grid
     {
         var sb = new System.Text.StringBuilder();
         sb.Append(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(Ws.Projects)).Append('|').Append(Ws.SelectedTab?.Id);
-        foreach (var t in Ws.Tabs) sb.Append('|').Append(t.Id).Append(':').Append(t.Title).Append(':').Append(t.Kind);
+        sb.Append('|').Append(string.Join(",", ClaudeProfiles.Shared.Visible.Select(p => p.Id + ":" + p.Label)));
+        foreach (var t in Ws.Tabs) sb.Append('|').Append(t.Id).Append(':').Append(t.Title).Append(':').Append(t.Kind).Append(':').Append(t.ConfigDir);
         return sb.ToString();
     }
 
@@ -303,7 +304,7 @@ public sealed class ClaudeWorkspaceView : Grid
     {
         var chat = tab.Chat;
         return string.Join("|", tab.Id, tab.Kind, tab.Git.Branch, tab.State, Fmt.Memory(tab.MemoryBytes), tab.Running, tab.SessionId.Length > 0, Ws.ModelValue, Ws.Effort, Ws.Mode,
-            chat?.Model, chat is not null && (chat.TotalCost > 0 || chat.SessionId is not null), Ws.ShowInspector);
+            chat?.Model, chat is not null && (chat.TotalCost > 0 || chat.SessionId is not null), Ws.ShowInspector, ClaudeProfiles.Shared.HasSeveral, tab.Profile?.Label);
     }
 
     private void RenderTabBar(bool force = true)
@@ -321,7 +322,9 @@ public sealed class ClaudeWorkspaceView : Grid
             title.MaxWidth = 180;
             var close = Ui.IconButton("", L.T("Common_Close", "Close"), () => Ws.Close(tab), "dim");
             close.Padding = new Thickness(4);
-            var content = Ui.H(6, stripe, SessionDot.ForTab(tab), Ui.Glyph(tab.Kind == ClaudeTabKind.Chat ? "" : "", 10), title, Ui.Text(tab.ProjectName, 12, "dim"), close);
+            var content = Ui.H(6, stripe, SessionDot.ForTab(tab), Ui.Glyph(tab.Kind == ClaudeTabKind.Chat ? "" : "", 10), title, Ui.Text(tab.ProjectName, 12, "dim"));
+            if (AgentAccount.Chip(tab.Profile, compact: true) is { } chip) content.Children.Add(chip);
+            content.Children.Add(close);
             var b = new Button
             {
                 Content = content,
@@ -342,14 +345,16 @@ public sealed class ClaudeWorkspaceView : Grid
         if (Ws.SelectedTab is { } current)
         {
             var folder = current.Folder;
-            menu.Items.Add(Ui.MenuItem(L.F("Claude_ChatIn", "Chat in {0}", current.ProjectName), () => Ws.NewSession(folder, kind: ClaudeTabKind.Chat), ""));
-            menu.Items.Add(Ui.MenuItem(L.F("Claude_TerminalIn", "Terminal in {0}", current.ProjectName), () => Ws.NewSession(folder, kind: ClaudeTabKind.Terminal), ""));
+            var owner = current.Profile?.Id;
+            menu.Items.Add(Ui.MenuItem(L.F("Claude_ChatIn", "Chat in {0}", current.ProjectName), () => Ws.NewSession(folder, kind: ClaudeTabKind.Chat, profileId: owner), ""));
+            menu.Items.Add(Ui.MenuItem(L.F("Claude_TerminalIn", "Terminal in {0}", current.ProjectName), () => Ws.NewSession(folder, kind: ClaudeTabKind.Terminal, profileId: owner), ""));
+            AgentAccount.AddNewAsItems(menu.Items, id => Ws.NewSession(folder, kind: ClaudeTabKind.Chat, profileId: id));
             menu.Items.Add(Ui.Separator());
         }
         foreach (var p in Ws.Projects.Where(p => p.Exists).Take(12))
         {
             var path = p.Path;
-            menu.Items.Add(Ui.MenuItem(p.Name, () => Ws.NewSession(path)));
+            menu.Items.Add(Ui.MenuItem(p.Name, () => Ws.NewSession(path, profileId: Ws.AccountFilter)));
         }
         add.Flyout = menu;
         tabBar.Children.Add(add);
@@ -363,6 +368,7 @@ public sealed class ClaudeWorkspaceView : Grid
         controlBarKey = key;
         var left = Ui.H(6, Ui.IconTile("", Palette.ProjectKey(tab.Folder), 18), Ui.Text(tab.ProjectName, 13, "text", FontWeights.SemiBold));
         if (tab.Git.Branch is { } b && b != "HEAD") left.Children.Add(SessionRow.BranchTag(b));
+        if (AgentAccount.Chip(tab.Profile) is { } account) left.Children.Add(account);
         var badge = SessionRow.StateBadge(tab.State, tab.MemoryBytes);
         badge.Margin = new Thickness(4, 0, 0, 0);
         left.Children.Add(badge);

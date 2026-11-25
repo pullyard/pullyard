@@ -952,10 +952,7 @@ public sealed partial class AppViewModel : ObservableObject
     public void SwitchClaudeProfile(string id)
     {
         if (id == ClaudeProfiles.Shared.ActiveId || ClaudeProfiles.Shared.Visible.All(p => p.Id != id)) return;
-        Claude.CloseAllForProfileSwitch();
         ClaudeProfiles.Shared.SetActive(id);
-        ClaudeUsageStore.Shared.Windows = new();
-        ClaudeUsageStore.Shared.Subscription = null;
         ClaudeAccountStore.Shared.Status = ClaudeAccountStatus.Checking;
         SwitchProfileRefresh().Forget();
     }
@@ -990,8 +987,12 @@ public sealed partial class AppViewModel : ObservableObject
 
     private async Task RemoveProfile(ClaudeProfile profile)
     {
+        Claude.CloseTabs(profile.ConfigDir);
+        ClaudeUsageStore.Shared.Forget(profile.ConfigDir);
         await ClaudeAccountStore.Shared.Logout(profile.ConfigDir);
         ClaudeProfiles.Shared.Remove(profile.Id);
+        Claude.AccountFilter = Claude.AccountFilter;
+        await Claude.ReloadProjects();
     }
 
     private async Task RefreshForgeBadges(IForgeClient forge)
