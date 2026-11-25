@@ -695,6 +695,7 @@ struct AgentSessionsView: View {
                     } header: {
                         projectHeader(group, collapsed: isCollapsed)
                     }
+                    .listSectionSpacing(isCollapsed ? 2 : 14)
                 }
                 if loading, link.history.isEmpty, !link.sessions.isEmpty {
                     HStack { Spacer(); PullYardLoader(size: 26); Spacer() }.listRowBackground(Color.clear)
@@ -749,7 +750,7 @@ struct AgentSessionsView: View {
                     .foregroundStyle(MobileTheme.muted)
                     .rotationEffect(.degrees(collapsed ? -90 : 0))
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, collapsed ? 2 : 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.pyPlain)
