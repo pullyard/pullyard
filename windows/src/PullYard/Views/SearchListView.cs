@@ -59,18 +59,29 @@ public sealed class SearchListView : ListPane
         List.ItemClick += OnItemClick;
         List.ContainerContentChanging += (_, e) =>
         {
-            if (!grouped && e.Item is SearchItem item && vm.Items.Count > 0 && ReferenceEquals(item, vm.Items[^1])) vm.LoadMore(Model.Api).Forget();
+            if (!grouped && e.Item is SearchItem item && vm.Items.Count > 0 && (ReferenceEquals(item, vm.Items[^1]) || ReferenceEquals(item, lastActive))) vm.LoadMore(Model.Api).Forget();
         };
         List.ContextRequested += OnContext;
         vm.PropertyChanged += OnVm;
         Model.PropertyChanged += OnModel;
-        Unloaded += (_, _) => Model.PropertyChanged -= OnModel;
+        Unloaded += (_, _) =>
+        {
+            Model.PropertyChanged -= OnModel;
+            QueueStore.Shared.Changed -= OnQueue;
+        };
         Loaded += (_, _) =>
         {
             Model.PropertyChanged -= OnModel;
             Model.PropertyChanged += OnModel;
+            QueueStore.Shared.Changed -= OnQueue;
+            QueueStore.Shared.Changed += OnQueue;
         };
     }
+
+    private SearchItem? lastActive;
+    private bool showSnoozed;
+
+    private void OnQueue() => DispatcherQueue.TryEnqueue(Render);
 
     private string Query => string.Join(" ", new[] { baseQuery, $"is:{kind}", stateFilter.Query(), "archived:false", sort.Query(), text }.Where(s => s.Length > 0));
 
@@ -191,7 +202,19 @@ public sealed class SearchListView : ListPane
         }
         else
         {
-            List.ItemsSource = vm.Items;
+            var queue = QueueStore.Shared;
+            var now = DateTimeOffset.Now;
+            var active = vm.Items.Where(i => queue.SnoozedUntil(i.Ref, now) is null).ToList();
+            var sleeping = vm.Items.Where(i => queue.SnoozedUntil(i.Ref, now) is not null).ToList();
+            lastActive = active.LastOrDefault();
+            if (sleeping.Count == 0) List.ItemsSource = vm.Items;
+            else
+            {
+                var rows = active.Cast<object>().ToList();
+                rows.Add(new SnoozedHeaderItem(sleeping.Count, showSnoozed));
+                if (showSnoozed) rows.AddRange(sleeping.Select(i => (object)new SnoozedSearchItem(i)));
+                List.ItemsSource = rows;
+            }
         }
         syncing = false;
         SyncSelection();
@@ -211,6 +234,7 @@ public sealed class SearchListView : ListPane
                 {
                     SearchItem s => s.Route,
                     GroupedSearchItem g => g.Item.Route,
+                    SnoozedSearchItem z => z.Item.Route,
                     _ => null
                 };
                 if (r == route)
@@ -231,6 +255,7 @@ public sealed class SearchListView : ListPane
         {
             SearchItem s => s.Route,
             GroupedSearchItem g => g.Item.Route,
+            SnoozedSearchItem z => z.Item.Route,
             _ => null
         };
         if (route is not null && route != Model.DetailRoot) Model.Select(route);
@@ -243,6 +268,11 @@ public sealed class SearchListView : ListPane
             if (!collapsed.Remove(h.Group.Id)) collapsed.Add(h.Group.Id);
             Render();
         }
+        else if (e.ClickedItem is SnoozedHeaderItem)
+        {
+            showSnoozed = !showSnoozed;
+            Render();
+        }
     }
 
     private void OnContext(UIElement sender, Microsoft.UI.Xaml.Input.ContextRequestedEventArgs args)
@@ -252,6 +282,7 @@ public sealed class SearchListView : ListPane
         {
             SearchItem s => s,
             GroupedSearchItem g => g.Item,
+            SnoozedSearchItem z => z.Item,
             _ => null
         };
         if (item is null) return;
@@ -266,6 +297,32 @@ public sealed class SearchListView : ListPane
             Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => ShellView.Copied(item.Url, L.T("Toast_CopiedLink", "Copied link")), ""),
             Ui.MenuItem(L.T("Menu_CopyShortLink", "Copy Short Link"), () => ShellView.CopyShortLink(ShortLink.Of(item.Repository.NameWithOwner, item.Number)), "\uE8C8"));
         if (item.IsPR) menu.Items.Add(Ui.MenuItem(L.T("Menu_CopyCheckout", "Copy “gh pr checkout”"), () => CopyCommand($"gh pr checkout {item.Number} -R {item.Repository.NameWithOwner}"), ""));
+        var queue = QueueStore.Shared;
+        var now = DateTimeOffset.Now;
+        menu.Items.Insert(0, Ui.Separator());
+        menu.Items.Insert(0, Ui.MenuItem(L.T("Queue_MarkSeen", "Mark as Seen"), () => queue.MarkSeen(item.Ref, DateTimeOffset.Now), "\uE890", queue.HasNews(item.Ref, item.UpdatedAt)));
+        if (queue.SnoozedUntil(item.Ref, now) is { } until)
+        {
+            menu.Items.Insert(0, Ui.MenuItem(L.F("Queue_WakeUp", "Wake Up (snoozed until {0})", until.ToString("g", Fmt.Culture)), () => queue.Wake(item.Ref), "\uE706"));
+        }
+        else
+        {
+            var snooze = new MenuFlyoutSubItem { Text = L.T("Queue_Snooze", "Snooze"), Icon = new FontIcon { Glyph = "\uE708", FontFamily = Ui.Icons } };
+            foreach (var (preset, title) in new[]
+            {
+                (SnoozePreset.Hour, L.T("Queue_ForAnHour", "For an hour")),
+                (SnoozePreset.Tomorrow, L.T("Queue_Tomorrow", "Until tomorrow")),
+                (SnoozePreset.NextWeek, L.T("Queue_NextWeek", "Until next week"))
+            })
+            {
+                snooze.Items.Add(Ui.MenuItem(title, () =>
+                {
+                    queue.Snooze(item.Ref, QueueStore.At(preset, DateTimeOffset.Now));
+                    ShellView.Toast(L.F("Queue_Snoozed", "Snoozed {0}", ShortLink.Of(item.Ref)), false, L.T("Common_Undo", "Undo"), () => queue.Wake(item.Ref), "\uE708", "link");
+                }));
+            }
+            menu.Items.Insert(0, snooze);
+        }
         return menu;
     }
 

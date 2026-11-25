@@ -98,6 +98,7 @@ public abstract class ListPane : Grid
     {
         SearchItem s => s.Id,
         GroupedSearchItem g => g.Item.Id,
+        SnoozedSearchItem z => z.Item.Id,
         NotificationThread n => n.Id,
         RepoSummary r => r.Id,
         ProjectSummary p => p.Id,

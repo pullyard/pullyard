@@ -99,13 +99,33 @@ public sealed class FeedRow : CodeRow
         SearchItem s => SearchRow(s, true),
         GroupedSearchItem g => SearchRow(g.Item, false),
         GroupHeaderItem h => GroupHeader(h),
+        SnoozedSearchItem z => Dimmed(SearchRow(z.Item, true)),
+        SnoozedHeaderItem z => SnoozedHeader(z),
         _ => null
     };
+
+    private static UIElement Dimmed(UIElement row)
+    {
+        row.Opacity = 0.7;
+        return row;
+    }
+
+    private static UIElement SnoozedHeader(SnoozedHeaderItem z)
+    {
+        var grid = Ui.Columns(
+            (Ui.Glyph(z.Expanded ? "\uE70D" : "\uE76C", 10, "dim"), Ui.Auto),
+            (Ui.Glyph("\uE708", 12, "muted"), Ui.Auto),
+            (Ui.Text(L.F("Queue_SnoozedHeader", "Snoozed · {0}", z.Count), 12, "muted", FontWeights.SemiBold), Ui.Star));
+        grid.Padding = new Thickness(0, 8, 0, 6);
+        return grid;
+    }
 
     protected override string? Spoken(object item) => item switch
     {
         SearchItem s => SpokenLabel(s),
         GroupedSearchItem g => SpokenLabel(g.Item),
+        SnoozedSearchItem z => $"{L.T("Queue_SnoozedA11y", "Snoozed")}, {SpokenLabel(z.Item)}",
+        SnoozedHeaderItem z => $"{L.F("Queue_SnoozedHeader", "Snoozed · {0}", z.Count)}, {(z.Expanded ? L.T("A11y_Expanded", "Expanded") : L.T("A11y_Collapsed", "Collapsed"))}",
         GroupHeaderItem h => $"{h.Group.Id}, {Fmt.Plural(h.Group.Items.Count, "item", "items")}, {(h.Expanded ? L.T("A11y_Expanded", "Expanded") : L.T("A11y_Collapsed", "Collapsed"))}",
         _ => null
     };
@@ -116,6 +136,7 @@ public sealed class FeedRow : CodeRow
     {
         var parts = new List<string> { item.Title, $"{item.Repository.NameWithOwner}{Prefix}{item.Number}" };
         if (item.Author?.Login is { Length: > 0 } login) parts.Add(L.F("A11y_ByAuthor", "by {0}", login));
+        if (item.IsPR && QueueStore.Shared.HasNews(item.Ref, item.UpdatedAt)) parts.Add(L.T("Queue_NewActivity", "New activity since you last opened it"));
         parts.Add(Ui.StateTitle(item.VisualState));
         if (item.IsPR)
         {
@@ -177,7 +198,25 @@ public sealed class FeedRow : CodeRow
             foreach (var l in labels.Take(4)) row.Children.Add(Ui.LabelChip(l));
             body.Children.Add(row);
         }
-        var grid = Ui.Columns((Ui.StateBadge(item.VisualState, true), Ui.Auto), (body, Ui.Star));
+        var badge = new Grid { VerticalAlignment = VerticalAlignment.Top };
+        badge.Children.Add(Ui.StateBadge(item.VisualState, true));
+        if (item.IsPR && QueueStore.Shared.HasNews(item.Ref, item.UpdatedAt))
+        {
+            var dot = new Microsoft.UI.Xaml.Shapes.Ellipse
+            {
+                Width = 8,
+                Height = 8,
+                Fill = Palette.Brush("coral"),
+                Stroke = Palette.Brush("list"),
+                StrokeThickness = 1.5,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, -2, -3, 0)
+            };
+            Ui.Tip(dot, L.T("Queue_NewActivity", "New activity since you last opened it"));
+            badge.Children.Add(dot);
+        }
+        var grid = Ui.Columns((badge, Ui.Auto), (body, Ui.Star));
         grid.ColumnSpacing = 10;
         grid.Padding = new Thickness(0, 6, 0, 6);
         return grid;
@@ -206,6 +245,10 @@ public sealed class FeedRow : CodeRow
 }
 
 public sealed record GroupedSearchItem(SearchItem Item);
+
+public sealed record SnoozedSearchItem(SearchItem Item);
+
+public sealed record SnoozedHeaderItem(int Count, bool Expanded);
 
 public sealed class NotificationRow : CodeRow
 {

@@ -653,6 +653,7 @@ public sealed partial class AppViewModel : ObservableObject
 
     private void Remember(Route route)
     {
+        if (route.Kind == RouteKind.PullRequest && route.Item is { } seen) QueueStore.Shared.MarkSeen(seen, DateTimeOffset.Now);
         recentRoutes.Remove(route);
         recentRoutes.Insert(0, route);
         if (recentRoutes.Count > 20) recentRoutes.RemoveAt(recentRoutes.Count - 1);
