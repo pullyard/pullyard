@@ -5860,6 +5860,146 @@
           }
         }
       }
+    },
+    "Enter your Jira address, for example acme.atlassian.net" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Введите адрес Jira, например acme.atlassian.net"
+          }
+        }
+      }
+    },
+    "Jira rejected the email or token." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jira не принял email или токен."
+          }
+        }
+      }
+    },
+    "%@ wasn't found in your Jira sites." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ не найден ни в одном вашем Jira."
+          }
+        }
+      }
+    },
+    "Jira answered with error %d." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jira ответил ошибкой %d."
+          }
+        }
+      }
+    },
+    "Imported %d Jira sites from %@" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Импортировано Jira: %d с %@"
+          }
+        }
+      }
+    },
+    "Import from %@" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Импорт с %@"
+          }
+        }
+      }
+    },
+    "Add Jira site" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавить Jira"
+          }
+        }
+      }
+    },
+    "Tickets mentioned in a pull request's title, branch or description show on its page. Each ticket opens from the Jira site that owns its project, with the rules you set on the Mac." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Тикеты из названия, ветки или описания PR показываются на его странице. Каждый тикет берётся из Jira, где есть его проект, по правилам с Mac."
+          }
+        }
+      }
+    },
+    "Name, e.g. Work" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Название, например Работа"
+          }
+        }
+      }
+    },
+    "Email" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Email"
+          }
+        }
+      }
+    },
+    "API token" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "API-токен"
+          }
+        }
+      }
+    },
+    "Create a token at id.atlassian.com → Security → API tokens. For Jira Server or Data Center, leave the email empty and use a personal access token." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создайте токен на id.atlassian.com → Security → API tokens. Для Jira Server или Data Center оставьте email пустым и используйте personal access token."
+          }
+        }
+      }
+    },
+    "Connect" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подключить"
+          }
+        }
+      }
+    },
+    "Remove" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

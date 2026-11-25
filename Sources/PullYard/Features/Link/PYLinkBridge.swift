@@ -18,6 +18,20 @@ struct PYLinkBridge {
             preview(message, client: client)
         case "edit":
             editMessage(message, client: client)
+        case "jira":
+            var reply = PYLinkMessage(type: "jira")
+            reply.id = message.id
+            let store = JiraConnections.shared
+            reply.jira = PYLinkJira(
+                connections: store.linkConnections.compactMap { link in
+                    guard let token = store.token(for: link.id) else { return nil }
+                    let keys = store.connection(link.id)?.projectKeys ?? []
+                    return PYLinkJiraConnection(id: link.id, name: link.name, site: link.site, email: link.email, token: token, projectKeys: keys)
+                },
+                orgOverrides: store.orgOverrides,
+                repoOverrides: store.repoOverrides
+            )
+            client.channel.send(json: reply)
         case "history":
             sendHistory(message, client: client)
         case "resume":

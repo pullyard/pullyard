@@ -322,6 +322,7 @@ struct PRDetailView: View {
             Button { withAnimation(.snappy) { section = .checks } } label: { ChecksSummaryCard(checks: checks) }
                 .buttonStyle(.pyPlain)
         }
+        JiraTicketsSection(keys: JiraKeyFinder.keys(title: pr.title, branch: pr.head.ref, body: pr.body), repo: key.repo)
         if let body = pr.body, !MarkdownParser.blocks(body).isEmpty {
             MarkdownView(markdown: body, collapsible: true).pyCard()
         } else {

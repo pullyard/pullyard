@@ -18,6 +18,7 @@
 		14FA9E4773D48988B26245D6 /* CredentialVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D18762764859FE93B40155 /* CredentialVault.swift */; };
 		1FF0948F19859135FE91737B /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F704A55C1B2862A9E81B2369 /* SearchView.swift */; };
 		20B23EC4331D918C39410462 /* InboxAndPullsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EF4EBD49C399A1EBB703665 /* InboxAndPullsView.swift */; };
+		228D58DECC871A8C3AB8E280 /* JiraViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E89E11B5D2A4EE80E9B6378A /* JiraViews.swift */; };
 		2447CE6CB79EEE43B34463B2 /* PYLinkProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94231697E07DA3DAFF6139C2 /* PYLinkProtocol.swift */; };
 		2BB15762897716909F534C3C /* DemoData.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC50A581502EF04854200F81 /* DemoData.swift */; };
 		2CDEB08C4B1F821762AB609D /* AgentActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C19694612AE062E76BC181B6 /* AgentActivity.swift */; };
@@ -36,6 +37,7 @@
 		6BF8DA74F5AFD7D499A42E08 /* Snooze.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9662C0C9DC3339E5CD6B7A47 /* Snooze.swift */; };
 		726AA9D25FB3D0D5CC3C8ABE /* KeyboardDismisser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435E8F2A21391A7806B96123 /* KeyboardDismisser.swift */; };
 		824047CDCB66FD452D27E23E /* WidgetFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDE41B0C24CD4D522D241B3 /* WidgetFetcher.swift */; };
+		8328112F372F52C1C66FA8DE /* JiraStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4127AF0EAFF3D7141F27CD40 /* JiraStore.swift */; };
 		840E10398ADEAF707B1F21E9 /* Markdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = 132760422E5715524A7D210F /* Markdown.swift */; };
 		84F9EA1D56B69704A234D705 /* FilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D1252337A283C4B3F84BE /* FilesView.swift */; };
 		857884D9283B9C9E5D68DF73 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5540DD8A1EFE9214A4C8EBAE /* ShareViewController.swift */; };
@@ -75,6 +77,7 @@
 		F3685C0831F795EA5528C863 /* CreatePullView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 127360F43A2B43F3766FC2DA /* CreatePullView.swift */; };
 		F3E1B1E8C0E98071559D75A5 /* PYLinkIroh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F9F1FEBE741DDBE8177BA81 /* PYLinkIroh.swift */; };
 		F68C66514A56887F1B265E54 /* CIActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0C66F8D185CD5194B079AE /* CIActivity.swift */; };
+		FE3185933D64017FD5F03977 /* JiraKeyFinderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7ACC95A77417C6758DB98D1 /* JiraKeyFinderTests.swift */; };
 		FE8B3F91653EC44B4BD8D825 /* ProjectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7656F08929BF5CF832079205 /* ProjectsView.swift */; };
 		FF7A2D02F762BA8BCC2827C6 /* AgentAttachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 674809AA8E4123FA4CFAF63B /* AgentAttachments.swift */; };
 /* End PBXBuildFile section */
@@ -134,6 +137,7 @@
 		3087B4E6E836EBC234BDFAF7 /* IssueDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueDetailView.swift; sourceTree = "<group>"; };
 		39385B92FCC46C6EA680341E /* AgentActivities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivities.swift; sourceTree = "<group>"; };
 		3CF0EA1A483B65C3A656E233 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		4127AF0EAFF3D7141F27CD40 /* JiraStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraStore.swift; sourceTree = "<group>"; };
 		435E8F2A21391A7806B96123 /* KeyboardDismisser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDismisser.swift; sourceTree = "<group>"; };
 		492802CE69238D7B67870B90 /* LinkClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkClient.swift; sourceTree = "<group>"; };
 		4E906B2E7B97FCF8016A2F05 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
@@ -172,6 +176,8 @@
 		D7C5751F2F7DBE975941D203 /* LocalCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCache.swift; sourceTree = "<group>"; };
 		D84E1D600AC299AC39B48E39 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		D8AAB054FDE6EB8D7BD4069E /* RepoViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoViews.swift; sourceTree = "<group>"; };
+		E7ACC95A77417C6758DB98D1 /* JiraKeyFinderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraKeyFinderTests.swift; sourceTree = "<group>"; };
+		E89E11B5D2A4EE80E9B6378A /* JiraViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraViews.swift; sourceTree = "<group>"; };
 		EBD4F0DC8CF7BE8F81827D8C /* DeviceFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceFlow.swift; sourceTree = "<group>"; };
 		ECB22B19338EC4FCC87BFDAB /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		EF3D1252337A283C4B3F84BE /* FilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesView.swift; sourceTree = "<group>"; };
@@ -202,6 +208,15 @@
 				DA4C6EE2B869F62A2ECE88C7 /* Shared */,
 				2B3C90A0C0FE22ABB901A0E7 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		214CDB920974D7D94554D713 /* Jira */ = {
+			isa = PBXGroup;
+			children = (
+				4127AF0EAFF3D7141F27CD40 /* JiraStore.swift */,
+				E89E11B5D2A4EE80E9B6378A /* JiraViews.swift */,
+			);
+			path = Jira;
 			sourceTree = "<group>";
 		};
 		2B3C90A0C0FE22ABB901A0E7 /* Products */ = {
@@ -279,6 +294,7 @@
 				9662C0C9DC3339E5CD6B7A47 /* Snooze.swift */,
 				2737E2F8BBDBAFD693B2442C /* SplashView.swift */,
 				F3F70BD21D0F88FEBEA3A71C /* Templates.swift */,
+				214CDB920974D7D94554D713 /* Jira */,
 				55B1DFA2B98859ED2D75BBCC /* Link */,
 			);
 			path = PullYardMobile;
@@ -287,6 +303,7 @@
 		A8419B5A223F5069A318F0A6 /* PullYardMobileTests */ = {
 			isa = PBXGroup;
 			children = (
+				E7ACC95A77417C6758DB98D1 /* JiraKeyFinderTests.swift */,
 				825268025F1A9721844AE423 /* PullYardMobileTests.swift */,
 			);
 			path = PullYardMobileTests;
@@ -482,6 +499,8 @@
 				553B9AF410D2BEF9AAD62485 /* Glass.swift in Sources */,
 				20B23EC4331D918C39410462 /* InboxAndPullsView.swift in Sources */,
 				506C6041378E535399DE85EA /* IssueDetailView.swift in Sources */,
+				8328112F372F52C1C66FA8DE /* JiraStore.swift in Sources */,
+				228D58DECC871A8C3AB8E280 /* JiraViews.swift in Sources */,
 				726AA9D25FB3D0D5CC3C8ABE /* KeyboardDismisser.swift in Sources */,
 				F126D8433948F1AF3BE7B615 /* LinkClient.swift in Sources */,
 				C070820FA7D4B882307E041E /* LiveActivities.swift in Sources */,
@@ -530,6 +549,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FE3185933D64017FD5F03977 /* JiraKeyFinderTests.swift in Sources */,
 				BB2F3FACC07E463B7D375E51 /* PullYardMobileTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

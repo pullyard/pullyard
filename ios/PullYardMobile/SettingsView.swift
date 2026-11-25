@@ -39,6 +39,7 @@ struct SettingsView: View {
             }
 
             MacLinkSection()
+            JiraSettingsSection()
 
             Section {
                 HStack(spacing: 12) {

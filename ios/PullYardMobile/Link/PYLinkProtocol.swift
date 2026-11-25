@@ -89,6 +89,21 @@ struct PYLinkAttachment: Codable, Equatable {
     var data: Data
 }
 
+struct PYLinkJiraConnection: Codable, Equatable {
+    var id: String
+    var name: String
+    var site: String
+    var email: String
+    var token: String
+    var projectKeys: [String]
+}
+
+struct PYLinkJira: Codable, Equatable {
+    var connections: [PYLinkJiraConnection]
+    var orgOverrides: [String: String]
+    var repoOverrides: [String: String]
+}
+
 struct PYLinkSessionState: Codable, Equatable {
     var running: Bool
     var busy: Bool
@@ -128,6 +143,7 @@ struct PYLinkMessage: Codable {
     var attachments: [PYLinkAttachment]?
     var prompt: String?
     var replacesItem: String?
+    var jira: PYLinkJira?
 
     init(type: String) { self.type = type }
 }

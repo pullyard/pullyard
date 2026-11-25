@@ -300,6 +300,15 @@ final class LinkClient: ObservableObject {
         return next
     }
 
+    func importJira() async throws -> Int {
+        if !isConnected { try await ensureConnected() }
+        let reply = try await request(PYLinkMessage(type: "jira"), timeout: 20)
+        if let error = reply.error { throw LinkError.remote(error) }
+        guard let bundle = reply.jira else { throw LinkError.remote("Update PullYard on your Mac to share Jira.") }
+        JiraStore.shared.importBundle(bundle)
+        return bundle.connections.count
+    }
+
     func stop(_ session: String) {
         var message = PYLinkMessage(type: "stop")
         message.session = session
