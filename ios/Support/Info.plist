@@ -22,6 +22,14 @@
 		<string>en</string>
 		<string>ru</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>PullYard uses the camera to scan the pairing code shown by PullYard on your Mac.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>PullYard connects to PullYard on your Mac to start agent fixes and stream the chat.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_pullyard._tcp</string>
+	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSUserActivityTypes</key>

@@ -91,6 +91,46 @@
         }
       }
     },
+    "Address for VPN / Tailscale (host:port)": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Адрес для VPN / Tailscale (host:port)"
+          }
+        }
+      }
+    },
+    "Agent": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Агент"
+          }
+        }
+      }
+    },
+    "Agent sessions": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сессии агента"
+          }
+        }
+      }
+    },
+    "Agents": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Агенты"
+          }
+        }
+      }
+    },
     "All": {
       "localizations": {
         "ru": {
@@ -157,6 +197,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Все проекты"
+          }
+        }
+      }
+    },
+    "Allow": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Разрешить"
+          }
+        }
+      }
+    },
+    "Always": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Всегда"
           }
         }
       }
@@ -741,6 +801,16 @@
         }
       }
     },
+    "Connect": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подключить"
+          }
+        }
+      }
+    },
     "Connect GitHub": {
       "localizations": {
         "ru": {
@@ -757,6 +827,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "Безопасное подключение"
+          }
+        }
+      }
+    },
+    "Connect your Mac": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подключите Mac"
+          }
+        }
+      }
+    },
+    "Connected": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подключено"
+          }
+        }
+      }
+    },
+    "Connecting to your Mac…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подключаемся к Mac…"
+          }
+        }
+      }
+    },
+    "Connecting…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подключаемся…"
           }
         }
       }
@@ -1061,6 +1171,16 @@
         }
       }
     },
+    "Custom task…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Своя задача…"
+          }
+        }
+      }
+    },
     "Default merge method": {
       "localizations": {
         "ru": {
@@ -1117,6 +1237,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Удалить комментарий?"
+          }
+        }
+      }
+    },
+    "Deny": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Запретить"
           }
         }
       }
@@ -1457,6 +1587,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Завершить ревью"
+          }
+        }
+      }
+    },
+    "Fix review comments": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Исправить по комментариям"
+          }
+        }
+      }
+    },
+    "Fix with agent": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Исправить агентом"
           }
         }
       }
@@ -1981,6 +2131,16 @@
         }
       }
     },
+    "Loading the chat…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Загружаем чат…"
+          }
+        }
+      }
+    },
     "Loading your projects…": {
       "localizations": {
         "ru": {
@@ -2017,6 +2177,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Удерживайте строку, чтобы прокомментировать"
+          }
+        }
+      }
+    },
+    "Mac": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac"
           }
         }
       }
@@ -2211,6 +2381,16 @@
         }
       }
     },
+    "Message the agent": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сообщение агенту"
+          }
+        }
+      }
+    },
     "Mine": {
       "localizations": {
         "ru": {
@@ -2361,6 +2541,16 @@
         }
       }
     },
+    "No agent sessions": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нет сессий агента"
+          }
+        }
+      }
+    },
     "No changed files": {
       "localizations": {
         "ru": {
@@ -2507,6 +2697,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Пока ни один ваш PR не одобрен с зелёными проверками."
+          }
+        }
+      }
+    },
+    "Not connected": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не подключено"
           }
         }
       }
@@ -2671,6 +2871,16 @@
         }
       }
     },
+    "Open PullYard on your Mac and make sure both are on the same network.": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Откройте PullYard на Mac и проверьте, что устройства в одной сети."
+          }
+        }
+      }
+    },
     "Open changed files": {
       "localizations": {
         "ru": {
@@ -2747,6 +2957,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Обзор"
+          }
+        }
+      }
+    },
+    "Pair": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Связать"
+          }
+        }
+      }
+    },
+    "Pair with Mac": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Связать с Mac"
+          }
+        }
+      }
+    },
+    "Pair with PullYard on Mac": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Связать с PullYard на Mac"
           }
         }
       }
@@ -2837,6 +3077,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Закреплённые проекты"
+          }
+        }
+      }
+    },
+    "Point the camera at the code in PullYard on your Mac (Settings → iPhone).": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Наведите камеру на код в PullYard на Mac (Настройки → iPhone)."
           }
         }
       }
@@ -3247,6 +3497,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Решено"
+          }
+        }
+      }
+    },
+    "Resolve conflicts": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Разрешить конфликты"
           }
         }
       }
@@ -3861,6 +4121,26 @@
         }
       }
     },
+    "Start": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Запустить"
+          }
+        }
+      }
+    },
+    "Start one with Fix with agent on a pull request.": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Запустите через «Исправить агентом» на экране PR."
+          }
+        }
+      }
+    },
     "Start the conversation": {
       "localizations": {
         "ru": {
@@ -3887,6 +4167,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Статус"
+          }
+        }
+      }
+    },
+    "Stop": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Остановить"
           }
         }
       }
@@ -3927,6 +4217,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Итог"
+          }
+        }
+      }
+    },
+    "Task for the agent": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Задача для агента"
           }
         }
       }
@@ -3997,6 +4297,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Комментариев и ревью пока нет."
+          }
+        }
+      }
+    },
+    "Thinking": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Размышляет"
           }
         }
       }
@@ -4147,6 +4457,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Разблокируйте iPhone"
+          }
+        }
+      }
+    },
+    "Unpair": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отвязать"
+          }
+        }
+      }
+    },
+    "Unpair Mac": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отвязать Mac"
+          }
+        }
+      }
+    },
+    "Unpair this Mac?": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отвязать этот Mac?"
           }
         }
       }
@@ -4381,12 +4721,32 @@
         }
       }
     },
+    "What should the agent do?": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Что сделать агенту?"
+          }
+        }
+      }
+    },
     "What's new": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
             "value": "Что нового"
+          }
+        }
+      }
+    },
+    "Working…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Работает…"
           }
         }
       }
@@ -4817,6 +5177,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "· ваш PR"
+          }
+        }
+      }
+    },
+    "…or paste the pairing link": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "…или вставьте ссылку для связи"
           }
         }
       }

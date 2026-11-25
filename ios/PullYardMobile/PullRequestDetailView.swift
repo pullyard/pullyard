@@ -304,6 +304,9 @@ struct PRDetailView: View {
     }
 
     @ViewBuilder private func overview(_ pr: PullRequest) -> some View {
+        if pr.isOpen {
+            FixWithAgentMenu(key: key, hasConflicts: insight?.hasConflicts ?? (pr.mergeable == false))
+        }
         if pr.isOpen, let insight {
             MergeReadinessCard(insight: insight, checks: ChecksSummary(checks)) {
                 withAnimation(.snappy) { section = .checks }

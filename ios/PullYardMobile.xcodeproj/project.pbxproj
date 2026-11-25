@@ -17,6 +17,7 @@
 		14FA9E4773D48988B26245D6 /* CredentialVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D18762764859FE93B40155 /* CredentialVault.swift */; };
 		1FF0948F19859135FE91737B /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F704A55C1B2862A9E81B2369 /* SearchView.swift */; };
 		20B23EC4331D918C39410462 /* InboxAndPullsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EF4EBD49C399A1EBB703665 /* InboxAndPullsView.swift */; };
+		2447CE6CB79EEE43B34463B2 /* PYLinkProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94231697E07DA3DAFF6139C2 /* PYLinkProtocol.swift */; };
 		2BB15762897716909F534C3C /* DemoData.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC50A581502EF04854200F81 /* DemoData.swift */; };
 		2D77D08C6D1AA225C27D51FD /* Templates.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3F70BD21D0F88FEBEA3A71C /* Templates.swift */; };
 		2F9BC7385EE4D45E27459F0B /* Feedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18DD51AC197A1C7E2A36C4BE /* Feedback.swift */; };
@@ -53,11 +54,13 @@
 		C676A0716D8851BC0FA04633 /* CredentialVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D18762764859FE93B40155 /* CredentialVault.swift */; };
 		C9DFE06D59FC7922691A5941 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECB22B19338EC4FCC87BFDAB /* AppModel.swift */; };
 		CA50426C9CEAEBCEA447ABE8 /* OverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE425C9086597B1189109F0E /* OverviewView.swift */; };
+		CAA9A496F59DC926C60CD187 /* AgentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8699E5CDC258955E31456B7A /* AgentViews.swift */; };
 		CFDC447B91E3011E6E4FA655 /* WidgetFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDE41B0C24CD4D522D241B3 /* WidgetFetcher.swift */; };
 		D28BB13CEFDD66B5F9ED5C1F /* Logo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D381A401A2B8C7378B7DFA6 /* Logo.swift */; };
 		E091E2815B9F07E313E36493 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 665A39E542BD09746979B213 /* PrivacyInfo.xcprivacy */; };
 		E5B9913DEBE75D2D0681044E /* CIActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0C66F8D185CD5194B079AE /* CIActivity.swift */; };
 		EA6A54B14DC2A5F6BFB3CCC3 /* CredentialVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D18762764859FE93B40155 /* CredentialVault.swift */; };
+		F126D8433948F1AF3BE7B615 /* LinkClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492802CE69238D7B67870B90 /* LinkClient.swift */; };
 		F3685C0831F795EA5528C863 /* CreatePullView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 127360F43A2B43F3766FC2DA /* CreatePullView.swift */; };
 		F68C66514A56887F1B265E54 /* CIActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0C66F8D185CD5194B079AE /* CIActivity.swift */; };
 		FE8B3F91653EC44B4BD8D825 /* ProjectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7656F08929BF5CF832079205 /* ProjectsView.swift */; };
@@ -117,6 +120,7 @@
 		30670A8D6390E4CF24450643 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		3087B4E6E836EBC234BDFAF7 /* IssueDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueDetailView.swift; sourceTree = "<group>"; };
 		3CF0EA1A483B65C3A656E233 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		492802CE69238D7B67870B90 /* LinkClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkClient.swift; sourceTree = "<group>"; };
 		4E906B2E7B97FCF8016A2F05 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		4FEA9E8ED657C416009BF3B6 /* PullYardWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PullYardWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		5540DD8A1EFE9214A4C8EBAE /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
@@ -128,10 +132,12 @@
 		7EE61529501668AE98B97DC0 /* PRInsight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRInsight.swift; sourceTree = "<group>"; };
 		825268025F1A9721844AE423 /* PullYardMobileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PullYardMobileTests.swift; sourceTree = "<group>"; };
 		84B06A7A58C99EBB0092CBDF /* Outbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Outbox.swift; sourceTree = "<group>"; };
+		8699E5CDC258955E31456B7A /* AgentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentViews.swift; sourceTree = "<group>"; };
 		8855AD7FD323DF86A404E6F1 /* PullYardMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PullYardMobileApp.swift; sourceTree = "<group>"; };
 		8A9D2532BFC3890D2F2CBE0C /* PullYardMobileTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PullYardMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8B3A0459840F2BE02F504DC5 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
 		8DFC7599C7E90CF3EEB1CA67 /* PRWorkflowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRWorkflowViews.swift; sourceTree = "<group>"; };
+		94231697E07DA3DAFF6139C2 /* PYLinkProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PYLinkProtocol.swift; sourceTree = "<group>"; };
 		9662C0C9DC3339E5CD6B7A47 /* Snooze.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Snooze.swift; sourceTree = "<group>"; };
 		9DE0272495E9EE917571D595 /* FinishReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinishReviewView.swift; sourceTree = "<group>"; };
 		A2D18762764859FE93B40155 /* CredentialVault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialVault.swift; sourceTree = "<group>"; };
@@ -185,6 +191,16 @@
 			path = PullYardShare;
 			sourceTree = "<group>";
 		};
+		55B1DFA2B98859ED2D75BBCC /* Link */ = {
+			isa = PBXGroup;
+			children = (
+				8699E5CDC258955E31456B7A /* AgentViews.swift */,
+				492802CE69238D7B67870B90 /* LinkClient.swift */,
+				94231697E07DA3DAFF6139C2 /* PYLinkProtocol.swift */,
+			);
+			path = Link;
+			sourceTree = "<group>";
+		};
 		5CED7FE0F1DF8D51BBEB9287 /* PullYardMobile */ = {
 			isa = PBXGroup;
 			children = (
@@ -225,6 +241,7 @@
 				9662C0C9DC3339E5CD6B7A47 /* Snooze.swift */,
 				2737E2F8BBDBAFD693B2442C /* SplashView.swift */,
 				F3F70BD21D0F88FEBEA3A71C /* Templates.swift */,
+				55B1DFA2B98859ED2D75BBCC /* Link */,
 			);
 			path = PullYardMobile;
 			sourceTree = "<group>";
@@ -396,6 +413,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CAA9A496F59DC926C60CD187 /* AgentViews.swift in Sources */,
 				C9DFE06D59FC7922691A5941 /* AppModel.swift in Sources */,
 				A73200079D9632C212D17A9F /* AppShortcuts.swift in Sources */,
 				C3A92D0D40D42786058EDC4C /* AppTheme.swift in Sources */,
@@ -412,6 +430,7 @@
 				553B9AF410D2BEF9AAD62485 /* Glass.swift in Sources */,
 				20B23EC4331D918C39410462 /* InboxAndPullsView.swift in Sources */,
 				506C6041378E535399DE85EA /* IssueDetailView.swift in Sources */,
+				F126D8433948F1AF3BE7B615 /* LinkClient.swift in Sources */,
 				C070820FA7D4B882307E041E /* LiveActivities.swift in Sources */,
 				92E83F11231596E157BCF6AF /* LocalCache.swift in Sources */,
 				D28BB13CEFDD66B5F9ED5C1F /* Logo.swift in Sources */,
@@ -422,6 +441,7 @@
 				CA50426C9CEAEBCEA447ABE8 /* OverviewView.swift in Sources */,
 				0F54810514276B7405122E94 /* PRInsight.swift in Sources */,
 				88B3ABC287AA0225B1C590C2 /* PRWorkflowViews.swift in Sources */,
+				2447CE6CB79EEE43B34463B2 /* PYLinkProtocol.swift in Sources */,
 				FE8B3F91653EC44B4BD8D825 /* ProjectsView.swift in Sources */,
 				A5C63EF30A6A9F50E262E55B /* PullRequestDetailView.swift in Sources */,
 				472E8BD487486D1409370EA3 /* PullYardMobileApp.swift in Sources */,

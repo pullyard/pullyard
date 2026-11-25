@@ -38,6 +38,8 @@ struct SettingsView: View {
                 .pyRow()
             }
 
+            MacLinkSection()
+
             Section {
                 HStack(spacing: 12) {
                     ForEach(ThemeStyle.allCases) { option in

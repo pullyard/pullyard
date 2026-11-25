@@ -139,7 +139,11 @@ struct RootView: View {
                 model.handleForeground()
                 consumePendingLink()
             }
-            if phase == .background { BackgroundSync.schedule() }
+            if phase == .background {
+                BackgroundSync.schedule()
+                LinkClient.shared.disconnect()
+            }
+            if phase == .active, model.isSignedIn { LinkClient.shared.connectIfNeeded() }
         }
         .onChange(of: model.session) { _, session in
             if session == .signedOut { router.reset() }
@@ -155,6 +159,17 @@ struct RootView: View {
     private func handleURL(_ url: URL) {
         guard model.isSignedIn else {
             PendingLink.set(url)
+            return
+        }
+        if url.scheme == "pullyard", url.host == "pair", let pairing = PYLinkPairing.parse(url.absoluteString) {
+            Task {
+                do {
+                    try await LinkClient.shared.pair(pairing)
+                    model.feedback.success("Paired with \(pairing.name)")
+                } catch {
+                    model.feedback.error(error, key: "pair")
+                }
+            }
             return
         }
         if url.scheme == "pullyard", url.host == "pending" {
@@ -289,6 +304,10 @@ struct RouteDestination: View {
             CreateIssueView(repo: repo)
         case let .browse(repo, ref, path):
             RepoBrowserView(repo: repo, ref: ref, path: path)
+        case let .agent(session):
+            AgentChatView(session: session)
+        case .agents:
+            AgentSessionsView()
         case let .fileDiff(key, path):
             FileDiffView(key: key, path: path)
         case let .notification(id):

@@ -381,6 +381,8 @@ enum Route: Codable, Hashable {
     case finishReview(PRKey)
     case newIssue(String)
     case browse(repo: String, ref: String?, path: String)
+    case agent(String)
+    case agents
 }
 
 struct PushedBranch: Codable, Hashable, Identifiable {
