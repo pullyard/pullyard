@@ -116,6 +116,7 @@ public sealed class PRContent : Grid, IShortcutHost
     private ListView? fileList;
     private TextBox? fileFilter;
     private TextBlock? viewedCount;
+    private ProgressBar? viewedBar;
     private int lastScrollToken;
     private int renderedDiffVersion = -1;
     private string renderedFilter = "";
@@ -1306,7 +1307,12 @@ public sealed class PRContent : Grid, IShortcutHost
         };
         var filterRow = Ui.Columns((fileFilter, Ui.Star), (viewedCount, Ui.Auto));
         filterRow.Padding = new Thickness(8);
-        side.Children.Add(filterRow);
+        viewedBar = new ProgressBar { Minimum = 0, Maximum = 1, Height = 3, MinHeight = 3, Foreground = Palette.Brush("coral"), Background = Palette.Brush("harborLine"), Margin = new Thickness(8, 0, 8, 2), VerticalAlignment = VerticalAlignment.Bottom };
+        AutomationProperties.SetName(viewedBar, L.T("Files_Viewed", "Viewed"));
+        var filterHost = new Grid();
+        filterHost.Children.Add(filterRow);
+        filterHost.Children.Add(viewedBar);
+        side.Children.Add(filterHost);
         fileList = ListSupport.Create("GenericRowTemplate");
         fileList.SelectionChanged += (_, _) =>
         {
@@ -1375,6 +1381,13 @@ public sealed class PRContent : Grid, IShortcutHost
             AutomationProperties.SetAcceleratorKey(b, key);
             return b;
         }
+        static TextBlock NavLabel(string text)
+        {
+            var t = Ui.Caption(text);
+            t.Margin = new Thickness(8, 0, 0, 0);
+            AutomationProperties.SetAccessibilityView(t, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+            return t;
+        }
         wrapBox = new CheckBox { Content = L.T("Files_WrapLines", "Wrap lines"), MinWidth = 0, VerticalAlignment = VerticalAlignment.Center };
         ToolTipService.SetToolTip(wrapBox, L.T("Files_WrapTip", "Wrap long lines (W)"));
         AutomationProperties.SetAcceleratorKey(wrapBox, "W");
@@ -1396,11 +1409,13 @@ public sealed class PRContent : Grid, IShortcutHost
         var nav = Ui.H(2,
             fileListToggle,
             Ui.Line(vertical: true),
+            NavLabel(L.T("Files_NavFile", "File")),
             Nav("\uE70E", L.T("Files_PrevFile", "Previous file"), "P", "p"),
             Nav("\uE70D", L.T("Files_NextFile", "Next file"), "N", "n"),
             Ui.Line(vertical: true),
-            Nav("\uE74A", L.T("Files_PrevHunk", "Previous hunk"), "[", "["),
-            Nav("\uE74B", L.T("Files_NextHunk", "Next hunk"), "]", "]"));
+            NavLabel(L.T("Files_NavChange", "Change")),
+            Nav("\uE74A", L.T("Files_PrevHunk", "Previous change"), "[", "["),
+            Nav("\uE74B", L.T("Files_NextHunk", "Next change"), "]", "]"));
         scopeBox = new ComboBox { MinWidth = 120, VerticalAlignment = VerticalAlignment.Center };
         scopeBox.Items.Add(L.T("Files_ScopeAll", "All changes"));
         scopeBox.Items.Add("");
@@ -1413,7 +1428,8 @@ public sealed class PRContent : Grid, IShortcutHost
         var options = Ui.H(12, wrapBox, layoutBox);
         var row = Ui.Columns((nav, Ui.Auto), (scopeBox, Ui.Auto), (null, Ui.Star), (options, Ui.Auto));
         row.ColumnSpacing = 12;
-        row.Padding = new Thickness(8, 4, 10, 4);
+        row.Padding = new Thickness(8, 0, 10, 0);
+        row.MinHeight = 28;
         AutomationProperties.SetName(row, L.T("Files_ReviewBar", "Review navigation"));
         SyncReviewBar();
         SyncScope();
@@ -1574,7 +1590,9 @@ public sealed class PRContent : Grid, IShortcutHost
         var selected = model.ScrollTarget;
         fileList.ItemsSource = visible.Select(f => new FileListItem(f, model.ViewedPaths.Contains(f.Id), model.ThreadCount(f.Id))).ToList();
         if (selected is not null) fileList.SelectedItem = (fileList.ItemsSource as List<FileListItem>)?.FirstOrDefault(f => f.File.Id == selected);
-        if (viewedCount is not null) viewedCount.Text = $"{model.ViewedPaths.Intersect(shown.Select(f => f.Id)).Count()}/{shown.Count}";
+        var viewedNow = model.ViewedPaths.Intersect(shown.Select(f => f.Id)).Count();
+        if (viewedCount is not null) viewedCount.Text = L.F("Files_ViewedOf", "{0}/{1} viewed", viewedNow, shown.Count);
+        if (viewedBar is not null) viewedBar.Value = shown.Count == 0 ? 0 : (double)viewedNow / shown.Count;
         RenderFilesEmpty(shown.Count, visible.Count, filter);
         var layout = $"{WrapPref}|{SplitActive}|{model.DiffScope}";
         if (renderedDiffVersion == model.DiffVersion && renderedFilter == filter && renderedLayout == layout) return;
