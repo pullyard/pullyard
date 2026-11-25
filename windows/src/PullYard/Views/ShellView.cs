@@ -73,6 +73,8 @@ public sealed class ShellView : Grid
         else ShowEmptyDetail();
         Loaded += (_, _) =>
         {
+            if (!Program.SmokeUi && !Program.SmokeTour && !Core.Util.Demo.IsOn)
+                DispatcherQueue.TryEnqueue(() => WelcomeTour.ShowIfNeeded(XamlRoot, () => app.Section = Section.Overview).Forget());
             if (pendingToast is not { } queued) return;
             pendingToast = null;
             ShowToast(queued.Text, queued.IsError);

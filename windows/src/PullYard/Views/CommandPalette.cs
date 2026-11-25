@@ -629,6 +629,8 @@ public sealed class CommandPalette
         if (TextZoom.CanZoomOut) output.Add(new PaletteCommand("zoom-out", PaletteSection.Actions, "", "muted", L.T("Palette_ZoomOut", "Zoom Out"), TextZoom.ZoomOut) { Shortcut = "Ctrl+-", Keywords = "text size smaller" });
         if (!TextZoom.IsDefault) output.Add(new PaletteCommand("zoom-reset", PaletteSection.Actions, "", "muted", L.T("Palette_ActualSize", "Actual Size"), TextZoom.Reset) { Shortcut = "Ctrl+0", Keywords = "text size zoom reset" });
         output.Add(new PaletteCommand("shortcuts", PaletteSection.Actions, "\uE765", "muted", L.T("Shortcuts_Title", "Keyboard Shortcuts"), () => ShortcutsDialog.Show(root).Forget()) { Shortcut = "Ctrl+/", Keywords = "keys hotkeys help" });
+        if (app.Phase == Phase.LoggedIn) output.Add(new PaletteCommand("welcome-tour", PaletteSection.Actions, "\uE7BE", "violet", L.T("Palette_WelcomeTour", "Welcome Tour"), () => WelcomeTour.Show(root, () => app.Section = Section.Overview).Forget()) { Keywords = "onboarding intro help tour" });
+        if (app.Phase == Phase.LoggedIn) output.Add(new PaletteCommand("overview", PaletteSection.Actions, "\uE80F", "coral", L.T("Section_Overview", "Overview"), () => app.Section = Section.Overview) { Shortcut = "Ctrl+Alt+0", Keywords = "home today dashboard" });
         output.Add(new PaletteCommand("updates", PaletteSection.Actions, "", "sky", L.T("Menu_CheckForUpdates", "Check for Updates…"), () => app.Updater.Check(true).Forget()) { Keywords = "version upgrade" });
         return output;
     }
