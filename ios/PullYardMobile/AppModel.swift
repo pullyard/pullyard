@@ -326,6 +326,7 @@ final class AppModel: ObservableObject {
         pendingDone.values.forEach { $0.cancel() }; pendingDone = [:]
         notifications = []; inboxState = .idle; locallyRead = []
         projects = []; projectsState = .idle; pinnedProjects = []; detailCache = nil; savedSearches = []; activeSavedSearch = nil; pushedBranches = []
+        outbox = []; LocalStore.support.remove("outbox.json")
         VisitStore.clear()
         if !isDemo { BackgroundSync.reset() }
         lastUpdated = nil; isRefreshing = false; rateLimitedUntil = nil
@@ -368,6 +369,7 @@ final class AppModel: ObservableObject {
     func handleForeground() {
         if session == .locked { restoreSession(); return }
         guard session == .signedIn else { return }
+        Task { await flushOutbox() }
         if let lastUpdated, Date.now.timeIntervalSince(lastUpdated) < 60 { return }
         refreshAll()
     }
@@ -453,6 +455,7 @@ final class AppModel: ObservableObject {
         if !isDemo, includeInbox, lists[reviewKey] != nil, lists[mineKey] != nil {
             BackgroundSync.updateBaseline(reviews: lists[reviewKey] ?? [], mine: lists[mineKey] ?? [], notifications: notifications)
         }
+        if !connectivityIssue, !outbox.isEmpty { Task { await flushOutbox() } }
         let requestCount = keys.count + (includeInbox ? 1 : 0) + (includeUser ? 1 : 0)
         if errors.count < requestCount { lastUpdated = .now }
         saveCache()
@@ -536,9 +539,56 @@ final class AppModel: ObservableObject {
     func comments(_ key: PRKey) async throws -> [PRComment] { try await call { try await $0.comments(key) } }
     func reviewComments(_ key: PRKey) async throws -> [PRComment] { try await call { try await $0.reviewComments(key) } }
     func search(_ query: String, cursor: String? = nil) async throws -> PullRequestPage { try await call { try await $0.searchPullRequests(query, cursor: cursor) } }
-    func addComment(_ key: PRKey, body: String) async throws { try await call { try await $0.addComment(key, body: body) } }
-    func reply(_ key: PRKey, commentID: Int, body: String) async throws { try await call { try await $0.reply(key, commentID: commentID, body: body) } }
-    func submitReview(_ key: PRKey, event: ReviewEvent, body: String) async throws { try await call { try await $0.submitReview(key, event: event, body: body) } }
+    func addComment(_ key: PRKey, body: String) async throws { try await queueingOffline(OutboxItem(key: key, kind: .comment, body: body)) { try await $0.addComment(key, body: body) } }
+    func reply(_ key: PRKey, commentID: Int, body: String) async throws { try await queueingOffline(OutboxItem(key: key, kind: .reply(commentID), body: body)) { try await $0.reply(key, commentID: commentID, body: body) } }
+    func submitReview(_ key: PRKey, event: ReviewEvent, body: String) async throws { try await queueingOffline(OutboxItem(key: key, kind: .review(event), body: body)) { try await $0.submitReview(key, event: event, body: body) } }
+
+    @Published private(set) var outbox: [OutboxItem] = LocalStore.support.readJSON([OutboxItem].self, "outbox.json") ?? []
+    private var flushing = false
+
+    private func queueingOffline(_ item: OutboxItem, _ operation: (GitHubAPI) async throws -> Void) async throws {
+        do {
+            try await call(operation)
+        } catch GitHubError.offline {
+            outbox.append(item)
+            saveOutbox()
+            feedback.info("You're offline. It will be sent when you're back online.", key: "outbox")
+            throw OutboxQueued()
+        }
+    }
+
+    func removeFromOutbox(_ item: OutboxItem) {
+        outbox.removeAll { $0.id == item.id }
+        saveOutbox()
+    }
+
+    func flushOutbox() async {
+        guard !flushing, !outbox.isEmpty, client != nil else { return }
+        flushing = true
+        defer { flushing = false }
+        var sent = 0
+        for item in outbox {
+            do {
+                try await call { api in
+                    switch item.kind {
+                    case .comment: try await api.addComment(item.key, body: item.body)
+                    case let .reply(id): try await api.reply(item.key, commentID: id, body: item.body)
+                    case let .review(event): try await api.submitReview(item.key, event: event, body: item.body)
+                    }
+                }
+                outbox.removeAll { $0.id == item.id }
+                sent += 1
+            } catch GitHubError.offline {
+                break
+            } catch {
+                if let index = outbox.firstIndex(where: { $0.id == item.id }) { outbox[index].lastError = error.localizedDescription }
+            }
+        }
+        saveOutbox()
+        if sent > 0 { feedback.success("Sent \(sent) queued item\(sent == 1 ? "" : "s")", key: "outbox-sent") }
+    }
+
+    private func saveOutbox() { LocalStore.support.writeJSON(outbox, "outbox.json") }
     func submitPendingReview(_ key: PRKey, reviewID: Int, event: ReviewEvent, body: String) async throws { try await call { try await $0.submitPendingReview(key, reviewID: reviewID, event: event, body: body) } }
     func deletePendingReview(_ key: PRKey, reviewID: Int) async throws { try await call { try await $0.deletePendingReview(key, reviewID: reviewID) } }
 

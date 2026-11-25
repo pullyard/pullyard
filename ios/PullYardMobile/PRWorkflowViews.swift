@@ -13,8 +13,8 @@ struct MergeReadinessCard: View {
                     .mobileFont(size: 20, weight: .semibold)
                     .foregroundStyle(headline.color)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(headline.title).mobileFont(size: 16, weight: .semibold).foregroundStyle(MobileTheme.ink)
-                    Text(headline.subtitle).mobileFont(size: 13).foregroundStyle(MobileTheme.muted)
+                    Text(L(headline.title)).mobileFont(size: 16, weight: .semibold).foregroundStyle(MobileTheme.ink)
+                    Text(L(headline.subtitle)).mobileFont(size: 13).foregroundStyle(MobileTheme.muted)
                 }
                 Spacer()
                 if insight.autoMergeEnabled {
@@ -43,7 +43,7 @@ struct MergeReadinessCard: View {
         Button { action?() } label: {
             HStack(spacing: 10) {
                 Image(systemName: symbol).foregroundStyle(color).frame(width: 22)
-                Text(title).mobileFont(size: 14, weight: .medium).foregroundStyle(MobileTheme.ink)
+                Text(L(title)).mobileFont(size: 14, weight: .medium).foregroundStyle(MobileTheme.ink)
                 Spacer()
                 if action != nil { Image(systemName: "chevron.right").mobileFont(size: 11, weight: .semibold).foregroundStyle(MobileTheme.muted) }
             }
@@ -113,7 +113,7 @@ struct ReviewersCard: View {
                             Text(reviewer.login).mobileFont(size: 15, weight: .medium).foregroundStyle(MobileTheme.ink)
                             if GitHubUser(login: reviewer.login).isSameAccount(as: me) { Text("you").mobileFont(size: 11, weight: .bold).foregroundStyle(MobileTheme.accent) }
                         }
-                        Text(title(reviewer.state)).mobileFont(size: 12).foregroundStyle(color(reviewer.state))
+                        Text(L(title(reviewer.state))).mobileFont(size: 12).foregroundStyle(color(reviewer.state))
                     }
                     Spacer()
                     if canRerequest && !reviewer.isTeam && reviewer.state != .requested {
@@ -259,7 +259,7 @@ struct MergeSheet: View {
                                         .frame(width: 36, height: 36)
                                         .background(method == option ? MobileTheme.violetFill : MobileTheme.violet.opacity(0.12), in: Circle())
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(option.title).mobileFont(size: 15, weight: .semibold).foregroundStyle(MobileTheme.ink)
+                                        Text(L(option.title)).mobileFont(size: 15, weight: .semibold).foregroundStyle(MobileTheme.ink)
                                         Text(detail(option)).mobileFont(size: 12).foregroundStyle(MobileTheme.muted)
                                     }
                                     Spacer()
@@ -346,9 +346,9 @@ struct MergeSheet: View {
 
     private func detail(_ option: MergeMethod) -> String {
         switch option {
-        case .squash: "All commits become one commit on \(baseName)."
-        case .merge: "Keeps every commit and adds a merge commit."
-        case .rebase: "Replays each commit on top of \(baseName)."
+        case .squash: String(format: L("All commits become one commit on %@."), baseName)
+        case .merge: L("Keeps every commit and adds a merge commit.")
+        case .rebase: String(format: L("Replays each commit on top of %@."), baseName)
         }
     }
 

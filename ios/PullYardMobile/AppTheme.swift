@@ -247,14 +247,14 @@ struct RelativeTime: View {
     private func label(now: Date) -> String {
         let seconds = now.timeIntervalSince(date)
         let text: String
-        if abs(seconds) < 45 { text = "just now" }
-        else if seconds < 3_600 { text = "\(Int(seconds / 60))m" }
-        else if seconds < 86_400 { text = "\(Int(seconds / 3_600))h" }
-        else if seconds < 7 * 86_400 { text = "\(Int(seconds / 86_400))d" }
+        if abs(seconds) < 45 { text = L("just now") }
+        else if seconds < 3_600 { text = "\(Int(seconds / 60))\(L("m"))" }
+        else if seconds < 86_400 { text = "\(Int(seconds / 3_600))\(L("h"))" }
+        else if seconds < 7 * 86_400 { text = "\(Int(seconds / 86_400))\(L("d"))" }
         else { text = date.formatted(.dateTime.day().month(.abbreviated)) }
         guard let prefix else { return text }
-        let suffix = abs(seconds) >= 45 && seconds < 7 * 86_400 ? " ago" : ""
-        return "\(prefix) \(text)\(suffix)"
+        let suffix = abs(seconds) >= 45 && seconds < 7 * 86_400 ? L(" ago") : ""
+        return "\(L(prefix)) \(text)\(suffix)"
     }
 }
 
@@ -263,7 +263,7 @@ struct PRStatePill: View {
 
     var body: some View {
         let color = MobileTheme.color(for: state)
-        Label(state.title, systemImage: state.symbol)
+        Label(L(state.title), systemImage: state.symbol)
             .labelStyle(.titleAndIcon)
             .mobileFont(size: 11, weight: .semibold, design: .rounded)
             .foregroundStyle(color)
@@ -285,7 +285,7 @@ struct Chip: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 if let symbol { Image(systemName: symbol).mobileFont(size: 12, weight: .semibold) }
-                Text(title).mobileFont(size: 14, weight: .semibold)
+                Text(L(title)).mobileFont(size: 14, weight: .semibold)
                 if let count {
                     Text("\(count)")
                         .mobileFont(size: 12, weight: .bold, design: .rounded)
@@ -343,8 +343,8 @@ struct ErrorStateView: View {
                 Circle().fill(MobileTheme.amber.opacity(0.14)).frame(width: 74, height: 74)
                 Image(systemName: "exclamationmark.triangle.fill").mobileFont(size: 28, weight: .semibold).foregroundStyle(MobileTheme.amber)
             }
-            Text(title).mobileFont(size: 19, weight: .semibold).foregroundStyle(MobileTheme.ink).multilineTextAlignment(.center)
-            Text(message).mobileFont(size: 15).foregroundStyle(MobileTheme.muted).multilineTextAlignment(.center)
+            Text(L(title)).mobileFont(size: 19, weight: .semibold).foregroundStyle(MobileTheme.ink).multilineTextAlignment(.center)
+            Text(L(message)).mobileFont(size: 15).foregroundStyle(MobileTheme.muted).multilineTextAlignment(.center)
             if let retry {
                 Button(action: retry) { Text("Try again").mobileFont(size: 15, weight: .semibold).padding(.horizontal, 22).padding(.vertical, 11) }
                     .buttonStyle(.borderedProminent).tint(MobileTheme.accentFill)
@@ -364,8 +364,8 @@ struct PYEmptyState<Actions: View>: View {
     var body: some View {
         VStack(spacing: 14) {
             HarborMark().padding(.bottom, 4)
-            Text(title).mobileFont(size: 19, weight: .semibold).foregroundStyle(MobileTheme.ink).multilineTextAlignment(.center)
-            Text(message).mobileFont(size: 15).foregroundStyle(MobileTheme.muted).multilineTextAlignment(.center)
+            Text(L(title)).mobileFont(size: 19, weight: .semibold).foregroundStyle(MobileTheme.ink).multilineTextAlignment(.center)
+            Text(L(message)).mobileFont(size: 15).foregroundStyle(MobileTheme.muted).multilineTextAlignment(.center)
             actions.padding(.top, 4)
         }
         .padding(.horizontal, 32)

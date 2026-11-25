@@ -123,27 +123,47 @@ struct RootView: View {
             router.open(route, in: model.selectedTab)
             return .handled
         })
-        .onOpenURL { url in
-            if url.scheme == "pullyard", url.host == "queue", model.isSignedIn {
-                router.popToRoot(.pulls)
-                model.activeSavedSearch = nil
-                model.queue = .needsMyReview
-                model.selectedTab = .pulls
-                return
-            }
-            guard model.isSignedIn, let route = DeepLink.route(from: url) else { return }
-            if model.selectedTab == .settings { model.selectedTab = .pulls }
-            router.open(route, in: model.selectedTab)
-        }
+        .onReceive(NotificationCenter.default.publisher(for: .pullyardPendingLink)) { _ in consumePendingLink() }
+        .onOpenURL { url in handleURL(url) }
         .tint(MobileTheme.accent)
         .preferredColorScheme(AppearanceMode(rawValue: appearanceRaw)?.colorScheme)
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { model.handleForeground() }
+            if phase == .active {
+                model.handleForeground()
+                consumePendingLink()
+            }
             if phase == .background { BackgroundSync.schedule() }
         }
         .onChange(of: model.session) { _, session in
             if session == .signedOut { router.reset() }
+            if session == .signedIn { consumePendingLink() }
         }
+    }
+
+    private func consumePendingLink() {
+        guard model.isSignedIn, let url = PendingLink.take() else { return }
+        handleURL(url)
+    }
+
+    private func handleURL(_ url: URL) {
+        guard model.isSignedIn else {
+            PendingLink.set(url)
+            return
+        }
+        if url.scheme == "pullyard", url.host == "pending" {
+            if let pending = PendingLink.take() { handleURL(pending) }
+            return
+        }
+        if url.scheme == "pullyard", url.host == "queue" {
+            router.popToRoot(.pulls)
+            model.activeSavedSearch = nil
+            model.queue = .needsMyReview
+            model.selectedTab = .pulls
+            return
+        }
+        guard let route = DeepLink.route(from: url) else { return }
+        if model.selectedTab == .settings { model.selectedTab = .pulls }
+        router.open(route, in: model.selectedTab)
     }
 }
 

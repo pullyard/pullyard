@@ -92,6 +92,7 @@ struct PRDetailView: View {
     @State private var visitRecorded = false
     @State private var expandedCommits: Set<String> = []
     @State private var pendingCount: Int?
+    @State private var following = false
 
     init(key: PRKey, initial: PullRequest? = nil) {
         self.key = key
@@ -155,6 +156,13 @@ struct PRDetailView: View {
                             }
                         }
                     }
+                    if let pull, let checks, checks.contains(where: \.isPending) || following, LiveActivityManager.isAvailable {
+                        Button {
+                            Task { await toggleFollow(pull, checks: checks) }
+                        } label: {
+                            Label(following ? "Stop following checks" : "Follow checks on Lock Screen", systemImage: following ? "bell.slash" : "dot.radiowaves.left.and.right")
+                        }
+                    }
                     if canReview, myLatestReview != nil {
                         Button { openReview(.approve) } label: { Label("Approve again", systemImage: "checkmark.seal") }
                         Button { openReview(.requestChanges) } label: { Label("Request changes", systemImage: "arrow.uturn.backward") }
@@ -194,6 +202,23 @@ struct PRDetailView: View {
             Button("Keep it", role: .cancel) {}
         } message: { Text("Comments you added to this pending review will be deleted.") }
         .sensoryFeedback(.success, trigger: successPulse)
+        .userActivity("com.pullyard.pullrequest", isActive: pull != nil) { activity in
+            activity.title = pull.map { "\($0.title) · \(key.repo) #\(key.number)" } ?? "\(key.repo) #\(key.number)"
+            activity.webpageURL = pull?.htmlUrl ?? URL(string: "https://github.com/\(key.repo)/pull/\(key.number)")
+            activity.userInfo = ["repo": key.repo, "number": key.number]
+            activity.isEligibleForHandoff = true
+        }
+        .task(id: checks.map(ChecksSummary.init)) {
+            following = LiveActivityManager.isFollowing(key)
+            guard case .running = ChecksSummary(checks), let current = pull else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(20))
+                guard !Task.isCancelled else { return }
+                await loadChecks(current)
+                if case .running = ChecksSummary(checks) { continue }
+                return
+            }
+        }
         .environment(\.pyReact, ReactAction { comment, kind in react(comment, kind) })
         .feedbackChrome { Task { await load() } }
     }
@@ -239,14 +264,14 @@ struct PRDetailView: View {
 
     private func sectionTitle(_ section: PRSection) -> String {
         switch section {
-        case .overview: return section.rawValue
+        case .overview: return L(section.rawValue)
         case .conversation:
             let count = timeline.count
-            if let unresolved = insight?.unresolvedCount, unresolved > 0 { return "Conversation · \(unresolved) open" }
-            return count > 0 ? "Conversation \(count)" : section.rawValue
+            if let unresolved = insight?.unresolvedCount, unresolved > 0 { return "\(L(section.rawValue)) · \(unresolved)" }
+            return count > 0 ? "\(L(section.rawValue)) \(count)" : L(section.rawValue)
         case .checks:
-            if case let .failing(count) = ChecksSummary(checks) { return "Checks ✕\(count)" }
-            return section.rawValue
+            if case let .failing(count) = ChecksSummary(checks) { return "\(L(section.rawValue)) ✕\(count)" }
+            return L(section.rawValue)
         }
     }
 
@@ -704,6 +729,8 @@ struct PRDetailView: View {
         do {
             let value = try await model.checks(key, sha: pr.head.sha)
             withAnimation(.snappy) { checks = value }
+            await LiveActivityManager.update(key, checks: value)
+            following = LiveActivityManager.isFollowing(key)
         } catch { feedback.error(error, key: "checks-\(key.id)") }
     }
 
@@ -810,6 +837,22 @@ struct PRDetailView: View {
         }
     }
 
+    private func toggleFollow(_ pull: PullRequest, checks: [CheckRun]) async {
+        if following {
+            await LiveActivityManager.stop(key)
+            following = false
+            feedback.info("Stopped following checks", key: "follow")
+        } else {
+            do {
+                try LiveActivityManager.start(key, title: pull.title, checks: checks)
+                following = true
+                feedback.success("Following checks on your Lock Screen", key: "follow")
+            } catch {
+                feedback.error(error, key: "follow")
+            }
+        }
+    }
+
     private func discardPendingReview() async {
         guard let pendingReview else { return }
         do {
@@ -834,7 +877,7 @@ private struct ActionLabel: View {
     var outline: Color? = nil
 
     var body: some View {
-        Label(title, systemImage: symbol)
+        Label(L(title), systemImage: symbol)
             .mobileFont(size: 15, weight: .semibold)
             .lineLimit(1)
             .frame(maxWidth: .infinity, minHeight: 46)
@@ -919,7 +962,7 @@ private struct CheckGroupView: View {
         VStack(alignment: .leading, spacing: 8) {
             Button { withAnimation(.snappy) { expanded.toggle() } } label: {
                 HStack {
-                    SectionEyebrow("\(title) · \(items.count)")
+                    SectionEyebrow("\(L(title)) · \(items.count)")
                     Spacer()
                     Image(systemName: "chevron.down").rotationEffect(.degrees(expanded ? 0 : -90)).foregroundStyle(MobileTheme.muted)
                 }
@@ -1014,7 +1057,7 @@ struct ComposerSheet: View {
                         .foregroundStyle(MobileTheme.accent)
                     } else {
                         HStack {
-                            Text(request.guidance).mobileFont(size: 14).foregroundStyle(MobileTheme.muted).lineSpacing(3)
+                            Text(L(request.guidance)).mobileFont(size: 14).foregroundStyle(MobileTheme.muted).lineSpacing(3)
                             Spacer()
                             if !trimmed.isEmpty {
                                 Picker("Mode", selection: $preview) {
@@ -1083,7 +1126,7 @@ struct ComposerSheet: View {
                     .padding(.horizontal, 18).padding(.bottom, 10)
                 }
             }
-            .navigationTitle(request.title).navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(L(request.title)).navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { if trimmed.isEmpty { dismiss() } else { confirmClose = true } }.disabled(isSending)
@@ -1252,6 +1295,10 @@ struct ComposerSheet: View {
         isSending = true; errorMessage = nil
         do {
             try await (action ?? send)(trimmed)
+            DraftStore.shared.clear(request.draft)
+            isSending = false
+            dismiss()
+        } catch is OutboxQueued {
             DraftStore.shared.clear(request.draft)
             isSending = false
             dismiss()
@@ -1611,7 +1658,7 @@ struct MetricCard: View {
 struct SectionEyebrow: View {
     let title: String
     init(_ title: String) { self.title = title }
-    var body: some View { Text(title).mobileFont(size: 13, weight: .semibold).foregroundStyle(MobileTheme.muted).accessibilityAddTraits(.isHeader) }
+    var body: some View { Text(L(title)).mobileFont(size: 13, weight: .semibold).foregroundStyle(MobileTheme.muted).accessibilityAddTraits(.isHeader) }
 }
 
 struct AvatarView: View {

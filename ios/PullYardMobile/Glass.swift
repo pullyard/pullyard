@@ -69,6 +69,8 @@ enum GlassSupport {
     }
 }
 
+func L(_ key: String) -> String { NSLocalizedString(key, comment: "") }
+
 struct PYPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label

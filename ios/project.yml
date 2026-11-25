@@ -24,6 +24,8 @@ targets:
     dependencies:
       - target: PullYardWidget
         embed: true
+      - target: PullYardShare
+        embed: true
     entitlements:
       path: Support/PullYardMobile.entitlements
     settings:
@@ -49,6 +51,22 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: PullYard
         INFOPLIST_FILE: Support/Widget-Info.plist
+        SKIP_INSTALL: YES
+  PullYardShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PullYardShare
+      - path: Shared
+    entitlements:
+      path: Support/PullYardShare.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pullyard.mobile.share
+        CODE_SIGN_ENTITLEMENTS: Support/PullYardShare.entitlements
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: PullYard
+        INFOPLIST_FILE: Support/Share-Info.plist
         SKIP_INSTALL: YES
   PullYardMobileTests:
     type: bundle.unit-test

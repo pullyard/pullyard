@@ -103,6 +103,7 @@ enum BackgroundSync {
             saveBaseline(next)
             await updateBadge(unread: notifications.filter(\.unread).count)
             WidgetBridge.publish(reviews: reviews.items, mine: mine.items, unread: notifications.filter(\.unread).count)
+            await LiveActivityManager.refreshAll(using: client)
             return true
         } catch {
             return false

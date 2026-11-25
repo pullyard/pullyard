@@ -63,7 +63,7 @@ struct InboxView: View {
                 }
             } else {
                 ForEach(groups, id: \.title) { group in
-                    Section(group.title) {
+                    Section(L(group.title)) {
                         ForEach(group.items) { item in
                             NavigationLink(value: item.route) {
                                 NotificationRow(item: item)
@@ -205,7 +205,9 @@ struct ReasonChip: View {
             .background(color.opacity(0.13), in: Capsule())
     }
 
-    private var title: String {
+    private var title: String { L(rawTitle) }
+
+    private var rawTitle: String {
         switch reason {
         case "review_requested": "Review requested"
         case "mention": "Mentioned"

@@ -18,6 +18,7 @@ struct CredentialVault: CredentialStore {
     private let service = "com.pullyard.mobile.github"
     private let account = "primary"
     private let accessibility = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+    static let sharedGroup = "group.com.pullyard.mobile"
 
     private var baseQuery: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
@@ -35,7 +36,10 @@ struct CredentialVault: CredentialStore {
             guard let attributes = item as? [String: Any],
                   let data = attributes[kSecValueData as String] as? Data,
                   let token = String(data: data, encoding: .utf8), !token.isEmpty else { return .notFound }
-            if (attributes[kSecAttrAccessible as String] as? String) != (accessibility as String) {
+            let group = attributes[kSecAttrAccessGroup as String] as? String ?? ""
+            if !group.hasSuffix(Self.sharedGroup) {
+                migrate(token: token, from: group)
+            } else if (attributes[kSecAttrAccessible as String] as? String) != (accessibility as String) {
                 SecItemUpdate(baseQuery as CFDictionary, [kSecAttrAccessible as String: accessibility] as CFDictionary)
             }
             return .found(token)
@@ -54,11 +58,24 @@ struct CredentialVault: CredentialStore {
         if status == errSecItemNotFound {
             var insert = baseQuery
             update.forEach { insert[$0.key] = $0.value }
+            insert[kSecAttrAccessGroup as String] = Self.sharedGroup
             let result = SecItemAdd(insert as CFDictionary, nil)
             guard result == errSecSuccess else { throw VaultError.status(result) }
         } else if status != errSecSuccess {
             throw VaultError.status(status)
         }
+    }
+
+    private func migrate(token: String, from oldGroup: String) {
+        var insert = baseQuery
+        insert[kSecValueData as String] = Data(token.utf8)
+        insert[kSecAttrAccessible as String] = accessibility
+        insert[kSecAttrAccessGroup as String] = Self.sharedGroup
+        let status = SecItemAdd(insert as CFDictionary, nil)
+        guard status == errSecSuccess || status == errSecDuplicateItem, !oldGroup.isEmpty else { return }
+        var old = baseQuery
+        old[kSecAttrAccessGroup as String] = oldGroup
+        SecItemDelete(old as CFDictionary)
     }
 
     func clear() {

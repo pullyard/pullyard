@@ -103,7 +103,7 @@ struct FeedbackChrome: ViewModifier {
                     Button { onBannerTap?() } label: {
                         HStack(spacing: 8) {
                             Image(systemName: banner.symbol)
-                            Text(banner.message).lineLimit(2).multilineTextAlignment(.leading)
+                            Text(L(banner.message)).lineLimit(2).multilineTextAlignment(.leading)
                             Spacer(minLength: 0)
                             if onBannerTap != nil { Image(systemName: "arrow.clockwise").accessibilityHidden(true) }
                         }
@@ -144,7 +144,7 @@ private struct ToastView: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: symbol).foregroundStyle(tint)
-            Text(toast.message).mobileFont(size: 13, weight: .medium).foregroundStyle(MobileTheme.ink).lineLimit(3)
+            Text(L(toast.message)).mobileFont(size: 13, weight: .medium).foregroundStyle(MobileTheme.ink).lineLimit(3)
             Spacer(minLength: 4)
             if let title = toast.actionTitle {
                 Button(title, action: perform).mobileFont(size: 13, weight: .bold).foregroundStyle(MobileTheme.accent)

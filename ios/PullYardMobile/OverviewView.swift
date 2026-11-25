@@ -21,6 +21,7 @@ struct OverviewView: View {
             VStack(alignment: .leading, spacing: 18) {
                 header
                 heroCard
+                OutboxCard()
                 PushedBranchesCard()
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                     ForEach(Array(tiles.enumerated()), id: \.offset) { _, item in
@@ -72,7 +73,7 @@ struct OverviewView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(greeting).mobileFont(size: 14, weight: .medium).foregroundStyle(MobileTheme.muted)
+                Text(L(greeting)).mobileFont(size: 14, weight: .medium).foregroundStyle(MobileTheme.muted)
                 Text(model.user?.name?.split(separator: " ").first.map(String.init) ?? model.user?.login ?? "Reviewer")
                     .mobileFont(size: 22, weight: .semibold, design: .serif).foregroundStyle(MobileTheme.ink)
             }
@@ -216,7 +217,7 @@ private struct OverviewTile: View {
                 .mobileFont(size: 28, weight: .bold, design: .rounded)
                 .foregroundStyle((count ?? 0) > 0 ? MobileTheme.ink : MobileTheme.dim)
                 .contentTransition(.numericText())
-            Text(title).mobileFont(size: 14, weight: .semibold).foregroundStyle(MobileTheme.muted).lineLimit(1)
+            Text(L(title)).mobileFont(size: 14, weight: .semibold).foregroundStyle(MobileTheme.muted).lineLimit(1)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -283,7 +284,7 @@ struct FilteredPullsView: View {
         .refreshable { await model.refreshList(filter.listKey) }
         .pullToRefreshLogo(isRefreshing: model.listState(filter.listKey) == .loading && !pulls.isEmpty)
         .animation(.snappy, value: pulls.map(\.id))
-        .navigationTitle(filter.title)
+        .navigationTitle(L(filter.title))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

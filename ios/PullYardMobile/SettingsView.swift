@@ -137,6 +137,7 @@ struct SettingsView: View {
 
             Section("About") {
                 LabeledContent("PullYard for iPhone", value: Self.version)
+                Button { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } } label: { Label("Language", systemImage: "globe") }
                 Button { showTour = true } label: { Label("Welcome tour", systemImage: "sailboat") }
                 Link(destination: URL(string: "https://pullyard.app/changelog.html")!) { Label("What's new", systemImage: "sparkles") }
                 Link(destination: URL(string: "https://pullyard.app/roadmap.html")!) { Label("Roadmap", systemImage: "map") }

@@ -56,7 +56,7 @@ struct OnboardingView: View {
                     Spacer()
                     PageDots(count: count, current: current)
                         .padding(.bottom, 18)
-                    CTAButton(title: current < count - 1 ? "Next" : "Set sail", isFinal: current == count - 1) {
+                    CTAButton(title: L(current < count - 1 ? "Next" : "Set sail"), isFinal: current == count - 1) {
                         if current < count - 1 {
                             withAnimation(.smooth(duration: 0.6)) { page = current + 1 }
                         } else {
@@ -315,8 +315,8 @@ private struct OnboardingPage: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 260)
-            RevealText(text: title, active: active, size: 36)
-            Text(subtitle)
+            RevealText(text: L(title), active: active, size: 36)
+            Text(L(subtitle))
                 .mobileFont(size: 17)
                 .foregroundStyle(.white.opacity(0.75))
                 .lineSpacing(4)

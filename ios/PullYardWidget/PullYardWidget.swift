@@ -1,3 +1,5 @@
+import ActivityKit
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -59,9 +61,7 @@ struct QueueWidgetView: View {
             HStack {
                 Image(systemName: "arrow.triangle.pull").foregroundStyle(WidgetPalette.sky)
                 Spacer()
-                if let unread = entry.snapshot?.unread, unread > 0 {
-                    Label("\(unread)", systemImage: "tray.full.fill").font(.caption2.weight(.semibold)).foregroundStyle(.white.opacity(0.7))
-                }
+                RefreshButton()
             }
             Spacer()
             Text("\(count)").font(.system(size: 46, weight: .bold, design: .rounded)).foregroundStyle(count > 0 ? WidgetPalette.coral : .white).contentTransition(.numericText())
@@ -80,6 +80,7 @@ struct QueueWidgetView: View {
                 Text("to review").font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.8))
                 Spacer()
                 Text("My PRs \(entry.snapshot?.myOpen ?? 0)").font(.caption.weight(.semibold)).foregroundStyle(WidgetPalette.sky)
+                RefreshButton()
             }
             if let items = entry.snapshot?.items, !items.isEmpty {
                 ForEach(items.prefix(3)) { item in
@@ -144,7 +145,109 @@ struct QueueWidget: Widget {
     }
 }
 
+private struct RefreshButton: View {
+    var body: some View {
+        Button(intent: RefreshQueueIntent()) {
+            Image(systemName: "arrow.clockwise")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 26, height: 26)
+                .background(.white.opacity(0.14), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Refresh")
+    }
+}
+
+struct CIActivityWidget: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: CIActivityAttributes.self) { context in
+            CILockScreenView(context: context)
+                .activityBackgroundTint(WidgetPalette.navy)
+                .activitySystemActionForegroundColor(.white)
+                .widgetURL(URL(string: "pullyard://pull/\(context.attributes.repo)/\(context.attributes.number)"))
+        } dynamicIsland: { context in
+            DynamicIsland {
+                DynamicIslandExpandedRegion(.leading) {
+                    Label("#\(context.attributes.number)", systemImage: "arrow.triangle.pull").font(.caption.weight(.semibold)).foregroundStyle(WidgetPalette.sky)
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    CIStateIcon(state: context.state).font(.title3)
+                }
+                DynamicIslandExpandedRegion(.center) {
+                    Text(context.attributes.title).font(.caption.weight(.semibold)).lineLimit(1)
+                }
+                DynamicIslandExpandedRegion(.bottom) {
+                    VStack(spacing: 6) {
+                        CIProgressBar(state: context.state)
+                        Text(context.state.headline).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            } compactLeading: {
+                Image(systemName: "arrow.triangle.pull").foregroundStyle(WidgetPalette.sky)
+            } compactTrailing: {
+                CIStateIcon(state: context.state)
+            } minimal: {
+                CIStateIcon(state: context.state)
+            }
+            .widgetURL(URL(string: "pullyard://pull/\(context.attributes.repo)/\(context.attributes.number)"))
+        }
+    }
+}
+
+private struct CIStateIcon: View {
+    let state: CIActivityAttributes.ContentState
+    var body: some View {
+        if state.failed > 0 {
+            Image(systemName: "xmark.circle.fill").foregroundStyle(WidgetPalette.red)
+        } else if state.running > 0 {
+            Image(systemName: "clock.fill").foregroundStyle(WidgetPalette.amber)
+        } else {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(WidgetPalette.green)
+        }
+    }
+}
+
+private struct CIProgressBar: View {
+    let state: CIActivityAttributes.ContentState
+    var body: some View {
+        GeometryReader { geo in
+            let total = CGFloat(max(state.total, 1))
+            HStack(spacing: 2) {
+                if state.failed > 0 { Capsule().fill(WidgetPalette.red).frame(width: geo.size.width * CGFloat(state.failed) / total) }
+                if state.running > 0 { Capsule().fill(WidgetPalette.amber).frame(width: geo.size.width * CGFloat(state.running) / total) }
+                if state.passed > 0 { Capsule().fill(WidgetPalette.green).frame(width: geo.size.width * CGFloat(state.passed) / total) }
+                if state.skipped > 0 { Capsule().fill(Color.gray.opacity(0.5)).frame(width: geo.size.width * CGFloat(state.skipped) / total) }
+            }
+        }
+        .frame(height: 6)
+    }
+}
+
+private struct CILockScreenView: View {
+    let context: ActivityViewContext<CIActivityAttributes>
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                CIStateIcon(state: context.state).font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(context.attributes.title).font(.subheadline.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
+                    Text("\(context.attributes.repo) #\(context.attributes.number)").font(.caption).foregroundStyle(.white.opacity(0.6))
+                }
+                Spacer()
+                Text(context.state.updated, style: .relative).font(.caption2).foregroundStyle(.white.opacity(0.5))
+            }
+            CIProgressBar(state: context.state)
+            Text(context.state.headline).font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.85))
+        }
+        .padding(16)
+    }
+}
+
 @main
 struct PullYardWidgets: WidgetBundle {
-    var body: some Widget { QueueWidget() }
+    var body: some Widget {
+        QueueWidget()
+        CIActivityWidget()
+    }
 }
