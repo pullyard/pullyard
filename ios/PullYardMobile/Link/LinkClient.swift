@@ -231,7 +231,7 @@ final class LinkClient: ObservableObject {
         channel?.send(json: message)
     }
 
-    func send(_ text: String, attachments: [AgentAttachment] = [], to session: String) {
+    func send(_ text: String, attachments: [AgentAttachment] = [], localID: String? = nil, to session: String) {
         var message = PYLinkMessage(type: "send")
         message.session = session
         message.text = text
@@ -239,7 +239,7 @@ final class LinkClient: ObservableObject {
         channel?.send(json: message)
         AgentActivities.track(session)
         withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
-            chats[session]?.items.append(PYLinkItem(id: "local-\(UUID().uuidString)", kind: "user", text: text, files: attachments.isEmpty ? nil : attachments.map { $0.isImage ? "image" : $0.name }))
+            chats[session]?.items.append(PYLinkItem(id: localID ?? "local-\(UUID().uuidString)", kind: "user", text: text, files: attachments.isEmpty ? nil : attachments.map { $0.isImage ? "image" : $0.name }))
         }
     }
 

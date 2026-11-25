@@ -700,6 +700,8 @@ struct AgentChatView: View {
     @State private var lastCount = 0
     @State private var confirmClose = false
     @State private var editingItem: PYLinkItem?
+    @State private var outgoingID = "local-\(UUID().uuidString)"
+    @Namespace private var flight
     @State private var draftBeforeEdit = ""
     @EnvironmentObject private var router: AppRouter
     @EnvironmentObject private var model: AppModel
@@ -720,9 +722,9 @@ struct AgentChatView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     if let chat {
                         ForEach(chat.items) { item in
-                            AgentItemView(item: item, pending: isPending(item, in: chat), onEdit: editAction(item, in: chat))
+                            AgentItemView(item: item, flight: flight, pending: isPending(item, in: chat), onEdit: editAction(item, in: chat))
                                 .id(item.id)
-                                .transition(.asymmetric(insertion: item.kind == "user" ? .scale(scale: 0.9, anchor: .bottomTrailing).combined(with: .opacity) : .opacity.combined(with: .offset(y: 16)), removal: .opacity))
+                                .transition(.asymmetric(insertion: item.kind == "user" ? (item.id.hasPrefix("local-") ? .identity : .scale(scale: 0.9, anchor: .bottomTrailing).combined(with: .opacity)) : .opacity.combined(with: .offset(y: 16)), removal: .opacity))
                         }
                         ForEach(chat.state.pending) { permission in
                             PermissionCard(permission: permission) { allow, always in
@@ -993,13 +995,20 @@ struct AgentChatView: View {
                     .lineLimit(1...5)
                     .mobileFont(size: 16)
                     .padding(.vertical, 11)
+                    .background(alignment: .trailing) {
+                        Color.clear.modifier(Flight(id: outgoingID, namespace: flight))
+                    }
                 Button {
                     let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard canSend else { return }
                     if let editingItem { submitEdit(editingItem); return }
-                    link.send(text, attachments: attachments, to: session)
-                    draft = ""
-                    withAnimation(.snappy) { attachments = [] }
+                    let id = outgoingID
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+                        link.send(text, attachments: attachments, localID: id, to: session)
+                        draft = ""
+                        attachments = []
+                        outgoingID = "local-\(UUID().uuidString)"
+                    }
                     scrollRequest += 1
                 } label: {
                     Image(systemName: editingItem == nil ? "arrow.up" : "checkmark")
@@ -1041,6 +1050,19 @@ struct AgentChatView: View {
             } catch {
                 feedback.error(error, key: "agent-attach")
             }
+        }
+    }
+}
+
+private struct Flight: ViewModifier {
+    let id: String
+    let namespace: Namespace.ID?
+
+    func body(content: Content) -> some View {
+        if let namespace {
+            content.matchedGeometryEffect(id: id, in: namespace, properties: .frame, anchor: .bottomTrailing)
+        } else {
+            content
         }
     }
 }
@@ -1099,6 +1121,7 @@ private struct JumpToLatestButton: View {
 
 private struct AgentItemView: View {
     let item: PYLinkItem
+    var flight: Namespace.ID? = nil
     var pending = false
     var onEdit: (() -> Void)? = nil
     @State private var expanded = false
@@ -1123,6 +1146,7 @@ private struct AgentItemView: View {
                         Text(item.text).mobileFont(size: 15).foregroundStyle(.white)
                             .padding(.horizontal, 14).padding(.vertical, 10)
                             .background(MobileTheme.accentFill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .modifier(Flight(id: item.id, namespace: flight))
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 18, style: .continuous))
                             .contextMenu {
                                 Button { UIPasteboard.general.string = item.text } label: { Label("Copy", systemImage: "doc.on.doc") }
