@@ -84,6 +84,7 @@ struct PYLinkSession: Codable, Equatable, Identifiable {
     var state: String
     var repo: String?
     var number: Int?
+    var updated: Date?
 }
 
 struct PYLinkMessage: Codable {

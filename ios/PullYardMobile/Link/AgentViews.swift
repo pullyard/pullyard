@@ -249,52 +249,119 @@ struct FixWithAgentMenu: View {
 
 struct AgentSessionsView: View {
     @ObservedObject private var link = LinkClient.shared
+    @EnvironmentObject private var router: AppRouter
+    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var feedback: FeedbackCenter
     @State private var loading = false
+    @State private var resuming: String?
+    @State private var query = ""
+
+    private var closed: [PYLinkSession] {
+        let items = link.history.filter { $0.state == "closed" }
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return items }
+        return items.filter { $0.title.localizedCaseInsensitiveContains(q) || $0.folder.localizedCaseInsensitiveContains(q) || ($0.repo ?? "").localizedCaseInsensitiveContains(q) }
+    }
+
+    private var open: [PYLinkSession] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return link.sessions }
+        return link.sessions.filter { $0.title.localizedCaseInsensitiveContains(q) || $0.folder.localizedCaseInsensitiveContains(q) }
+    }
 
     var body: some View {
         List {
-            if link.sessions.isEmpty, link.status == .connecting || loading {
+            if link.sessions.isEmpty, link.history.isEmpty, link.status == .connecting || loading {
                 VStack(spacing: 12) {
                     PullYardLoader(size: 34)
                     Text("Connecting to \(link.macName)…").mobileFont(size: 14).foregroundStyle(MobileTheme.muted)
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 50)
                 .listRowBackground(Color.clear)
-            } else if link.sessions.isEmpty {
+            } else if link.sessions.isEmpty, link.history.isEmpty {
                 PYEmptyState(title: link.isConnected ? "No agent sessions" : "Not connected", message: link.isConnected ? "Start one with Fix with agent on a pull request." : "Open PullYard on your Mac and turn on iPhone access in its Settings.")
                     .frame(maxWidth: .infinity).padding(.vertical, 40)
                     .listRowBackground(Color.clear)
             } else {
-                Section("On \(link.macName)") {
-                    ForEach(link.sessions) { session in
-                        NavigationLink(value: Route.agent(session.id)) {
-                            HStack(spacing: 10) {
-                                Circle().fill(color(session.state)).frame(width: 9, height: 9)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(session.title).mobileFont(size: 15, weight: .semibold).lineLimit(2)
-                                    Text(subtitle(session)).mobileFont(size: 12).foregroundStyle(MobileTheme.muted).lineLimit(1)
-                                }
-                            }
+                if !open.isEmpty {
+                    Section("Open on \(link.macName)") {
+                        ForEach(open) { session in
+                            NavigationLink(value: Route.agent(session.id)) { row(session, color: color(session.state)) }
+                                .pyRow()
                         }
-                        .pyRow()
                     }
+                }
+                if !closed.isEmpty {
+                    Section {
+                        ForEach(closed) { session in
+                            Button { resume(session) } label: {
+                                HStack {
+                                    row(session, color: MobileTheme.slate.opacity(0.5))
+                                    Spacer(minLength: 8)
+                                    if resuming == session.id { PullYardLoader(size: 22) } else { Image(systemName: "arrow.uturn.forward.circle").foregroundStyle(MobileTheme.accent) }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.pyPlain)
+                            .disabled(resuming != nil)
+                            .pyRow()
+                        }
+                    } header: {
+                        Text("History")
+                    } footer: {
+                        Text("Tap a session to continue it in PullYard on \(link.macName).")
+                    }
+                } else if loading, !link.sessions.isEmpty {
+                    HStack { Spacer(); PullYardLoader(size: 26); Spacer() }.listRowBackground(Color.clear)
                 }
             }
         }
         .pyListStyle()
-        .refreshable { await link.refreshSessions() }
+        .searchable(text: $query, prompt: "Search sessions")
+        .refreshable { await load() }
         .navigationTitle("Agents")
-        .task {
-            loading = true
-            await link.refreshSessions()
-            loading = false
+        .task { await load() }
+    }
+
+    private func load() async {
+        loading = true
+        await link.refreshSessions()
+        await link.loadHistory()
+        loading = false
+    }
+
+    private func resume(_ session: PYLinkSession) {
+        resuming = session.id
+        Task {
+            defer { resuming = nil }
+            do {
+                let tab = try await link.resume(session.id)
+                router.open(.agent(tab), in: model.selectedTab)
+            } catch {
+                feedback.error(error, key: "agent-resume")
+            }
+        }
+    }
+
+    private func row(_ session: PYLinkSession, color: Color) -> some View {
+        HStack(spacing: 10) {
+            Circle().fill(color).frame(width: 9, height: 9)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.title).mobileFont(size: 15, weight: .semibold).lineLimit(2).foregroundStyle(MobileTheme.ink)
+                Text(subtitle(session)).mobileFont(size: 12).foregroundStyle(MobileTheme.muted).lineLimit(1)
+            }
         }
     }
 
     private func subtitle(_ session: PYLinkSession) -> String {
-        guard let repo = session.repo else { return session.folder }
-        guard let number = session.number else { return repo }
-        return "\(repo) #\(number)"
+        let place: String
+        if let repo = session.repo {
+            place = session.number.map { "\(repo) #\($0)" } ?? repo
+        } else {
+            place = (session.folder as NSString).lastPathComponent
+        }
+        guard let updated = session.updated else { return place }
+        return "\(place) · \(updated.formatted(.relative(presentation: .named)))"
     }
 
     private func color(_ state: String) -> Color {

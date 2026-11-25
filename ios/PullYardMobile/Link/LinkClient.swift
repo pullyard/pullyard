@@ -33,6 +33,7 @@ final class LinkClient: ObservableObject {
     @Published private(set) var sessions: [PYLinkSession] = []
     @Published private(set) var chats: [String: AgentChat] = [:]
     @Published private(set) var viaInternet = false
+    @Published private(set) var history: [PYLinkSession] = []
 
     private var channel: PYLinkChannel?
     private var browser: NWBrowser?
@@ -72,6 +73,7 @@ final class LinkClient: ObservableObject {
         disconnect()
         mac = nil
         sessions = []
+        history = []
         chats = [:]
         UserDefaults.standard.removeObject(forKey: "link.mac")
         status = .unpaired
@@ -120,6 +122,25 @@ final class LinkClient: ObservableObject {
         if !isConnected { try? await ensureConnected() }
         guard let reply = try? await request(PYLinkMessage(type: "list")) else { return }
         sessions = reply.sessions ?? []
+    }
+
+    func loadHistory() async {
+        if !isConnected { try? await ensureConnected() }
+        guard let reply = try? await request(PYLinkMessage(type: "history"), timeout: 30) else { return }
+        history = reply.sessions ?? history
+    }
+
+    func resume(_ id: String) async throws -> String {
+        if !isConnected { try await ensureConnected() }
+        var message = PYLinkMessage(type: "resume")
+        message.session = id
+        let reply = try await request(message, timeout: 60)
+        if let error = reply.error { throw LinkError.remote(error) }
+        guard let session = reply.session else { throw LinkError.remote("The Mac didn't return a session.") }
+        sessions = reply.sessions ?? sessions
+        subscriptions.insert(session)
+        if chats[session] == nil { chats[session] = AgentChat(id: session, title: history.first { $0.id == id }?.title ?? "Agent") }
+        return session
     }
 
     func startFix(repo: String, number: Int, kind: String, text: String?) async throws -> String {

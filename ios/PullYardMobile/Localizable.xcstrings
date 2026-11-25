@@ -5240,6 +5240,46 @@
           }
         }
       }
+    },
+    "Open on %@" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Открыто на %@"
+          }
+        }
+      }
+    },
+    "History" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "История"
+          }
+        }
+      }
+    },
+    "Tap a session to continue it in PullYard on %@." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нажмите на сессию, чтобы продолжить её в PullYard на %@."
+          }
+        }
+      }
+    },
+    "Search sessions" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Поиск сессий"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

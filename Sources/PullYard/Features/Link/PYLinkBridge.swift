@@ -14,6 +14,10 @@ struct PYLinkBridge {
             client.channel.send(json: reply)
         case "fix":
             startFix(message, client: client)
+        case "history":
+            sendHistory(message, client: client)
+        case "resume":
+            resume(message, client: client)
         case "subscribe":
             guard let session = message.session else { return }
             client.subscriptions.insert(session)
@@ -67,6 +71,50 @@ struct PYLinkBridge {
         guard let parsed = URL(string: url) else { return nil }
         let parts = parsed.pathComponents.filter { $0 != "/" }
         return parts.count >= 2 ? "\(parts[0])/\(parts[1])" : nil
+    }
+
+    private func sendHistory(_ message: PYLinkMessage, client: PYLinkClient) {
+        guard let app else { return }
+        Task { @MainActor in
+            await app.claude.reloadProjects(force: false)
+            let open = Dictionary(app.claude.tabs.filter { $0.chat != nil && !$0.sessionId.isEmpty }.map { ($0.sessionId, $0) }, uniquingKeysWith: { a, _ in a })
+            let recent = app.claude.projects.flatMap(\.sessions).filter { !$0.archived }.sorted { $0.modified > $1.modified }.prefix(60)
+            var reply = PYLinkMessage(type: "history")
+            reply.id = message.id
+            reply.sessions = recent.map { info in
+                PYLinkSession(id: info.id, title: info.title, folder: info.cwd, state: open[info.id].map { Self.state($0.state) } ?? "closed", repo: info.prURL.flatMap(Self.repo(fromURL:)), number: info.prNumber, updated: info.modified)
+            }
+            client.channel.send(json: reply)
+        }
+    }
+
+    private func resume(_ message: PYLinkMessage, client: PYLinkClient) {
+        func fail(_ text: String) {
+            var reply = PYLinkMessage(type: "error")
+            reply.id = message.id
+            reply.error = text
+            client.channel.send(json: reply)
+        }
+        guard let app, let id = message.session else { return fail("Missing session.") }
+        Task { @MainActor in
+            if app.claude.sessionsByID[id] == nil { await app.claude.reloadProjects(force: true) }
+            let tab: ClaudeTab
+            if let open = app.claude.tabs.first(where: { $0.sessionId == id && $0.chat != nil }) {
+                tab = open
+            } else if let info = app.claude.sessionsByID[id] {
+                guard FileManager.default.fileExists(atPath: info.cwd) else { return fail("The folder of this session no longer exists on \(server.desktopName).") }
+                tab = app.claude.resume(info, kind: .chat)
+            } else {
+                return fail("This session isn't on \(server.desktopName) anymore.")
+            }
+            var reply = PYLinkMessage(type: "started")
+            reply.id = message.id
+            reply.session = tab.id.uuidString
+            reply.sessions = sessions()
+            client.channel.send(json: reply)
+            client.subscriptions.insert(tab.id.uuidString)
+            pushUpdates(to: client, only: tab.id.uuidString)
+        }
     }
 
     private func startFix(_ message: PYLinkMessage, client: PYLinkClient) {
