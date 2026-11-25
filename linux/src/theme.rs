@@ -508,6 +508,25 @@ button.status-chip-button { padding: 0; min-height: 0; min-width: 0; border-radi
 .next-card { background-color: @sy_raised; border: 1px solid @sy_line; border-radius: 10px; padding: 12px 14px; }
 button.next-card:hover { background-color: shade(@sy_raised, 0.98); border-color: @sy_line_strong; }
 .news-dot { background-color: @sy_coral; border-radius: 999px; min-width: 6px; min-height: 6px; }
+button.sy-section-toggle { padding: 0; min-height: 0; margin: 0; background: none; box-shadow: none; }
+button.sy-section-toggle .sy-section-title { margin-right: 0; }
+button.sy-today { padding: 10px 12px; }
+.welcome-tour { color: white; }
+.welcome-eyebrow { color: #F07563; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; }
+.welcome-title { font-family: "Noto Serif", "DejaVu Serif", serif; font-size: 38px; font-weight: 600; color: white; }
+.welcome-subtitle { font-size: 15px; color: alpha(white, 0.78); }
+.welcome-card { background-color: alpha(white, 0.07); border: 1px solid alpha(white, 0.14); border-radius: 14px; padding: 16px; }
+.welcome-number { font-size: 28px; font-weight: 700; color: white; font-feature-settings: "tnum"; }
+.welcome-muted { color: alpha(white, 0.65); font-size: 0.85em; }
+.welcome-text { color: alpha(white, 0.9); }
+.welcome-coral { color: #F8A59A; font-weight: 600; }
+.welcome-log { font-family: monospace; font-size: 12px; color: alpha(white, 0.8); }
+.welcome-dot { border-radius: 999px; background-color: alpha(white, 0.3); transition: background-color 240ms ease-out; }
+.welcome-dot.active { background-color: white; }
+button.welcome-link { color: alpha(white, 0.85); font-weight: 600; }
+.welcome-tour .keycap { background-color: alpha(white, 0.08); border-color: alpha(white, 0.25); color: white; }
+button.welcome-cta { background-color: @sy_coral_fill; color: @sy_on_coral; animation: sy-cta-glow 1.8s ease-in-out infinite alternate; }
+@keyframes sy-cta-glow { from { box-shadow: 0 0 0 0 alpha(#F07563, 0.0); } to { box-shadow: 0 0 18px 2px alpha(#F07563, 0.55); } }
 "#;
 
 pub fn ink_token(name: &str) -> &str {

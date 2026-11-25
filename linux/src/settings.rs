@@ -107,6 +107,12 @@ pub struct Settings {
     pub files_show_list: bool,
     pub sidebar_width: i32,
     pub clipboard_watch: bool,
+    pub recent_routes: Vec<String>,
+    pub welcome_tour_seen: bool,
+    pub checklist_dismissed: bool,
+    pub issues_collapsed: bool,
+    pub queue_seen: HashMap<String, i64>,
+    pub queue_snoozed: HashMap<String, i64>,
 }
 
 impl Default for Settings {
@@ -171,6 +177,12 @@ impl Default for Settings {
             files_show_list: true,
             sidebar_width: 0,
             clipboard_watch: true,
+            recent_routes: Vec::new(),
+            welcome_tour_seen: false,
+            checklist_dismissed: false,
+            issues_collapsed: false,
+            queue_seen: HashMap::new(),
+            queue_snoozed: HashMap::new(),
         }
     }
 }
