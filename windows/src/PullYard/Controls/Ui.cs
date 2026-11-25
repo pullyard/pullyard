@@ -335,7 +335,9 @@ public static class Ui
     public static GridLength Auto => GridLength.Auto;
     public static GridLength Star => new(1, GridUnitType.Star);
 
-    public static WakeLoader Spinner(double size = 16) => new(size);
+    public static FrameworkElement Spinner(double size = 16) => new BranchLoader(size);
+
+    public static WakeLoader Wake(double size = 16) => new(size);
 
     public static Button RefreshButton(Func<Task> refresh, string? tooltip = null)
     {
@@ -447,7 +449,7 @@ public static class Ui
         return panel;
     }
 
-    public static FrameworkElement Loading(double size = 56) => new LogoLoader(size)
+    public static FrameworkElement Loading(double size = 44) => new LogoLoader(size)
     {
         HorizontalAlignment = HorizontalAlignment.Center,
         VerticalAlignment = VerticalAlignment.Center

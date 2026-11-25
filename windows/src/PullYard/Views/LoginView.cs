@@ -21,7 +21,7 @@ public sealed class LoginView : Grid
     private readonly AppViewModel app = AppViewModel.Shared;
     private readonly bool embedded;
     private readonly Action? onDone;
-    private readonly WakeLoader busyRing = Ui.Spinner(18);
+    private readonly FrameworkElement busyRing = Ui.Spinner(18);
     private readonly InfoBar errorBar = new() { Severity = InfoBarSeverity.Error, IsClosable = true, IsOpen = false };
     private readonly StackPanel providerArea = Ui.V(18);
     private readonly TextBox hostBox = new();

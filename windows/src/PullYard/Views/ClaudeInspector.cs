@@ -257,8 +257,8 @@ public sealed class TasksPanel : Grid
 
     private static UIElement Trailing(ToolItem t) => t.TaskState switch
     {
-        ChatTaskState.Running => Ui.H(6, t.StartedAt is { } start ? Ui.Caption(Duration(DateTime.Now - start)) : null, Ui.Spinner(12)),
-        ChatTaskState.Stopping => Ui.H(6, Ui.Caption(L.T("Tasks_Stopping", "Stopping…")), Ui.Spinner(12)),
+        ChatTaskState.Running => Ui.H(6, t.StartedAt is { } start ? Ui.Caption(Duration(DateTime.Now - start)) : null, Ui.Wake(12)),
+        ChatTaskState.Stopping => Ui.H(6, Ui.Caption(L.T("Tasks_Stopping", "Stopping…")), Ui.Wake(12)),
         ChatTaskState.Failed => Ui.Text(L.T("Tasks_Failed", "Failed"), 12, "red", FontWeights.Medium),
         ChatTaskState.Stopped => Ui.Caption(L.T("Tasks_Stopped", "Stopped")),
         _ => Ui.Caption(t.StartedAt is { } a && t.FinishedAt is { } b ? Duration(b - a) : "")

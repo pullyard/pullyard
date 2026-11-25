@@ -63,13 +63,14 @@ public sealed class IssueDetailView : LiveDetail, IShortcutHost
     private HtmlView? html;
     private string lastHtml = "";
     private int lastToken;
-    private readonly RefreshFooter status = new(compact: true);
+    private readonly RefreshPill status;
     private readonly StackPanel header = Ui.V(8);
     private readonly StackPanel tools = Ui.H(2);
 
     public IssueDetailView(ItemRef r)
     {
         itemRef = r;
+        status = new RefreshPill(() => model?.Load() ?? Task.CompletedTask);
         Children.Add(host);
         host.Content = Ui.Loading();
         Shortcuts.ShortLinkKey(this);
@@ -199,7 +200,6 @@ public sealed class IssueDetailView : LiveDetail, IShortcutHost
                 ? Ui.Button(L.T("Issue_CloseShort", "Close"), () => ConfirmClose(itemRef.Number).Forget(), glyph: "\uE930", tooltip: L.T("Issue_Close", "Close issue"))
                 : Ui.Button(L.T("Issue_ReopenShort", "Reopen"), () => model.SetOpen(true).Forget(), glyph: "\uE7A7", tooltip: L.T("Issue_Reopen", "Reopen issue")));
         }
-        tools.Children.Add(Ui.RefreshButton(() => model?.Load() ?? Task.CompletedTask));
         var share = Ui.H(0,
             Ui.IconButton("\uE71B", L.T("Menu_CopyLink", "Copy Link"), () => ShellView.Copied(issue.Url, L.T("Toast_CopiedLink", "Copied link")), "text"),
             Ui.IconButton("\uE8C8", L.T("Menu_CopyShortLinkHint", "Copy short link (Ctrl+Shift+C)"), () => ShellView.CopyShortLink(ShortLink.Of(itemRef)), "text"),

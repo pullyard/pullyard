@@ -110,9 +110,9 @@ internal static class LogoArt
 
 public sealed class LogoLoader : Grid
 {
-    private const double Draw = 1.7;
-    private const double Hold = 0.5;
-    private const double Erase = 0.55;
+    private const double Draw = 1.1;
+    private const double Hold = 0.3;
+    private const double Erase = 0.4;
     private const double DashPad = 0.6;
 
     private readonly bool once;
@@ -187,10 +187,11 @@ public sealed class LogoLoader : Grid
         art.Children.Add(Stroke(LogoArt.Curves(wave1.Start, wave1.Parts), LogoArt.CubicLength(wave1.Start, wave1.Parts), 12, LogoArt.Alpha(LogoArt.Wave, 0.55), 0.74, 1.00));
         art.Children.Add(Stroke(LogoArt.Curves(wave2.Start, wave2.Parts), LogoArt.CubicLength(wave2.Start, wave2.Parts), 10, LogoArt.Alpha(LogoArt.Wave, 0.32), 0.78, 1.00));
 
+        if (!once) Reveal(this, board is null ? 0.8 : 1);
         if (board is null)
         {
             foreach (var apply in finalState) apply();
-            Opacity = once ? 1 : 0.8;
+            if (once) Opacity = 1;
             return;
         }
         if (once) board.Completed += (_, _) => Drawn?.Invoke();
@@ -222,6 +223,7 @@ public sealed class LogoLoader : Grid
             if (running) return;
             running = true;
             board.Begin();
+            if (!once) board.Seek(TimeSpan.FromSeconds(drawSeconds * 0.3));
         }
         else Stop();
     }
@@ -258,7 +260,7 @@ public sealed class LogoLoader : Grid
         if (!once)
         {
             anim.KeyFrames.Add(new DiscreteDoubleKeyFrame { KeyTime = Key(TimeSpan.FromSeconds(drawSeconds + Hold)), Value = 0 });
-            anim.KeyFrames.Add(new EasingDoubleKeyFrame { KeyTime = Key(TimeSpan.FromSeconds(Cycle)), Value = -hidden, EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut } });
+            anim.KeyFrames.Add(new EasingDoubleKeyFrame { KeyTime = Key(TimeSpan.FromSeconds(Cycle)), Value = -hidden, EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut } });
         }
         Storyboard.SetTarget(anim, path);
         Storyboard.SetTargetProperty(anim, "StrokeDashOffset");
@@ -278,7 +280,7 @@ public sealed class LogoLoader : Grid
         if (!once)
         {
             anim.KeyFrames.Add(new DiscreteDoubleKeyFrame { KeyTime = Key(TimeSpan.FromSeconds(drawSeconds + Hold)), Value = end });
-            anim.KeyFrames.Add(new EasingDoubleKeyFrame { KeyTime = Key(TimeSpan.FromSeconds(Cycle)), Value = eraseOut ? 0 : end, EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut } });
+            anim.KeyFrames.Add(new EasingDoubleKeyFrame { KeyTime = Key(TimeSpan.FromSeconds(Cycle)), Value = eraseOut ? 0 : end, EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut } });
         }
         Storyboard.SetTarget(anim, target);
         Storyboard.SetTargetProperty(anim, "Opacity");
@@ -297,6 +299,166 @@ public sealed class LogoLoader : Grid
         Storyboard.SetTarget(anim, scale);
         Storyboard.SetTargetProperty(anim, "ScaleY");
         board.Children.Add(anim);
+    }
+
+    internal static void Reveal(UIElement target, double opacity)
+    {
+        target.Opacity = 0;
+        var timer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread()?.CreateTimer();
+        if (timer is null)
+        {
+            target.Opacity = opacity;
+            return;
+        }
+        if (Motion.Enabled) target.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(180) };
+        timer.Interval = TimeSpan.FromMilliseconds(180);
+        timer.IsRepeating = false;
+        timer.Tick += (_, _) => target.Opacity = opacity;
+        timer.Start();
+    }
+}
+
+public sealed class BranchLoader : Grid
+{
+    private const double Cycle = 1.8;
+    private const double BoxX = 160;
+    private const double BoxY = 454;
+    private const double BoxSize = 372;
+    private readonly Storyboard? board;
+    private bool running;
+
+    public BranchLoader(double size = 14, string? label = null)
+    {
+        Width = size;
+        Height = size;
+        IsHitTestVisible = false;
+        VerticalAlignment = VerticalAlignment.Center;
+        AutomationProperties.SetName(this, label ?? L.T("Loader_Loading", "Loading"));
+        var art = new Canvas { RenderTransform = new TranslateTransform { X = -BoxX, Y = -BoxY } };
+        Children.Add(new Viewbox { Stretch = Stretch.Uniform, Child = new Canvas { Width = BoxSize, Height = BoxSize, Children = { art } } });
+        board = Motion.Enabled ? new Storyboard { RepeatBehavior = RepeatBehavior.Forever, Duration = new Duration(TimeSpan.FromSeconds(Cycle)) } : null;
+        var thickness = Math.Max(1.4, size / 9) * BoxSize / size;
+        var violet = Palette.Get("violet");
+        var sky = Palette.Get("accent");
+        var curveA = (Start: new Point(240, 500), Parts: new[] { (new Point(392, 500), new Point(420, 636), new Point(520, 636)) });
+        var curveB = (Start: new Point(240, 772), Parts: new[] { (new Point(392, 772), new Point(420, 636), new Point(520, 636)) });
+        art.Children.Add(Part(LogoArt.Circle(206, 500, 34), 2 * Math.PI * 34, thickness, violet, false));
+        art.Children.Add(Part(LogoArt.Circle(206, 772, 34), 2 * Math.PI * 34, thickness, sky, false));
+        art.Children.Add(Part(LogoArt.Curves(curveA.Start, curveA.Parts), LogoArt.CubicLength(curveA.Start, curveA.Parts), thickness, violet, true));
+        art.Children.Add(Part(LogoArt.Curves(curveB.Start, curveB.Parts), LogoArt.CubicLength(curveB.Start, curveB.Parts), thickness, sky, true));
+        LogoLoader.Reveal(this, board is null ? 0.8 : 1);
+        if (board is null) return;
+        Loaded += (_, _) => Sync();
+        Unloaded += (_, _) => Sync();
+        RegisterPropertyChangedCallback(VisibilityProperty, (_, _) => Sync());
+    }
+
+    private Path Part(Geometry geometry, double length, double thickness, Color color, bool curve)
+    {
+        var dash = length / thickness;
+        var hidden = dash + 0.6;
+        var path = new Path
+        {
+            Data = geometry,
+            Stroke = new SolidColorBrush(color),
+            StrokeThickness = thickness,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeDashCap = PenLineCap.Round,
+            StrokeDashArray = new DoubleCollection { dash, dash + 2.2 },
+            StrokeDashOffset = board is null ? 0 : hidden
+        };
+        if (board is null) return path;
+        var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
+        var anim = new DoubleAnimationUsingKeyFrames { EnableDependentAnimation = true };
+        anim.KeyFrames.Add(new DiscreteDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.Zero), Value = hidden });
+        if (curve) anim.KeyFrames.Add(new DiscreteDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromSeconds(Cycle * 0.12)), Value = hidden });
+        anim.KeyFrames.Add(new EasingDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromSeconds(Cycle * (curve ? 0.5 : 0.25))), Value = 0, EasingFunction = ease });
+        anim.KeyFrames.Add(new DiscreteDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromSeconds(Cycle * 0.5)), Value = 0 });
+        anim.KeyFrames.Add(new EasingDoubleKeyFrame { KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromSeconds(Cycle)), Value = -hidden, EasingFunction = ease });
+        Storyboard.SetTarget(anim, path);
+        Storyboard.SetTargetProperty(anim, "StrokeDashOffset");
+        board.Children.Add(anim);
+        return path;
+    }
+
+    private void Sync()
+    {
+        if (board is null) return;
+        var show = IsLoaded && Visibility == Visibility.Visible;
+        if (show == running) return;
+        running = show;
+        if (show) board.Begin();
+        else board.Stop();
+    }
+}
+
+public sealed class WakeBar : Grid
+{
+    private readonly Storyboard? board;
+    private readonly TranslateTransform shift = new();
+    private readonly Microsoft.UI.Xaml.Shapes.Rectangle sweep = new() { HorizontalAlignment = HorizontalAlignment.Left };
+    private bool running;
+
+    public WakeBar(double height = 2)
+    {
+        Height = height;
+        MinHeight = height;
+        IsHitTestVisible = false;
+        AutomationProperties.SetName(this, L.T("Loader_Loading", "Loading"));
+        Background = Palette.Brush("harborLine");
+        var wake = Palette.Get("wake");
+        var gradient = new LinearGradientBrush { StartPoint = new Point(0, 0.5), EndPoint = new Point(1, 0.5) };
+        gradient.GradientStops.Add(new GradientStop { Color = LogoArt.Alpha(wake, 0), Offset = 0 });
+        gradient.GradientStops.Add(new GradientStop { Color = wake, Offset = 0.55 });
+        gradient.GradientStops.Add(new GradientStop { Color = LogoArt.Alpha(wake, 0), Offset = 1 });
+        sweep.Fill = gradient;
+        sweep.RenderTransform = shift;
+        Children.Add(sweep);
+        Clip = new RectangleGeometry();
+        SizeChanged += (_, e) =>
+        {
+            Clip = new RectangleGeometry { Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height) };
+            sweep.Width = Math.Max(80, e.NewSize.Width * 0.35);
+            Restart();
+        };
+        board = Motion.Enabled ? new Storyboard { RepeatBehavior = RepeatBehavior.Forever } : null;
+        if (board is null)
+        {
+            sweep.Width = 0;
+            Background = Palette.Brush("wake", 0.6);
+            return;
+        }
+        Loaded += (_, _) => Restart();
+        Unloaded += (_, _) => Stop();
+        RegisterPropertyChangedCallback(VisibilityProperty, (_, _) => Restart());
+    }
+
+    private void Stop()
+    {
+        if (board is null || !running) return;
+        running = false;
+        board.Stop();
+    }
+
+    private void Restart()
+    {
+        if (board is null) return;
+        Stop();
+        if (!IsLoaded || Visibility != Visibility.Visible || ActualWidth <= 0) return;
+        board.Children.Clear();
+        var anim = new DoubleAnimation
+        {
+            From = -sweep.Width,
+            To = ActualWidth,
+            Duration = new Duration(TimeSpan.FromSeconds(1.4)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
+        };
+        Storyboard.SetTarget(anim, shift);
+        Storyboard.SetTargetProperty(anim, "X");
+        board.Children.Add(anim);
+        running = true;
+        board.Begin();
     }
 }
 

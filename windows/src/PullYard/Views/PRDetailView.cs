@@ -109,8 +109,7 @@ public sealed class PRContent : Grid, IShortcutHost
     private readonly TabStrip tabs = new(nameof(PRTab.Conversation));
     private readonly Grid tabArea = new();
     private readonly StackPanel toolbar = Ui.H(2);
-    private readonly RefreshFooter status = new(compact: true);
-    private readonly WakeLoader busy = Ui.Spinner(16);
+    private readonly RefreshPill status;
     private readonly Dictionary<PRTab, FrameworkElement> tabViews = new();
     private HtmlView? conversation;
     private HtmlView? diff;
@@ -138,6 +137,7 @@ public sealed class PRContent : Grid, IShortcutHost
     public PRContent(PRDetailViewModel model)
     {
         this.model = model;
+        status = new RefreshPill(() => model.Load(true));
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -149,7 +149,7 @@ public sealed class PRContent : Grid, IShortcutHost
         top.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         top.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         top.Children.Add(titleHost);
-        var tools = Ui.H(4, busy, status, toolbar);
+        var tools = Ui.H(4, status, toolbar);
         tools.VerticalAlignment = VerticalAlignment.Top;
         SetColumn(tools, 1);
         top.Children.Add(tools);
@@ -172,8 +172,6 @@ public sealed class PRContent : Grid, IShortcutHost
         Shortcuts.ShortLinkKey(this);
 
         tabs.SelectionChanged += id => model.Tab = Enum.Parse<PRTab>(id);
-        status.Retry = () => model.Load(true).Forget();
-        busy.Visibility = Visibility.Collapsed;
         model.PropertyChanged += OnModel;
         JiraService.Account.Changed += OnJiraChanged;
         Settings.Shared.Changed += OnSettings;
@@ -291,10 +289,8 @@ public sealed class PRContent : Grid, IShortcutHost
             case nameof(PRDetailViewModel.Loading):
             case nameof(PRDetailViewModel.LastUpdated):
             case nameof(PRDetailViewModel.RefreshError):
-                status.Update(model.LastUpdated, model.Loading, model.RefreshError);
-                break;
             case nameof(PRDetailViewModel.Busy):
-                busy.Visibility = model.Busy ? Visibility.Visible : Visibility.Collapsed;
+                SyncStatus();
                 break;
             case nameof(PRDetailViewModel.ActionError):
                 if (model.ActionError is { } err)
@@ -350,8 +346,10 @@ public sealed class PRContent : Grid, IShortcutHost
         if (diff is not null) RenderFilesNotices();
         if (tabViews.ContainsKey(PRTab.Commits)) tabViews[PRTab.Commits] = BuildCommits(tabViews[PRTab.Commits]);
         if (tabViews.ContainsKey(PRTab.Checks)) tabViews[PRTab.Checks] = BuildChecks(tabViews[PRTab.Checks]);
-        status.Update(model.LastUpdated, model.Loading, model.RefreshError);
+        SyncStatus();
     }
+
+    private void SyncStatus() => status.Update(model.LastUpdated, model.Loading || model.Busy, model.RefreshError);
 
     private void RenderHeader()
     {
@@ -790,7 +788,6 @@ public sealed class PRContent : Grid, IShortcutHost
         toolbar.Children.Add(fix);
         if (pr.IsOpen && !pr.IsDraft && model.CanWrite)
             toolbar.Children.Add(Ui.Button(L.T("PR_MergeButton", "Merge"), () => Dialogs.Merge(XamlRoot, model).Forget(), glyph: "", tooltip: L.T("PR_MergeHint", "Merge pull request (Ctrl+Shift+M)")));
-        toolbar.Children.Add(Ui.RefreshButton(() => model.Load(true)));
         var more = Ui.IconButton("", L.T("Common_MoreActions", "More actions"), () => { }, "text");
         more.Flyout = MoreMenu();
         var group = Ui.H(0,
