@@ -351,7 +351,7 @@ struct FixTourOverlay: View {
             }
             .padding(14)
             .frame(width: 360)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .pyGlass(in: RoundedRectangle(cornerRadius: 14), outline: false)
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(nsColor: .separatorColor)))
             .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
             .padding(16)

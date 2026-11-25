@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var tokenFailed = false
     @State private var refreshingToken = false
     @AppStorage("clipboard.watch") private var watchClipboard = true
+    @AppStorage(ListDensity.key) private var density: ListDensity = .roomy
     @AppStorage("settings.tab") private var tab = "general"
     @AppStorage(Updater.autoCheckKey) private var autoCheckUpdates = true
     @AppStorage(Diagnostics.enabledKey) private var diagnosticsEnabled = false
@@ -79,6 +80,11 @@ struct SettingsView: View {
                     }
                 }
                 .help("Also ⌘+ and ⌘− in the main window")
+                Picker("List density", selection: $density) {
+                    ForEach(ListDensity.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .help("How much each pull request row shows")
                 Toggle("Show PullYard in the menu bar", isOn: Binding(get: { app.showMenuBar }, set: { app.showMenuBar = $0 }))
             } header: {
                 SettingsHeader(title: "Appearance", icon: "paintpalette.fill", color: .syViolet)

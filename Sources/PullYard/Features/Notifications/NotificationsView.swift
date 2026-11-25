@@ -12,6 +12,7 @@ struct NotificationsView: View {
     @State private var checkingCache = false
     @State private var rows = RowAppearTracker.shared("notifications")
     @State private var confirmMarkAll = false
+    @State private var pendingDone: [String: Task<Void, Never>] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,13 +28,13 @@ struct NotificationsView: View {
             List(selection: $selection) {
                 if let error, !items.isEmpty { ListErrorNote(message: error) { await load() } }
                 ForEach(items) { n in
-                    NotificationRow(item: n)
+                    NotificationRow(item: n, onDone: { requestDone(n) })
                         .rowAppear(n.id, rows)
                         .tag(n.id)
                         .simultaneousGesture(TapGesture(count: 2).onEnded { if n.route == nil { openExternal(n) } })
                         .contextMenu {
                             if n.unread { Button("Mark as read") { Task { await markRead(n) } } }
-                            Button("Done (remove from inbox)") { Task { await markDone(n) } }
+                            Button("Done (remove from inbox)") { requestDone(n) }
                             Button("Open in browser") { openInBrowser(n.webURL) }
                             if let ref = ShortLink.ref(route: n.route) {
                                 Button("Copy short link") { app.copyShortLink(ref) }
@@ -56,6 +57,11 @@ struct NotificationsView: View {
             .onKeyPress(.return) {
                 guard let n = selected, n.route == nil else { return .ignored }
                 openExternal(n)
+                return .handled
+            }
+            .onKeyPress(characters: CharacterSet(charactersIn: "e")) { _ in
+                guard let n = selected else { return .ignored }
+                requestDone(n)
                 return .handled
             }
             .liveRefresh(updated: lastUpdated, refreshing: loading, error: items.isEmpty ? nil : error) { await load() }
@@ -173,14 +179,35 @@ struct NotificationsView: View {
         ListCache.remove(account: account, key: Self.cacheKey(!showAll))
     }
 
-    private func markDone(_ n: NotificationThread) async {
+    private func requestDone(_ n: NotificationThread) {
+        guard pendingDone[n.id] == nil, let index = items.firstIndex(where: { $0.id == n.id }) else { return }
+        let next = items.indices.contains(index + 1) ? items[index + 1].id : (index > 0 ? items[index - 1].id : nil)
+        withAnimation(Motion.quick) { _ = items.remove(at: index) }
+        if selection == n.id { selection = next }
+        if n.unread { app.unreadCount = max(0, app.unreadCount - 1) }
+        pendingDone[n.id] = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+            pendingDone[n.id] = nil
+            await commitDone(n, at: index)
+        }
+        app.showToast("Done · \(n.subject.title)", action: ToastAction(title: "Undo") {
+            pendingDone[n.id]?.cancel()
+            pendingDone[n.id] = nil
+            withAnimation(Motion.quick) { items.insert(n, at: min(index, items.count)) }
+            if n.unread { app.unreadCount += 1 }
+        })
+    }
+
+    private func commitDone(_ n: NotificationThread, at index: Int) async {
         guard let api = app.api else { return }
         do { try await api.markNotificationDone(n.id) } catch {
-            if !isCancellation(error) { app.showToast("Couldn’t mark as done: \(error.localizedDescription)", isError: true) }
+            if isCancellation(error) { return }
+            app.showToast("Couldn’t mark as done: \(error.localizedDescription)", isError: true)
+            withAnimation(Motion.quick) { items.insert(n, at: min(index, items.count)) }
+            if n.unread { app.unreadCount += 1 }
             return
         }
-        items.removeAll { $0.id == n.id }
-        if n.unread { app.unreadCount = max(0, app.unreadCount - 1) }
         persistChange()
     }
 
@@ -198,12 +225,14 @@ struct NotificationsView: View {
 
 struct NotificationRow: View {
     let item: NotificationThread
+    var onDone: (() -> Void)?
+    @State private var hovering = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Circle().fill(item.unread ? Color.sySky : .clear).frame(width: 7, height: 7).padding(.top, 7).accessibilityLabel("Unread").accessibilityHidden(!item.unread)
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.syIcon(11))
                 .foregroundStyle(color)
                 .frame(width: 22, height: 22)
                 .background(RoundedRectangle(cornerRadius: 6).fill(color.opacity(0.14)))
@@ -223,8 +252,24 @@ struct NotificationRow: View {
                 }
                 .font(.syCaption)
             }
+            Spacer(minLength: 0)
+            if let onDone {
+                Button(action: onDone) {
+                    Image(systemName: "checkmark")
+                        .font(.syIcon(11))
+                        .frame(width: 24, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(Color.syMuted)
+                .opacity(hovering ? 1 : 0)
+                .help("Done (E)")
+                .accessibilityLabel("Done")
+            }
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onHover { h in withAnimation(.easeOut(duration: Motion.Dur.micro)) { hovering = h } }
     }
 
     private var icon: String {

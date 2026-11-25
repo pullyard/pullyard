@@ -297,6 +297,7 @@ struct StatusChip: View {
     var icon: String?
     var color: Color = .syMuted
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var hovering = false
 
     var body: some View {
@@ -311,6 +312,7 @@ struct StatusChip: View {
         .padding(.horizontal, 6)
         .frame(height: TextZoom.shared.size(18))
         .background(Capsule().fill(color.opacity(hovering ? 0.2 : (scheme == .dark ? 0.18 : 0.12))))
+        .overlay { if contrast == .increased { Capsule().strokeBorder(color, lineWidth: 1) } }
         .fixedSize()
         .onHover { hovering = $0 }
     }

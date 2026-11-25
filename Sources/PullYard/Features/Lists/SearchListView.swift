@@ -22,9 +22,31 @@ enum StateFilter: String, CaseIterable, Identifiable {
     }
 }
 
+enum ListDensity: String, CaseIterable, Identifiable {
+    case compact, standard, roomy
+    static let key = "list.density"
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .compact: return "Compact"
+        case .standard: return "Standard"
+        case .roomy: return "Roomy"
+        }
+    }
+}
+
 enum ListSort: String, CaseIterable, Identifiable {
     case updated, created, comments
     var id: String { rawValue }
+
+    var short: String {
+        switch self {
+        case .updated: return "Updated"
+        case .created: return "Newest"
+        case .comments: return "Comments"
+        }
+    }
 
     var title: String {
         switch self {
@@ -387,6 +409,7 @@ struct SearchListView: View {
     @State private var text: String
     @State private var loadedText = ""
     @State private var collapsed: Set<String> = []
+    @AppStorage(ListDensity.key) private var density: ListDensity = .roomy
     private let memoryKey: String
 
     init(title: String, kind: String, baseQuery: String, grouped: Bool = false) {
@@ -423,13 +446,22 @@ struct SearchListView: View {
                         ForEach(ListSort.allCases) { Text($0.title).tag($0) }
                     }
                     .pickerStyle(.inline)
+                    Divider()
+                    Picker("Density", selection: $density) {
+                        ForEach(ListDensity.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.inline)
                 } label: {
-                    Image(systemName: "arrow.up.arrow.down")
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.up.arrow.down")
+                        Text(sort.short)
+                    }
+                    .font(.syCaption.weight(.medium))
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("Sort: \(sort.title)")
+                .help("Sort: \(sort.title) · Density: \(density.title)")
                 .accessibilityLabel("Sort")
                 .accessibilityValue(sort.title)
             }
@@ -468,6 +500,10 @@ struct SearchListView: View {
                         .font(.syCaption)
                         .listRowSeparator(.hidden)
                 }
+            }
+            .onKeyPress(characters: CharacterSet(charactersIn: "jk")) { press in
+                step(press.characters == "j" ? 1 : -1)
+                return .handled
             }
             .opacity(model.loading && !model.showingCached && !model.items.isEmpty ? 0.55 : 1)
             .animation(.easeOut(duration: 0.15), value: model.loading)
@@ -509,6 +545,19 @@ struct SearchListView: View {
                 if !grouped, item.id == model.items.last?.id { Task { await model.loadMore(api: app.api) } }
             }
             .contextMenu { ItemContextMenu(item: item) }
+    }
+
+    private var visibleItems: [SearchItem] {
+        guard grouped else { return model.items }
+        return model.groups.flatMap { !collapsed.contains($0.id) || !text.isEmpty ? $0.items : [] }
+    }
+
+    private func step(_ delta: Int) {
+        let items = visibleItems
+        guard !items.isEmpty else { return }
+        let index = items.firstIndex { $0.route == app.detailRoot }
+        let next = index.map { min(items.count - 1, max(0, $0 + delta)) } ?? (delta > 0 ? 0 : items.count - 1)
+        app.select(items[next].route)
     }
 
     private func reload(silent: Bool = false, typing: Bool = false) async {
@@ -605,6 +654,7 @@ struct ItemRow: View {
     let item: SearchItem
     var showRepo = true
     var numberPrefix = "#"
+    @AppStorage(ListDensity.key) private var density: ListDensity = .roomy
 
     private var reference: String {
         showRepo ? "\(item.repository.nameWithOwner)\(numberPrefix)\(item.number)" : "\(numberPrefix)\(item.number)"
@@ -634,6 +684,93 @@ struct ItemRow: View {
     }
 
     var body: some View {
+        Group {
+            switch density {
+            case .compact: compactRow
+            case .standard: standardRow
+            case .roomy: roomyRow
+            }
+        }
+        .padding(.vertical, density == .compact ? 2 : 4)
+        .padding(.horizontal, 6)
+        .contentShape(Rectangle())
+        .hoverHighlight(radius: 7)
+        .padding(.horizontal, -6)
+        .help(item.title)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenLabel)
+    }
+
+    @ViewBuilder
+    private var trailingChips: some View {
+        if item.isPR {
+            ReviewChip(decision: item.reviewDecision)
+            CIChip(state: item.ciState)
+        }
+        if let comments = item.comments?.totalCount, comments > 0 {
+            Label("\(comments)", systemImage: "bubble.left").labelStyle(.titleAndIcon).monospacedDigit()
+        }
+    }
+
+    private var compactRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: item.visualState.compactIcon)
+                .font(.syIcon(10))
+                .foregroundStyle(item.visualState.color)
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            Text(item.title)
+                .font(.syBody.weight(.medium))
+                .foregroundStyle(Color.syText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 6)
+            if item.isPR { CIIcon(state: item.ciState).font(.syCaption) }
+            Text(Fmt.rel(item.updatedAt))
+                .font(.syCaption.monospacedDigit())
+                .foregroundStyle(Color.syMuted)
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .frame(minHeight: TextZoom.shared.size(22))
+    }
+
+    private var standardRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            StateBadge(state: item.visualState, compact: true)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(item.title)
+                        .font(.syBody.weight(.medium))
+                        .foregroundStyle(Color.syText)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 6)
+                    Text(Fmt.rel(item.updatedAt))
+                        .font(.syCaption.monospacedDigit())
+                        .foregroundStyle(Color.syMuted)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                HStack(spacing: 6) {
+                    Text(reference).font(.syCaption.monospaced()).lineLimit(1).truncationMode(.middle)
+                    if showRepo || item.author != nil {
+                        Text(item.author?.login ?? "").lineLimit(1)
+                    }
+                    if let labels = item.labels?.nodes, let first = labels.first {
+                        LabelChip(label: first)
+                        if labels.count > 1 { Text("+\(labels.count - 1)").foregroundStyle(Color.syDim) }
+                    }
+                    Spacer(minLength: 6)
+                    HStack(spacing: 6) { trailingChips }.fixedSize()
+                }
+                .font(.syCaption)
+                .foregroundStyle(Color.syMuted)
+            }
+        }
+    }
+
+    private var roomyRow: some View {
         HStack(alignment: .top, spacing: 10) {
             StateBadge(state: item.visualState, compact: true)
             VStack(alignment: .leading, spacing: 4) {
@@ -656,16 +793,8 @@ struct ItemRow: View {
                     Avatar(url: item.author?.avatarUrl, size: 18, ring: true)
                     Text(item.author?.login ?? "").lineLimit(1)
                     Spacer(minLength: 6)
-                    HStack(spacing: 8) {
-                        if item.isPR {
-                            ReviewChip(decision: item.reviewDecision)
-                            CIChip(state: item.ciState)
-                        }
-                        if let comments = item.comments?.totalCount, comments > 0 {
-                            Label("\(comments)", systemImage: "bubble.left").labelStyle(.titleAndIcon).monospacedDigit()
-                        }
-                    }
-                    .fixedSize()
+                    HStack(spacing: 8) { trailingChips }
+                        .fixedSize()
                 }
                 .font(.syCaption)
                 .foregroundStyle(Color.syMuted)
@@ -682,13 +811,5 @@ struct ItemRow: View {
                 }
             }
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 6)
-        .contentShape(Rectangle())
-        .hoverHighlight(radius: 7)
-        .padding(.horizontal, -6)
-        .help(item.title)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spokenLabel)
     }
 }

@@ -198,6 +198,7 @@ final class ClaudeWorkspace {
     let sessionRows = RowAppearTracker()
     var showInspector = true
     var ciFixes: [ItemRef: CIFixLaunch] = [:]
+    var prFixes: [ItemRef: CIFixLaunch] = [:]
 
     var defaults: AgentDefaults { AgentDefaults.shared }
     var effort: ClaudeEffort {

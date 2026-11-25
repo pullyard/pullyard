@@ -55,6 +55,10 @@ struct PullYardApp: App {
         .defaultSize(width: 1380, height: 860)
         .commands {
             ToolbarCommands()
+            SidebarCommands()
+            CommandMenu("Pull Request") {
+                PullRequestCommands(app: app)
+            }
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesButton()
                 Button("Buy Me a Pizza…") { openInBrowser(Support.pizzaURL) }
@@ -111,7 +115,7 @@ struct PullYardApp: App {
                     .disabled(!app.canLock)
             }
             CommandGroup(replacing: .help) {
-                HelpCommands()
+                HelpCommands(app: app)
             }
         }
 
@@ -151,6 +155,9 @@ struct GoSectionCommands: View {
     var body: some View {
         let forge = app.forge != nil
         Group {
+        if !forge {
+            Button("Overview") { app.section = .overview }.keyboardShortcut("0", modifiers: [.command, .option])
+        }
         Button("Review Requests") { app.section = .prs(.reviewRequested) }
             .keyboardShortcut("1")
             .disabled(forge && !app.forgeSupports(.prs(.reviewRequested)))
@@ -173,9 +180,12 @@ struct GoSectionCommands: View {
 }
 
 struct HelpCommands: View {
+    let app: AppModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        Button("Welcome Tour") { withAnimation(Motion.smooth) { app.showOnboarding = true } }
+            .disabled(app.phase != .loggedIn)
         Button("Keyboard Shortcuts") { openWindow(id: "shortcuts") }
             .keyboardShortcut("/", modifiers: .command)
         Button("PullYard Website") { openInBrowser("https://pullyard.app") }

@@ -286,19 +286,19 @@ private struct PullIndicator: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(.regularMaterial, in: Capsule())
+                .pyGlassCapsule(outline: false)
                 .transition(.opacity)
             case .loading:
                 PullYardLoader(size: 30)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(.regularMaterial, in: Capsule())
+                    .pyGlassCapsule(outline: false)
             case .idle:
                 let scale = 0.75 + 0.25 * progress
                 PullYardLogoMark(progress: Double(progress), size: 30 * scale)
                     .padding(.horizontal, 8 * scale)
                     .padding(.vertical, 3 * scale)
-                    .background(.regularMaterial, in: Capsule())
+                    .pyGlassCapsule(outline: false)
             }
         }
         .frame(height: 26)

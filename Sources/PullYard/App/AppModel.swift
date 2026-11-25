@@ -75,6 +75,7 @@ struct CodeOpenRequest {
 }
 
 enum SidebarSection: Hashable {
+    case overview
     case notifications
     case prs(PRFilter)
     case myPRsByRepo
@@ -84,8 +85,11 @@ enum SidebarSection: Hashable {
     case projects
     case claude
 
+    var isFullWidth: Bool { self == .claude || self == .overview }
+
     var storageKey: String {
         switch self {
+        case .overview: return "overview"
         case .notifications: return "notifications"
         case .prs(let f): return "prs/\(f.rawValue)"
         case .myPRsByRepo: return "prs/byProject"
@@ -100,6 +104,7 @@ enum SidebarSection: Hashable {
     init?(storageKey: String) {
         let parts = storageKey.split(separator: "/").map(String.init)
         switch (parts.first, parts.dropFirst().first) {
+        case ("overview", _): self = .overview
         case ("notifications", _): self = .notifications
         case ("prs", "byProject"): self = .myPRsByRepo
         case ("prs", let f?): self = .prs(PRFilter(rawValue: f) ?? .reviewRequested)
@@ -111,6 +116,15 @@ enum SidebarSection: Hashable {
         default: return nil
         }
     }
+}
+
+enum ToastKind: Equatable {
+    case info, error, merged, approved
+}
+
+struct ToastAction {
+    let title: String
+    let run: @MainActor () -> Void
 }
 
 enum NavigationMemory {
@@ -166,7 +180,7 @@ final class AppModel {
     var section: SidebarSection? = AppModel.storedSection {
         didSet {
             guard section != oldValue, let section else { return }
-            if let oldValue, oldValue != .claude { lastListSection = oldValue }
+            if let oldValue, !oldValue.isFullWidth { lastListSection = oldValue }
             if !Demo.isOn { UserDefaults.standard.set(section.storageKey, forKey: NavigationMemory.sectionKey) }
         }
     }
@@ -196,7 +210,8 @@ final class AppModel {
     }
 
     private static var storedSection: SidebarSection {
-        guard !Demo.isOn, let key = UserDefaults.standard.string(forKey: NavigationMemory.sectionKey) else { return .prs(.reviewRequested) }
+        guard !Demo.isOn else { return .prs(.reviewRequested) }
+        guard let key = UserDefaults.standard.string(forKey: NavigationMemory.sectionKey) else { return .overview }
         return SidebarSection(storageKey: key) ?? .prs(.reviewRequested)
     }
 
@@ -209,7 +224,7 @@ final class AppModel {
     }
 
     private func restoreRoute() {
-        guard !Demo.isOn, api != nil, detailRoot == nil, section != .claude,
+        guard !Demo.isOn, api != nil, detailRoot == nil, section?.isFullWidth != true,
               let stored = UserDefaults.standard.string(forKey: NavigationMemory.routeKey),
               let route = NavigationMemory.decode(stored, account: cacheAccount) else { return }
         detailRoot = route
@@ -233,11 +248,22 @@ final class AppModel {
     var showOpenLink = false
     var showQuickOpen = false
     var showCommandPalette = false
+    var showOnboarding = false
+    static let onboardingKey = "onboarding.seen.v1"
+
+    func finishOnboarding() {
+        UserDefaults.standard.set(true, forKey: Self.onboardingKey)
+        withAnimation(Motion.smooth) { showOnboarding = false }
+        if forge == nil { section = .overview }
+    }
     var recentRoutes: [Route] = []
     var clipboardRoute: Route?
     var toast: String?
     var loginNotice: String?
     var toastIsError = false
+    var toastKind: ToastKind = .info
+    var toastAction: ToastAction?
+    var toastSerial = 0
     var pendingCode: CodeOpenRequest?
     var reviewRequests: [SearchItem] = []
     var myPRs: [SearchItem] = []
@@ -265,6 +291,7 @@ final class AppModel {
     }
 
     init() {
+        DiffPrefs.settleWrapDefault()
         URLCache.shared = URLCache(memoryCapacity: 40 << 20, diskCapacity: 200 << 20)
         Diagnostics.shared.start()
         DispatchQueue.main.async { [weak self] in
@@ -624,7 +651,7 @@ final class AppModel {
     }
 
     var frontRoute: Route? {
-        section == .claude ? nil : (detailPath.last ?? detailRoot)
+        section?.isFullWidth == true ? nil : (detailPath.last ?? detailRoot)
     }
 
     var detailTitle: DetailTitle?
@@ -638,7 +665,7 @@ final class AppModel {
     }
 
     var frontDetailKey: String? {
-        if section == .claude { return nil }
+        if section?.isFullWidth == true { return nil }
         if forge != nil { return forgeSelection.map { "forge:\($0.id)" } }
         return frontRoute.map { "\($0)" }
     }
@@ -742,7 +769,7 @@ final class AppModel {
     }
 
     func open(_ route: Route, push: Bool = false) {
-        if section == .claude || section == nil {
+        if section?.isFullWidth != false {
             section = lastListSection ?? .prs(.mine)
             detailPath = []
             detailRoot = route
@@ -779,7 +806,7 @@ final class AppModel {
         guard target.account == nil || target.account == cacheAccount else { return openInBrowser(target.url) }
         if forge != nil {
             guard let item = (reviewRequests + myPRs).first(where: { $0.url == target.url }) else { return openInBrowser(target.url) }
-            if section == .claude || section == nil { section = .prs(forgeCaps.pullFilters.first ?? .mine) }
+            if section?.isFullWidth != false { section = .prs(forgeCaps.pullFilters.first ?? .mine) }
             forgeSelection = item
             NSApp.activate(ignoringOtherApps: true)
         } else if let repo = RepoRef(full: target.repo) {
@@ -917,21 +944,67 @@ final class AppModel {
 
     func dismissToast() {
         toastTask?.cancel()
-        withAnimation(Motion.fade) { toast = nil }
+        withAnimation(Motion.fade) {
+            toast = nil
+            toastAction = nil
+        }
     }
 
-    func showToast(_ text: String, isError: Bool = false) {
+    func showToast(_ text: String, isError: Bool = false, kind: ToastKind? = nil, action: ToastAction? = nil) {
         toastTask?.cancel()
         withAnimation(Motion.quick) {
             toast = text
             toastIsError = isError
+            toastKind = kind ?? (isError ? .error : .info)
+            toastAction = action
+            toastSerial += 1
         }
-        AccessibilityNotification.Announcement(text).post()
+        AccessibilityNotification.Announcement(action.map { "\(text). \($0.title) available" } ?? text).post()
+        let seconds: Double = isError ? 8 : (action != nil ? 5 : (kind == nil || kind == .info ? 1.8 : 3))
         toastTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: isError ? 8_000_000_000 : 1_800_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             guard !Task.isCancelled else { return }
-            withAnimation(Motion.fade) { self?.toast = nil }
+            withAnimation(Motion.fade) {
+                self?.toast = nil
+                self?.toastAction = nil
+            }
         }
+    }
+
+    func runToastAction() {
+        guard let action = toastAction else { return }
+        dismissToast()
+        action.run()
+    }
+
+    func nextReviewRequest(after ref: ItemRef?) -> SearchItem? {
+        reviewRequests.first { $0.ref != ref }
+    }
+
+    func openQueue(step: Int) {
+        let queue = reviewRequests
+        guard !queue.isEmpty else { return }
+        let current = ShortLink.ref(route: frontRoute)
+        let index = queue.firstIndex { $0.ref == current }
+        let target: Int
+        if let index {
+            target = (index + step + queue.count) % queue.count
+        } else {
+            target = step > 0 ? 0 : queue.count - 1
+        }
+        guard queue[target].ref != current else { return }
+        if section?.isFullWidth == true { section = .prs(.reviewRequested) }
+        open(queue[target].route)
+    }
+
+    func openNextReviewRequest(after ref: ItemRef?) {
+        guard let next = nextReviewRequest(after: ref) else { return }
+        open(next.route)
+    }
+
+    func nextReviewAction(after ref: ItemRef?) -> ToastAction? {
+        guard nextReviewRequest(after: ref) != nil else { return nil }
+        return ToastAction(title: "Next review →") { [weak self] in self?.openNextReviewRequest(after: ref) }
     }
 
     func openCode(_ repo: RepoRef, ref: String, path: String, blame: Bool) {

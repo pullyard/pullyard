@@ -55,6 +55,7 @@ struct PYEmptyState: View {
     var message: String
     var shortcuts: [(key: String, label: String)] = []
     var aurora = true
+    var nextUp = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var lifted = false
 
@@ -90,12 +91,19 @@ struct PYEmptyState: View {
                     }
                     .padding(.top, 6)
                 }
+                if nextUp {
+                    VStack(spacing: 14) {
+                        NextUpPanel()
+                        FirstRunChecklist()
+                    }
+                    .padding(.top, 18)
+                }
             }
             .padding(32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .task { await bob() }
     }
 

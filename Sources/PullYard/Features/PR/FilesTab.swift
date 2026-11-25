@@ -11,6 +11,7 @@ struct FilesTab: View {
     @State private var cache = DiffRowsCache()
     @AppStorage(DiffPrefs.wrapKey) private var wrap = true
     @AppStorage(DiffPrefs.splitKey) private var split = false
+    @AppStorage(DiffPrefs.filesWidthKey) private var listWidth: Double = 260
 
     var body: some View {
         Group {
@@ -18,8 +19,8 @@ struct FilesTab: View {
                 HStack(spacing: 0) {
                     if showList {
                         HStack(spacing: 0) {
-                            FileListPane(model: model, focus: focus, filter: $filter, files: visibleFiles).frame(width: 260).surface(.list)
-                            Divider()
+                            FileListPane(model: model, focus: focus, filter: $filter, files: visibleFiles).frame(width: CGFloat(listWidth)).surface(.list)
+                            ColumnResizeHandle(width: $listWidth, range: 200...420, edge: .leading, reset: 260)
                         }
                     }
                     VStack(spacing: 0) {
@@ -399,44 +400,138 @@ private struct FileListPane: View {
     let focus: FileFocus
     @Binding var filter: String
     let files: [DiffFile]
+    @Environment(AppModel.self) private var app
+    @AppStorage(DiffPrefs.filesTreeKey) private var tree = false
+    @State private var mineOnly = false
+    @State private var mine: Set<String> = []
+
+    private var mineKey: String {
+        let owners: String
+        switch model.codeOwners {
+        case .loaded(let c): owners = c.path
+        default: owners = "-"
+        }
+        return "\(app.user?.login ?? "")|\(owners)|\(model.filesOid ?? "")|\(model.displayedFiles.count)"
+    }
+
+    private func computeMine() {
+        guard let me = app.user?.login.lowercased(), let summary = model.ownership else {
+            mine = []
+            return
+        }
+        mine = Set(summary.groups.filter { $0.owners.contains { $0.handle.lowercased() == me } }.flatMap(\.files))
+    }
+
+    private var shown: [DiffFile] {
+        mineOnly ? files.filter { mine.contains($0.id) } : files
+    }
+
+    private var folders: [(dir: String, files: [DiffFile])] {
+        var order: [String] = []
+        var map: [String: [DiffFile]] = [:]
+        for f in shown {
+            let dir = (f.id as NSString).deletingLastPathComponent
+            if map[dir] == nil { order.append(dir) }
+            map[dir, default: []].append(f)
+        }
+        return order.map { ($0, map[$0] ?? []) }
+    }
 
     var body: some View {
+        let total = model.displayedFiles.count
+        let viewed = model.viewedPaths.intersection(model.displayedFiles.map(\.id)).count
+        let ownMine = mine
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                TextField("Filter files", text: $filter).textFieldStyle(.roundedBorder).controlSize(.small)
-                Text("\(model.viewedPaths.intersection(model.displayedFiles.map(\.id)).count)/\(model.displayedFiles.count)")
-                    .font(.syCaption.monospacedDigit()).foregroundStyle(Color.syMuted).help("Viewed")
-            }
-            .padding(8)
-            List(files, selection: Binding(get: { focus.current ?? model.scrollTarget }, set: { p in if let p { model.revealFile(p) } })) { f in
+            VStack(spacing: 6) {
                 HStack(spacing: 6) {
-                    Text(f.statusLetter)
-                        .font(.syCaption2.weight(.bold).monospaced())
-                        .foregroundStyle(statusColor(f.status))
-                        .frame(width: 12)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text((f.id as NSString).lastPathComponent).font(.syBody).lineLimit(1)
-                        Text((f.id as NSString).deletingLastPathComponent).font(.syCaption2).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.head)
+                    TextField("Filter files", text: $filter).textFieldStyle(.roundedBorder).controlSize(.small)
+                    Button { tree.toggle() } label: {
+                        Image(systemName: tree ? "folder" : "list.bullet").frame(width: 18, height: 18).contentShape(Rectangle())
                     }
-                    Spacer(minLength: 2)
-                    if model.threadCount(f.id) > 0 {
-                        Image(systemName: "text.bubble").font(.syCaption2).foregroundStyle(Color.syMuted).accessibilityLabel("Has comments")
+                    .buttonStyle(.borderless)
+                    .keyboardShortcut("t", modifiers: .option)
+                    .help(tree ? "Show as a flat list (⌥T)" : "Group by folder (⌥T)")
+                    .accessibilityLabel(tree ? "Show as a flat list" : "Group by folder")
+                }
+                HStack(spacing: 6) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.syLineStrong)
+                            Capsule().fill(Color.syCoral).frame(width: total > 0 ? geo.size.width * CGFloat(viewed) / CGFloat(total) : 0)
+                        }
                     }
-                    if model.viewedPaths.contains(f.id) {
-                        Image(systemName: "checkmark.circle.fill").font(.syCaption).foregroundStyle(Color.ghGreen).accessibilityLabel("Viewed")
+                    .frame(height: 4)
+                    .animation(Motion.gentle, value: viewed)
+                    Text("\(viewed)/\(total) viewed")
+                        .font(.syCaption.monospacedDigit())
+                        .foregroundStyle(Color.syMuted)
+                        .fixedSize()
+                    if !ownMine.isEmpty {
+                        Button { mineOnly.toggle() } label: {
+                            StatusChip(text: "Mine \(ownMine.count)", icon: "person.crop.circle", color: mineOnly ? .syAccentFill : .syMuted)
+                        }
+                        .buttonStyle(.plain)
+                        .help(mineOnly ? "Show all files" : "Show only files you own (CODEOWNERS)")
                     }
                 }
-                .rowAppear(f.id, model.fileRows)
-                .tag(f.id)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(viewed) of \(total) files viewed")
+            }
+            .padding(8)
+            List(selection: Binding(get: { focus.current ?? model.scrollTarget }, set: { p in if let p { model.revealFile(p) } })) {
+                if tree {
+                    ForEach(folders, id: \.dir) { folder in
+                        Section {
+                            ForEach(folder.files) { row($0, showDir: false) }
+                        } header: {
+                            Text(folder.dir.isEmpty ? "/" : folder.dir)
+                                .font(.syCaption.monospaced())
+                                .foregroundStyle(Color.syMuted)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                                .help(folder.dir)
+                        }
+                    }
+                } else {
+                    ForEach(shown) { row($0, showDir: true) }
+                }
             }
             .listStyle(.inset)
             .surface(.list)
+            .onChange(of: mineKey, initial: true) { computeMine() }
             .overlay {
-                if files.isEmpty {
+                if shown.isEmpty {
                     ListEmptyNote(title: model.displayedFiles.isEmpty ? "No files" : "No files match", compact: true)
                 }
             }
         }
+    }
+
+    private func row(_ f: DiffFile, showDir: Bool) -> some View {
+        HStack(spacing: 6) {
+            Text(f.statusLetter)
+                .font(.syCaption2.weight(.bold).monospaced())
+                .foregroundStyle(statusColor(f.status))
+                .frame(width: 12)
+            VStack(alignment: .leading, spacing: 0) {
+                Text((f.id as NSString).lastPathComponent).font(.syBody).lineLimit(1)
+                if showDir {
+                    Text((f.id as NSString).deletingLastPathComponent).font(.syCaption2).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.head)
+                }
+            }
+            Spacer(minLength: 2)
+            if model.threadCount(f.id) > 0 {
+                Image(systemName: "text.bubble").font(.syCaption2).foregroundStyle(Color.syMuted).accessibilityLabel("Has comments")
+            }
+            if model.viewedPaths.contains(f.id) {
+                Image(systemName: "checkmark.circle.fill").font(.syCaption).foregroundStyle(Color.ghGreen).accessibilityLabel("Viewed")
+            } else {
+                DiffStat(additions: f.additions, deletions: f.deletions).font(.syCaption2)
+            }
+        }
+        .help(f.id)
+        .rowAppear(f.id, model.fileRows)
+        .tag(f.id)
     }
 
     private func statusColor(_ s: String) -> Color {

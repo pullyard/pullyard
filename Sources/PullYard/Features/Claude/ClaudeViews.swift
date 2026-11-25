@@ -710,37 +710,77 @@ struct ClaudeEmptyState: View {
 
     var body: some View {
         let ws = app.claude
-        VStack(spacing: 16) {
-            Image(systemName: "terminal").font(.system(size: 34, weight: .light)).foregroundStyle(Color.syMuted)
-            Text("Agents").font(.syTitle2.weight(.semibold)).foregroundStyle(Color.syText)
-            Text("Runs Claude Code, installed on this Mac. Start a new session in a project or resume one from the history on the left.")
-                .foregroundStyle(Color.syMuted)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(ws.projects.filter(\.exists).prefix(6)) { p in
-                    Button {
-                        ws.newSession(folder: p.path)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "folder").foregroundStyle(Color.syMuted).frame(width: 22)
-                            Text(p.name).fontWeight(.medium).foregroundStyle(Color.syText)
-                            Spacer()
-                            Text(Fmt.rel(p.lastActivity)).font(.syCaption).foregroundStyle(Color.syDim)
-                            Image(systemName: "plus").foregroundStyle(Color.syMuted)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                        .card(radius: 10)
-                    }
-                    .buttonStyle(.plain)
+        let projects = Array(ws.projects.filter(\.exists).prefix(6))
+        ZStack {
+            if Theme.isBrand { BrandAurora().opacity(0.8) }
+            VStack(spacing: 18) {
+                ZStack(alignment: .bottom) {
+                    HarborWaves().frame(width: 180, height: 20).offset(y: 14)
+                    DrawnLogoMark(key: "agents-empty", size: 88)
                 }
+                .padding(.bottom, 10)
+                Text("Agents on deck")
+                    .font(.system(size: TextZoom.shared.size(26), weight: .semibold, design: .serif))
+                    .foregroundStyle(Color.syText)
+                Text("Runs Claude Code, installed on this Mac. Start a new session in a project or resume one from the history on the left.")
+                    .foregroundStyle(Color.syMuted)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 440)
+                if !projects.isEmpty {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                        ForEach(projects) { p in
+                            AgentProjectCard(name: p.name, path: p.path, last: p.lastActivity) { ws.newSession(folder: p.path) }
+                        }
+                    }
+                    .frame(maxWidth: 520)
+                    .padding(.top, 6)
+                }
+                HStack(spacing: 16) {
+                    HStack(spacing: 6) { Keycap(key: "⌘N"); Text("New session").font(.syCaption).foregroundStyle(Color.syMuted) }
+                    HStack(spacing: 6) { Keycap(key: "⇧⌘K"); Text("Go to session").font(.syCaption).foregroundStyle(Color.syMuted) }
+                }
+                .padding(.top, 4)
             }
-            .frame(width: 380)
+            .padding(32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .surface(.panel)
+    }
+}
+
+private struct AgentProjectCard: View {
+    let name: String
+    let path: String
+    let last: Date
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "folder.fill")
+                    .font(.syIcon(13))
+                    .foregroundStyle(Color.syCoral)
+                    .frame(width: 30, height: 30)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.syCoral.opacity(0.12)))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
+                    Text(Fmt.rel(last)).font(.syCaption).foregroundStyle(Color.syMuted)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "plus")
+                    .font(.syIcon(11))
+                    .foregroundStyle(hovering ? Color.syCoralInk : Color.syDim)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.syRaised))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(hovering ? Color.syCoral.opacity(0.45) : Color.syLine))
+            .shadow(color: .black.opacity(hovering ? 0.07 : 0.03), radius: hovering ? 10 : 4, y: 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .onHover { h in withAnimation(.easeOut(duration: Motion.Dur.fast)) { hovering = h } }
+        .help("New session in \(path)")
     }
 }
 

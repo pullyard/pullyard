@@ -553,21 +553,40 @@ struct WorkingIndicator: View {
     let chat: ChatSession
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { ctx in
+        HStack(spacing: 10) {
             HStack(spacing: 8) {
-                PullYardLoader(size: 26)
+                PYLoader(size: 16, label: "Working")
+                    .frame(width: 18, height: 18)
                 Text(chat.status ?? (chat.pendingCount > 0 ? "Waiting for you" : "Working…"))
-                    .foregroundStyle(Color.syMuted)
+                    .foregroundStyle(Color.syText)
+                    .lineLimit(1)
                 if let start = chat.turnStartedAt {
-                    Text("\(Int(ctx.date.timeIntervalSince(start)))s").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
+                    TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                        Text(Self.elapsed(ctx.date.timeIntervalSince(start)))
+                            .font(.syCaption.monospacedDigit())
+                            .foregroundStyle(Color.syMuted)
+                    }
                 }
-                Spacer()
-                Button("Stop") { chat.interrupt() }
-                    .controlSize(.small)
-                    .keyboardShortcut(.escape, modifiers: [])
             }
-            .font(.syCallout)
+            .padding(.leading, 10)
+            .padding(.trailing, 14)
+            .frame(height: 32)
+            .background(Capsule().fill(Color.syAgentAccent.opacity(0.08)))
+            .overlay(Capsule().strokeBorder(Color.syAgentAccent.opacity(0.2)))
+            Spacer()
+            Button("Stop") { chat.interrupt() }
+                .controlSize(.small)
+                .keyboardShortcut(.escape, modifiers: [])
+                .help("Stop the agent (Esc)")
         }
+        .font(.syCallout)
+    }
+}
+
+extension WorkingIndicator {
+    static func elapsed(_ seconds: TimeInterval) -> String {
+        let s = max(0, Int(seconds))
+        return s < 60 ? "\(s)s" : "\(s / 60)m \(s % 60)s"
     }
 }
 

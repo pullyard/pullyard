@@ -59,15 +59,32 @@ enum Theme {
         }
     }
 
-    fileprivate static func color(_ name: String, light: NSColor, dark: NSColor, system: NSColor) -> NSColor {
+    fileprivate static func color(_ name: String, light: NSColor, dark: NSColor, system: NSColor, contrastLight: NSColor? = nil, contrastDark: NSColor? = nil) -> NSColor {
         NSColor(name: NSColor.Name("sy." + name)) { appearance in
             guard isBrand else { return system }
-            return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+            switch appearance.bestMatch(from: [.accessibilityHighContrastDarkAqua, .accessibilityHighContrastAqua, .darkAqua, .aqua]) {
+            case .accessibilityHighContrastDarkAqua?: return contrastDark ?? dark
+            case .accessibilityHighContrastAqua?: return contrastLight ?? light
+            case .darkAqua?: return dark
+            default: return light
+            }
         }
     }
 
-    fileprivate static func color(_ name: String, light: UInt32, dark: UInt32, lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1, system: NSColor) -> NSColor {
-        color(name, light: NSColor(hex: light, alpha: lightAlpha), dark: NSColor(hex: dark, alpha: darkAlpha), system: system)
+    fileprivate static func color(_ name: String, light: UInt32, dark: UInt32, lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1, system: NSColor, contrast: Contrast = .same) -> NSColor {
+        let l = NSColor(hex: light, alpha: lightAlpha), d = NSColor(hex: dark, alpha: darkAlpha)
+        switch contrast {
+        case .same:
+            return color(name, light: l, dark: d, system: system)
+        case .strongerLine:
+            return color(name, light: l, dark: d, system: system, contrastLight: NSColor(hex: light, alpha: min(1, lightAlpha * 2)), contrastDark: NSColor(hex: dark, alpha: min(1, darkAlpha * 2)))
+        case .hex(let hl, let hd):
+            return color(name, light: l, dark: d, system: system, contrastLight: NSColor(hex: hl), contrastDark: NSColor(hex: hd))
+        }
+    }
+
+    enum Contrast {
+        case same, strongerLine, hex(UInt32, UInt32)
     }
 }
 
@@ -79,12 +96,12 @@ extension NSColor {
     static let syRaised = Theme.color("raised", light: 0xFFFFFF, dark: 0x152036, system: .controlBackgroundColor)
     static let sySunken = Theme.color("sunken", light: 0xF1EEE8, dark: 0x0A101C, system: .textBackgroundColor)
     static let syBar = Theme.color("bar", light: 0xF5F3EE, dark: 0x111A2C, system: .windowBackgroundColor)
-    static let syLine = Theme.color("line", light: 0x1A2333, dark: 0xA0AEC4, lightAlpha: 0.12, darkAlpha: 0.14, system: .separatorColor)
-    static let syLineStrong = Theme.color("lineStrong", light: 0x1A2333, dark: 0xA0AEC4, lightAlpha: 0.20, darkAlpha: 0.22, system: .separatorColor)
+    static let syLine = Theme.color("line", light: 0x1A2333, dark: 0xA0AEC4, lightAlpha: 0.12, darkAlpha: 0.14, system: .separatorColor, contrast: .strongerLine)
+    static let syLineStrong = Theme.color("lineStrong", light: 0x1A2333, dark: 0xA0AEC4, lightAlpha: 0.20, darkAlpha: 0.22, system: .separatorColor, contrast: .strongerLine)
 
     static let syText = Theme.color("text", light: 0x1A2333, dark: 0xE6EBF2, system: .labelColor)
-    static let syMuted = Theme.color("muted", light: 0x5F6B7E, dark: 0x8693A8, system: .secondaryLabelColor)
-    static let syDim = Theme.color("dim", light: 0x646C80, dark: 0x7D899F, system: .tertiaryLabelColor)
+    static let syMuted = Theme.color("muted", light: 0x5F6B7E, dark: 0x8693A8, system: .secondaryLabelColor, contrast: .hex(0x4A5366, 0xA6B1C4))
+    static let syDim = Theme.color("dim", light: 0x646C80, dark: 0x7D899F, system: .tertiaryLabelColor, contrast: .hex(0x4A5366, 0xA6B1C4))
 
     static let syAccent = Theme.color("accent", light: 0x2A8BC8, dark: 0x5BB8EC, system: .controlAccentColor)
     static let syLink = Theme.color("link", light: 0x1F6FA3, dark: 0x5BB8EC, system: .linkColor)
@@ -110,7 +127,7 @@ extension NSColor {
     static let syAddText = Theme.color("addText", light: 0x1E5A3A, dark: 0xC2E9D2, system: .textColor)
     static let syDelText = Theme.color("delText", light: 0x7A2A20, dark: 0xF3C4BE, system: .textColor)
     static let syHunkText = Theme.color("hunkText", light: 0x1F6E9E, dark: 0x8CCBEE, system: .secondaryLabelColor)
-    static let syGutter = Theme.color("gutter", light: 0x687084, dark: 0x7D899F, system: .tertiaryLabelColor)
+    static let syGutter = Theme.color("gutter", light: 0x687084, dark: 0x7D899F, system: .tertiaryLabelColor, contrast: .hex(0x4A5366, 0xA6B1C4))
 
     static let syAccentFill = Theme.color("accentFill", light: 0x1D70A6, dark: 0x1D70A6, system: .controlAccentColor)
     static let syGreenFill = Theme.color("greenFill", light: 0x2B7F50, dark: 0x2B7F50, system: .systemGreen)

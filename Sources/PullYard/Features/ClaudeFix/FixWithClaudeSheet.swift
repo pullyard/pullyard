@@ -318,6 +318,9 @@ struct FixWithClaudeSheet: View {
                 if source == .ci, target != .copy {
                     app.claude.ciFixes[model.ref] = CIFixLaunch(tabID: tab?.id, target: target, headOid: pr.headRefOid, at: Date())
                 }
+                if let tab {
+                    app.claude.prFixes[model.ref] = CIFixLaunch(tabID: tab.id, target: target, headOid: pr.headRefOid, at: Date())
+                }
                 dismiss()
             } catch {
                 self.error = error.localizedDescription

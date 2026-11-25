@@ -46,19 +46,34 @@ struct PRDetailContent: View {
     @Environment(AppModel.self) private var app
     @Environment(\.liveFront) private var front
     @State private var showReview = false
+    @State private var reviewEvent = "COMMENT"
     @State private var showMerge = false
     @State private var showEdit = false
     @State private var showReviewers = false
     @State private var confirm: PRConfirm?
     @State private var showFix = false
     @State private var ciFix: CIFixRequest?
+    @State private var expandedOverride = false
+    @AppStorage("pr.header.autoCollapse") private var autoCollapse = true
+
+    private var collapsible: Bool {
+        autoCollapse && [PRTab.files, .checks, .commits].contains(model.tab)
+    }
+
+    private var headerCollapsed: Bool { collapsible && !expandedOverride }
 
     var body: some View {
         VStack(spacing: 0) {
-            PRHeaderView(model: model, pr: pr, onMerge: { showMerge = true }, onRequestReview: { showReviewers = true })
-            ReReviewBanner(model: model, pr: pr) { showReviewers = true }
-            ClaudeFixBanner(pr: pr) { showFix = true }
-            CIFailureBanner(model: model, pr: pr, onFix: { ciFix = CIFixRequest() }, onRerun: { confirm = .rerunFailed })
+            if headerCollapsed {
+                CompactPRBar(model: model, pr: pr) { expandedOverride = true }
+            } else {
+                VStack(spacing: 0) {
+                    PRHeaderView(model: model, pr: pr, onMerge: { showMerge = true }, onRequestReview: { showReviewers = true }, onFixChecks: pr.isOpen ? { ciFix = CIFixRequest() } : nil, onCollapse: collapsible ? { expandedOverride = false } : nil)
+                    ReReviewBanner(model: model, pr: pr) { showReviewers = true }
+                    ClaudeFixBanner(pr: pr) { showFix = true }
+                    CIFailureBanner(model: model, pr: pr, onFix: { ciFix = CIFixRequest() }, onRerun: { confirm = .rerunFailed })
+                }
+            }
             TabStrip(items: tabItems, selection: $model.tab, shortcuts: true)
             .padding(.top, 6)
             Divider()
@@ -76,11 +91,13 @@ struct PRDetailContent: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .transaction(value: headerCollapsed) { $0.animation = nil }
+        .onChange(of: model.tab) { expandedOverride = false }
         .detailTitle(pr.title, subtitle: "\(model.ref.repo.full) #\(pr.number)")
         .task(id: pr.url) { app.noteCanonical(model.ref, url: pr.url) }
-        .background { if front { reviewShortcuts } }
+        .focusedSceneValue(\.prActions, front ? actions : nil)
         .panelToolbar(id: "pr-detail") { toolbar }
-        .sheet(isPresented: $showReview) { ReviewSheet(model: model, pr: pr) }
+        .sheet(isPresented: $showReview) { ReviewSheet(model: model, pr: pr, initialEvent: reviewEvent) }
         .sheet(isPresented: $showMerge) { MergeSheet(model: model, pr: pr) }
         .sheet(isPresented: $showEdit) { EditPRSheet(model: model, pr: pr) }
         .sheet(isPresented: $showReviewers) { ReviewersSheet(model: model) }
@@ -99,21 +116,33 @@ struct PRDetailContent: View {
         }
     }
 
-    private var reviewShortcuts: some View {
-        Group {
-            Button("Write review") { showReview = true }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(!pr.isOpen)
-            Button("Approve") { confirm = .approve }
-                .keyboardShortcut("a", modifiers: [.command, .shift])
-                .disabled(!pr.isOpen || pr.viewerDidAuthor)
-            Button("Merge") { showMerge = true }
-                .keyboardShortcut("m", modifiers: [.command, .shift])
-                .disabled(!canMerge)
-        }
-        .opacity(0)
-        .frame(width: 0, height: 0)
-        .accessibilityHidden(true)
+    private var actions: PRActions {
+        let failing = pr.checks.contains { $0.outcome == .failure }
+        return PRActions(
+            ref: model.ref,
+            number: pr.number,
+            isOpen: pr.isOpen,
+            canReview: !pr.viewerDidAuthor,
+            canMerge: canMerge,
+            hasFailing: failing,
+            unviewed: model.unviewedCount,
+            writeReview: { reviewEvent = "COMMENT"; showReview = true },
+            approve: { confirm = .approve },
+            requestChanges: { reviewEvent = "REQUEST_CHANGES"; showReview = true },
+            merge: { showMerge = true },
+            fixWithAgent: { showFix = true },
+            fixChecks: { ciFix = CIFixRequest() },
+            rerunFailed: { confirm = .rerunFailed },
+            markAllViewed: {
+                Task {
+                    await model.markAllViewed()
+                    app.showToast("Marked all files viewed")
+                }
+            },
+            openInBrowser: { openInBrowser(pr.url) },
+            copyLink: { copy(pr.url, "Copied link") },
+            copyCheckout: { copy("gh pr checkout \(pr.number) -R \(model.ref.repo.full)", "Copied checkout command") }
+        )
     }
 
     @ViewBuilder
@@ -209,7 +238,10 @@ struct PRDetailContent: View {
     private func perform(_ c: PRConfirm) {
         Task {
             switch c {
-            case .approve: _ = await model.submitReview(event: "APPROVE", body: "")
+            case .approve:
+                if await model.submitReview(event: "APPROVE", body: "") {
+                    app.showToast("Approved #\(pr.number)", kind: .approved, action: app.nextReviewAction(after: model.ref))
+                }
             case .close: await model.simple(Q.closePR)
             case .deleteBranch: await model.deleteBranch()
             case .disableAutoMerge: await model.simple(Q.disableAutoMerge)
@@ -236,7 +268,7 @@ struct PRDetailContent: View {
         if pr.isOpen {
             ToolbarItem(id: "pr.review", placement: .primaryAction) {
                 Menu {
-                    Button("Write review…") { showReview = true }
+                    Button("Write review…") { reviewEvent = "COMMENT"; showReview = true }
                     if !pr.viewerDidAuthor {
                         Button("Approve") { confirm = .approve }
                     }
@@ -245,6 +277,7 @@ struct PRDetailContent: View {
                 } label: {
                     Label(model.pending.isEmpty ? "Review" : "Review (\(model.pending.count))", systemImage: "checkmark.bubble")
                 } primaryAction: {
+                    reviewEvent = "COMMENT"
                     showReview = true
                 }
                 .labelStyle(.titleAndIcon)
@@ -380,6 +413,8 @@ struct PRHeaderView: View {
     let pr: PullRequestDetail
     let onMerge: () -> Void
     var onRequestReview: () -> Void = {}
+    var onFixChecks: (() -> Void)?
+    var onCollapse: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -387,6 +422,17 @@ struct PRHeaderView: View {
                 Text(pr.title).font(.syTitle2.weight(.bold)).textSelection(.enabled)
                 Text("#\(pr.number)").font(.syTitle2).foregroundStyle(Color.syDim)
                 ShortLinkButton(ref: ShortLink.ref(url: pr.url) ?? model.ref)
+                Spacer(minLength: 8)
+                AgentRunChip(ref: model.ref)
+                if let onCollapse {
+                    Button(action: onCollapse) {
+                        Image(systemName: "chevron.up").font(.syIcon(11)).frame(width: 20, height: 20).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Color.syMuted)
+                    .help("Collapse the header")
+                    .accessibilityLabel("Collapse header")
+                }
             }
             HStack(spacing: 8) {
                 StateBadge(state: pr.visualState)
@@ -422,7 +468,7 @@ struct PRHeaderView: View {
                 StackStrip(tree: tree, repo: model.ref.repo) { model.tab = .stack }
                     .transition(.opacity)
             }
-            MergeStatusBar(model: model, pr: pr, onMerge: onMerge, onRequestReview: onRequestReview)
+            MergeStatusBar(model: model, pr: pr, onMerge: onMerge, onRequestReview: onRequestReview, onFixChecks: onFixChecks)
         }
         .animation(Motion.smooth, value: model.stackTree)
         .padding(.horizontal, 16)
@@ -570,8 +616,10 @@ struct MergeStatusBar: View {
     let pr: PullRequestDetail
     let onMerge: () -> Void
     var onRequestReview: () -> Void = {}
+    var onFixChecks: (() -> Void)?
     @Environment(AppModel.self) private var app
     @AppStorage("pr.mergeRequirementsExpanded") private var expanded = true
+    @State private var showConflicts = false
 
     var body: some View {
         if pr.isOpen {
@@ -588,20 +636,18 @@ struct MergeStatusBar: View {
                     checksBadge
                     Spacer()
                     if MergeConflicts.applies(pr) {
-                        Button(conflictsTitle) {
-                            model.tab = .conversation
-                            model.scrollToBottomToken += 1
-                        }
-                        .controlSize(.small)
-                        .help("Show the conflicting files at the end of the conversation")
+                        Button(conflictsTitle) { showConflicts = true }
+                            .controlSize(.small)
+                            .help("Show the conflicting files")
+                            .popover(isPresented: $showConflicts, arrowEdge: .bottom) { conflictsPopover }
                     }
-                    if pr.mergeStateStatus == "BEHIND", model.canWrite || pr.viewerCanUpdate {
+                    if !expanded || requirements.isEmpty, pr.mergeStateStatus == "BEHIND", model.canWrite || pr.viewerCanUpdate {
                         Button("Update branch") {
                             Task { if await model.simple(Q.updateBranch) { app.showToast("Branch updated from \(pr.baseRefName)") } }
                         }
                         .controlSize(.small)
                     }
-                    if pr.isDraft, pr.viewerCanUpdate {
+                    if !expanded || requirements.isEmpty, pr.isDraft, pr.viewerCanUpdate {
                         Button("Ready for review") {
                             Task { if await model.simple(Q.readyForReview) { app.showToast("Marked ready for review") } }
                         }
@@ -637,7 +683,7 @@ struct MergeStatusBar: View {
                     }
                 }
                 if expanded, !requirements.isEmpty {
-                    MergeRequirementsList(requirements: requirements, ownership: model.ownership, canPerform: canPerform, perform: perform)
+                    MergeRequirementsList(requirements: requirements, ownership: model.ownership, canPerform: canPerform, perform: perform, agentFix: agentFix)
                         .transition(.opacity)
                 }
             }
@@ -651,10 +697,70 @@ struct MergeStatusBar: View {
     private func canPerform(_ action: RequirementAction) -> Bool {
         switch action {
         case .requestReview: return model.canWrite || pr.viewerDidAuthor
-        case .updateBranch, .readyForReview: return false
+        case .updateBranch: return model.canWrite || pr.viewerCanUpdate
+        case .readyForReview: return pr.viewerCanUpdate
         case .showConflicts: return !MergeConflicts.applies(pr)
         case .showChecks, .showConversation: return true
         }
+    }
+
+    private func agentFix(_ kind: RequirementKind) -> (() -> Void)? {
+        switch kind {
+        case .conflicts where MergeConflicts.applies(pr): return { model.showResolveConflicts = true }
+        case .checks: return onFixChecks
+        default: return nil
+        }
+    }
+
+    private var conflictsPopover: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Conflicts with \(pr.baseRefName)").font(.syHeadline)
+            switch model.conflicts {
+            case .files(let files)?:
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(files, id: \.self) { file in
+                            Label(file, systemImage: "exclamationmark.triangle")
+                                .font(.syCallout.monospaced())
+                                .foregroundStyle(Color.syText)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                                .help(file)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 220)
+            case .checking?:
+                HStack(spacing: 6) {
+                    PYLoader(size: 12)
+                    Text("Checking which files conflict…").font(.syCallout).foregroundStyle(Color.syMuted)
+                }
+            case .noClone?:
+                Text("Choose a local clone to see which files conflict.").font(.syCallout).foregroundStyle(Color.syMuted)
+            case .unavailable(let reason)?:
+                Text(reason).font(.syCallout).foregroundStyle(Color.syMuted)
+            case nil:
+                Text("GitHub reports conflicts with the base branch.").font(.syCallout).foregroundStyle(Color.syMuted)
+            }
+            HStack {
+                Button("Show in conversation") {
+                    showConflicts = false
+                    model.tab = .conversation
+                    model.scrollToBottomToken += 1
+                }
+                Spacer()
+                Button("Resolve with agent…") {
+                    showConflicts = false
+                    model.showResolveConflicts = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.syAgentFill)
+            }
+            .controlSize(.small)
+        }
+        .padding(14)
+        .frame(width: 380)
     }
 
     private func perform(_ action: RequirementAction) {
@@ -940,5 +1046,109 @@ struct MergeToolbarButton: View {
                 .tint(Color.syGreenFill)
                 .help("Ready to merge (⇧⌘M)")
         }
+    }
+}
+
+struct AgentRunChip: View {
+    let ref: ItemRef
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        if let launch = app.claude.prFixes[ref] ?? app.claude.ciFixes[ref],
+           let id = launch.tabID,
+           let tab = app.claude.tabs.first(where: { $0.id == id }) {
+            let state = tab.state
+            Button {
+                app.claude.selectedTabID = tab.id
+                app.section = .claude
+            } label: {
+                HStack(spacing: 5) {
+                    if state == .working {
+                        PYLoader(size: 11, label: "Agent working")
+                    } else {
+                        Image(systemName: state == .waiting ? "hand.raised.fill" : "checkmark.circle.fill").font(.syIcon(10))
+                    }
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        Text(label(state, since: launch.at, now: context.date))
+                            .lineLimit(1)
+                    }
+                }
+                .font(.sy(size: 11, weight: .semibold))
+                .foregroundStyle(Color.syCoralInk)
+                .padding(.horizontal, 8)
+                .frame(height: TextZoom.shared.size(20))
+                .background(Capsule().fill(Color.syCoral.opacity(0.12)))
+                .fixedSize()
+            }
+            .buttonStyle(.plain)
+            .help("Open the agent session")
+            .accessibilityLabel("Agent session: \(state.title)")
+        }
+    }
+
+    private func label(_ state: ClaudeTabState, since: Date, now: Date) -> String {
+        let minutes = max(0, Int(now.timeIntervalSince(since) / 60))
+        let age = minutes < 1 ? "just now" : "\(minutes)m"
+        switch state {
+        case .working: return "Agent running · \(age)"
+        case .waiting: return "Agent needs you"
+        default: return "Agent session · \(age)"
+        }
+    }
+}
+
+struct CompactPRBar: View {
+    let model: PRDetailModel
+    let pr: PullRequestDetail
+    let onExpand: () -> Void
+
+    var body: some View {
+        let failing = pr.checks.filter { $0.outcome == .failure }.count
+        let running = pr.checks.filter { $0.outcome == .pending }.count
+        let total = model.displayedFiles.count
+        let viewed = model.viewedPaths.intersection(model.displayedFiles.map(\.id)).count
+        HStack(spacing: 8) {
+            Image(systemName: pr.visualState.compactIcon)
+                .font(.syIcon(10))
+                .foregroundStyle(pr.visualState.color)
+                .frame(width: 18, height: 18)
+                .background(Circle().fill(pr.visualState.color.opacity(Tint.tile)))
+                .help(pr.visualState.title)
+            Text("#\(pr.number)").font(.sy(size: 13)).foregroundStyle(Color.syMuted).monospacedDigit()
+            Text(pr.title)
+                .font(.sy(size: 13, weight: .semibold))
+                .foregroundStyle(Color.syText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 8)
+            if failing > 0 {
+                Button { model.tab = .checks } label: { StatusChip(text: "\(failing) failing", icon: "xmark.circle.fill", color: .ghRed) }
+                    .buttonStyle(.plain)
+                    .help("Show checks")
+            } else if running > 0 {
+                Button { model.tab = .checks } label: { StatusChip(text: "\(running) running", icon: "circle.dashed", color: .syAmberInk) }
+                    .buttonStyle(.plain)
+                    .help("Show checks")
+            }
+            if MergeConflicts.applies(pr) {
+                Button(action: onExpand) { StatusChip(text: "Conflicts", icon: "exclamationmark.triangle.fill", color: .ghRed) }
+                    .buttonStyle(.plain)
+                    .help("Show merge requirements")
+            }
+            if model.filesLoaded, total > 0 {
+                StatusChip(text: "Viewed \(viewed)/\(total)", icon: viewed == total ? "checkmark.circle.fill" : "eye", color: viewed == total ? .ghGreen : .syMuted)
+            }
+            AgentRunChip(ref: model.ref)
+            Button(action: onExpand) {
+                Image(systemName: "chevron.down").font(.syIcon(11)).frame(width: 20, height: 20).contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(Color.syMuted)
+            .help("Show the full header")
+            .accessibilityLabel("Expand header")
+        }
+        .padding(.horizontal, 16)
+        .frame(height: TextZoom.shared.size(36))
+        .accessibilityElement(children: .contain)
     }
 }

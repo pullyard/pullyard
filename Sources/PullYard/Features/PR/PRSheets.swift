@@ -11,6 +11,22 @@ enum MergeMethod: String, CaseIterable, Identifiable {
         case .REBASE: return "Rebase and merge"
         }
     }
+
+    var short: String {
+        switch self {
+        case .MERGE: return "Merge"
+        case .SQUASH: return "Squash"
+        case .REBASE: return "Rebase"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .MERGE: return "arrow.triangle.merge"
+        case .SQUASH: return "square.stack.3d.down.right"
+        case .REBASE: return "arrow.triangle.branch"
+        }
+    }
 }
 
 struct SheetFrame<Content: View>: View {
@@ -78,8 +94,15 @@ struct ReviewSheet: View {
     let model: PRDetailModel
     let pr: PullRequestDetail
     @Environment(\.dismiss) private var dismiss
-    @State private var event = "COMMENT"
+    @Environment(AppModel.self) private var app
+    @State private var event: String
     @State private var confirmDiscard = false
+
+    init(model: PRDetailModel, pr: PullRequestDetail, initialEvent: String = "COMMENT") {
+        self.model = model
+        self.pr = pr
+        _event = State(initialValue: pr.viewerDidAuthor ? "COMMENT" : initialEvent)
+    }
 
     private var text: String { model.summaryDraft }
 
@@ -154,8 +177,16 @@ struct ReviewSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(submitTitle) {
-                    let body = text, ev = event
-                    Task { if await model.submitReview(event: ev, body: body) { dismiss() } }
+                    let body = text, ev = event, ref = model.ref, number = pr.number
+                    Task {
+                        guard await model.submitReview(event: ev, body: body) else { return }
+                        dismiss()
+                        switch ev {
+                        case "APPROVE": app.showToast("Approved #\(number)", kind: .approved, action: app.nextReviewAction(after: ref))
+                        case "REQUEST_CHANGES": app.showToast("Requested changes on #\(number)", action: app.nextReviewAction(after: ref))
+                        default: app.showToast("Review submitted on #\(number)")
+                        }
+                    }
                 }
                 .keyboardShortcut(.return, modifiers: .command)
                 .buttonStyle(.borderedProminent)
@@ -192,10 +223,16 @@ struct MergeSheet: View {
     let model: PRDetailModel
     let pr: PullRequestDetail
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppModel.self) private var app
     @State private var method: MergeMethod = .MERGE
     @State private var title = ""
     @State private var message = ""
     @State private var deleteBranch = true
+    @State private var confirmMerge: Bool?
+
+    private enum Gate {
+        case clean, waiting, conflicts, behind, blocked
+    }
 
     private var allowed: [MergeMethod] {
         guard let r = model.repo else { return MergeMethod.allCases }
@@ -208,21 +245,58 @@ struct MergeSheet: View {
         }
     }
 
+    private var gate: Gate {
+        let reqs = model.requirements
+        if reqs.contains(where: { $0.kind == .conflicts && $0.state == .missing }) { return .conflicts }
+        if reqs.contains(where: { $0.kind == .behind && $0.state == .missing }) { return .behind }
+        if reqs.contains(where: { $0.state == .missing }) { return .blocked }
+        if reqs.contains(where: { $0.state == .pending }) || pr.mergeStateStatus == "UNSTABLE" && pr.checks.contains(where: { $0.outcome == .pending }) { return .waiting }
+        return .clean
+    }
+
+    private var canAutoMerge: Bool {
+        model.repo?.autoMergeAllowed == true && pr.autoMergeRequest == nil && pr.mergeStateStatus != "CLEAN"
+    }
+
+    private var deletesBranch: Bool {
+        deleteBranch && !(model.repo?.deleteBranchOnMerge ?? false) && pr.headRepository?.nameWithOwner == model.ref.repo.full
+    }
+
     var body: some View {
         let readiness = MergeStatusBar.status(pr, requirements: model.requirements)
-        let blocked = !readiness.ready && pr.mergeStateStatus != nil && pr.mergeStateStatus != "UNKNOWN"
+        let gate = gate
         SheetFrame(title: "Merge #\(pr.number) into \(pr.baseRefName)", model: model) {
-            Label(readiness.text, systemImage: readiness.icon)
-                .font(.syCallout)
-                .foregroundStyle(readiness.ready ? Color.syText : readiness.color)
-                .padding(.horizontal, Space.m + 2)
-                .padding(.vertical, Space.s)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: Radius.m).fill(readiness.color.opacity(Tint.banner)))
-            Picker("Method", selection: $method) {
-                ForEach(allowed) { Text($0.title).tag($0) }
+            HStack(spacing: 10) {
+                PullYardLogoMark(progress: 1, size: 30)
+                    .saturation(gate == .clean ? 1 : 0.35)
+                Text(readiness.text)
+                    .font(.syCallout.weight(.medium))
+                    .foregroundStyle(gate == .clean ? Color.syText : readiness.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
             }
-            .onChange(of: method) { _, m in prefill(m) }
+            .padding(.horizontal, Space.m + 2)
+            .padding(.vertical, Space.s)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: Radius.m).fill((gate == .clean ? Color.syGreen : readiness.color).opacity(Tint.banner)))
+            if !model.requirements.isEmpty {
+                ScrollView {
+                    MergeRequirementsList(requirements: model.requirements, canPerform: canPerform, perform: perform, agentFix: agentFix)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 180)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            if allowed.count > 1 {
+                Picker("Method", selection: $method) {
+                    ForEach(allowed) { m in Label(m.short, systemImage: m.symbol).tag(m) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .tint(Color.syAccentFill)
+                .onChange(of: method) { _, m in prefill(m) }
+                .accessibilityLabel("Merge method")
+            }
             if method != .REBASE {
                 TextField("Commit title (GitHub default)", text: $title)
                 ComposerBox(text: $message, placeholder: "Commit description (optional)", minHeight: 80)
@@ -232,33 +306,162 @@ struct MergeSheet: View {
                 Toggle("Delete branch \(pr.headRefName) after merge", isOn: $deleteBranch)
             }
             HStack {
-                if model.repo?.autoMergeAllowed == true, pr.autoMergeRequest == nil, pr.mergeStateStatus != "CLEAN" {
-                    Button("Enable auto-merge") {
-                        Task { if await model.enableAutoMerge(method: method.rawValue) { dismiss() } }
-                    }
-                    .help("Merge automatically when checks and reviews pass")
-                }
+                secondaryButton(gate)
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(blocked ? "Merge anyway" : "Merge") {
-                    let t = title.trimmingCharacters(in: .whitespaces)
-                    let b = message.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let del = deleteBranch && !(model.repo?.deleteBranchOnMerge ?? false) && pr.headRepository?.nameWithOwner == model.ref.repo.full
-                    Task {
-                        if await model.merge(method: method.rawValue, title: t.isEmpty ? nil : t, body: b.isEmpty ? nil : b, deleteBranch: del) { dismiss() }
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(blocked ? Color.syRedFill : Color.syGreenFill)
-                .keyboardShortcut(blocked ? nil : .defaultAction)
-                .help(blocked ? "GitHub may reject this merge: \(readiness.text)" : "Merge pull request")
-                .disabled(model.busy || allowed.isEmpty)
+                primaryButton(gate)
             }
         }
         .onAppear {
             let def = MergeMethod(rawValue: model.repo?.viewerDefaultMergeMethod ?? "MERGE") ?? .MERGE
             method = allowed.contains(def) ? def : (allowed.first ?? .MERGE)
             prefill(method)
+        }
+        .onLiveTick { await model.load(live: true) }
+        .confirmationDialog(confirmTitle, isPresented: Binding(get: { confirmMerge != nil }, set: { if !$0 { confirmMerge = nil } }), titleVisibility: .visible) {
+            Button(confirmMerge == true ? "Merge anyway" : "Merge", role: confirmMerge == true ? .destructive : nil) {
+                confirmMerge = nil
+                performMerge()
+            }
+            Button("Cancel", role: .cancel) { confirmMerge = nil }
+        } message: {
+            Text(confirmMessage)
+        }
+    }
+
+    private var confirmTitle: String {
+        "\(method.title) #\(pr.number) into \(pr.baseRefName)?"
+    }
+
+    private var confirmMessage: String {
+        var parts: [String] = []
+        if confirmMerge == true { parts.append("Not everything required for merging is done. GitHub may reject the merge.") }
+        if deletesBranch { parts.append("The branch \(pr.headRefName) will be deleted afterwards. You can restore it from the confirmation.") }
+        parts.append("This can't be undone on GitHub.")
+        return parts.joined(separator: " ")
+    }
+
+    private func mergeNow() {
+        confirmMerge = gate != .clean
+    }
+
+    @ViewBuilder
+    private func primaryButton(_ gate: Gate) -> some View {
+        switch gate {
+        case .clean:
+            Button("Merge…", action: mergeNow)
+                .buttonStyle(.borderedProminent)
+                .tint(Color.syGreenFill)
+                .keyboardShortcut(.defaultAction)
+                .disabled(model.busy || allowed.isEmpty)
+        case .waiting where canAutoMerge:
+            Button("Merge when ready", action: enableAuto)
+                .buttonStyle(.borderedProminent)
+                .tint(Color.syGreenFill)
+                .keyboardShortcut(.defaultAction)
+                .help("Merge automatically when checks and reviews pass")
+                .disabled(model.busy)
+        case .conflicts where MergeConflicts.applies(pr):
+            Button("Resolve with agent…") {
+                dismiss()
+                model.showResolveConflicts = true
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color.syAgentFill)
+            .keyboardShortcut(.defaultAction)
+        case .behind where model.canWrite || pr.viewerCanUpdate:
+            Button("Update branch") { perform(.updateBranch) }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.syAccentFill)
+                .keyboardShortcut(.defaultAction)
+                .disabled(model.busy)
+        default:
+            mergeAnywayButton
+        }
+    }
+
+    @ViewBuilder
+    private func secondaryButton(_ gate: Gate) -> some View {
+        switch gate {
+        case .clean:
+            if canAutoMerge {
+                Button("Merge when ready", action: enableAuto)
+                    .help("Merge automatically when checks and reviews pass")
+            }
+        case .waiting where canAutoMerge, .conflicts where MergeConflicts.applies(pr), .behind where model.canWrite || pr.viewerCanUpdate:
+            mergeAnywayButton
+        default:
+            if canAutoMerge {
+                Button("Merge when ready", action: enableAuto)
+                    .help("Merge automatically when checks and reviews pass")
+            }
+        }
+    }
+
+    private var mergeAnywayButton: some View {
+        Button("Merge anyway…", action: mergeNow)
+            .buttonStyle(.bordered)
+            .foregroundStyle(Color.syRed)
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.syRed.opacity(0.6)))
+            .help("GitHub may reject this merge")
+            .disabled(model.busy || allowed.isEmpty)
+    }
+
+    private func canPerform(_ action: RequirementAction) -> Bool {
+        switch action {
+        case .updateBranch: return model.canWrite || pr.viewerCanUpdate
+        case .readyForReview: return pr.viewerCanUpdate
+        case .requestReview, .showChecks, .showConversation, .showConflicts: return false
+        }
+    }
+
+    private func perform(_ action: RequirementAction) {
+        switch action {
+        case .updateBranch:
+            Task { if await model.simple(Q.updateBranch) { app.showToast("Branch updated from \(pr.baseRefName)") } }
+        case .readyForReview:
+            Task { if await model.simple(Q.readyForReview) { app.showToast("Marked ready for review") } }
+        default:
+            break
+        }
+    }
+
+    private func agentFix(_ kind: RequirementKind) -> (() -> Void)? {
+        guard kind == .conflicts, MergeConflicts.applies(pr) else { return nil }
+        return {
+            dismiss()
+            model.showResolveConflicts = true
+        }
+    }
+
+    private func enableAuto() {
+        let m = method.rawValue
+        Task {
+            guard await model.enableAutoMerge(method: m) else { return }
+            dismiss()
+            app.showToast("Auto-merge enabled for #\(pr.number)")
+        }
+    }
+
+    private func performMerge() {
+        let t = title.trimmingCharacters(in: .whitespaces)
+        let b = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let del = deletesBranch
+        let number = pr.number, base = pr.baseRefName, branch = pr.headRefName, sha = pr.headRefOid, ref = model.ref
+        let headRepo = pr.headRepository?.nameWithOwner
+        Task {
+            guard await model.merge(method: method.rawValue, title: t.isEmpty ? nil : t, body: b.isEmpty ? nil : b, deleteBranch: del) else { return }
+            let deleted = del && model.deferredError == nil
+            dismiss()
+            if deleted, let headRepo {
+                app.showToast("Merged #\(number) into \(base)", kind: .merged, action: ToastAction(title: "Restore branch") {
+                    Task {
+                        if await model.restoreBranch(branch, repo: headRepo, sha: sha) { app.showToast("Restored branch \(branch)") }
+                    }
+                })
+            } else {
+                app.showToast("Merged #\(number) into \(base)", kind: .merged, action: app.nextReviewAction(after: ref))
+            }
         }
     }
 

@@ -271,6 +271,10 @@ extension GitHubAPI {
         try await send("DELETE", "/repos/\(repo)/git/refs/heads/\(encoded)")
     }
 
+    func restoreBranch(repo: String, branch: String, sha: String) async throws {
+        try await send("POST", "/repos/\(repo)/git/refs", body: ["ref": "refs/heads/\(branch)", "sha": sha])
+    }
+
     func rerunFailedJobs(repo: RepoRef, runId: Int) async throws {
         try await send("POST", "/repos/\(repo.full)/actions/runs/\(runId)/rerun-failed-jobs")
     }

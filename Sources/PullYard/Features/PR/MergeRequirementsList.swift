@@ -5,6 +5,7 @@ struct MergeRequirementsList: View {
     var ownership: OwnershipSummary?
     let canPerform: (RequirementAction) -> Bool
     let perform: (RequirementAction) -> Void
+    var agentFix: (RequirementKind) -> (() -> Void)? = { _ in nil }
 
     private var ordered: [MergeRequirement] {
         let rank: (RequirementState) -> Int = {
@@ -53,6 +54,13 @@ struct MergeRequirementsList: View {
                 }
             }
             Spacer(minLength: 8)
+            if r.state == .missing, let fix = agentFix(r.kind) {
+                Button(r.kind == .conflicts ? "Resolve with agent" : "Fix with agent", action: fix)
+                    .font(.syCaption.weight(.semibold))
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Color.syCoralInk)
+                    .help("Start an agent session for this")
+            }
             if let action = r.action, r.state != .satisfied, canPerform(action) {
                 Button(title(action)) { perform(action) }
                     .font(.syCaption)

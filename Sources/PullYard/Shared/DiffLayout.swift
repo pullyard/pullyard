@@ -2,6 +2,15 @@ import Foundation
 
 enum DiffPrefs {
     static let wrapKey = "diff.wrapLines"
+    static let filesWidthKey = "pr.files.listWidth"
+    static let filesTreeKey = "pr.files.tree"
+
+    static func settleWrapDefault() {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: wrapKey) == nil else { return }
+        let existing = ["nav.section", "settings.tab", "theme.style", "pollInterval", "shell.listWidth", NavigationMemory.routeKey].contains { defaults.object(forKey: $0) != nil }
+        defaults.set(existing, forKey: wrapKey)
+    }
     static let splitKey = "diff.splitView"
     static let splitMinWidth: CGFloat = 900
 }

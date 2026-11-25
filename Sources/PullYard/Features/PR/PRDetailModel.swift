@@ -806,6 +806,22 @@ final class PRDetailModel {
         await run { try await api.requestReviewers(ref, logins: logins) }
     }
 
+    var unviewedCount: Int {
+        guard filesLoaded else { return pr?.changedFiles ?? 0 }
+        return files.filter { !viewedPaths.contains($0.id) }.count
+    }
+
+    func markAllViewed() async {
+        if !filesLoaded { await loadFiles() }
+        for file in files where !viewedPaths.contains(file.id) {
+            await toggleViewed(file.id, scroll: false)
+        }
+    }
+
+    func restoreBranch(_ branch: String, repo: String, sha: String) async -> Bool {
+        await run { try await api.restoreBranch(repo: repo, branch: branch, sha: sha) }
+    }
+
     func deleteBranch() async {
         guard let pr, let head = pr.headRepository?.nameWithOwner else { return }
         await run { try await api.deleteBranch(repo: head, branch: pr.headRefName) }
