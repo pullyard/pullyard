@@ -258,16 +258,21 @@ struct AgentSessionsView: View {
     @State private var query = ""
 
     private var closed: [PYLinkSession] {
-        let items = link.history.filter { $0.state == "closed" }
-        let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return items }
-        return items.filter { $0.title.localizedCaseInsensitiveContains(q) || $0.folder.localizedCaseInsensitiveContains(q) || ($0.repo ?? "").localizedCaseInsensitiveContains(q) }
+        link.history.filter { $0.state == "closed" && matches($0) }
     }
 
     private var open: [PYLinkSession] {
+        link.sessions.filter(matches)
+    }
+
+    private func matches(_ session: PYLinkSession) -> Bool {
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return link.sessions }
-        return link.sessions.filter { $0.title.localizedCaseInsensitiveContains(q) || $0.folder.localizedCaseInsensitiveContains(q) }
+        guard !q.isEmpty else { return true }
+        let number = q.hasPrefix("#") ? String(q.dropFirst()) : q
+        return session.title.localizedCaseInsensitiveContains(q)
+            || session.folder.localizedCaseInsensitiveContains(q)
+            || (session.repo ?? "").localizedCaseInsensitiveContains(q)
+            || session.number.map { String($0) == number } == true
     }
 
     var body: some View {
@@ -287,7 +292,7 @@ struct AgentSessionsView: View {
                 if !open.isEmpty {
                     Section("Open on \(link.macName)") {
                         ForEach(open) { session in
-                            NavigationLink(value: Route.agent(session.id)) { row(session, color: color(session.state)) }
+                            NavigationLink(value: Route.agent(session.id)) { row(session) }
                                 .pyRow()
                         }
                     }
@@ -297,7 +302,7 @@ struct AgentSessionsView: View {
                         ForEach(closed) { session in
                             Button { resume(session) } label: {
                                 HStack {
-                                    row(session, color: MobileTheme.slate.opacity(0.5))
+                                    row(session)
                                     Spacer(minLength: 8)
                                     if resuming == session.id { PullYardLoader(size: 22) } else { Image(systemName: "arrow.uturn.forward.circle").foregroundStyle(MobileTheme.accent) }
                                 }
@@ -318,7 +323,7 @@ struct AgentSessionsView: View {
             }
         }
         .pyListStyle()
-        .searchable(text: $query, prompt: "Search sessions")
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search sessions, projects or #PR")
         .refreshable { await load() }
         .navigationTitle("Agents")
         .task { await load() }
@@ -344,9 +349,9 @@ struct AgentSessionsView: View {
         }
     }
 
-    private func row(_ session: PYLinkSession, color: Color) -> some View {
+    private func row(_ session: PYLinkSession) -> some View {
         HStack(spacing: 10) {
-            Circle().fill(color).frame(width: 9, height: 9)
+            AgentStateDot(state: session.state)
             VStack(alignment: .leading, spacing: 2) {
                 Text(session.title).mobileFont(size: 15, weight: .semibold).lineLimit(2).foregroundStyle(MobileTheme.ink)
                 Text(subtitle(session)).mobileFont(size: 12).foregroundStyle(MobileTheme.muted).lineLimit(1)
@@ -364,21 +369,13 @@ struct AgentSessionsView: View {
         guard let updated = session.updated else { return place }
         return "\(place) · \(updated.formatted(.relative(presentation: .named)))"
     }
-
-    private func color(_ state: String) -> Color {
-        switch state {
-        case "working": MobileTheme.amber
-        case "waiting": MobileTheme.coral
-        case "active": MobileTheme.green
-        default: MobileTheme.slate
-        }
-    }
 }
 
 struct AgentChatView: View {
     let session: String
     @ObservedObject private var link = LinkClient.shared
     @State private var draft = ""
+    @State private var busySince: Date?
     @FocusState private var focused: Bool
 
     private var chat: AgentChat? { link.chats[session] }
@@ -396,11 +393,8 @@ struct AgentChatView: View {
                             .id("perm-\(permission.id)")
                         }
                         if chat.state.busy {
-                            HStack(spacing: 10) {
-                                PullYardLoader(size: 30)
-                                Text(chat.state.status ?? L("Working…")).mobileFont(size: 13).foregroundStyle(MobileTheme.muted)
-                            }
-                            .id("busy")
+                            AgentWorkingCapsule(status: chat.state.status, since: busySince)
+                                .id("busy")
                         }
                         if let error = chat.state.error {
                             Label(error, systemImage: "exclamationmark.triangle.fill").mobileFont(size: 13).foregroundStyle(MobileTheme.amberInk)
@@ -417,6 +411,7 @@ struct AgentChatView: View {
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: chat?.items.count) { _, _ in withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) } }
             .onChange(of: chat?.state.pending.count) { _, _ in withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .onChange(of: chat?.state.busy, initial: true) { _, busy in busySince = busy == true ? (busySince ?? Date()) : nil }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .navigationTitle(chat?.title ?? L("Agent"))
@@ -483,7 +478,7 @@ private struct AgentItemView: View {
         case "thinking":
             Button { withAnimation(.snappy) { expanded.toggle() } } label: {
                 VStack(alignment: .leading, spacing: 4) {
-                    Label("Thinking", systemImage: "brain").mobileFont(size: 12, weight: .semibold).foregroundStyle(MobileTheme.muted)
+                    ThinkingLabel(text: "Thinking").mobileFont(size: 12, weight: .semibold)
                     if expanded { Text(item.text).mobileFont(size: 13).foregroundStyle(MobileTheme.muted) }
                 }
             }
@@ -491,8 +486,14 @@ private struct AgentItemView: View {
         case "tool":
             Button { withAnimation(.snappy) { expanded.toggle() } } label: {
                 HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: icon).foregroundStyle(color).frame(width: 18)
-                        .symbolEffect(.pulse, isActive: item.status == "running")
+                    Group {
+                        if item.status == "running" {
+                            WakeLoader().frame(width: 18, height: 16)
+                        } else {
+                            Image(systemName: icon).foregroundStyle(color)
+                        }
+                    }
+                    .frame(width: 18)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.tool ?? "Tool").mobileFont(size: 13, weight: .semibold).foregroundStyle(MobileTheme.ink)
                         if !item.text.isEmpty {
