@@ -528,14 +528,35 @@ impl PrPage {
 
     fn render_commits(&self, l: &gtk::ListBox, pr: &PullRequestDetail) {
         l.remove_all();
-        for node in pr.all_commits.nodes.iter().rev() {
+        let reviewed = self.model.last_reviewed().map(|r| r.oid);
+        let commits: Vec<&CommitInfoNode> = pr.all_commits.nodes.iter().rev().collect();
+        let today = chrono::Local::now().date_naive();
+        let mut last_day: Option<chrono::NaiveDate> = None;
+        for (i, node) in commits.iter().enumerate() {
             let c = &node.commit;
+            let day = c.committed_date.with_timezone(&chrono::Local).date_naive();
+            if last_day != Some(day) {
+                last_day = Some(day);
+                let head = gtk::ListBoxRow::new();
+                head.set_activatable(false);
+                head.set_selectable(false);
+                let title = day_title(day, today);
+                let l2 = label_with(&title.to_uppercase(), &["sy-eyebrow"]);
+                l2.set_margin_top(if i == 0 { 2 } else { 10 });
+                head.set_child(Some(&l2));
+                head.add_css_class("timeline-day");
+                l.append(&head);
+            }
             let row = gtk::ListBoxRow::new();
             row.set_widget_name(&format!("commit:{}", c.oid));
             let b = hbox(10);
-            margins(&b, 2, 0, 2, 0);
+            let first_of_day = i == 0 || commits[i - 1].commit.committed_date.with_timezone(&chrono::Local).date_naive() != day;
+            let last_of_day = i + 1 == commits.len() || commits[i + 1].commit.committed_date.with_timezone(&chrono::Local).date_naive() != day;
+            b.append(&timeline_rail(i, first_of_day, last_of_day));
             let author = c.author.as_ref();
-            b.append(&avatar(author.and_then(|a| a.avatar_url.as_deref()), 22, None));
+            let av = avatar(author.and_then(|a| a.avatar_url.as_deref()), 22, None);
+            av.set_valign(gtk::Align::Start);
+            b.append(&av);
             let col = vbox(2);
             col.set_hexpand(true);
             let t = wrap_label(&c.message_headline, &["sy-text"]);
@@ -543,13 +564,29 @@ impl PrPage {
             t.set_ellipsize(gtk::pango::EllipsizeMode::End);
             col.append(&t);
             let who = author.and_then(|a| a.user.as_ref().map(|u| u.login.clone()).or_else(|| a.name.clone())).unwrap_or_default();
-            col.append(&label_with(&format!("{who} · {}", util::rel(Some(c.committed_date))), &["sy-muted", "sy-small"]));
+            let meta = hbox(6);
+            meta.append(&label_with(&format!("{who} · {}", c.committed_date.with_timezone(&chrono::Local).format("%H:%M")), &["sy-muted", "sy-small", "sy-meta-num"]));
+            if reviewed.as_deref() == Some(c.oid.as_str()) {
+                meta.append(&status_chip("Your last review", "sky", Some("sy-eye-symbolic")));
+            }
+            col.append(&meta);
             b.append(&col);
-            if let Some(ci) = ci_icon(c.status_check_rollup.as_ref().map(|s| s.state.as_str())) {
+            if let Some(ci) = ci_chip(c.status_check_rollup.as_ref().map(|s| s.state.as_str())) {
+                ci.set_valign(gtk::Align::Start);
                 b.append(&ci);
             }
-            b.append(&label_with(&c.abbreviated_oid, &["sy-mono", "sy-muted", "sy-small"]));
-            b.append(&icon("go-next-symbolic", 12));
+            let sha = gtk::Button::new();
+            sha.add_css_class("status-chip-button");
+            sha.set_valign(gtk::Align::Start);
+            sha.set_child(Some(&chip(&c.abbreviated_oid, "slate", None, true)));
+            sha.set_tooltip_text(Some("Copy SHA"));
+            set_label(&sha, &format!("Copy SHA {}", c.abbreviated_oid));
+            let (oid, short) = (c.oid.clone(), c.abbreviated_oid.clone());
+            sha.connect_clicked(move |_| app::copy(&oid, &format!("Copied {short}")));
+            b.append(&sha);
+            let go = icon("go-next-symbolic", 12);
+            go.set_valign(gtk::Align::Center);
+            b.append(&go);
             row.set_child(Some(&b));
             let oid = c.oid.clone();
             let short = c.abbreviated_oid.clone();
@@ -569,7 +606,7 @@ impl PrPage {
         if total > pr.all_commits.nodes.len() as i64 {
             let row = gtk::ListBoxRow::new();
             row.set_widget_name("all-commits");
-            row.set_child(Some(&label_with(&format!("Showing the latest {} of {total} commits — open all in browser", pr.all_commits.nodes.len()), &["fg-accent"])));
+            row.set_child(Some(&label_with(&format!("Showing the latest {} of {total} commits — open all in browser", pr.all_commits.nodes.len()), &["sy-link"])));
             l.append(&row);
         }
     }
@@ -1433,6 +1470,41 @@ fn checks_fix_actions(model: &Rc<PrModel>, pr: &PullRequestDetail, row: &gtk::Bo
     }
 }
 
+pub fn day_title(day: chrono::NaiveDate, today: chrono::NaiveDate) -> String {
+    let diff = (today - day).num_days();
+    match diff {
+        0 => "Today".to_string(),
+        1 => "Yesterday".to_string(),
+        2..=6 => day.format("%A").to_string(),
+        _ if day.format("%Y").to_string() == today.format("%Y").to_string() => day.format("%b %-d").to_string(),
+        _ => day.format("%b %-d, %Y").to_string(),
+    }
+}
+
+fn timeline_rail(index: usize, first: bool, last: bool) -> gtk::DrawingArea {
+    let area = gtk::DrawingArea::new();
+    area.set_content_width(14);
+    area.set_vexpand(true);
+    area.add_css_class("timeline-rail");
+    decorative(&area);
+    let hex = if index % 2 == 0 { crate::brand::MARK_VIOLET } else { crate::brand::MARK_SKY };
+    let (r, g, b) = crate::brand::rgb(hex);
+    area.set_draw_func(move |a, cr, w, h| {
+        let line = a.color();
+        let x = w as f64 / 2.0;
+        let dot_y = 13.0;
+        cr.set_source_rgba(line.red() as f64, line.green() as f64, line.blue() as f64, line.alpha() as f64);
+        cr.set_line_width(2.0);
+        cr.move_to(x, if first { dot_y } else { 0.0 });
+        cr.line_to(x, if last { dot_y } else { h as f64 });
+        let _ = cr.stroke();
+        cr.set_source_rgb(r, g, b);
+        cr.arc(x, dot_y, 4.5, 0.0, std::f64::consts::TAU);
+        let _ = cr.fill();
+    });
+    area
+}
+
 pub fn agent_chip(r: &ItemRef) -> Option<gtk::Button> {
     let (tab, state) = fix_claude::ci_session(r)?;
     let (text, color) = match state {
@@ -1697,4 +1769,19 @@ pub fn stack_strip(model: &Rc<PrModel>, tree: &StackTree, interactive: bool) -> 
     });
     b.append(&more);
     b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn commit_days_read_naturally() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap();
+        assert_eq!(day_title(today, today), "Today");
+        assert_eq!(day_title(today.pred_opt().unwrap(), today), "Yesterday");
+        assert_eq!(day_title(chrono::NaiveDate::from_ymd_opt(2026, 11, 21).unwrap(), today), "Saturday");
+        assert_eq!(day_title(chrono::NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(), today), "Oct 2");
+        assert_eq!(day_title(chrono::NaiveDate::from_ymd_opt(2025, 10, 2).unwrap(), today), "Oct 2, 2025");
+    }
 }
