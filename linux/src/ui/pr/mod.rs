@@ -1,6 +1,7 @@
 pub mod diff_view;
 pub mod files;
 pub mod model;
+pub mod review_panel;
 pub mod sheets;
 pub mod stack_graph;
 pub mod stack_notes;
@@ -32,6 +33,9 @@ pub struct PrPage {
     title: adw::WindowTitle,
     actions: gtk::Box,
     status: Rc<RefreshStatus>,
+    panel_toggle: gtk::ToggleButton,
+    split: adw::OverlaySplitView,
+    panel: RefCell<Option<Rc<review_panel::ReviewPanel>>>,
     header_box: gtk::Box,
     banners: gtk::Box,
     tabs: Rc<TabStrip>,
@@ -98,7 +102,19 @@ impl PrPage {
         let body = gtk::Stack::new();
         body.add_named(&loading(), Some("loading"));
         body.add_named(&main, Some("main"));
-        let (toolbar, hb, _) = toolbar_page("", "", &body);
+        let split = adw::OverlaySplitView::new();
+        split.set_sidebar_position(gtk::PackType::End);
+        split.set_collapsed(false);
+        split.set_show_sidebar(false);
+        split.set_min_sidebar_width(300.0);
+        split.set_max_sidebar_width(380.0);
+        split.set_content(Some(&body));
+        let panel_toggle = gtk::ToggleButton::new();
+        panel_toggle.set_child(Some(&icon("sy-panel-right-symbolic", 16)));
+        panel_toggle.add_css_class("image-button");
+        panel_toggle.set_tooltip_text(Some("Review panel (Ctrl+Alt+I)"));
+        set_label(&panel_toggle, "Review panel");
+        let (toolbar, hb, _) = toolbar_page("", "", &split);
         hb.set_title_widget(Some(&title));
         toolbar.add_css_class("sy-panel-pane");
         let actions = hbox(4);
@@ -110,6 +126,7 @@ impl PrPage {
             }
         });
         hb.pack_end(&status.detail_pill());
+        hb.pack_end(&panel_toggle);
         hb.pack_end(&actions);
         let page = adw::NavigationPage::new(&toolbar, &model.r.title());
         let me = Rc::new(PrPage {
@@ -118,6 +135,9 @@ impl PrPage {
             title,
             actions,
             status,
+            panel_toggle: panel_toggle.clone(),
+            split,
+            panel: RefCell::new(None),
             header_box,
             banners,
             tabs,
@@ -137,6 +157,12 @@ impl PrPage {
             ci_session: Cell::new(None),
         });
         *holder.borrow_mut() = Some(Rc::downgrade(&me));
+        let w = Rc::downgrade(&me);
+        panel_toggle.connect_toggled(move |t| {
+            if let Some(me) = w.upgrade() {
+                me.show_panel(t.is_active());
+            }
+        });
         if let Some(a) = app::try_get() {
             let w = Rc::downgrade(&me);
             a.claude.changed.connect(move |_| {
@@ -237,6 +263,7 @@ impl PrPage {
             }
             Change::Rules => self.render_header(),
             Change::Reveal(_) => {}
+            Change::TogglePanel => self.panel_toggle.set_active(!self.panel_toggle.is_active()),
         }
     }
 
@@ -314,6 +341,15 @@ impl PrPage {
         if tab == PrTab::Files {
             self.model.ensure_files();
         }
+    }
+
+    fn show_panel(self: &Rc<Self>, open: bool) {
+        if open && self.panel.borrow().is_none() {
+            let p = review_panel::ReviewPanel::new(self.model.clone());
+            self.split.set_sidebar(Some(&p.widget));
+            *self.panel.borrow_mut() = Some(p);
+        }
+        self.split.set_show_sidebar(open);
     }
 
     fn unload_stack(&self) {
@@ -1143,6 +1179,7 @@ pub enum Shortcut {
     Review,
     Approve,
     Merge,
+    ReviewPanel,
 }
 
 pub fn shortcut(kind: Shortcut) {
@@ -1153,6 +1190,7 @@ pub fn shortcut(kind: Shortcut) {
         Shortcut::Review if pr.is_open() => sheets::review(m),
         Shortcut::Approve if pr.is_open() && !pr.viewer_did_author => confirm_approve(m),
         Shortcut::Merge if pr.is_open() && !pr.is_draft && m.can_write() => sheets::merge(m),
+        Shortcut::ReviewPanel => m.emit(Change::TogglePanel),
         _ => {}
     }
 }

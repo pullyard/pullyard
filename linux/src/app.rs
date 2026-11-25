@@ -257,7 +257,8 @@ pub struct App {
     pub claude: Rc<Workspace>,
 }
 
-const PHASE_ACTIONS: [&str; 18] = [
+const PHASE_ACTIONS: [&str; 19] = [
+    "pr-review-panel",
     "section-overview",
     "refresh",
     "back",
@@ -1741,6 +1742,7 @@ impl App {
         add("pr-review", &["<Control><Shift>r"], Box::new(|| ui::pr::shortcut(ui::pr::Shortcut::Review)));
         add("pr-approve", &["<Control><Shift>a"], Box::new(|| ui::pr::shortcut(ui::pr::Shortcut::Approve)));
         add("pr-merge", &["<Control><Shift>m"], Box::new(|| ui::pr::shortcut(ui::pr::Shortcut::Merge)));
+        add("pr-review-panel", &["<Control><Alt>i"], Box::new(|| ui::pr::shortcut(ui::pr::Shortcut::ReviewPanel)));
         add("preferences", &["<Control>comma"], Box::new(|| ui::settings::show()));
         add("check-updates", &[], Box::new(|| ui::update::show(true)));
         add("show-update", &[], Box::new(|| ui::update::show(false)));

@@ -514,6 +514,9 @@ splitbutton.tint-coral > separator { background-color: alpha(@sy_on_coral, 0.35)
 button.merge-blocked { color: @sy_muted; }
 button.check-group-head { padding: 4px 6px; }
 .timeline-rail { color: @sy_line_strong; }
+.review-panel { background-color: @sy_panel; border-left: 1px solid @sy_line; }
+progressbar.viewed-progress trough, progressbar.viewed-progress progress { min-height: 4px; border-radius: 2px; }
+progressbar.viewed-progress progress { background-color: @sy_coral; }
 list.sy-list > row.timeline-day { border-bottom: none; padding-bottom: 2px; }
 button.notif-done { opacity: 0; transition: opacity 120ms ease-out; }
 list.sy-list > row:hover button.notif-done, list.sy-list > row:selected button.notif-done, button.notif-done:focus { opacity: 1; }

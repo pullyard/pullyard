@@ -66,6 +66,7 @@ pub enum Change {
     Rules,
     Reveal(String),
     ActionError(String),
+    TogglePanel,
 }
 
 #[derive(Clone)]
