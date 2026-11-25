@@ -197,9 +197,7 @@ pub fn run(_app: Rc<App>) {
     step(next(300), "jira ticket card", move || {
         let url = pr().pr.borrow().as_ref().map(|p| p.url.clone()).unwrap_or_default();
         crate::settings::update(|s| {
-            s.jira_site = "smoke.invalid".into();
-            s.jira_has_token = true;
-            s.jira_name = Some("Smoke".into());
+            s.jira_connections = vec![crate::jira::JiraConnection { id: "smoke".into(), name: "Smoke".into(), site: "https://smoke.invalid".into(), display_name: Some("Smoke".into()), project_keys: vec!["SMOKE".into()], ..Default::default() }];
         });
         crate::jira::remember(&crate::jira::JiraIssue {
             key: "SMOKE-1".into(),
@@ -216,6 +214,7 @@ pub fn run(_app: Rc<App>) {
             updated: Some(chrono::Utc::now()),
             parent_key: Some("SMOKE-0".into()),
             parent_summary: Some("Smoke epic".into()),
+            connection_id: Some("smoke".into()),
         });
         crate::jira::remember(&crate::jira::JiraIssue {
             key: "SMOKE-2".into(),
@@ -232,6 +231,7 @@ pub fn run(_app: Rc<App>) {
             updated: None,
             parent_key: None,
             parent_summary: None,
+            connection_id: Some("smoke".into()),
         });
         crate::jira::set_linked(&url, vec!["SMOKE-1".into(), "SMOKE-2".into()]);
         crate::jira::changed();
@@ -240,11 +240,7 @@ pub fn run(_app: Rc<App>) {
         let url = pr().pr.borrow().as_ref().map(|p| p.url.clone()).unwrap_or_default();
         crate::jira::set_linked(&url, vec![]);
         crate::jira::set_hidden(&url, vec![]);
-        crate::settings::update(|s| {
-            s.jira_site.clear();
-            s.jira_has_token = false;
-            s.jira_name = None;
-        });
+        crate::settings::update(|s| s.jira_connections.clear());
         crate::jira::changed();
         pr().set_tab(PrTab::Conversation);
     });

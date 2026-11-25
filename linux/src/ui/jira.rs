@@ -149,15 +149,30 @@ fn busy_button(label: &str) -> (gtk::Button, gtk::Stack) {
     (b, stack)
 }
 
+#[derive(Clone, PartialEq)]
+enum FormMode {
+    List,
+    Adding,
+    Editing(String),
+}
+
+thread_local! {
+    static REFRESHING: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+}
+
 pub fn connect_form() -> gtk::Box {
-    let root = vbox(10);
+    let root = vbox(12);
+    let mode = Rc::new(RefCell::new(FormMode::List));
+    let holder: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
     let weak = root.downgrade();
-    let fill = Rc::new(move || {
-        if let Some(root) = weak.upgrade() {
-            clear(&root);
-            build_form(&root);
-        }
+    let (m, h) = (mode.clone(), holder.clone());
+    let fill: Rc<dyn Fn()> = Rc::new(move || {
+        let Some(root) = weak.upgrade() else { return };
+        let Some(refill) = h.borrow().clone() else { return };
+        clear(&root);
+        build_form(&root, &m, refill);
     });
+    *holder.borrow_mut() = Some(fill.clone());
     fill();
     let weak = root.downgrade();
     let f = fill.clone();
@@ -171,41 +186,151 @@ pub fn connect_form() -> gtk::Box {
     root
 }
 
-fn build_form(root: &gtk::Box) {
-    if jira::is_configured() {
-        let row = hbox(10);
-        row.append(&colored_icon("sy-check-circle-symbolic", 18, "green"));
-        let texts = vbox(1);
-        texts.set_hexpand(true);
-        texts.append(&ellipsized(&jira::display_name().unwrap_or_else(|| "Connected".into()), &["sy-text"]));
-        texts.append(&ellipsized(&jira::host(), &["sy-muted", "sy-small"]));
-        row.append(&texts);
-        let out = button("Disconnect");
-        out.set_valign(gtk::Align::Center);
-        out.connect_clicked(|_| jira::disconnect());
-        row.append(&out);
-        root.append(&row);
+fn build_form(root: &gtk::Box, mode: &Rc<RefCell<FormMode>>, refill: Rc<dyn Fn()>) {
+    let list = jira::connections();
+    let current = mode.borrow().clone();
+    let set_mode = {
+        let (mode, refill) = (mode.clone(), refill.clone());
+        Rc::new(move |m: FormMode| {
+            *mode.borrow_mut() = m;
+            refill();
+        })
+    };
+    if list.is_empty() && current != FormMode::Adding {
+        root.append(&connection_editor(None, Rc::new(|| {})));
         return;
     }
-    root.append(&wrap_label("Connect Jira to see the ticket for a pull request and move it between statuses. Your API token stays in the system keyring.", &["sy-muted"]));
+    for c in &list {
+        if current == FormMode::Editing(c.id.clone()) {
+            let s = set_mode.clone();
+            root.append(&connection_editor(Some(c.clone()), Rc::new(move || s(FormMode::List))));
+        } else {
+            root.append(&connection_row(c, set_mode.clone(), refill.clone()));
+        }
+    }
+    if current == FormMode::Adding {
+        let s = set_mode.clone();
+        root.append(&connection_editor(None, Rc::new(move || s(FormMode::List))));
+    } else {
+        let add = gtk::Button::new();
+        add.set_child(Some(&icon_label_content("list-add-symbolic", "Add Jira connection")));
+        add.set_halign(gtk::Align::Start);
+        let s = set_mode.clone();
+        add.connect_clicked(move |_| s(FormMode::Adding));
+        root.append(&add);
+    }
+    if jira::has_several() || !jira::org_overrides().is_empty() || !jira::repo_overrides().is_empty() {
+        root.append(&routing_rules());
+    }
+}
+
+fn refresh_connection(id: String, refill: Rc<dyn Fn()>) {
+    REFRESHING.with(|r| r.borrow_mut().insert(id.clone()));
+    refill();
+    rt::spawn_local(async move {
+        jira::refresh_projects(&id).await;
+        REFRESHING.with(|r| r.borrow_mut().remove(&id));
+        refill();
+    });
+}
+
+fn connection_row(c: &jira::JiraConnection, set_mode: Rc<dyn Fn(FormMode)>, refill: Rc<dyn Fn()>) -> gtk::Box {
+    let row = hbox(10);
+    let missing = jira::known_token(&c.id) == Some(false);
+    if jira::known_token(&c.id).is_none() {
+        let (id, refill) = (c.id.clone(), refill.clone());
+        rt::spawn_local(async move {
+            if jira::token(&id).await.is_none() {
+                refill();
+            }
+        });
+    }
+    let status = if missing { colored_icon("sy-attention-symbolic", 18, "amber") } else { colored_icon("sy-check-circle-symbolic", 18, "green") };
+    status.set_tooltip_text(Some(if missing { "No API token saved for this connection" } else { "Connected" }));
+    row.append(&status);
+    let texts = vbox(1);
+    texts.set_hexpand(true);
+    let top = hbox(6);
+    top.append(&ellipsized(&c.name, &["sy-text"]));
+    if let Some(me) = &c.display_name {
+        top.append(&ellipsized(me, &["sy-muted", "sy-small"]));
+    }
+    texts.append(&top);
+    let sub = ellipsized(&c.subtitle(), &["sy-muted", "sy-small"]);
+    if !c.project_keys.is_empty() {
+        sub.set_tooltip_text(Some(&c.project_keys.join(", ")));
+    }
+    texts.append(&sub);
+    row.append(&texts);
+    if REFRESHING.with(|r| r.borrow().contains(&c.id)) {
+        row.append(&wake_spinner(14));
+    }
+    let mut menu = Menu::new();
+    let (s, id) = (set_mode.clone(), c.id.clone());
+    menu.item("Edit…", move || s(FormMode::Editing(id.clone())));
+    let (s, id) = (set_mode.clone(), c.id.clone());
+    menu.item("Reconnect with a new token…", move || s(FormMode::Editing(id.clone())));
+    let (id, r) = (c.id.clone(), refill.clone());
+    menu.item("Refresh projects", move || refresh_connection(id.clone(), r.clone()));
+    menu.section(None);
+    let (id, name) = (c.id.clone(), c.name.clone());
+    menu.item("Remove…", move || {
+        let id = id.clone();
+        crate::ui::dialogs::confirm(&format!("Remove {name}?"), Some("Its API token is deleted from the system keyring. Rules that point to it are removed too."), "Remove", true, move || jira::remove(&id));
+    });
+    let more = menu.button("view-more-symbolic", &format!("Actions for {}", c.name));
+    more.add_css_class("flat");
+    more.set_valign(gtk::Align::Center);
+    row.append(&more);
+    row
+}
+
+fn connection_editor(existing: Option<jira::JiraConnection>, done: Rc<dyn Fn()>) -> gtk::Box {
+    let configured = jira::is_configured();
+    let framed = existing.is_some() || configured;
+    let root = vbox(10);
+    if framed {
+        root.add_css_class("sy-card-flat");
+        pad(&root, 12);
+    }
+    if existing.is_none() {
+        let text = if configured {
+            "Add another Jira site. PullYard picks the right one for each ticket by its project key."
+        } else {
+            "Connect Jira to see the ticket for a pull request and move it between statuses. Your API token stays in the system keyring."
+        };
+        root.append(&wrap_label(text, &["sy-muted"]));
+    }
+    let name = gtk::Entry::new();
+    name.set_placeholder_text(Some("Name — e.g. Work A"));
+    root.append(&name);
     let site = gtk::Entry::new();
     site.set_placeholder_text(Some("Jira address — acme.atlassian.net"));
-    site.set_text(&jira::site());
     site.set_input_purpose(gtk::InputPurpose::Url);
     root.append(&site);
     let email = gtk::Entry::new();
     email.set_placeholder_text(Some("Atlassian account email (empty for a Data Center token)"));
-    email.set_text(&jira::email());
     email.set_input_purpose(gtk::InputPurpose::Email);
     root.append(&email);
+    if let Some(c) = &existing {
+        name.set_text(&c.name);
+        site.set_text(&c.site);
+        email.set_text(&c.email);
+    }
     let row = hbox(8);
     let token = gtk::PasswordEntry::new();
     token.set_show_peek_icon(true);
     token.set_hexpand(true);
-    token.set_property("placeholder-text", "API token");
-    let (connect, connect_stack) = busy_button("Connect");
+    token.set_property("placeholder-text", if existing.is_none() { "API token" } else { "New API token (leave empty to keep the current one)" });
+    let (connect, connect_stack) = busy_button(if existing.is_none() { "Connect" } else { "Save" });
     row.append(&token);
     row.append(&connect);
+    if framed {
+        let cancel = button("Cancel");
+        let d = done.clone();
+        cancel.connect_clicked(move |_| d());
+        row.append(&cancel);
+    }
     root.append(&row);
     let create = link_button("Create an API token at id.atlassian.com");
     create.set_halign(gtk::Align::Start);
@@ -215,9 +340,10 @@ fn build_form(root: &gtk::Box) {
     error.set_selectable(true);
     error.set_visible(false);
     root.append(&error);
+    let editing = existing.is_some();
     let sync = {
         let (site, token, connect) = (site.clone(), token.clone(), connect.clone());
-        move || connect.set_sensitive(!site.text().trim().is_empty() && !token.text().trim().is_empty())
+        move || connect.set_sensitive(!site.text().trim().is_empty() && (editing || !token.text().trim().is_empty()))
     };
     sync();
     let s = sync.clone();
@@ -226,21 +352,28 @@ fn build_form(root: &gtk::Box) {
     token.connect_changed(move |_| s());
     let busy = Rc::new(Cell::new(false));
     let token_entry = token.clone();
+    let id = existing.map(|c| c.id);
     let submit = Rc::new(move || {
-        if busy.get() || site.text().trim().is_empty() || token.text().trim().is_empty() {
+        if busy.get() || site.text().trim().is_empty() || (id.is_none() && token.text().trim().is_empty()) {
             return;
         }
         busy.set(true);
         connect_stack.set_visible_child_name("busy");
         error.set_visible(false);
-        let (site_v, email_v, token_v) = (site.text().to_string(), email.text().to_string(), token.text().to_string());
-        let (busy, stack, error, token) = (busy.clone(), connect_stack.clone(), error.clone(), token.clone());
+        let (name_v, site_v, email_v, token_v) = (name.text().to_string(), site.text().to_string(), email.text().to_string(), token.text().to_string());
+        let (busy, stack, error, token, done, id) = (busy.clone(), connect_stack.clone(), error.clone(), token.clone(), done.clone(), id.clone());
         rt::spawn_local(async move {
-            let result = jira::connect(site_v, email_v, token_v).await;
+            let result = match &id {
+                Some(id) => jira::update(id, &name_v, &site_v, &email_v, Some(token_v)).await,
+                None => jira::add(&name_v, &site_v, &email_v, &token_v).await.map(|_| ()),
+            };
             busy.set(false);
             stack.set_visible_child_name("label");
             match result {
-                Ok(()) => token.set_text(""),
+                Ok(()) => {
+                    token.set_text("");
+                    done();
+                }
                 Err(e) => {
                     error.set_text(&e.message);
                     error.set_visible(true);
@@ -252,6 +385,157 @@ fn build_form(root: &gtk::Box) {
     connect.connect_clicked(move |_| s());
     let s = submit.clone();
     token_entry.connect_activate(move |_| s());
+    root
+}
+
+fn routing_rules() -> gtk::Box {
+    let root = vbox(8);
+    root.set_margin_top(6);
+    root.append(&label_with("Rules", &["sy-dim", "sy-small", "sy-bold"]));
+    root.append(&wrap_label("Tickets go to the site that owns their project key. A rule wins over that: a repository rule first, then an organization rule.", &["sy-muted", "sy-small"]));
+    let mut rules: Vec<(String, String, bool)> = vec![];
+    let mut repos: Vec<(String, String)> = jira::repo_overrides().into_iter().collect();
+    repos.sort();
+    rules.extend(repos.into_iter().map(|(k, v)| (k, v, true)));
+    let mut orgs: Vec<(String, String)> = jira::org_overrides().into_iter().collect();
+    orgs.sort();
+    rules.extend(orgs.into_iter().map(|(k, v)| (k, v, false)));
+    for (key, id, is_repo) in rules {
+        let row = hbox(8);
+        row.append(&colored_icon(if is_repo { "sy-repo-symbolic" } else { "sy-project-symbolic" }, 14, "muted"));
+        row.append(&label_with(&if is_repo { key.clone() } else { format!("{key}/*") }, &["sy-mono", "sy-text"]));
+        row.append(&label_with("→", &["sy-dim"]));
+        let target = label_with(&jira::connection(Some(&id)).map(|c| c.name).unwrap_or_else(|| "—".into()), &["sy-text"]);
+        target.set_hexpand(true);
+        target.set_xalign(0.0);
+        row.append(&target);
+        let remove = icon_button("list-remove-symbolic", &format!("Remove rule for {key}"));
+        remove.set_tooltip_text(Some("Remove this rule"));
+        remove.connect_clicked(move |_| {
+            if is_repo {
+                if let Some(repo) = crate::api::models::RepoRef::from_full(&key) {
+                    jira::set_repo_override(None, &repo);
+                }
+            } else {
+                jira::set_org_override(None, &key);
+            }
+        });
+        row.append(&remove);
+        root.append(&row);
+    }
+    let list = jira::connections();
+    let add_row = hbox(8);
+    let org = gtk::Entry::new();
+    org.set_placeholder_text(Some("GitHub organization"));
+    org.set_width_chars(18);
+    add_row.append(&org);
+    let names: Vec<&str> = list.iter().map(|c| c.name.as_str()).collect();
+    let picker = gtk::DropDown::from_strings(&names);
+    picker.set_tooltip_text(Some("Jira connection"));
+    add_row.append(&picker);
+    let add = button("Add rule");
+    add_row.append(&add);
+    let sync = {
+        let (org, add) = (org.clone(), add.clone());
+        move || add.set_sensitive(!org.text().trim().is_empty())
+    };
+    sync();
+    let s = sync.clone();
+    org.connect_changed(move |_| s());
+    let ids: Vec<String> = list.iter().map(|c| c.id.clone()).collect();
+    let submit = {
+        let (org, picker) = (org.clone(), picker.clone());
+        Rc::new(move || {
+            let name = org.text().trim().trim_matches(|c| c == '@' || c == '/' || c == '*').to_string();
+            let Some(id) = ids.get(picker.selected() as usize).cloned() else { return };
+            if name.is_empty() {
+                return;
+            }
+            jira::set_org_override(Some(id), &name);
+        })
+    };
+    let s = submit.clone();
+    add.connect_clicked(move |_| s());
+    let s = submit.clone();
+    org.connect_activate(move |_| s());
+    root.append(&add_row);
+    root
+}
+
+pub fn repo_chip(repo: &crate::api::models::RepoRef) -> gtk::Box {
+    let holder = hbox(0);
+    let weak = holder.downgrade();
+    let repo = repo.clone();
+    let fill = Rc::new(move || {
+        let Some(holder) = weak.upgrade() else { return };
+        clear(&holder);
+        holder.set_visible(jira::is_configured());
+        if jira::is_configured() {
+            holder.append(&repo_chip_button(&repo));
+        }
+    });
+    fill();
+    let weak = holder.downgrade();
+    jira::on_change(move |_| {
+        if weak.upgrade().is_none() {
+            return false;
+        }
+        fill();
+        true
+    });
+    holder
+}
+
+fn repo_chip_button(repo: &crate::api::models::RepoRef) -> gtk::MenuButton {
+    let (by_repo, by_org) = jira::override_for(repo);
+    let several = jira::has_several();
+    let list = jira::connections();
+    let mark = |on: bool, text: &str| format!("{}{text}", if on { "✓ " } else { "" });
+    let automatic = match jira::connection(by_org.as_deref()) {
+        Some(c) => format!("Same as {} ({})", repo.owner, c.name),
+        None if several => "Automatic — by project key".to_string(),
+        None => "Automatic".to_string(),
+    };
+    let mut menu = Menu::new();
+    menu.section(Some(&format!("Jira for {}", repo.full())));
+    let r = repo.clone();
+    menu.item(&mark(by_repo.is_none(), &automatic), move || jira::set_repo_override(None, &r));
+    for c in &list {
+        let (r, id) = (repo.clone(), c.id.clone());
+        menu.item(&mark(by_repo.as_deref() == Some(c.id.as_str()), &c.name), move || jira::set_repo_override(Some(id.clone()), &r));
+    }
+    if several {
+        menu.section(Some(&format!("All of {}", repo.owner)));
+        let owner = repo.owner.clone();
+        menu.item(&mark(by_org.is_none(), "By project key"), move || jira::set_org_override(None, &owner));
+        for c in &list {
+            let (owner, id) = (repo.owner.clone(), c.id.clone());
+            menu.item(&mark(by_org.as_deref() == Some(c.id.as_str()), &c.name), move || jira::set_org_override(Some(id.clone()), &owner));
+        }
+    }
+    let title = jira::connection(jira::connection_for_repo(repo).as_deref()).map(|c| c.name).unwrap_or_else(|| "Jira: by key".into());
+    let b = gtk::MenuButton::new();
+    b.add_css_class("flat");
+    b.add_css_class("chip-button");
+    b.set_child(Some(&chip(&title, "sky", Some("sy-ticket-symbolic"), false)));
+    b.set_tooltip_text(Some("Which Jira this repository's tickets come from"));
+    b.set_valign(gtk::Align::Center);
+    menu.apply_to(&b);
+    b
+}
+
+pub fn repo_badge(full: &str) -> Option<gtk::Box> {
+    if !jira::has_several() {
+        return None;
+    }
+    let repo = crate::api::models::RepoRef::from_full(full)?;
+    let c = jira::connection(jira::connection_for_repo(&repo).as_deref())?;
+    let b = hbox(3);
+    b.append(&colored_icon("sy-ticket-symbolic", 10, "sky"));
+    b.append(&label_with(&c.name, &["fg-sky", "sy-tiny"]));
+    b.set_tooltip_text(Some(&format!("Jira tickets come from {}", c.name)));
+    b.set_valign(gtk::Align::Center);
+    Some(b)
 }
 
 pub struct JiraTab {
@@ -417,7 +701,7 @@ impl JiraTab {
             if self.issues.borrow().contains_key(&key) || self.errors.borrow().contains_key(&key) {
                 continue;
             }
-            match jira::cached(&key) {
+            match jira::cached(&key, Some(&self.model.r.repo)) {
                 Some(hit) => {
                     self.issues.borrow_mut().insert(key, hit);
                 }
@@ -430,25 +714,17 @@ impl JiraTab {
             return;
         }
         let weak = Rc::downgrade(self);
+        let repo = self.model.r.repo.clone();
         rt::spawn_local(async move {
-            let Some(client) = jira::client().await else {
-                if let Some(me) = weak.upgrade() {
-                    me.pending.set(0);
-                    me.render();
-                }
-                return;
-            };
             for key in missing {
-                let c = client.clone();
-                let k = key.clone();
                 let weak = weak.clone();
+                let repo = repo.clone();
                 rt::spawn_local(async move {
-                    let result = rt::run(async move { c.issue(&k).await }).await;
+                    let result = jira::fetch_issue(&key, Some(&repo)).await;
                     let Some(me) = weak.upgrade() else { return };
                     me.pending.set(me.pending.get().saturating_sub(1));
                     match result {
                         Ok(issue) => {
-                            jira::remember(&issue);
                             me.errors.borrow_mut().remove(&key);
                             me.issues.borrow_mut().insert(key, issue);
                         }
@@ -514,9 +790,10 @@ impl JiraTab {
         texts.set_valign(gtk::Align::Center);
         let title = if count == 1 { "1 linked ticket".to_string() } else { format!("{count} linked tickets") };
         texts.append(&ellipsized(&title, &["sy-heading", "sy-text"]));
-        let host = jira::host();
-        if !host.is_empty() {
-            texts.append(&ellipsized(&host, &["sy-muted", "sy-small"]));
+        let loaded: Vec<JiraIssue> = keys(&self.model).iter().filter_map(|k| self.issues.borrow().get(k).cloned()).collect();
+        let subtitle = jira::header_subtitle(&loaded);
+        if !subtitle.is_empty() {
+            texts.append(&ellipsized(&subtitle, &["sy-muted", "sy-small"]));
         }
         row.append(&texts);
         if self.pending.get() > 0 {
@@ -670,12 +947,8 @@ impl JiraTab {
             b.set_halign(gtk::Align::Start);
             b.set_tooltip_text(Some("Parent ticket — open in Jira"));
             b.set_child(Some(&line));
-            let key = parent.clone();
-            b.connect_clicked(move |_| {
-                if let Some(url) = jira::browse_url(&key) {
-                    util::open_url(&url);
-                }
-            });
+            let url = format!("{}/browse/{parent}", issue.site_base());
+            b.connect_clicked(move |_| util::open_url(&url));
             c.append(&b);
         }
         let error_label = wrap_label("", &["fg-red", "sy-small"]);
@@ -700,6 +973,11 @@ impl JiraTab {
         head.append(&label_with(&issue.key, &["sy-mono", "sy-bold", "sy-text"]));
         if let Some(t) = &issue.kind {
             head.append(&ellipsized(t, &["sy-muted", "sy-small"]));
+        }
+        if let Some(c) = jira::connection(issue.connection_id.as_deref()).filter(|_| jira::has_several()) {
+            let tag = chip(&c.name, "sky", None, false);
+            tag.set_tooltip_text(Some(&format!("From {}", c.host())));
+            head.append(&tag);
         }
         head.append(&spacer());
         head.append(&self.status_menu(&issue, show_error));
@@ -816,16 +1094,16 @@ impl JiraTab {
         placeholder.attach(&mb);
         mb.set_popover(Some(&popover));
         let mover: Rc<dyn Fn(String)> = {
-            let (key, weak, mb_weak) = (issue.key.clone(), Rc::downgrade(self), mb.downgrade());
+            let (key, weak, mb_weak, conn) = (issue.key.clone(), Rc::downgrade(self), mb.downgrade(), issue.connection_id.clone());
             Rc::new(move |id: String| {
                 let Some(mb) = mb_weak.upgrade() else { return };
                 mb.set_sensitive(false);
                 pill.dot.set_visible(false);
                 pill.busy.set_visible(true);
                 show_error(None);
-                let (key, weak, mb_weak, pill, show_error) = (key.clone(), weak.clone(), mb_weak.clone(), pill.clone(), show_error.clone());
+                let (key, weak, mb_weak, pill, show_error, conn) = (key.clone(), weak.clone(), mb_weak.clone(), pill.clone(), show_error.clone(), conn.clone());
                 rt::spawn_local(async move {
-                    let result = match jira::client().await {
+                    let result = match jira::client(conn.as_deref()).await {
                         Some(client) => {
                             let k = key.clone();
                             rt::run(async move {
@@ -842,7 +1120,8 @@ impl JiraTab {
                     pill.busy.set_visible(false);
                     pill.dot.set_visible(true);
                     match result {
-                        Ok(issue) => {
+                        Ok(mut issue) => {
+                            issue.connection_id = conn;
                             jira::remember(&issue);
                             if let Some(me) = weak.upgrade() {
                                 me.issues.borrow_mut().insert(issue.key.clone(), issue);
@@ -855,14 +1134,14 @@ impl JiraTab {
             })
         };
         let state = Rc::new(Cell::new(false));
-        let (key, mb_weak) = (issue.key.clone(), mb.downgrade());
+        let (key, mb_weak, conn) = (issue.key.clone(), mb.downgrade(), issue.connection_id.clone());
         popover.connect_show(move |p| {
             if state.replace(true) {
                 return;
             }
-            let (key, mb_weak, popover, mover, state) = (key.clone(), mb_weak.clone(), p.clone(), mover.clone(), state.clone());
+            let (key, mb_weak, popover, mover, state, conn) = (key.clone(), mb_weak.clone(), p.clone(), mover.clone(), state.clone(), conn.clone());
             rt::spawn_local(async move {
-                let transitions = match jira::client().await {
+                let transitions = match jira::client(conn.as_deref()).await {
                     Some(client) => rt::run(async move { client.transitions(&key).await }).await.unwrap_or_default(),
                     None => vec![],
                 };

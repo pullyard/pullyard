@@ -144,6 +144,7 @@ struct State {
     worktree_existing: RefCell<Option<String>>,
     worktree_removing: Cell<bool>,
     worktree_error: RefCell<Option<String>>,
+    tickets: RefCell<Vec<crate::jira::JiraIssue>>,
 }
 
 impl State {
@@ -167,7 +168,7 @@ impl State {
         let threads = self.threads();
         let selected = self.selected.borrow();
         let chosen: Vec<&ReviewThread> = threads.iter().filter(|t| selected.contains(&t.id)).collect();
-        fix_prompt::build(&self.pr, &self.model.r.repo, &chosen, &fix_prompt::general_feedback(&self.pr), &options)
+        fix_prompt::build(&self.pr, &self.model.r.repo, &chosen, &fix_prompt::general_feedback(&self.pr), &options) + &fix_prompt::tickets(&self.tickets.borrow())
     }
 
     fn prompt(&self) -> String {
@@ -577,7 +578,29 @@ fn present(model: Rc<PrModel>, ci: Option<Rc<CiFix>>) -> Option<Rc<State>> {
         worktree_existing: RefCell::new(None),
         worktree_removing: Cell::new(false),
         worktree_error: RefCell::new(None),
+        tickets: RefCell::new(vec![]),
     });
+    if ci.is_none() && crate::jira::is_configured() {
+        let keys: Vec<String> = super::jira::keys(&model).into_iter().take(3).collect();
+        let repo = model.r.repo.clone();
+        let weak = Rc::downgrade(&state);
+        crate::rt::spawn_local(async move {
+            let mut found = vec![];
+            for key in keys {
+                if let Ok(issue) = crate::jira::fetch_issue(&key, Some(&repo)).await {
+                    found.push(issue);
+                }
+            }
+            let Some(st) = weak.upgrade() else { return };
+            if found.is_empty() {
+                return;
+            }
+            *st.tickets.borrow_mut() = found;
+            if st.custom.borrow().is_none() {
+                st.refresh_prompt();
+            }
+        });
+    }
 
     let composed_box = vbox(4);
     match &found {
