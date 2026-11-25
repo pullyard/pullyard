@@ -505,17 +505,12 @@ public sealed class ShellView : Grid
             return;
         }
         if (app.Section.Kind == SectionKind.Claude) return;
-        var tile = Ui.IconTile("", "violet", 56);
-        tile.HorizontalAlignment = HorizontalAlignment.Center;
-        tile.Opacity = 0.9;
-        var a = Ui.Text(L.T("Detail_Empty", "Select a pull request, issue or project"), 13, "muted");
-        a.HorizontalAlignment = HorizontalAlignment.Center;
-        var b = Ui.Text(L.T("Detail_EmptyHints", "Ctrl+L to open by link · Ctrl+K for the command palette · Ctrl+/ for all shortcuts"), 12, "dim");
-        b.HorizontalAlignment = HorizontalAlignment.Center;
-        var panel = Ui.V(12, tile, a, b);
-        panel.HorizontalAlignment = HorizontalAlignment.Center;
-        panel.VerticalAlignment = VerticalAlignment.Center;
-        detailHost.Content = panel;
+        detailHost.Content = new EmptyHarbor("detail-empty", L.T("Detail_EmptyTitle", "Nothing open yet"), L.T("Detail_Empty", "Select a pull request, issue or project"), new[]
+        {
+            ("Ctrl+L", L.T("Detail_HintLink", "Open by link")),
+            ("Ctrl+K", L.T("Detail_HintPalette", "Command palette")),
+            ("Ctrl+/", L.T("Detail_HintShortcuts", "All shortcuts"))
+        }, nextUp: true);
     }
 
     private void OnRoute(Route route, bool push)
