@@ -151,19 +151,8 @@ public sealed class FeedRow : CodeRow
         var signals = Ui.H(8);
         if (item.IsPR)
         {
-            if (Ui.CiIcon(item.CiState, 11) is { } ci) signals.Children.Add(ci);
-            switch (item.ReviewDecision)
-            {
-                case "APPROVED":
-                    signals.Children.Add(Ui.StatusGlyph("\uE8FB", 11, "green", L.T("Review_Approved", "Approved")));
-                    break;
-                case "CHANGES_REQUESTED":
-                    signals.Children.Add(Ui.StatusGlyph("\uE7BA", 11, "red", L.T("Review_ChangesRequested", "Changes requested")));
-                    break;
-                case "REVIEW_REQUIRED":
-                    signals.Children.Add(Ui.StatusGlyph("\uE7B3", 11, "muted", L.T("Review_Required", "Review required")));
-                    break;
-            }
+            if (Ui.ReviewChip(item.ReviewDecision) is { } review) signals.Children.Add(review);
+            if (Ui.CiChip(item.CiState) is { } ci) signals.Children.Add(ci);
         }
         if (item.Comments.TotalCount > 0)
         {

@@ -445,13 +445,10 @@ public sealed class PRContent : Grid, IShortcutHost
         }
         if (checks.Count > 0)
         {
-            var chips = Ui.H(6);
-            if (anyFailed > 0) chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "red"), Ui.Caption(anyFailed.ToString(), "red")));
-            if (anyPending > 0) chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "amber"), Ui.Caption(anyPending.ToString(), "amber")));
-            chips.Children.Add(Ui.H(2, Ui.Glyph("", 11, "green"), Ui.Caption(ok.ToString(), "green")));
+            var chips = Ui.CheckChips(anyFailed, anyPending, ok);
             var b = new Button { Content = chips, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(4, 0, 4, 0) };
             Ui.Tip(b, L.T("PR_Checks", "Checks"));
-            Ui.Named(b, L.T("PR_Checks", "Checks"), L.F("PR_ChecksSummary", "{0} failed, {1} pending, {2} passed", anyFailed, anyPending, ok));
+            Ui.Named(b, L.T("PR_Checks", "Checks"), Ui.CheckSummary(anyFailed, anyPending, ok));
             b.Click += (_, _) => model.Tab = PRTab.Checks;
             row.Children.Add(b);
         }
@@ -878,7 +875,7 @@ public sealed class PRContent : Grid, IShortcutHost
         var checks = pr.Checks;
         var failed = checks.Count(c => c.Outcome == CheckOutcome.Failure);
         var pending = checks.Count(c => c.Outcome == CheckOutcome.Pending);
-        var summary = checks.Count == 0 ? "0" : failed > 0 ? $"✕{failed}" : pending > 0 ? $"…{pending}" : $"✓{checks.Count}";
+        var summary = checks.Count == 0 ? "0" : failed > 0 ? L.F("Checks_FailingN", "{0} failing", failed) : pending > 0 ? L.F("Checks_RunningN", "{0} running", pending) : L.F("Checks_PassingN", "{0} passing", checks.Count);
         var color = failed > 0 ? "red" : pending > 0 ? "amber" : checks.Count == 0 ? "muted" : "green";
         tabs.SetTabs(new TabSpec[]
         {
