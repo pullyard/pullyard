@@ -1,0 +1,221 @@
+import CryptoKit
+import Foundation
+import Network
+
+enum PYLink {
+    static let serviceType = "_pullyard._tcp"
+    static let version = 1
+    static let preferredPort: UInt16 = 47811
+    static let maxFrame = 4 * 1024 * 1024
+}
+
+struct PYLinkPairing: Codable, Equatable {
+    var v = PYLink.version
+    let name: String
+    let id: String
+    let key: String
+    let code: String
+    let hosts: [String]
+    let port: UInt16
+
+    var url: String {
+        let data = (try? JSONEncoder().encode(self)) ?? Data()
+        let encoded = data.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        return "pullyard://pair?d=\(encoded)"
+    }
+
+    static func parse(_ string: String) -> PYLinkPairing? {
+        guard let components = URLComponents(string: string.trimmingCharacters(in: .whitespacesAndNewlines)), components.scheme == "pullyard", components.host == "pair",
+              var value = components.queryItems?.first(where: { $0.name == "d" })?.value else { return nil }
+        value = value.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while value.count % 4 != 0 { value += "=" }
+        guard let data = Data(base64Encoded: value) else { return nil }
+        return try? JSONDecoder().decode(PYLinkPairing.self, from: data)
+    }
+}
+
+struct PYLinkHello: Codable {
+    let v: Int
+    let deviceID: String
+    let deviceName: String
+    let deviceKey: String
+    let nonce: String
+    var pairingCode: String?
+}
+
+struct PYLinkHelloReply: Codable {
+    let ok: Bool
+    let desktopID: String
+    let desktopName: String
+    let nonce: String
+    var reason: String?
+}
+
+struct PYLinkPermission: Codable, Equatable, Identifiable {
+    let id: String
+    let tool: String
+    let summary: String
+    var detail: String?
+}
+
+struct PYLinkItem: Codable, Equatable, Identifiable {
+    let id: String
+    let kind: String
+    var text: String
+    var tool: String?
+    var status: String?
+    var permission: PYLinkPermission?
+}
+
+struct PYLinkSessionState: Codable, Equatable {
+    var running: Bool
+    var busy: Bool
+    var status: String?
+    var error: String?
+    var pending: [PYLinkPermission]
+}
+
+struct PYLinkSession: Codable, Equatable, Identifiable {
+    let id: String
+    var title: String
+    var folder: String
+    var state: String
+    var repo: String?
+    var number: Int?
+}
+
+struct PYLinkMessage: Codable {
+    var type: String
+    var id: String?
+    var session: String?
+    var repo: String?
+    var number: Int?
+    var kind: String?
+    var text: String?
+    var requestID: String?
+    var allow: Bool?
+    var always: Bool?
+    var sessions: [PYLinkSession]?
+    var items: [PYLinkItem]?
+    var removed: [String]?
+    var order: [String]?
+    var state: PYLinkSessionState?
+    var error: String?
+    var url: String?
+
+    init(type: String) { self.type = type }
+}
+
+enum PYLinkCrypto {
+    static func publicKeyString(_ key: Curve25519.KeyAgreement.PrivateKey) -> String {
+        key.publicKey.rawRepresentation.base64EncodedString()
+    }
+
+    static func publicKey(_ string: String) -> Curve25519.KeyAgreement.PublicKey? {
+        guard let data = Data(base64Encoded: string) else { return nil }
+        return try? Curve25519.KeyAgreement.PublicKey(rawRepresentation: data)
+    }
+
+    static func nonce() -> String {
+        var bytes = [UInt8](repeating: 0, count: 24)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return Data(bytes).base64EncodedString()
+    }
+
+    static func sessionKey(privateKey: Curve25519.KeyAgreement.PrivateKey, peer: Curve25519.KeyAgreement.PublicKey, clientNonce: String, serverNonce: String) throws -> SymmetricKey {
+        let shared = try privateKey.sharedSecretFromKeyAgreement(with: peer)
+        let salt = Data((clientNonce + "|" + serverNonce).utf8)
+        return shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: salt, sharedInfo: Data("pullyard-link-v1".utf8), outputByteCount: 32)
+    }
+
+    static func seal(_ data: Data, key: SymmetricKey, direction: String) throws -> Data {
+        try ChaChaPoly.seal(data, using: key, authenticating: Data(direction.utf8)).combined
+    }
+
+    static func open(_ data: Data, key: SymmetricKey, direction: String) throws -> Data {
+        try ChaChaPoly.open(ChaChaPoly.SealedBox(combined: data), using: key, authenticating: Data(direction.utf8))
+    }
+}
+
+final class PYLinkChannel: @unchecked Sendable {
+    let connection: NWConnection
+    private var buffer = Data()
+    private let queue: DispatchQueue
+    private var key: SymmetricKey?
+    private let sendDirection: String
+    private let receiveDirection: String
+    var onFrame: ((Data) -> Void)?
+    var onClose: ((Error?) -> Void)?
+    private var closed = false
+
+    init(connection: NWConnection, isServer: Bool, queue: DispatchQueue) {
+        self.connection = connection
+        self.queue = queue
+        sendDirection = isServer ? "s2c" : "c2s"
+        receiveDirection = isServer ? "c2s" : "s2c"
+    }
+
+    func start() {
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .failed(let error): self?.close(error)
+            case .cancelled: self?.close(nil)
+            default: break
+            }
+        }
+        connection.start(queue: queue)
+        receive()
+    }
+
+    func encrypt(with key: SymmetricKey) { self.key = key }
+
+    func send(_ payload: Data) {
+        let body: Data
+        if let key { guard let sealed = try? PYLinkCrypto.seal(payload, key: key, direction: sendDirection) else { return }; body = sealed } else { body = payload }
+        var length = UInt32(body.count).bigEndian
+        var frame = Data(bytes: &length, count: 4)
+        frame.append(body)
+        connection.send(content: frame, completion: .contentProcessed { [weak self] error in if let error { self?.close(error) } })
+    }
+
+    func send<T: Encodable>(json value: T) {
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        send(data)
+    }
+
+    func close(_ error: Error?) {
+        guard !closed else { return }
+        closed = true
+        connection.cancel()
+        onClose?(error)
+    }
+
+    private func receive() {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, complete, error in
+            guard let self else { return }
+            if let data, !data.isEmpty {
+                self.buffer.append(data)
+                self.drain()
+            }
+            if let error { self.close(error); return }
+            if complete { self.close(nil); return }
+            self.receive()
+        }
+    }
+
+    private func drain() {
+        while buffer.count >= 4 {
+            let length = Int(buffer.prefix(4).reduce(UInt32(0)) { ($0 << 8) | UInt32($1) })
+            guard length <= PYLink.maxFrame else { close(nil); return }
+            guard buffer.count >= 4 + length else { return }
+            let body = buffer.subdata(in: buffer.startIndex + 4 ..< buffer.startIndex + 4 + length)
+            buffer.removeSubrange(buffer.startIndex ..< buffer.startIndex + 4 + length)
+            if let key {
+                guard let opened = try? PYLinkCrypto.open(body, key: key, direction: receiveDirection) else { close(nil); return }
+                onFrame?(opened)
+            } else {
+                onFrame?(body)
+            }
+        }
+    }
+}

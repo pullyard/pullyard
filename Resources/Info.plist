@@ -48,5 +48,11 @@
 	<string>NSApplication</string>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>PullYard lets your paired iPhone connect to this Mac to start and follow agent fixes.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_pullyard._tcp</string>
+	</array>
 </dict>
 </plist>

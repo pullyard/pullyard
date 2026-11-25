@@ -295,6 +295,7 @@ final class AppModel {
         URLCache.shared = URLCache(memoryCapacity: 40 << 20, diskCapacity: 200 << 20)
         Diagnostics.shared.start()
         DispatchQueue.main.async { [weak self] in
+            if let self { PYLinkServer.shared.attach(self) }
             self?.claude.observeBadge()
             AppDelegate.workspace = self?.claude
             AppDelegate.flushDrafts = { [weak self] in self?.flushDrafts() }

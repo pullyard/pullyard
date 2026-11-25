@@ -38,6 +38,9 @@ struct SettingsView: View {
             integrationsForm
                 .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
                 .tag("integrations")
+            PYLinkSettingsView()
+                .tabItem { Label("iPhone", systemImage: "iphone") }
+                .tag("iphone")
             advancedForm
                 .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
                 .tag("advanced")
