@@ -8,6 +8,7 @@ struct MacLinkSection: View {
     @State private var pairingError: String?
     @State private var manualHost = ""
     @State private var confirmUnpair = false
+    @AppStorage(AgentActivities.enabledKey) private var liveActivity = true
 
     var body: some View {
         Section {
@@ -29,6 +30,8 @@ struct MacLinkSection: View {
                     Button { link.connectIfNeeded() } label: { Label("Connect", systemImage: "bolt.horizontal.circle") }
                 }
                 NavigationLink(value: Route.agents) { Label("Agent sessions", systemImage: "bubble.left.and.text.bubble.right") }
+                Toggle(isOn: $liveActivity) { Label("Live Activity for agents", systemImage: "platter.filled.top.iphone") }
+                    .onChange(of: liveActivity) { _, on in if !on { AgentActivities.endAll() } }
                 HStack {
                     TextField("Address for VPN / Tailscale (host:port)", text: $manualHost)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()

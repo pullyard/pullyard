@@ -5510,6 +5510,16 @@
           }
         }
       }
+    },
+    "Live Activity for agents" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live Activity для агентов"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

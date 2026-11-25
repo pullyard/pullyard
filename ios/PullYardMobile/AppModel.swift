@@ -434,8 +434,10 @@ final class AppModel: ObservableObject {
         }
         let current = generation
         isRefreshing = true
-        for key in keys where (self.lists[key]?.isEmpty ?? true) { listStates[key] = .loading }
-        if includeInbox && notifications.isEmpty { inboxState = .loading }
+        for key in keys where self.lists[key] == nil { listStates[key] = .loading }
+        if includeInbox && notifications.isEmpty {
+            if case .loaded = inboxState {} else { inboxState = .loading }
+        }
         defer { if current == generation { isRefreshing = false } }
 
         let identityTask: Task<Result<(user: GitHubUser, scopes: [String]), Error>, Never>? = includeUser ? Task { await Self.capture { try await client.currentUser() } } : nil

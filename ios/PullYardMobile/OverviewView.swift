@@ -2,6 +2,7 @@ import SwiftUI
 
 struct OverviewView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var pulling = false
 
     private var waiting: [PullRequest] { model.pulls(for: .queue(.needsMyReview)) }
     private var reviewKey: PRListKey { OverviewFilter.queue(.needsMyReview).listKey }
@@ -68,8 +69,12 @@ struct OverviewView: View {
             .frame(maxWidth: .infinity)
         }
         .background(BrandBackdrop())
-        .refreshable { await model.refreshOverview() }
-        .pullToRefreshLogo(isRefreshing: model.isRefreshing)
+        .refreshable {
+            pulling = true
+            await model.refreshOverview()
+            pulling = false
+        }
+        .pullToRefreshLogo(isRefreshing: pulling)
         .navigationTitle("Overview")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -78,7 +83,10 @@ struct OverviewView: View {
                     .accessibilityLabel("Refresh")
             }
         }
-        .task { await model.refreshOverview() }
+        .task {
+            if let updated = model.lastUpdated, Date.now.timeIntervalSince(updated) < 60 { return }
+            await model.refreshOverview()
+        }
         .feedbackChrome { Task { await model.refreshOverview() } }
     }
 

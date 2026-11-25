@@ -9,6 +9,16 @@ enum AgentActivities {
     private static var pending: [String: State] = [:]
     private static var inFlight: Set<String> = []
 
+    static let enabledKey = "agents.liveActivity"
+
+    static var isEnabled: Bool { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
+
+    static func endAll() {
+        pending = [:]
+        let activities = Activity<AgentActivityAttributes>.activities
+        Task { for activity in activities { await activity.end(nil, dismissalPolicy: .immediate) } }
+    }
+
     static var hasActive: Bool { Activity<AgentActivityAttributes>.activities.contains { $0.activityState == .active } }
 
     static func track(_ session: String) { tracked.insert(session) }
@@ -21,6 +31,7 @@ enum AgentActivities {
     }
 
     static func sync(session: String, chat: AgentChat, mac: String) {
+        guard isEnabled else { return }
         let current = activity(for: session)
         guard tracked.contains(session) || current != nil else { return }
         let state = makeState(chat, previous: current?.content.state)
