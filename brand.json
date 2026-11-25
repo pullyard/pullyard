@@ -1,0 +1,212 @@
+{
+  "name": "PullYard",
+  "source": "Sources/PullYard/Shared/Theme.swift",
+  "colors": {
+    "window": {
+      "light": "#F7F5F0",
+      "dark": "#0C1220"
+    },
+    "sidebar": {
+      "light": "#EFECE5",
+      "dark": "#0A0F1B"
+    },
+    "list": {
+      "light": "#F3F1EC",
+      "dark": "#0E1526"
+    },
+    "panel": {
+      "light": "#FDFCFA",
+      "dark": "#101828"
+    },
+    "raised": {
+      "light": "#FFFFFF",
+      "dark": "#152036"
+    },
+    "sunken": {
+      "light": "#F1EEE8",
+      "dark": "#0A101C"
+    },
+    "bar": {
+      "light": "#F5F3EE",
+      "dark": "#111A2C"
+    },
+    "line": {
+      "light": "#1A2333",
+      "dark": "#A0AEC4",
+      "lightAlpha": 0.12,
+      "darkAlpha": 0.14
+    },
+    "lineStrong": {
+      "light": "#1A2333",
+      "dark": "#A0AEC4",
+      "lightAlpha": 0.2,
+      "darkAlpha": 0.22
+    },
+    "text": {
+      "light": "#1A2333",
+      "dark": "#E6EBF2"
+    },
+    "muted": {
+      "light": "#5F6B7E",
+      "dark": "#8693A8"
+    },
+    "dim": {
+      "light": "#646C80",
+      "dark": "#7D899F"
+    },
+    "accent": {
+      "light": "#2A8BC8",
+      "dark": "#5BB8EC"
+    },
+    "link": {
+      "light": "#1F6FA3",
+      "dark": "#5BB8EC"
+    },
+    "sky": {
+      "light": "#1F7FB8",
+      "dark": "#5BB8EC"
+    },
+    "violet": {
+      "light": "#6B55D6",
+      "dark": "#9D8CF0"
+    },
+    "coral": {
+      "light": "#D8513F",
+      "dark": "#EE6F5F"
+    },
+    "coralInk": {
+      "light": "#B8412F",
+      "dark": "#EE6F5F"
+    },
+    "coralFill": {
+      "light": "#C24533",
+      "dark": "#C24533"
+    },
+    "onCoral": {
+      "light": "#FFFFFF",
+      "dark": "#FFFFFF"
+    },
+    "green": {
+      "light": "#2E8A57",
+      "dark": "#5DBE8A"
+    },
+    "red": {
+      "light": "#C2412F",
+      "dark": "#E8746A"
+    },
+    "amber": {
+      "light": "#B7791F",
+      "dark": "#E8B44C"
+    },
+    "amberInk": {
+      "light": "#9A6416",
+      "dark": "#E8B44C"
+    },
+    "harborLine": {
+      "light": "#1F6FA3",
+      "dark": "#7DD3FC",
+      "lightAlpha": 0.22,
+      "darkAlpha": 0.2
+    },
+    "wake": {
+      "light": "#1F6FA3",
+      "dark": "#7DD3FC",
+      "lightAlpha": 0.55,
+      "darkAlpha": 0.75
+    },
+    "teal": {
+      "light": "#23877A",
+      "dark": "#56C2B0"
+    },
+    "indigo": {
+      "light": "#4E5BC4",
+      "dark": "#8C97E8"
+    },
+    "slate": {
+      "light": "#6B7486",
+      "dark": "#939CB0"
+    },
+    "addBG": {
+      "light": "#2E8A57",
+      "dark": "#5DBE8A",
+      "lightAlpha": 0.11,
+      "darkAlpha": 0.1
+    },
+    "delBG": {
+      "light": "#C2412F",
+      "dark": "#E8746A",
+      "lightAlpha": 0.1,
+      "darkAlpha": 0.11
+    },
+    "hunkBG": {
+      "light": "#1F7FB8",
+      "dark": "#5BB8EC",
+      "lightAlpha": 0.08,
+      "darkAlpha": 0.08
+    },
+    "addWord": {
+      "light": "#2E8A57",
+      "dark": "#5DBE8A",
+      "lightAlpha": 0.26,
+      "darkAlpha": 0.28
+    },
+    "delWord": {
+      "light": "#C2412F",
+      "dark": "#E8746A",
+      "lightAlpha": 0.22,
+      "darkAlpha": 0.28
+    },
+    "addText": {
+      "light": "#1E5A3A",
+      "dark": "#C2E9D2"
+    },
+    "delText": {
+      "light": "#7A2A20",
+      "dark": "#F3C4BE"
+    },
+    "hunkText": {
+      "light": "#1F6E9E",
+      "dark": "#8CCBEE"
+    },
+    "gutter": {
+      "light": "#687084",
+      "dark": "#7D899F"
+    },
+    "accentFill": {
+      "light": "#1D70A6",
+      "dark": "#1D70A6"
+    },
+    "greenFill": {
+      "light": "#2B7F50",
+      "dark": "#2B7F50"
+    },
+    "violetFill": {
+      "light": "#5E48C8",
+      "dark": "#5E48C8"
+    },
+    "redFill": {
+      "light": "#B23A2A",
+      "dark": "#B23A2A"
+    },
+    "slateFill": {
+      "light": "#5B6476",
+      "dark": "#5B6476"
+    },
+    "onAccent": {
+      "light": "#FFFFFF",
+      "dark": "#FFFFFF"
+    },
+    "hover": {
+      "light": "#1A2333",
+      "dark": "#E6EBF2",
+      "lightAlpha": 0.04,
+      "darkAlpha": 0.05
+    },
+    "selected": {
+      "light": "#1A2333",
+      "dark": "#E6EBF2",
+      "lightAlpha": 0.07,
+      "darkAlpha": 0.08
+    }
+  }
+}
