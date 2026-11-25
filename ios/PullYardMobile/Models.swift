@@ -361,10 +361,10 @@ enum LoadState: Equatable {
 }
 
 enum AppTab: String, CaseIterable, Identifiable, Codable {
-    case pulls = "Pull requests", projects = "Projects", inbox = "Inbox", search = "Search", settings = "Settings"
+    case pulls = "Pull requests", projects = "Projects", inbox = "Inbox", agents = "Agents", search = "Search", settings = "Settings"
     var id: String { rawValue }
     var symbol: String {
-        switch self { case .inbox: "tray.full"; case .pulls: "arrow.triangle.pull"; case .projects: "folder"; case .search: "magnifyingglass"; case .settings: "gearshape" }
+        switch self { case .inbox: "tray.full"; case .pulls: "arrow.triangle.pull"; case .projects: "folder"; case .agents: "wand.and.stars"; case .search: "magnifyingglass"; case .settings: "gearshape" }
     }
 }
 

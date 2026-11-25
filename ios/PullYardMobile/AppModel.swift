@@ -408,6 +408,7 @@ final class AppModel: ObservableObject {
         case .pulls: await refreshAll().value
         case .inbox: await refreshInbox()
         case .projects: await refreshProjects()
+        case .agents: await LinkClient.shared.refreshSessions()
         case .search, .settings: break
         }
     }

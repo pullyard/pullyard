@@ -252,8 +252,9 @@ final class PYLinkServer {
                 try? await Task.sleep(for: .milliseconds(350))
                 guard let self else { return }
                 let bridge = PYLinkBridge(server: self, app: self.app)
-                for client in self.clients.values where client.authenticated && !client.subscriptions.isEmpty {
-                    bridge.pushUpdates(to: client)
+                for client in self.clients.values where client.authenticated {
+                    bridge.pushSessions(to: client)
+                    if !client.subscriptions.isEmpty { bridge.pushUpdates(to: client) }
                 }
             }
         }
@@ -307,6 +308,7 @@ final class PYLinkClient {
     var sentItems: [String: [String: PYLinkItem]] = [:]
     var sentOrder: [String: [String]] = [:]
     var sentState: [String: PYLinkSessionState] = [:]
+    var sentSessions: [PYLinkSession]?
 
     init(channel: PYLinkChannel) { self.channel = channel }
 }

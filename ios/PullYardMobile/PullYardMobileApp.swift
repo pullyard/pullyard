@@ -39,6 +39,7 @@ final class AppRouter: ObservableObject {
     @Published var inboxPath: [Route] = []
     @Published var searchPath: [Route] = []
     @Published var settingsPath: [Route] = []
+    @Published var agentsPath: [Route] = []
 
     private struct Snapshot: Codable { var pulls: [Route]; var projects: [Route]?; var inbox: [Route]; var search: [Route] }
 
@@ -49,7 +50,7 @@ final class AppRouter: ObservableObject {
         pullsPath = snapshot.pulls; projectsPath = snapshot.projects ?? []; inboxPath = snapshot.inbox; searchPath = snapshot.search
     }
 
-    func reset() { pullsPath = []; projectsPath = []; inboxPath = []; searchPath = []; settingsPath = [] }
+    func reset() { pullsPath = []; projectsPath = []; inboxPath = []; searchPath = []; settingsPath = []; agentsPath = [] }
 
     func replaceTop(with route: Route, in tab: AppTab) {
         switch tab {
@@ -58,6 +59,7 @@ final class AppRouter: ObservableObject {
         case .inbox: if inboxPath.isEmpty { inboxPath = [route] } else { inboxPath[inboxPath.count - 1] = route }
         case .search: if searchPath.isEmpty { searchPath = [route] } else { searchPath[searchPath.count - 1] = route }
         case .settings: if settingsPath.isEmpty { settingsPath = [route] } else { settingsPath[settingsPath.count - 1] = route }
+        case .agents: if agentsPath.isEmpty { agentsPath = [route] } else { agentsPath[agentsPath.count - 1] = route }
         }
     }
 
@@ -68,6 +70,7 @@ final class AppRouter: ObservableObject {
         case .inbox: inboxPath.last
         case .search: searchPath.last
         case .settings: settingsPath.last
+        case .agents: agentsPath.last
         }
     }
 
@@ -75,6 +78,7 @@ final class AppRouter: ObservableObject {
         switch tab {
         case .pulls: pullsPath.append(route)
         case .settings: settingsPath.append(route)
+        case .agents: agentsPath.append(route)
         case .projects: projectsPath.append(route)
         case .inbox: inboxPath.append(route)
         case .search: searchPath.append(route)
@@ -88,6 +92,7 @@ final class AppRouter: ObservableObject {
         switch tab {
         case .pulls: trim(&pullsPath)
         case .settings: trim(&settingsPath)
+        case .agents: trim(&agentsPath)
         case .projects: trim(&projectsPath)
         case .inbox: trim(&inboxPath)
         case .search: trim(&searchPath)
@@ -101,6 +106,7 @@ final class AppRouter: ObservableObject {
         case .inbox: inboxPath = []
         case .search: searchPath = []
         case .settings: settingsPath = []
+        case .agents: agentsPath = []
         }
     }
 }
@@ -193,7 +199,8 @@ struct RootView: View {
             return
         }
         if url.scheme == "pullyard", url.host == "agent", let id = url.pathComponents.dropFirst().first {
-            if router.top(in: model.selectedTab) != .agent(id) { router.open(.agent(id), in: model.selectedTab) }
+            model.selectedTab = .agents
+            if router.top(in: .agents) != .agent(id) { router.open(.agent(id), in: .agents) }
             return
         }
         if url.scheme == "pullyard", url.host == "queue" {
@@ -223,6 +230,7 @@ private struct LockedView: View {
 struct MainTabsView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var router: AppRouter
+    @ObservedObject private var agentBadge = AgentBadge.shared
     @AppStorage("mobile.refresh.minutes") private var refreshMinutes = 5
     @SceneStorage("mobile.router") private var routerData: Data?
     @State private var restored = false
@@ -255,6 +263,8 @@ struct MainTabsView: View {
                 Tab("Projects", systemImage: "folder", value: AppTab.projects) { projectsStack }
                 Tab("Inbox", systemImage: "tray.full", value: AppTab.inbox) { inboxStack }
                     .badge(model.unreadCount)
+                Tab("Agents", systemImage: "wand.and.stars", value: AppTab.agents) { agentsStack }
+                    .badge(agentBadge.count)
                 Tab("Settings", systemImage: "gearshape", value: AppTab.settings) { settingsStack }
                 Tab(value: AppTab.search, role: .search) { searchStack }
             }
@@ -275,6 +285,10 @@ struct MainTabsView: View {
                 searchStack
                     .tabItem { Label("Search", systemImage: "magnifyingglass") }
                     .tag(AppTab.search)
+                agentsStack
+                    .tabItem { Label("Agents", systemImage: "wand.and.stars") }
+                    .tag(AppTab.agents)
+                    .badge(agentBadge.count)
                 settingsStack
                     .tabItem { Label("Settings", systemImage: "gearshape") }
                     .tag(AppTab.settings)
@@ -286,6 +300,7 @@ struct MainTabsView: View {
     private var projectsStack: some View { NavigationStack(path: $router.projectsPath) { ProjectsView().routeDestinations() } }
     private var inboxStack: some View { NavigationStack(path: $router.inboxPath) { InboxView().routeDestinations() } }
     private var searchStack: some View { NavigationStack(path: $router.searchPath) { SearchView().routeDestinations() } }
+    private var agentsStack: some View { NavigationStack(path: $router.agentsPath) { AgentsHome().routeDestinations() } }
     private var settingsStack: some View { NavigationStack(path: $router.settingsPath) { SettingsView().routeDestinations() } }
 
     private var tabSelection: Binding<AppTab> {

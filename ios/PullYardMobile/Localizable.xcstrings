@@ -5610,6 +5610,136 @@
           }
         }
       }
+    },
+    "Agents" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Агенты"
+          }
+        }
+      }
+    },
+    "Your Mac's agent, in your pocket" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Агент с вашего Mac — в кармане"
+          }
+        }
+      }
+    },
+    "Connecting to your Mac…" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подключение к Mac…"
+          }
+        }
+      }
+    },
+    "Can't reach your Mac" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac недоступен"
+          }
+        }
+      }
+    },
+    "Pair this iPhone with PullYard on your Mac to start agent fixes, follow the chat live and answer when it needs you." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Свяжите iPhone с PullYard на Mac, чтобы запускать исправления агентом, следить за чатом вживую и отвечать, когда он ждёт вас."
+          }
+        }
+      }
+    },
+    "Hang on, this usually takes a second." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Секунду, обычно это быстро."
+          }
+        }
+      }
+    },
+    "Make sure PullYard is open on your Mac with iPhone access turned on." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Проверьте, что PullYard открыт на Mac и доступ для iPhone включён."
+          }
+        }
+      }
+    },
+    "Open PullYard on your Mac" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Откройте PullYard на Mac"
+          }
+        }
+      }
+    },
+    "Go to Settings → iPhone and tap Show pairing code" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Settings → iPhone → Show pairing code"
+          }
+        }
+      }
+    },
+    "Scan it from Settings → Mac on this iPhone" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Отсканируйте его здесь: Настройки → Mac"
+          }
+        }
+      }
+    },
+    "Try again" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Повторить"
+          }
+        }
+      }
+    },
+    "Open Settings" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Открыть настройки"
+          }
+        }
+      }
+    },
+    "Pair with your Mac" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Связать с Mac"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

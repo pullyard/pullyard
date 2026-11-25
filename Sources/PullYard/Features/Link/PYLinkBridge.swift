@@ -308,6 +308,17 @@ struct PYLinkBridge {
         }
     }
 
+    func pushSessions(to client: PYLinkClient) {
+        let current = sessions()
+        guard client.sentSessions != current else { return }
+        let first = client.sentSessions == nil
+        client.sentSessions = current
+        guard !first else { return }
+        var message = PYLinkMessage(type: "sessions")
+        message.sessions = current
+        client.channel.send(json: message)
+    }
+
     func pushUpdates(to client: PYLinkClient, only: String? = nil) {
         for session in client.subscriptions where only == nil || session == only {
             guard let tab = tab(session), let chat = tab.chat else {

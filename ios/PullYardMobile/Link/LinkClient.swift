@@ -35,6 +35,12 @@ extension PYLinkItem {
 }
 
 @MainActor
+final class AgentBadge: ObservableObject {
+    static let shared = AgentBadge()
+    @Published var count = 0
+}
+
+@MainActor
 final class LinkClient: ObservableObject {
     enum Status: Equatable { case unpaired, offline, connecting, connected(String), failed(String) }
 
@@ -42,7 +48,12 @@ final class LinkClient: ObservableObject {
 
     @Published private(set) var mac: PairedMac? = LinkClient.loadMac()
     @Published private(set) var status: Status = .unpaired
-    @Published private(set) var sessions: [PYLinkSession] = []
+    @Published private(set) var sessions: [PYLinkSession] = [] {
+        didSet {
+            let waiting = sessions.filter { $0.state == "waiting" }.count
+            if AgentBadge.shared.count != waiting { AgentBadge.shared.count = waiting }
+        }
+    }
     @Published private(set) var chats: [String: AgentChat] = [:]
     @Published private(set) var viaInternet = false
     @Published private(set) var history: [PYLinkSession] = []
