@@ -218,12 +218,14 @@ impl FilesTab {
         set_label(&list_toggle, "File list");
         review_bar.append(&list_toggle);
         let file_nav = hbox(2);
+        file_nav.append(&label_with("File", &["sy-muted", "sy-small"]));
         let prev_file = nav_button("go-up-symbolic", "Previous file", "P");
         let next_file = nav_button("go-down-symbolic", "Next file", "N");
         file_nav.append(&prev_file);
         file_nav.append(&next_file);
         review_bar.append(&file_nav);
         let hunk_nav = hbox(2);
+        hunk_nav.append(&label_with("Change", &["sy-muted", "sy-small"]));
         let prev_hunk = nav_button("go-top-symbolic", "Previous hunk", "[");
         let next_hunk = nav_button("go-bottom-symbolic", "Next hunk", "]");
         hunk_nav.append(&prev_hunk);

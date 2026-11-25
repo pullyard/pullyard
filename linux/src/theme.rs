@@ -353,8 +353,8 @@ button.chip-button { padding: 0; min-height: 0; min-width: 0; border-radius: 999
 .diff-line.del { background-color: @sy_del_bg; }
 .diff-line.hunk { background-color: @sy_hunk_bg; color: @sy_muted; }
 .diff-line.meta { color: @sy_muted; }
-.diff-gutter { color: @sy_dim; font-family: monospace; font-size: 12px; }
-.diff-gutter.commentable:hover { color: @sy_accent; }
+.diff-gutter { color: @sy_gutter; font-family: monospace; font-size: 12px; }
+.diff-gutter.commentable:hover { color: @sy_coral; }
 .diff-file-header { background-color: @sy_raised; border-top: 1px solid @sy_line; border-bottom: 1px solid @sy_line; padding: 6px 12px; margin-top: 8px; }
 .diff-note { color: @sy_muted; font-size: 0.85em; padding: 8px 12px; }
 .inline-card { background-color: @sy_raised; border-radius: 10px; margin: 6px 12px 6px 108px; }

@@ -76,15 +76,15 @@ fn diff_lines(c: &ToolCall) -> Vec<DiffLine> {
                 let body: String = l.chars().skip(1).collect();
                 match l.chars().next() {
                     Some('+') => {
-                        out.push(DiffLine { id: idx, kind: LineKind::Add, text: body, old_line: None, new_line: Some(new) });
+                        out.push(DiffLine { id: idx, kind: LineKind::Add, text: body, old_line: None, new_line: Some(new), word: None });
                         new += 1;
                     }
                     Some('-') => {
-                        out.push(DiffLine { id: idx, kind: LineKind::Del, text: body, old_line: Some(old), new_line: None });
+                        out.push(DiffLine { id: idx, kind: LineKind::Del, text: body, old_line: Some(old), new_line: None, word: None });
                         old += 1;
                     }
                     _ => {
-                        out.push(DiffLine { id: idx, kind: LineKind::Context, text: body, old_line: Some(old), new_line: Some(new) });
+                        out.push(DiffLine { id: idx, kind: LineKind::Context, text: body, old_line: Some(old), new_line: Some(new), word: None });
                         old += 1;
                         new += 1;
                     }
@@ -96,7 +96,7 @@ fn diff_lines(c: &ToolCall) -> Vec<DiffLine> {
     }
     if c.name == "Write" {
         for (n, l) in c.string("content").unwrap_or_default().split('\n').enumerate() {
-            out.push(DiffLine { id: idx, kind: LineKind::Add, text: l.to_string(), old_line: None, new_line: Some(n as i64 + 1) });
+            out.push(DiffLine { id: idx, kind: LineKind::Add, text: l.to_string(), old_line: None, new_line: Some(n as i64 + 1), word: None });
             idx += 1;
         }
         return out;
@@ -109,11 +109,11 @@ fn diff_lines(c: &ToolCall) -> Vec<DiffLine> {
     };
     for e in edits {
         for l in e.get("old_string").and_then(|v| v.as_str()).unwrap_or("").split('\n') {
-            out.push(DiffLine { id: idx, kind: LineKind::Del, text: l.to_string(), old_line: None, new_line: None });
+            out.push(DiffLine { id: idx, kind: LineKind::Del, text: l.to_string(), old_line: None, new_line: None, word: None });
             idx += 1;
         }
         for l in e.get("new_string").and_then(|v| v.as_str()).unwrap_or("").split('\n') {
-            out.push(DiffLine { id: idx, kind: LineKind::Add, text: l.to_string(), old_line: None, new_line: None });
+            out.push(DiffLine { id: idx, kind: LineKind::Add, text: l.to_string(), old_line: None, new_line: None, word: None });
             idx += 1;
         }
     }

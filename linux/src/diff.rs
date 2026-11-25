@@ -16,6 +16,7 @@ pub struct DiffLine {
     pub text: String,
     pub old_line: Option<i64>,
     pub new_line: Option<i64>,
+    pub word: Option<(usize, usize)>,
 }
 
 impl DiffLine {
@@ -125,31 +126,88 @@ pub fn parse(patch: &str) -> Vec<DiffLine> {
             let (o, n) = hunk_start(raw);
             old = o;
             new = n;
-            result.push(DiffLine { id: idx, kind: LineKind::Hunk, text: raw.to_string(), old_line: None, new_line: None });
+            result.push(DiffLine { id: idx, kind: LineKind::Hunk, text: raw.to_string(), old_line: None, new_line: None, word: None });
             continue;
         }
         let first = raw.chars().next();
         let body = if raw.is_empty() { String::new() } else { raw[first.map(|c| c.len_utf8()).unwrap_or(0)..].to_string() };
         match first {
             Some('+') => {
-                result.push(DiffLine { id: idx, kind: LineKind::Add, text: body, old_line: None, new_line: Some(new) });
+                result.push(DiffLine { id: idx, kind: LineKind::Add, text: body, old_line: None, new_line: Some(new), word: None });
                 new += 1;
             }
             Some('-') => {
-                result.push(DiffLine { id: idx, kind: LineKind::Del, text: body, old_line: Some(old), new_line: None });
+                result.push(DiffLine { id: idx, kind: LineKind::Del, text: body, old_line: Some(old), new_line: None, word: None });
                 old += 1;
             }
             Some('\\') => {
-                result.push(DiffLine { id: idx, kind: LineKind::Meta, text: raw.to_string(), old_line: None, new_line: None });
+                result.push(DiffLine { id: idx, kind: LineKind::Meta, text: raw.to_string(), old_line: None, new_line: None, word: None });
             }
             _ => {
-                result.push(DiffLine { id: idx, kind: LineKind::Context, text: body, old_line: Some(old), new_line: Some(new) });
+                result.push(DiffLine { id: idx, kind: LineKind::Context, text: body, old_line: Some(old), new_line: Some(new), word: None });
                 old += 1;
                 new += 1;
             }
         }
     }
+    mark_intraline(&mut result);
     result
+}
+
+const INTRALINE_MAX: usize = 400;
+
+pub fn changed_span(a: &str, b: &str) -> Option<((usize, usize), (usize, usize))> {
+    if a == b || a.len() > INTRALINE_MAX || b.len() > INTRALINE_MAX {
+        return None;
+    }
+    let mut prefix = 0;
+    for ((i, ca), (_, cb)) in a.char_indices().zip(b.char_indices()) {
+        if ca != cb {
+            break;
+        }
+        prefix = i + ca.len_utf8();
+    }
+    let mut suffix = 0;
+    for (ca, cb) in a[prefix..].chars().rev().zip(b[prefix..].chars().rev()) {
+        if ca != cb {
+            break;
+        }
+        suffix += ca.len_utf8();
+    }
+    if prefix + suffix == 0 || a[prefix..].trim().is_empty() && b[prefix..].trim().is_empty() {
+        return None;
+    }
+    let (ae, be) = (a.len() - suffix, b.len() - suffix);
+    if ae <= prefix && be <= prefix {
+        return None;
+    }
+    Some(((prefix, ae.max(prefix)), (prefix, be.max(prefix))))
+}
+
+pub fn mark_intraline(lines: &mut [DiffLine]) {
+    let mut i = 0;
+    while i < lines.len() {
+        if lines[i].kind != LineKind::Del {
+            i += 1;
+            continue;
+        }
+        let del_start = i;
+        while i < lines.len() && lines[i].kind == LineKind::Del {
+            i += 1;
+        }
+        let add_start = i;
+        while i < lines.len() && lines[i].kind == LineKind::Add {
+            i += 1;
+        }
+        let pairs = (add_start - del_start).min(i - add_start);
+        for k in 0..pairs {
+            let (d, a) = (del_start + k, add_start + k);
+            if let Some((ds, as_)) = changed_span(&lines[d].text, &lines[a].text) {
+                lines[d].word = Some(ds).filter(|(s, e)| e > s);
+                lines[a].word = Some(as_).filter(|(s, e)| e > s);
+            }
+        }
+    }
 }
 
 pub fn parse_unified(text: &str) -> Vec<PrFile> {
@@ -236,6 +294,37 @@ pub fn parse_unified(text: &str) -> Vec<PrFile> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn intraline_marks_only_the_changed_span() {
+        let lines = parse("@@ -1,2 +1,2 @@\n-let total = price * 2;\n+let total = price * 3;\n same");
+        assert_eq!(lines[1].word, Some((20, 21)));
+        assert_eq!(lines[2].word, Some((20, 21)));
+        assert_eq!(lines[3].word, None);
+    }
+
+    #[test]
+    fn intraline_skips_lines_with_nothing_in_common() {
+        assert_eq!(changed_span("alpha", "omega"), None);
+        assert_eq!(changed_span("same", "same"), None);
+        let lines = parse("@@ -1 +1 @@\n-abc\n+xyz");
+        assert_eq!(lines[1].word, None);
+    }
+
+    #[test]
+    fn intraline_pairs_runs_in_order_and_handles_unicode() {
+        let lines = parse("@@ -1,2 +1,3 @@\n-naïve = 1\n-b = 2\n+naïve = 5\n+b = 7\n+c = 9");
+        assert_eq!(lines[1].word.map(|(s, e)| &lines[1].text[s..e]), Some("1"));
+        assert_eq!(lines[3].word.map(|(s, e)| &lines[3].text[s..e]), Some("5"));
+        assert_eq!(lines[4].word.map(|(s, e)| &lines[4].text[s..e]), Some("7"));
+        assert_eq!(lines[5].word, None);
+    }
+
+    #[test]
+    fn intraline_insertion_marks_added_text() {
+        assert_eq!(changed_span("foo(a)", "foo(a, b)"), Some(((5, 5), (5, 8))));
+    }
+
     use super::*;
 
     #[test]
