@@ -29,9 +29,25 @@ struct PYLinkBridge {
         case "unsubscribe":
             if let session = message.session { client.subscriptions.remove(session) }
         case "send":
-            guard let chat = tab(message.session)?.chat, let text = message.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return }
-            if !chat.running { tab(message.session)?.ensureChatRunning() }
-            chat.send(text)
+            guard let tab = tab(message.session), let chat = tab.chat else { return }
+            let text = message.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let attachments = message.attachments ?? []
+            guard !text.isEmpty || !attachments.isEmpty else { return }
+            var images: [ChatImage] = []
+            var paths: [String] = []
+            for attachment in attachments {
+                if Self.inlineImageTypes.contains(attachment.mediaType), attachment.data.count <= ChatImage.maxBytes {
+                    images.append(ChatImage(data: attachment.data, mediaType: attachment.mediaType))
+                } else if let url = Self.store(attachment) {
+                    paths.append(url.path)
+                }
+            }
+            var prompt = text
+            if !paths.isEmpty {
+                prompt += (prompt.isEmpty ? "" : "\n\n") + "Files attached from the iPhone:\n" + paths.map { "- \($0)" }.joined(separator: "\n")
+            }
+            if !chat.running { tab.ensureChatRunning() }
+            chat.send(prompt, images: images)
         case "permission":
             guard let chat = tab(message.session)?.chat, let request = chat.pendingPermissions.first(where: { $0.id == message.requestID }) else { return }
             chat.respond(request, allow: message.allow ?? false, always: message.always == true ? request.suggestions.first : nil)
@@ -42,6 +58,24 @@ struct PYLinkBridge {
             reply.id = message.id
             reply.error = "Unsupported request: \(message.type)"
             client.channel.send(json: reply)
+        }
+    }
+
+    private static let inlineImageTypes: Set<String> = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+
+    private static func store(_ attachment: PYLinkAttachment) -> URL? {
+        let fm = FileManager.default
+        guard let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        let folder = support.appendingPathComponent("PullYard/iPhone Attachments", isDirectory: true).appendingPathComponent(UUID().uuidString.prefix(8).lowercased(), isDirectory: true)
+        var name = (attachment.name as NSString).lastPathComponent.replacingOccurrences(of: ":", with: "-")
+        if name.isEmpty || name.hasPrefix(".") { name = "attachment" + name }
+        do {
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            let url = folder.appendingPathComponent(name)
+            try attachment.data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
         }
     }
 
@@ -206,8 +240,8 @@ struct PYLinkBridge {
     private static func items(_ source: ArraySlice<ChatItem>) -> [PYLinkItem] {
         source.map { item in
             switch item {
-            case let .user(id, text, _):
-                return PYLinkItem(id: "u" + id, kind: "user", text: text)
+            case let .user(id, text, images):
+                return PYLinkItem(id: "u" + id, kind: "user", text: text, files: images.isEmpty ? nil : images.map { _ in "image" })
             case let .text(value):
                 return PYLinkItem(id: "t" + value.id, kind: "text", text: value.text)
             case let .thinking(value):

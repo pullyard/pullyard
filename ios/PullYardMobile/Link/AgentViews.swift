@@ -1,4 +1,5 @@
 import AVFoundation
+import PhotosUI
 import SwiftUI
 
 struct MacLinkSection: View {
@@ -382,6 +383,12 @@ struct AgentChatView: View {
     @State private var followUntil = Date.distantPast
     @State private var viewportHeight: CGFloat = 0
     @State private var scrollRequest = 0
+    @State private var attachments: [AgentAttachment] = []
+    @State private var photoSelection: [PhotosPickerItem] = []
+    @State private var showPhotos = false
+    @State private var showFiles = false
+    @State private var dropTargeted = false
+    @EnvironmentObject private var feedback: FeedbackCenter
     @FocusState private var focused: Bool
 
     private var chat: AgentChat? { link.chats[session] }
@@ -444,6 +451,27 @@ struct AgentChatView: View {
             .onAppear { scrollToEnd(proxy, animated: false) }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+        .overlay { AgentDropOverlay(active: dropTargeted) }
+        .onDrop(of: [.image, .fileURL, .data], isTargeted: $dropTargeted) { providers in
+            Task { await add(providers) }
+            return true
+        }
+        .photosPicker(isPresented: $showPhotos, selection: $photoSelection, maxSelectionCount: 10, matching: .images)
+        .onChange(of: photoSelection) { _, items in
+            guard !items.isEmpty else { return }
+            photoSelection = []
+            Task {
+                for item in items {
+                    if let attachment = await AgentAttachmentLoader.photo(item) { append(attachment) }
+                }
+            }
+        }
+        .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            guard case let .success(urls) = result else { return }
+            for url in urls {
+                do { append(try AgentAttachmentLoader.file(at: url)) } catch { feedback.error(error, key: "agent-attach") }
+            }
+        }
         .onChange(of: focused) { _, on in
             guard on, atBottom else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { scrollRequest += 1 }
@@ -507,31 +535,71 @@ struct AgentChatView: View {
         }
     }
 
+    private var canSend: Bool {
+        link.isConnected && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty)
+    }
+
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField("Message the agent", text: $draft, axis: .vertical)
-                .focused($focused)
-                .lineLimit(1...5)
-                .mobileFont(size: 16)
-                .padding(.horizontal, 14).padding(.vertical, 10)
-                .pyGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous), fallback: MobileTheme.card)
-            Button {
-                let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty else { return }
-                link.send(text, to: session)
-                draft = ""
-                scrollRequest += 1
-            } label: {
-                Image(systemName: "arrow.up").mobileFont(size: 17, weight: .bold).foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Circle())
-                    .pyGlass(in: Circle(), tint: MobileTheme.accentFill, interactive: true, fallback: MobileTheme.accentFill)
+        VStack(alignment: .leading, spacing: 6) {
+            if !attachments.isEmpty {
+                AgentAttachmentStrip(attachments: attachments) { item in attachments.removeAll { $0.id == item.id } }
             }
-            .buttonStyle(.pyPlain)
-            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !link.isConnected)
-            .accessibilityLabel("Send")
+            HStack(alignment: .bottom, spacing: 10) {
+                Menu {
+                    Button { showPhotos = true } label: { Label("Photo Library", systemImage: "photo.on.rectangle") }
+                    Button { showFiles = true } label: { Label("Files", systemImage: "folder") }
+                } label: {
+                    Image(systemName: "plus").mobileFont(size: 17, weight: .semibold).foregroundStyle(MobileTheme.ink)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
+                        .pyGlass(in: Circle(), interactive: true, fallback: MobileTheme.card)
+                }
+                .accessibilityLabel("Attach")
+                TextField("Message the agent", text: $draft, axis: .vertical)
+                    .focused($focused)
+                    .lineLimit(1...5)
+                    .mobileFont(size: 16)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .pyGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous), fallback: MobileTheme.card)
+                Button {
+                    let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard canSend else { return }
+                    link.send(text, attachments: attachments, to: session)
+                    draft = ""
+                    withAnimation(.snappy) { attachments = [] }
+                    scrollRequest += 1
+                } label: {
+                    Image(systemName: "arrow.up").mobileFont(size: 17, weight: .bold).foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
+                        .pyGlass(in: Circle(), tint: MobileTheme.accentFill, interactive: true, fallback: MobileTheme.accentFill)
+                }
+                .buttonStyle(.pyPlain)
+                .disabled(!canSend)
+                .accessibilityLabel("Send")
+            }
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
+        .animation(.snappy, value: attachments.count)
+    }
+
+    private func append(_ attachment: AgentAttachment) {
+        let total = attachments.reduce(0) { $0 + $1.data.count } + attachment.data.count
+        guard total <= AgentAttachmentLoader.maxTotalBytes else {
+            feedback.error(AgentAttachmentError.tooLarge(L("The attachments")), key: "agent-attach")
+            return
+        }
+        attachments.append(attachment)
+    }
+
+    private func add(_ providers: [NSItemProvider]) async {
+        for provider in providers {
+            do {
+                if let attachment = try await AgentAttachmentLoader.load(provider) { append(attachment) }
+            } catch {
+                feedback.error(error, key: "agent-attach")
+            }
+        }
     }
 }
 
@@ -581,10 +649,24 @@ private struct AgentItemView: View {
         case "user":
             HStack {
                 Spacer(minLength: 40)
-                Text(item.text).mobileFont(size: 15).foregroundStyle(.white)
-                    .padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(MobileTheme.accentFill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .textSelection(.enabled)
+                VStack(alignment: .trailing, spacing: 6) {
+                    if let files = item.files, !files.isEmpty {
+                        HStack(spacing: 6) {
+                            ForEach(Array(files.enumerated()), id: \.offset) { _, name in
+                                Label(name == "image" ? L("Photo") : name, systemImage: name == "image" || name.hasSuffix(".jpg") ? "photo" : "doc")
+                                    .mobileFont(size: 12, weight: .medium).foregroundStyle(.white).lineLimit(1)
+                                    .padding(.horizontal, 10).padding(.vertical, 6)
+                                    .background(MobileTheme.accentFill.opacity(0.75), in: Capsule())
+                            }
+                        }
+                    }
+                    if !item.text.isEmpty {
+                        Text(item.text).mobileFont(size: 15).foregroundStyle(.white)
+                            .padding(.horizontal, 14).padding(.vertical, 10)
+                            .background(MobileTheme.accentFill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .textSelection(.enabled)
+                    }
+                }
             }
         case "text":
             MarkdownView(markdown: item.text)

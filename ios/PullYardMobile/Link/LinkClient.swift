@@ -205,13 +205,14 @@ final class LinkClient: ObservableObject {
         channel?.send(json: message)
     }
 
-    func send(_ text: String, to session: String) {
+    func send(_ text: String, attachments: [AgentAttachment] = [], to session: String) {
         var message = PYLinkMessage(type: "send")
         message.session = session
         message.text = text
+        if !attachments.isEmpty { message.attachments = attachments.map(\.payload) }
         channel?.send(json: message)
         AgentActivities.track(session)
-        chats[session]?.items.append(PYLinkItem(id: "local-\(UUID().uuidString)", kind: "user", text: text))
+        chats[session]?.items.append(PYLinkItem(id: "local-\(UUID().uuidString)", kind: "user", text: text, files: attachments.isEmpty ? nil : attachments.map { $0.isImage ? "image" : $0.name }))
     }
 
     func respond(_ permission: PYLinkPermission, allow: Bool, always: Bool = false, in session: String) {

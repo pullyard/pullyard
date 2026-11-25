@@ -71,6 +71,7 @@
 		F3E1B1E8C0E98071559D75A5 /* PYLinkIroh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F9F1FEBE741DDBE8177BA81 /* PYLinkIroh.swift */; };
 		F68C66514A56887F1B265E54 /* CIActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0C66F8D185CD5194B079AE /* CIActivity.swift */; };
 		FE8B3F91653EC44B4BD8D825 /* ProjectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7656F08929BF5CF832079205 /* ProjectsView.swift */; };
+		FF7A2D02F762BA8BCC2827C6 /* AgentAttachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 674809AA8E4123FA4CFAF63B /* AgentAttachments.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -134,6 +135,7 @@
 		4FEA9E8ED657C416009BF3B6 /* PullYardWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PullYardWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		5540DD8A1EFE9214A4C8EBAE /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		665A39E542BD09746979B213 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		674809AA8E4123FA4CFAF63B /* AgentAttachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentAttachments.swift; sourceTree = "<group>"; };
 		7514C15D3A6E031E05E5E80A /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		7656F08929BF5CF832079205 /* ProjectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsView.swift; sourceTree = "<group>"; };
 		7A695F8DF43A5AF140D29255 /* AppShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcuts.swift; sourceTree = "<group>"; };
@@ -217,6 +219,7 @@
 			isa = PBXGroup;
 			children = (
 				39385B92FCC46C6EA680341E /* AgentActivities.swift */,
+				674809AA8E4123FA4CFAF63B /* AgentAttachments.swift */,
 				8699E5CDC258955E31456B7A /* AgentViews.swift */,
 				492802CE69238D7B67870B90 /* LinkClient.swift */,
 				9F9F1FEBE741DDBE8177BA81 /* PYLinkIroh.swift */,
@@ -447,6 +450,7 @@
 			files = (
 				499F195ABE538B364E01A5E0 /* AgentActivities.swift in Sources */,
 				2D62B9013668D115E229ED24 /* AgentActivity.swift in Sources */,
+				FF7A2D02F762BA8BCC2827C6 /* AgentAttachments.swift in Sources */,
 				CAA9A496F59DC926C60CD187 /* AgentViews.swift in Sources */,
 				C9DFE06D59FC7922691A5941 /* AppModel.swift in Sources */,
 				A73200079D9632C212D17A9F /* AppShortcuts.swift in Sources */,

@@ -6,7 +6,7 @@ enum PYLink {
     static let serviceType = "_pullyard._tcp"
     static let version = 1
     static let preferredPort: UInt16 = 47811
-    static let maxFrame = 4 * 1024 * 1024
+    static let maxFrame = 32 * 1024 * 1024
     static let irohALPN = Data("pullyard/link/1".utf8)
 }
 
@@ -67,6 +67,13 @@ struct PYLinkItem: Codable, Equatable, Identifiable {
     var tool: String?
     var status: String?
     var permission: PYLinkPermission?
+    var files: [String]?
+}
+
+struct PYLinkAttachment: Codable, Equatable {
+    var name: String
+    var mediaType: String
+    var data: Data
 }
 
 struct PYLinkSessionState: Codable, Equatable {
@@ -105,6 +112,7 @@ struct PYLinkMessage: Codable {
     var state: PYLinkSessionState?
     var error: String?
     var url: String?
+    var attachments: [PYLinkAttachment]?
 
     init(type: String) { self.type = type }
 }
