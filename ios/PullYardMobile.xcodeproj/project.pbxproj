@@ -29,6 +29,7 @@
 		54D529617C831F4F08F6FD2E /* DeviceFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBD4F0DC8CF7BE8F81827D8C /* DeviceFlow.swift */; };
 		553B9AF410D2BEF9AAD62485 /* Glass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120660E6D50C51E2C99B570E /* Glass.swift */; };
 		568B3FF6AD57088C3560CEA7 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30670A8D6390E4CF24450643 /* SettingsView.swift */; };
+		5CC63BF72B08F7B2DCDDC958 /* LogoMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960D80A6217273D4ADFA762B /* LogoMark.swift */; };
 		691EC5C347D72EA884A20DDC /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B3A0459840F2BE02F504DC5 /* WidgetSnapshot.swift */; };
 		698A26A285F7F05C42C8C074 /* AgentActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C19694612AE062E76BC181B6 /* AgentActivity.swift */; };
 		6BF8DA74F5AFD7D499A42E08 /* Snooze.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9662C0C9DC3339E5CD6B7A47 /* Snooze.swift */; };
@@ -63,10 +64,12 @@
 		CAA9A496F59DC926C60CD187 /* AgentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8699E5CDC258955E31456B7A /* AgentViews.swift */; };
 		CFDC447B91E3011E6E4FA655 /* WidgetFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDE41B0C24CD4D522D241B3 /* WidgetFetcher.swift */; };
 		D28BB13CEFDD66B5F9ED5C1F /* Logo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D381A401A2B8C7378B7DFA6 /* Logo.swift */; };
+		DFFDA8D1E1C8DBD15AAA522F /* LogoMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960D80A6217273D4ADFA762B /* LogoMark.swift */; };
 		E091E2815B9F07E313E36493 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 665A39E542BD09746979B213 /* PrivacyInfo.xcprivacy */; };
 		E5B9913DEBE75D2D0681044E /* CIActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0C66F8D185CD5194B079AE /* CIActivity.swift */; };
 		EA6A54B14DC2A5F6BFB3CCC3 /* CredentialVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D18762764859FE93B40155 /* CredentialVault.swift */; };
 		F126D8433948F1AF3BE7B615 /* LinkClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492802CE69238D7B67870B90 /* LinkClient.swift */; };
+		F2480A6955CCD4AB302227DB /* LogoMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960D80A6217273D4ADFA762B /* LogoMark.swift */; };
 		F3685C0831F795EA5528C863 /* CreatePullView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 127360F43A2B43F3766FC2DA /* CreatePullView.swift */; };
 		F3E1B1E8C0E98071559D75A5 /* PYLinkIroh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F9F1FEBE741DDBE8177BA81 /* PYLinkIroh.swift */; };
 		F68C66514A56887F1B265E54 /* CIActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0C66F8D185CD5194B079AE /* CIActivity.swift */; };
@@ -149,6 +152,7 @@
 		8B3A0459840F2BE02F504DC5 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
 		8DFC7599C7E90CF3EEB1CA67 /* PRWorkflowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRWorkflowViews.swift; sourceTree = "<group>"; };
 		94231697E07DA3DAFF6139C2 /* PYLinkProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PYLinkProtocol.swift; sourceTree = "<group>"; };
+		960D80A6217273D4ADFA762B /* LogoMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogoMark.swift; sourceTree = "<group>"; };
 		9662C0C9DC3339E5CD6B7A47 /* Snooze.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Snooze.swift; sourceTree = "<group>"; };
 		9DE0272495E9EE917571D595 /* FinishReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinishReviewView.swift; sourceTree = "<group>"; };
 		9F9F1FEBE741DDBE8177BA81 /* PYLinkIroh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PYLinkIroh.swift; sourceTree = "<group>"; };
@@ -296,6 +300,7 @@
 				C19694612AE062E76BC181B6 /* AgentActivity.swift */,
 				AA0C66F8D185CD5194B079AE /* CIActivity.swift */,
 				A2D18762764859FE93B40155 /* CredentialVault.swift */,
+				960D80A6217273D4ADFA762B /* LogoMark.swift */,
 				0BDE41B0C24CD4D522D241B3 /* WidgetFetcher.swift */,
 				8B3A0459840F2BE02F504DC5 /* WidgetSnapshot.swift */,
 			);
@@ -438,6 +443,7 @@
 				2CDEB08C4B1F821762AB609D /* AgentActivity.swift in Sources */,
 				B7F186FA168D1403810754FA /* CIActivity.swift in Sources */,
 				C676A0716D8851BC0FA04633 /* CredentialVault.swift in Sources */,
+				F2480A6955CCD4AB302227DB /* LogoMark.swift in Sources */,
 				857884D9283B9C9E5D68DF73 /* ShareViewController.swift in Sources */,
 				9E1D6A9E230F4A2BF9CC87AB /* WidgetFetcher.swift in Sources */,
 				9A76D45247A1ADA13599209C /* WidgetSnapshot.swift in Sources */,
@@ -473,6 +479,7 @@
 				C070820FA7D4B882307E041E /* LiveActivities.swift in Sources */,
 				92E83F11231596E157BCF6AF /* LocalCache.swift in Sources */,
 				D28BB13CEFDD66B5F9ED5C1F /* Logo.swift in Sources */,
+				DFFDA8D1E1C8DBD15AAA522F /* LogoMark.swift in Sources */,
 				840E10398ADEAF707B1F21E9 /* Markdown.swift in Sources */,
 				AD7A5FF8A6B142D0098B47A5 /* Models.swift in Sources */,
 				03EC4801CE2B757E85EBBA46 /* OnboardingView.swift in Sources */,
@@ -504,6 +511,7 @@
 				698A26A285F7F05C42C8C074 /* AgentActivity.swift in Sources */,
 				E5B9913DEBE75D2D0681044E /* CIActivity.swift in Sources */,
 				14FA9E4773D48988B26245D6 /* CredentialVault.swift in Sources */,
+				5CC63BF72B08F7B2DCDDC958 /* LogoMark.swift in Sources */,
 				0A62DCA41480F5AA074C2324 /* PullYardWidget.swift in Sources */,
 				824047CDCB66FD452D27E23E /* WidgetFetcher.swift in Sources */,
 				B0DED8A6A515396FCFD94263 /* WidgetSnapshot.swift in Sources */,

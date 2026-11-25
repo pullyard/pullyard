@@ -540,27 +540,31 @@ struct AgentChatView: View {
     }
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 0) {
             if !attachments.isEmpty {
                 AgentAttachmentStrip(attachments: attachments) { item in attachments.removeAll { $0.id == item.id } }
+                    .padding(.horizontal, 10).padding(.top, 4)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            HStack(alignment: .bottom, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 6) {
                 Menu {
                     Button { showPhotos = true } label: { Label("Photo Library", systemImage: "photo.on.rectangle") }
                     Button { showFiles = true } label: { Label("Files", systemImage: "folder") }
                 } label: {
-                    Image(systemName: "plus").mobileFont(size: 17, weight: .semibold).foregroundStyle(MobileTheme.ink)
+                    Image(systemName: "plus")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(MobileTheme.muted)
+                        .frame(width: 36, height: 36)
+                        .background(MobileTheme.ink.opacity(0.06), in: Circle())
                         .frame(width: 44, height: 44)
                         .contentShape(Circle())
-                        .pyGlass(in: Circle(), interactive: true, fallback: MobileTheme.card)
                 }
                 .accessibilityLabel("Attach")
                 TextField("Message the agent", text: $draft, axis: .vertical)
                     .focused($focused)
                     .lineLimit(1...5)
                     .mobileFont(size: 16)
-                    .padding(.horizontal, 14).padding(.vertical, 10)
-                    .pyGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous), fallback: MobileTheme.card)
+                    .padding(.vertical, 11)
                 Button {
                     let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard canSend else { return }
@@ -569,18 +573,26 @@ struct AgentChatView: View {
                     withAnimation(.snappy) { attachments = [] }
                     scrollRequest += 1
                 } label: {
-                    Image(systemName: "arrow.up").mobileFont(size: 17, weight: .bold).foregroundStyle(.white)
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 34)
+                        .background(canSend ? MobileTheme.accentFill : MobileTheme.slate.opacity(0.35), in: Circle())
                         .frame(width: 44, height: 44)
                         .contentShape(Circle())
-                        .pyGlass(in: Circle(), tint: MobileTheme.accentFill, interactive: true, fallback: MobileTheme.accentFill)
                 }
                 .buttonStyle(.pyPlain)
                 .disabled(!canSend)
                 .accessibilityLabel("Send")
             }
+            .padding(.horizontal, 4)
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        .pyGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous), fallback: MobileTheme.card)
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(focused ? MobileTheme.accent.opacity(0.35) : MobileTheme.line))
+        .padding(.horizontal, 12).padding(.vertical, 8)
         .animation(.snappy, value: attachments.count)
+        .animation(.easeOut(duration: 0.15), value: focused)
+        .animation(.easeOut(duration: 0.15), value: canSend)
     }
 
     private func append(_ attachment: AgentAttachment) {

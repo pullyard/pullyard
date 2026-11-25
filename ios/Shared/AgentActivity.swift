@@ -10,16 +10,6 @@ struct AgentActivityAttributes: ActivityAttributes {
         var steps: Int
         var started: Date
         var finished: Date?
-
-        var label: String {
-            switch phase {
-            case .working: "Working"
-            case .waiting: "Needs you"
-            case .done: "Done"
-            case .stopped: "Stopped"
-            case .failed: "Failed"
-            }
-        }
     }
 
     let session: String

@@ -252,32 +252,56 @@ struct AgentActivityWidget: Widget {
                 .activitySystemActionForegroundColor(.white)
                 .widgetURL(Self.url(context))
         } dynamicIsland: { context in
-            DynamicIsland {
+            let phase = context.state.phase
+            return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    AgentPhaseIcon(phase: context.state.phase).font(.title3).padding(.leading, 4)
+                    PullYardLogoMark(progress: 1, size: 40, flatten: false).padding(.leading, 6).padding(.top, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    AgentTimer(state: context.state).font(.callout.weight(.semibold).monospacedDigit()).foregroundStyle(.white.opacity(0.85)).padding(.trailing, 4)
+                    AgentTimer(state: context.state)
+                        .font(.system(size: 22, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.trailing)
+                        .frame(maxWidth: 90, alignment: .trailing)
+                        .padding(.trailing, 6).padding(.top, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
-                    Text(context.attributes.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(context.attributes.title)
+                            .font(.system(size: 15, weight: .semibold, design: .serif))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        AgentPhasePill(phase: phase, compact: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    AgentDetailLine(state: context.state, stale: context.isStale).padding(.horizontal, 4)
+                    VStack(spacing: 10) {
+                        AgentWake(phase: phase)
+                        AgentDetailLine(state: context.state, stale: context.isStale)
+                    }
+                    .padding(.horizontal, 6).padding(.top, 6)
                 }
             } compactLeading: {
-                AgentPhaseIcon(phase: context.state.phase)
+                PullYardLogoMark(progress: 1, size: 24, flatten: false)
             } compactTrailing: {
-                if context.state.phase == .working {
-                    AgentTimer(state: context.state).font(.caption2.weight(.semibold).monospacedDigit()).foregroundStyle(WidgetPalette.coral).frame(maxWidth: 44)
+                if phase == .working {
+                    AgentTimer(state: context.state)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(AgentPhaseStyle.color(phase))
+                        .frame(maxWidth: 46)
                 } else {
-                    Text(context.state.label).font(.caption2.weight(.semibold)).foregroundStyle(AgentPhaseIcon.color(context.state.phase))
+                    Image(systemName: AgentPhaseStyle.symbol(phase)).font(.system(size: 13, weight: .bold)).foregroundStyle(AgentPhaseStyle.color(phase))
                 }
             } minimal: {
-                AgentPhaseIcon(phase: context.state.phase)
+                ZStack {
+                    Circle().stroke(AgentPhaseStyle.color(phase).opacity(0.9), lineWidth: 2)
+                    PullYardLogoMark(progress: 1, size: 15, flatten: false)
+                }
             }
             .widgetURL(Self.url(context))
-            .keylineTint(AgentPhaseIcon.color(context.state.phase))
+            .keylineTint(AgentPhaseStyle.color(phase))
         }
     }
 
@@ -286,30 +310,53 @@ struct AgentActivityWidget: Widget {
     }
 }
 
-private struct AgentPhaseIcon: View {
-    let phase: AgentActivityAttributes.ContentState.Phase
+private enum AgentPhaseStyle {
+    typealias Phase = AgentActivityAttributes.ContentState.Phase
 
-    static func color(_ phase: AgentActivityAttributes.ContentState.Phase) -> Color {
+    static func color(_ phase: Phase) -> Color {
         switch phase {
         case .working: WidgetPalette.coral
         case .waiting: WidgetPalette.amber
         case .done: WidgetPalette.green
-        case .stopped: Color.gray
+        case .stopped: Color(white: 0.62)
         case .failed: WidgetPalette.red
         }
     }
 
+    static func symbol(_ phase: Phase) -> String {
+        switch phase {
+        case .working: "sparkles"
+        case .waiting: "hand.raised.fill"
+        case .done: "checkmark"
+        case .stopped: "stop.fill"
+        case .failed: "exclamationmark"
+        }
+    }
+}
+
+private struct AgentPhasePill: View {
+    let phase: AgentActivityAttributes.ContentState.Phase
+    var compact = false
+
     var body: some View {
-        Image(systemName: symbol).foregroundStyle(Self.color(phase))
+        HStack(spacing: 5) {
+            Image(systemName: AgentPhaseStyle.symbol(phase)).font(.system(size: compact ? 9 : 10, weight: .bold))
+            Text(LocalizedStringKey(label)).font(.system(size: compact ? 11 : 12, weight: .semibold, design: .rounded))
+        }
+        .foregroundStyle(AgentPhaseStyle.color(phase))
+        .padding(.horizontal, compact ? 0 : 9).padding(.vertical, compact ? 0 : 4)
+        .background {
+            if !compact { Capsule().fill(AgentPhaseStyle.color(phase).opacity(0.15)) }
+        }
     }
 
-    private var symbol: String {
+    private var label: String {
         switch phase {
-        case .working: "wand.and.stars"
-        case .waiting: "hand.raised.fill"
-        case .done: "checkmark.circle.fill"
-        case .stopped: "stop.circle.fill"
-        case .failed: "exclamationmark.triangle.fill"
+        case .working: "Working"
+        case .waiting: "Needs you"
+        case .done: "Done"
+        case .stopped: "Stopped"
+        case .failed: "Failed"
         }
     }
 }
@@ -319,10 +366,22 @@ private struct AgentTimer: View {
 
     var body: some View {
         if let finished = state.finished {
-            Text(timerInterval: state.started...max(finished, state.started), countsDown: false, showsHours: false)
+            Text(timerInterval: state.started...max(finished, state.started), pauseTime: max(finished, state.started), countsDown: false, showsHours: false)
         } else {
             Text(timerInterval: state.started...Date.distantFuture, countsDown: false, showsHours: false)
         }
+    }
+}
+
+private struct AgentWake: View {
+    let phase: AgentActivityAttributes.ContentState.Phase
+
+    var body: some View {
+        let active = phase == .working || phase == .waiting
+        Capsule()
+            .fill(active ? AnyShapeStyle(LinearGradient(colors: [WidgetPalette.violet, WidgetPalette.sky, AgentPhaseStyle.color(phase)], startPoint: .leading, endPoint: .trailing)) : AnyShapeStyle(AgentPhaseStyle.color(phase).opacity(0.55)))
+            .frame(height: 3)
+            .opacity(active ? 1 : 0.8)
     }
 }
 
@@ -331,14 +390,22 @@ private struct AgentDetailLine: View {
     let stale: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
+            Image(systemName: state.phase == .working ? "chevron.right" : "text.quote")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white.opacity(0.4))
             Text(stale && state.finished == nil ? "Open PullYard for the latest" : state.detail)
-                .font(.caption.monospaced())
-                .foregroundStyle(.white.opacity(0.7))
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.72))
                 .lineLimit(1)
-            Spacer(minLength: 4)
+            Spacer(minLength: 6)
             if state.steps > 0 {
-                Text("\(state.steps) step\(state.steps == 1 ? "" : "s")").font(.caption2.weight(.medium)).foregroundStyle(.white.opacity(0.45))
+                Text("\(state.steps)")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.75))
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Capsule().fill(.white.opacity(0.1)))
+                    .accessibilityLabel("\(state.steps) steps")
             }
         }
     }
@@ -348,26 +415,41 @@ private struct AgentLockScreenView: View {
     let context: ActivityViewContext<AgentActivityAttributes>
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let phase = context.state.phase
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                AgentPhaseIcon(phase: context.state.phase)
-                    .font(.title3)
-                    .frame(width: 34, height: 34)
-                    .background(AgentPhaseIcon.color(context.state.phase).opacity(0.16), in: Circle())
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(context.attributes.title).font(.subheadline.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
-                    Text("\(context.state.label) on \(context.attributes.mac)").font(.caption).foregroundStyle(AgentPhaseIcon.color(context.state.phase))
+                PullYardLogoMark(progress: 1, size: 34, flatten: false)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("PullYard").font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                    Text(context.attributes.mac).font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                AgentTimer(state: context.state)
-                    .font(.title3.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.9))
-                    .multilineTextAlignment(.trailing)
-                    .frame(maxWidth: 80, alignment: .trailing)
+                AgentPhasePill(phase: phase)
             }
+            HStack(alignment: .lastTextBaseline, spacing: 12) {
+                Text(context.attributes.title)
+                    .font(.system(size: 17, weight: .semibold, design: .serif))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                Spacer(minLength: 8)
+                AgentTimer(state: context.state)
+                    .font(.system(size: 26, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 100, alignment: .trailing)
+            }
+            AgentWake(phase: phase)
             AgentDetailLine(state: context.state, stale: context.isStale)
         }
-        .padding(16)
+        .padding(.horizontal, 18).padding(.vertical, 16)
+        .background {
+            ZStack {
+                LinearGradient(colors: [WidgetPalette.navyTop, WidgetPalette.navy], startPoint: .topLeading, endPoint: .bottomTrailing)
+                RadialGradient(colors: [WidgetPalette.violet.opacity(0.28), .clear], center: .topLeading, startRadius: 0, endRadius: 220)
+                RadialGradient(colors: [WidgetPalette.sky.opacity(0.18), .clear], center: .topTrailing, startRadius: 0, endRadius: 200)
+                RadialGradient(colors: [AgentPhaseStyle.color(phase).opacity(0.14), .clear], center: .bottomTrailing, startRadius: 0, endRadius: 180)
+            }
+        }
     }
 }
 
