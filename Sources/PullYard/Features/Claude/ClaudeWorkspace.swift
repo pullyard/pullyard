@@ -199,7 +199,7 @@ final class ClaudeWorkspace {
     @ObservationIgnored private var indexWarmed = false
     @ObservationIgnored private(set) var sessionsByID: [String: ClaudeSessionInfo] = [:]
     let sessionRows = RowAppearTracker()
-    var showInspector = true
+    var showInspector = false
     var ciFixes: [ItemRef: CIFixLaunch] = [:]
     var prFixes: [ItemRef: CIFixLaunch] = [:]
 
