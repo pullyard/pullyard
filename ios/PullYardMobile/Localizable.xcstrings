@@ -5220,6 +5220,26 @@
           }
         }
       }
+    },
+    "Connecting to %@…" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подключение к %@…"
+          }
+        }
+      }
+    },
+    "Open PullYard on your Mac and turn on iPhone access in its Settings." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Откройте PullYard на Mac и включите доступ для iPhone в его настройках."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

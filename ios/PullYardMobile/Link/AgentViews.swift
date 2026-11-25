@@ -249,11 +249,19 @@ struct FixWithAgentMenu: View {
 
 struct AgentSessionsView: View {
     @ObservedObject private var link = LinkClient.shared
+    @State private var loading = false
 
     var body: some View {
         List {
-            if link.sessions.isEmpty {
-                PYEmptyState(title: link.isConnected ? "No agent sessions" : "Not connected", message: link.isConnected ? "Start one with Fix with agent on a pull request." : "Open PullYard on your Mac and make sure both are on the same network.")
+            if link.sessions.isEmpty, link.status == .connecting || loading {
+                VStack(spacing: 12) {
+                    PullYardLoader(size: 34)
+                    Text("Connecting to \(link.macName)…").mobileFont(size: 14).foregroundStyle(MobileTheme.muted)
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 50)
+                .listRowBackground(Color.clear)
+            } else if link.sessions.isEmpty {
+                PYEmptyState(title: link.isConnected ? "No agent sessions" : "Not connected", message: link.isConnected ? "Start one with Fix with agent on a pull request." : "Open PullYard on your Mac and turn on iPhone access in its Settings.")
                     .frame(maxWidth: .infinity).padding(.vertical, 40)
                     .listRowBackground(Color.clear)
             } else {
@@ -274,9 +282,13 @@ struct AgentSessionsView: View {
             }
         }
         .pyListStyle()
-        .refreshable { link.connectIfNeeded(); await link.refreshSessions() }
+        .refreshable { await link.refreshSessions() }
         .navigationTitle("Agents")
-        .task { link.connectIfNeeded(); await link.refreshSessions() }
+        .task {
+            loading = true
+            await link.refreshSessions()
+            loading = false
+        }
     }
 
     private func subtitle(_ session: PYLinkSession) -> String {

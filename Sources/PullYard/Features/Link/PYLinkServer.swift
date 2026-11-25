@@ -53,6 +53,7 @@ final class PYLinkServer {
     @ObservationIgnored private var pump: Task<Void, Never>?
     @ObservationIgnored private var irohEndpoint: Endpoint?
     @ObservationIgnored private var irohTask: Task<Void, Never>?
+    @ObservationIgnored private var activity: NSObjectProtocol?
     @ObservationIgnored lazy var identity: Curve25519.KeyAgreement.PrivateKey = PYLinkServer.loadIdentity()
 
     let desktopID: String = {
@@ -115,7 +116,7 @@ final class PYLinkServer {
         port = nil
         for client in clients.values { client.channel.close(nil) }
         clients = [:]
-        connected = []
+        refreshConnected()
         pump?.cancel()
         pump = nil
         stopIroh()
@@ -194,7 +195,7 @@ final class PYLinkServer {
             Task { @MainActor in
                 guard let self else { return }
                 self.clients[id] = nil
-                self.connected = Set(self.clients.values.compactMap(\.deviceID))
+                self.refreshConnected()
             }
         }
         channel.start()
@@ -231,7 +232,17 @@ final class PYLinkServer {
         client.channel.encrypt(with: key)
         client.authenticated = true
         client.deviceID = devices[index].id
+        refreshConnected()
+    }
+
+    private func refreshConnected() {
         connected = Set(clients.values.compactMap(\.deviceID))
+        if connected.isEmpty {
+            if let activity { ProcessInfo.processInfo.endActivity(activity) }
+            activity = nil
+        } else if activity == nil {
+            activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical], reason: "PullYard for iPhone is connected")
+        }
     }
 
     private func ensurePump() {
