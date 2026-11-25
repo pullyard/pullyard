@@ -42,6 +42,8 @@ final class LinkClient: ObservableObject {
     private var subscriptions: Set<String> = []
     private var connectTask: Task<Void, Error>?
     private var irohEndpoint: Endpoint?
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private var backgroundTimer: Task<Void, Never>?
     private var irohBinding: Task<Endpoint, Error>?
     private let pathMonitor = NWPathMonitor()
     private var onLocalNetwork = true
@@ -107,6 +109,33 @@ final class LinkClient: ObservableObject {
         try await task.value
     }
 
+    func enterBackground() {
+        guard AgentActivities.hasActive, channel != nil else { disconnect(); return }
+        endBackground(disconnect: false)
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "pullyard.agent.activity") { [weak self] in
+            Task { @MainActor in self?.endBackground(disconnect: true) }
+        }
+        backgroundTimer = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(25))
+            guard !Task.isCancelled else { return }
+            self?.endBackground(disconnect: true)
+        }
+    }
+
+    func enterForeground() {
+        endBackground(disconnect: false)
+    }
+
+    private func endBackground(disconnect shouldDisconnect: Bool) {
+        backgroundTimer?.cancel()
+        backgroundTimer = nil
+        if shouldDisconnect { disconnect() }
+        if backgroundTask != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTask)
+            backgroundTask = .invalid
+        }
+    }
+
     func disconnect() {
         channel?.close(nil)
         channel = nil
@@ -139,6 +168,7 @@ final class LinkClient: ObservableObject {
         guard let session = reply.session else { throw LinkError.remote("The Mac didn't return a session.") }
         sessions = reply.sessions ?? sessions
         subscriptions.insert(session)
+        AgentActivities.track(session)
         if chats[session] == nil { chats[session] = AgentChat(id: session, title: history.first { $0.id == id }?.title ?? "Agent") }
         return session
     }
@@ -155,6 +185,7 @@ final class LinkClient: ObservableObject {
         guard let session = reply.session else { throw LinkError.remote("The Mac didn't return a session.") }
         sessions = reply.sessions ?? sessions
         subscriptions.insert(session)
+        AgentActivities.track(session)
         if chats[session] == nil { chats[session] = AgentChat(id: session, title: "Agent") }
         return session
     }
@@ -179,6 +210,7 @@ final class LinkClient: ObservableObject {
         message.session = session
         message.text = text
         channel?.send(json: message)
+        AgentActivities.track(session)
         chats[session]?.items.append(PYLinkItem(id: "local-\(UUID().uuidString)", kind: "user", text: text))
     }
 
@@ -402,6 +434,7 @@ final class LinkClient: ObservableObject {
             }
             if let state = message.state { chat.state = state }
             chats[session] = chat
+            AgentActivities.sync(session: session, chat: chat, mac: macName)
         case "sessions":
             sessions = message.sessions ?? sessions
         default:

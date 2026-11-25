@@ -61,6 +61,16 @@ final class AppRouter: ObservableObject {
         }
     }
 
+    func top(in tab: AppTab) -> Route? {
+        switch tab {
+        case .pulls: pullsPath.last
+        case .projects: projectsPath.last
+        case .inbox: inboxPath.last
+        case .search: searchPath.last
+        case .settings: settingsPath.last
+        }
+    }
+
     func open(_ route: Route, in tab: AppTab) {
         switch tab {
         case .pulls: pullsPath.append(route)
@@ -139,6 +149,7 @@ struct RootView: View {
         .preferredColorScheme(AppearanceMode(rawValue: appearanceRaw)?.colorScheme)
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                LinkClient.shared.enterForeground()
                 KeyboardDismisser.install()
                 model.reloadFocus()
                 model.handleForeground()
@@ -146,7 +157,7 @@ struct RootView: View {
             }
             if phase == .background {
                 BackgroundSync.schedule()
-                LinkClient.shared.disconnect()
+                LinkClient.shared.enterBackground()
             }
             if phase == .active, model.isSignedIn { LinkClient.shared.connectIfNeeded() }
         }
@@ -179,6 +190,10 @@ struct RootView: View {
         }
         if url.scheme == "pullyard", url.host == "pending" {
             if let pending = PendingLink.take() { handleURL(pending) }
+            return
+        }
+        if url.scheme == "pullyard", url.host == "agent", let id = url.pathComponents.dropFirst().first {
+            if router.top(in: model.selectedTab) != .agent(id) { router.open(.agent(id), in: model.selectedTab) }
             return
         }
         if url.scheme == "pullyard", url.host == "queue" {

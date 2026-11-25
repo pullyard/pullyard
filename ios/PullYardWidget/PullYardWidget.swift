@@ -244,10 +244,138 @@ private struct CILockScreenView: View {
     }
 }
 
+struct AgentActivityWidget: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: AgentActivityAttributes.self) { context in
+            AgentLockScreenView(context: context)
+                .activityBackgroundTint(WidgetPalette.navy)
+                .activitySystemActionForegroundColor(.white)
+                .widgetURL(Self.url(context))
+        } dynamicIsland: { context in
+            DynamicIsland {
+                DynamicIslandExpandedRegion(.leading) {
+                    AgentPhaseIcon(phase: context.state.phase).font(.title3).padding(.leading, 4)
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    AgentTimer(state: context.state).font(.callout.weight(.semibold).monospacedDigit()).foregroundStyle(.white.opacity(0.85)).padding(.trailing, 4)
+                }
+                DynamicIslandExpandedRegion(.center) {
+                    Text(context.attributes.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                }
+                DynamicIslandExpandedRegion(.bottom) {
+                    AgentDetailLine(state: context.state, stale: context.isStale).padding(.horizontal, 4)
+                }
+            } compactLeading: {
+                AgentPhaseIcon(phase: context.state.phase)
+            } compactTrailing: {
+                if context.state.phase == .working {
+                    AgentTimer(state: context.state).font(.caption2.weight(.semibold).monospacedDigit()).foregroundStyle(WidgetPalette.coral).frame(maxWidth: 44)
+                } else {
+                    Text(context.state.label).font(.caption2.weight(.semibold)).foregroundStyle(AgentPhaseIcon.color(context.state.phase))
+                }
+            } minimal: {
+                AgentPhaseIcon(phase: context.state.phase)
+            }
+            .widgetURL(Self.url(context))
+            .keylineTint(AgentPhaseIcon.color(context.state.phase))
+        }
+    }
+
+    private static func url(_ context: ActivityViewContext<AgentActivityAttributes>) -> URL? {
+        URL(string: "pullyard://agent/\(context.attributes.session)")
+    }
+}
+
+private struct AgentPhaseIcon: View {
+    let phase: AgentActivityAttributes.ContentState.Phase
+
+    static func color(_ phase: AgentActivityAttributes.ContentState.Phase) -> Color {
+        switch phase {
+        case .working: WidgetPalette.coral
+        case .waiting: WidgetPalette.amber
+        case .done: WidgetPalette.green
+        case .stopped: Color.gray
+        case .failed: WidgetPalette.red
+        }
+    }
+
+    var body: some View {
+        Image(systemName: symbol).foregroundStyle(Self.color(phase))
+    }
+
+    private var symbol: String {
+        switch phase {
+        case .working: "wand.and.stars"
+        case .waiting: "hand.raised.fill"
+        case .done: "checkmark.circle.fill"
+        case .stopped: "stop.circle.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        }
+    }
+}
+
+private struct AgentTimer: View {
+    let state: AgentActivityAttributes.ContentState
+
+    var body: some View {
+        if let finished = state.finished {
+            Text(timerInterval: state.started...max(finished, state.started), countsDown: false, showsHours: false)
+        } else {
+            Text(timerInterval: state.started...Date.distantFuture, countsDown: false, showsHours: false)
+        }
+    }
+}
+
+private struct AgentDetailLine: View {
+    let state: AgentActivityAttributes.ContentState
+    let stale: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(stale && state.finished == nil ? "Open PullYard for the latest" : state.detail)
+                .font(.caption.monospaced())
+                .foregroundStyle(.white.opacity(0.7))
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            if state.steps > 0 {
+                Text("\(state.steps) step\(state.steps == 1 ? "" : "s")").font(.caption2.weight(.medium)).foregroundStyle(.white.opacity(0.45))
+            }
+        }
+    }
+}
+
+private struct AgentLockScreenView: View {
+    let context: ActivityViewContext<AgentActivityAttributes>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                AgentPhaseIcon(phase: context.state.phase)
+                    .font(.title3)
+                    .frame(width: 34, height: 34)
+                    .background(AgentPhaseIcon.color(context.state.phase).opacity(0.16), in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(context.attributes.title).font(.subheadline.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
+                    Text("\(context.state.label) on \(context.attributes.mac)").font(.caption).foregroundStyle(AgentPhaseIcon.color(context.state.phase))
+                }
+                Spacer(minLength: 8)
+                AgentTimer(state: context.state)
+                    .font(.title3.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.9))
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 80, alignment: .trailing)
+            }
+            AgentDetailLine(state: context.state, stale: context.isStale)
+        }
+        .padding(16)
+    }
+}
+
 @main
 struct PullYardWidgets: WidgetBundle {
     var body: some Widget {
         QueueWidget()
         CIActivityWidget()
+        AgentActivityWidget()
     }
 }

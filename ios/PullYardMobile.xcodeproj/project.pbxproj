@@ -19,14 +19,18 @@
 		20B23EC4331D918C39410462 /* InboxAndPullsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EF4EBD49C399A1EBB703665 /* InboxAndPullsView.swift */; };
 		2447CE6CB79EEE43B34463B2 /* PYLinkProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94231697E07DA3DAFF6139C2 /* PYLinkProtocol.swift */; };
 		2BB15762897716909F534C3C /* DemoData.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC50A581502EF04854200F81 /* DemoData.swift */; };
+		2CDEB08C4B1F821762AB609D /* AgentActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C19694612AE062E76BC181B6 /* AgentActivity.swift */; };
+		2D62B9013668D115E229ED24 /* AgentActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C19694612AE062E76BC181B6 /* AgentActivity.swift */; };
 		2D77D08C6D1AA225C27D51FD /* Templates.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3F70BD21D0F88FEBEA3A71C /* Templates.swift */; };
 		2F9BC7385EE4D45E27459F0B /* Feedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18DD51AC197A1C7E2A36C4BE /* Feedback.swift */; };
 		472E8BD487486D1409370EA3 /* PullYardMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8855AD7FD323DF86A404E6F1 /* PullYardMobileApp.swift */; };
+		499F195ABE538B364E01A5E0 /* AgentActivities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39385B92FCC46C6EA680341E /* AgentActivities.swift */; };
 		506C6041378E535399DE85EA /* IssueDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3087B4E6E836EBC234BDFAF7 /* IssueDetailView.swift */; };
 		54D529617C831F4F08F6FD2E /* DeviceFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBD4F0DC8CF7BE8F81827D8C /* DeviceFlow.swift */; };
 		553B9AF410D2BEF9AAD62485 /* Glass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120660E6D50C51E2C99B570E /* Glass.swift */; };
 		568B3FF6AD57088C3560CEA7 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30670A8D6390E4CF24450643 /* SettingsView.swift */; };
 		691EC5C347D72EA884A20DDC /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B3A0459840F2BE02F504DC5 /* WidgetSnapshot.swift */; };
+		698A26A285F7F05C42C8C074 /* AgentActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C19694612AE062E76BC181B6 /* AgentActivity.swift */; };
 		6BF8DA74F5AFD7D499A42E08 /* Snooze.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9662C0C9DC3339E5CD6B7A47 /* Snooze.swift */; };
 		726AA9D25FB3D0D5CC3C8ABE /* KeyboardDismisser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435E8F2A21391A7806B96123 /* KeyboardDismisser.swift */; };
 		824047CDCB66FD452D27E23E /* WidgetFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDE41B0C24CD4D522D241B3 /* WidgetFetcher.swift */; };
@@ -122,6 +126,7 @@
 		2EF4EBD49C399A1EBB703665 /* InboxAndPullsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxAndPullsView.swift; sourceTree = "<group>"; };
 		30670A8D6390E4CF24450643 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		3087B4E6E836EBC234BDFAF7 /* IssueDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueDetailView.swift; sourceTree = "<group>"; };
+		39385B92FCC46C6EA680341E /* AgentActivities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivities.swift; sourceTree = "<group>"; };
 		3CF0EA1A483B65C3A656E233 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		435E8F2A21391A7806B96123 /* KeyboardDismisser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDismisser.swift; sourceTree = "<group>"; };
 		492802CE69238D7B67870B90 /* LinkClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkClient.swift; sourceTree = "<group>"; };
@@ -151,6 +156,7 @@
 		B6D80172FDB710BD8881905F /* PullRequestDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PullRequestDetailView.swift; sourceTree = "<group>"; };
 		BAA821B14496A8A2E7564C1D /* PullYardShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PullYardShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		BF51D71B18FDD71AD5E3A9A7 /* PullYardMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PullYardMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C19694612AE062E76BC181B6 /* AgentActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivity.swift; sourceTree = "<group>"; };
 		CDA54E3ED6B7AF977D609157 /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		CE425C9086597B1189109F0E /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
 		D7C5751F2F7DBE975941D203 /* LocalCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCache.swift; sourceTree = "<group>"; };
@@ -210,6 +216,7 @@
 		55B1DFA2B98859ED2D75BBCC /* Link */ = {
 			isa = PBXGroup;
 			children = (
+				39385B92FCC46C6EA680341E /* AgentActivities.swift */,
 				8699E5CDC258955E31456B7A /* AgentViews.swift */,
 				492802CE69238D7B67870B90 /* LinkClient.swift */,
 				9F9F1FEBE741DDBE8177BA81 /* PYLinkIroh.swift */,
@@ -283,6 +290,7 @@
 		DA4C6EE2B869F62A2ECE88C7 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				C19694612AE062E76BC181B6 /* AgentActivity.swift */,
 				AA0C66F8D185CD5194B079AE /* CIActivity.swift */,
 				A2D18762764859FE93B40155 /* CredentialVault.swift */,
 				0BDE41B0C24CD4D522D241B3 /* WidgetFetcher.swift */,
@@ -424,6 +432,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2CDEB08C4B1F821762AB609D /* AgentActivity.swift in Sources */,
 				B7F186FA168D1403810754FA /* CIActivity.swift in Sources */,
 				C676A0716D8851BC0FA04633 /* CredentialVault.swift in Sources */,
 				857884D9283B9C9E5D68DF73 /* ShareViewController.swift in Sources */,
@@ -436,6 +445,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				499F195ABE538B364E01A5E0 /* AgentActivities.swift in Sources */,
+				2D62B9013668D115E229ED24 /* AgentActivity.swift in Sources */,
 				CAA9A496F59DC926C60CD187 /* AgentViews.swift in Sources */,
 				C9DFE06D59FC7922691A5941 /* AppModel.swift in Sources */,
 				A73200079D9632C212D17A9F /* AppShortcuts.swift in Sources */,
@@ -486,6 +497,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				698A26A285F7F05C42C8C074 /* AgentActivity.swift in Sources */,
 				E5B9913DEBE75D2D0681044E /* CIActivity.swift in Sources */,
 				14FA9E4773D48988B26245D6 /* CredentialVault.swift in Sources */,
 				0A62DCA41480F5AA074C2324 /* PullYardWidget.swift in Sources */,
