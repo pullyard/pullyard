@@ -86,6 +86,7 @@ struct ChatView: View {
                     scrollDown(proxy)
                 }
                 .onChange(of: chat.busy) { scrollDown(proxy) }
+                .onChange(of: chat.expandedTools) { follow.holdUntil = Date().addingTimeInterval(0.6) }
                 .onChange(of: chat.lastError) { scrollDown(proxy) }
                 .onChange(of: chat.pendingCount) {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { scrollDown(proxy) }
@@ -210,6 +211,7 @@ final class ChatFollow {
     @ObservationIgnored var keptTopID: String?
     var resizeTick = 0
     @ObservationIgnored var resizing = false
+    @ObservationIgnored var holdUntil = Date.distantPast
     @ObservationIgnored var viewportHeight: CGFloat = 0
 }
 
@@ -298,7 +300,7 @@ private struct ChatScrollObserver: NSViewRepresentable {
                     self.follow?.resizing = false
                 }
             }
-            guard follow.stick, resized || restoreUntil > Date() else { return }
+            guard follow.stick, Date() > follow.holdUntil, resized || restoreUntil > Date() else { return }
             let y = max(0, doc.frame.height - clip.bounds.height)
             guard abs(clip.bounds.origin.y - y) > 0.5 else { return }
             clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
@@ -1001,7 +1003,7 @@ struct ThinkingView: View {
     var body: some View {
         if !text.text.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
-                Button { withAnimation(Motion.quick) { open.toggle() } } label: {
+                Button { open.toggle() } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "chevron.right").font(.syCaption2).rotationEffect(.degrees(open ? 90 : 0))
                         Image(systemName: "brain").foregroundStyle(Color.syViolet.opacity(0.8))
@@ -1018,7 +1020,6 @@ struct ThinkingView: View {
                 .accessibilityValue(open ? "Expanded" : "Collapsed")
                 if open {
                     Text(text.text).font(.syCallout).foregroundStyle(Color.syMuted).textSelection(.enabled).padding(.leading, 18)
-                        .transition(.reveal)
                 }
             }
         }
@@ -1106,7 +1107,7 @@ struct ToolCallView: View {
         let isOpen = open ?? defaultOpen
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
-                Button { withAnimation(Motion.quick) { open = !isOpen } } label: {
+                Button { open = !isOpen } label: {
                     HStack(spacing: 8) {
                         statusIcon
                         Image(systemName: ToolPresentation.icon(call.name)).foregroundStyle(Color.syMuted).frame(width: 16)
@@ -1136,7 +1137,6 @@ struct ToolCallView: View {
                 Rectangle().fill(Color.syLine).frame(height: 1)
                 ToolDetails(call: call, folder: folder)
                     .padding(10)
-                    .transition(.reveal)
             }
             if let p = call.permission, !p.resolved {
                 PermissionCard(request: p, chat: chat, folder: folder)
