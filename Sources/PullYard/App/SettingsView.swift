@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
+    @AppStorage(SplitAppShell.flagKey) private var nativeSplit = false
     @AppStorage("pollInterval") private var pollInterval = 30.0
     @AppStorage("oauthClientID") private var clientID = ""
     @AppStorage(Theme.styleKey) private var themeStyle = ThemeStyle.pullyard.rawValue
@@ -260,6 +261,14 @@ struct SettingsView: View {
                 }
             } header: {
                 SettingsHeader(title: "Diagnostics", icon: "gauge.with.dots.needle.33percent", color: .sySky)
+            }
+            Section {
+                Toggle("Native split view", isOn: $nativeSplit)
+                Text("Uses the macOS split view for the sidebar, list and detail. On macOS 26 the sidebar becomes glass. The narrow icon rail is not available in this mode. Experimental.")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+            } header: {
+                SettingsHeader(title: "Window layout", icon: "sidebar.left", color: .syViolet)
             }
             Section {
                 TextField("Client ID", text: $clientID)

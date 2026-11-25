@@ -58,10 +58,17 @@ struct ThemedRoot<Content: View>: View {
 
 struct MainView: View {
     @Environment(AppModel.self) private var app
+    @AppStorage(SplitAppShell.flagKey) private var nativeSplit = false
 
     var body: some View {
         @Bindable var app = app
-        AppShell()
+        Group {
+            if nativeSplit {
+                SplitAppShell()
+            } else {
+                AppShell()
+            }
+        }
             .modifier(BrandToolbar())
             .overlay {
                 if app.showOnboarding {
@@ -171,6 +178,69 @@ struct AppShell: View {
             ToolbarItem(id: "sidebar", placement: .navigation) {
                 SidebarToggleButton(hidden: $hidden)
             }
+        }
+    }
+}
+
+struct SplitAppShell: View {
+    static let flagKey = "shell.nativeSplitView"
+    @Environment(AppModel.self) private var app
+    @AppStorage("agents.sidebarHidden") private var hidden = false
+    @State private var visibility: NavigationSplitViewVisibility = .all
+
+    private var showsList: Bool { !(app.section == .overview && app.forge == nil) }
+
+    var body: some View {
+        Group {
+            if showsList {
+                NavigationSplitView(columnVisibility: $visibility) {
+                    sidebar
+                } content: {
+                    ContentColumn()
+                        .surface(.list)
+                        .navigationSplitViewColumnWidth(min: 280, ideal: 360, max: 560)
+                } detail: {
+                    DetailColumn()
+                }
+            } else {
+                NavigationSplitView(columnVisibility: $visibility) {
+                    sidebar
+                } detail: {
+                    DetailColumn()
+                }
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+        .onAppear { visibility = hidden ? .detailOnly : .all }
+        .onChange(of: visibility) { _, v in hidden = v == .detailOnly }
+        .onChange(of: hidden) { _, h in
+            let next: NavigationSplitViewVisibility = h ? .detailOnly : .all
+            if visibility != next { withAnimation(Motion.smooth) { visibility = next } }
+        }
+        .edgeReveal(.leading, enabled: hidden, width: showsList ? AppShell.sidebarWidth + 1 + 360 : AppShell.sidebarWidth) {
+            EdgePanelContent(sidebarWidth: AppShell.sidebarWidth)
+                .environment(app)
+                .font(.syBody)
+                .tint(Color.syAccent)
+                .environment(\.locale, .app)
+        }
+    }
+
+    private var sidebar: some View {
+        SidebarView(compact: false)
+            .modifier(SplitSidebarSurface())
+            .navigationSplitViewColumnWidth(min: 180, ideal: AppShell.sidebarWidth, max: 320)
+    }
+}
+
+private struct SplitSidebarSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        if GlassSupport.isAvailable, !reduceTransparency, Theme.isBrand {
+            content.scrollContentBackground(.hidden).background(Color.sySidebar.opacity(0.35))
+        } else {
+            content.surface(.sidebar)
         }
     }
 }
