@@ -51,12 +51,16 @@ struct PYLinkSettingsView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("In PullYard on your iPhone open Settings → Mac, tap Pair and scan this code.")
                             Text("Code \(pairing.code)").font(.system(.title3, design: .monospaced).weight(.semibold))
+                            Text("Fingerprint \(PYLinkCrypto.fingerprint(pairing.key))").font(.system(.callout, design: .monospaced)).foregroundStyle(Color.syMuted)
                             Text("Expires \(expires.formatted(date: .omitted, time: .shortened))").foregroundStyle(Color.syMuted)
                             Button("Cancel") { server.cancelPairing() }
                         }
                     }
                 } else {
                     Button("Show pairing code") { server.beginPairing() }
+                    if let error = server.lastError, server.port != nil {
+                        Text(error).foregroundStyle(Color.syRed)
+                    }
                 }
             }
 

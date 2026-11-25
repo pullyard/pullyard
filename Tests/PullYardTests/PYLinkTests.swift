@@ -14,14 +14,97 @@ final class PYLinkTests: XCTestCase {
     func testBothSidesDeriveTheSameKey() throws {
         let desktop = Curve25519.KeyAgreement.PrivateKey()
         let phone = Curve25519.KeyAgreement.PrivateKey()
-        let a = try PYLinkCrypto.sessionKey(privateKey: desktop, peer: phone.publicKey, clientNonce: "c", serverNonce: "s")
-        let b = try PYLinkCrypto.sessionKey(privateKey: phone, peer: desktop.publicKey, clientNonce: "c", serverNonce: "s")
-        let sealed = try PYLinkCrypto.seal(Data("hello".utf8), key: a, direction: "c2s")
-        XCTAssertEqual(try PYLinkCrypto.open(sealed, key: b, direction: "c2s"), Data("hello".utf8))
-        XCTAssertThrowsError(try PYLinkCrypto.open(sealed, key: b, direction: "s2c"))
+        let desktopEphemeral = Curve25519.KeyAgreement.PrivateKey()
+        let phoneEphemeral = Curve25519.KeyAgreement.PrivateKey()
+        let a = try PYLinkCrypto.sessionKey(identity: desktop, peer: phone.publicKey, ephemeral: desktopEphemeral, peerEphemeral: phoneEphemeral.publicKey, clientNonce: "c", serverNonce: "s")
+        let b = try PYLinkCrypto.sessionKey(identity: phone, peer: desktop.publicKey, ephemeral: phoneEphemeral, peerEphemeral: desktopEphemeral.publicKey, clientNonce: "c", serverNonce: "s")
+        let sealed = try PYLinkCrypto.seal(Data("hello".utf8), key: a, direction: "c2s", counter: 0)
+        XCTAssertEqual(try PYLinkCrypto.open(sealed, key: b, direction: "c2s", counter: 0), Data("hello".utf8))
+        XCTAssertThrowsError(try PYLinkCrypto.open(sealed, key: b, direction: "s2c", counter: 0))
+        XCTAssertThrowsError(try PYLinkCrypto.open(sealed, key: b, direction: "c2s", counter: 1))
         let stranger = Curve25519.KeyAgreement.PrivateKey()
-        let c = try PYLinkCrypto.sessionKey(privateKey: stranger, peer: desktop.publicKey, clientNonce: "c", serverNonce: "s")
-        XCTAssertThrowsError(try PYLinkCrypto.open(sealed, key: c, direction: "c2s"))
+        let c = try PYLinkCrypto.sessionKey(identity: stranger, peer: desktop.publicKey, ephemeral: phoneEphemeral, peerEphemeral: desktopEphemeral.publicKey, clientNonce: "c", serverNonce: "s")
+        XCTAssertThrowsError(try PYLinkCrypto.open(sealed, key: c, direction: "c2s", counter: 0))
+    }
+
+    func testDirectionsNeverShareANonce() {
+        XCTAssertNotEqual(Data(PYLinkCrypto.frameNonce(direction: "c2s", counter: 7)), Data(PYLinkCrypto.frameNonce(direction: "s2c", counter: 7)))
+    }
+
+    func testHelloProofNeedsTheRightKeysAndCode() throws {
+        let desktop = Curve25519.KeyAgreement.PrivateKey()
+        let phone = Curve25519.KeyAgreement.PrivateKey()
+        let attacker = Curve25519.KeyAgreement.PrivateKey()
+        let phoneKey = try PYLinkCrypto.authKey(privateKey: phone, peer: desktop.publicKey)
+        let desktopKey = try PYLinkCrypto.authKey(privateKey: desktop, peer: phone.publicKey)
+        var hello = PYLinkHello(v: PYLink.version, deviceID: "d", deviceName: "iPhone", deviceKey: PYLinkCrypto.publicKeyString(phone), nonce: "n", ephemeral: "e", pairing: true)
+        hello.proof = PYLinkCrypto.proof(hello.proofParts(code: "123456"), key: phoneKey)
+        XCTAssertTrue(PYLinkCrypto.verify(hello.proof, parts: hello.proofParts(code: "123456"), key: desktopKey))
+        XCTAssertFalse(PYLinkCrypto.verify(hello.proof, parts: hello.proofParts(code: "654321"), key: desktopKey))
+        let attackerKey = try PYLinkCrypto.authKey(privateKey: attacker, peer: desktop.publicKey)
+        var forged = hello
+        forged.proof = PYLinkCrypto.proof(hello.proofParts(code: "123456"), key: attackerKey)
+        XCTAssertFalse(PYLinkCrypto.verify(forged.proof, parts: forged.proofParts(code: "123456"), key: desktopKey))
+    }
+
+    func testPlaintextAfterHelloIsNeverDelivered() throws {
+        let queue = DispatchQueue(label: "test.link.plain")
+        let listener = try NWListener(using: .tcp, on: .any)
+        let first = expectation(description: "hello delivered")
+        let closed = expectation(description: "injected frame rejected")
+        var serverChannel: PYLinkChannel?
+        var frames: [String] = []
+        listener.newConnectionHandler = { connection in
+            let channel = PYLinkChannel(connection: connection, isServer: true, queue: queue)
+            channel.onFrame = { data in
+                frames.append(String(decoding: data, as: UTF8.self))
+                if frames.count == 1 {
+                    first.fulfill()
+                    channel.encrypt(with: SymmetricKey(size: .bits256))
+                }
+            }
+            channel.onClose = { _ in closed.fulfill() }
+            serverChannel = channel
+            channel.start()
+        }
+        let ready = expectation(description: "listener ready")
+        listener.stateUpdateHandler = { if case .ready = $0 { ready.fulfill() } }
+        listener.start(queue: queue)
+        wait(for: [ready], timeout: 5)
+        let client = PYLinkChannel(connection: NWConnection(host: "127.0.0.1", port: listener.port!, using: .tcp), isServer: false, queue: queue)
+        client.start()
+        client.send(Data("hello".utf8))
+        client.send(Data("{\"type\":\"fix\"}".utf8))
+        wait(for: [first, closed], timeout: 5)
+        XCTAssertEqual(frames, ["hello"])
+        client.close(nil)
+        serverChannel?.close(nil)
+        listener.cancel()
+    }
+
+    func testOversizedHandshakeFrameIsRejected() throws {
+        let queue = DispatchQueue(label: "test.link.big")
+        let listener = try NWListener(using: .tcp, on: .any)
+        let closed = expectation(description: "closed")
+        var serverChannel: PYLinkChannel?
+        listener.newConnectionHandler = { connection in
+            let channel = PYLinkChannel(connection: connection, isServer: true, queue: queue)
+            channel.onFrame = { _ in XCTFail("oversized frame delivered") }
+            channel.onClose = { _ in closed.fulfill() }
+            serverChannel = channel
+            channel.start()
+        }
+        let ready = expectation(description: "listener ready")
+        listener.stateUpdateHandler = { if case .ready = $0 { ready.fulfill() } }
+        listener.start(queue: queue)
+        wait(for: [ready], timeout: 5)
+        let client = PYLinkChannel(connection: NWConnection(host: "127.0.0.1", port: listener.port!, using: .tcp), isServer: false, queue: queue)
+        client.start()
+        client.send(Data(repeating: 65, count: PYLink.maxHandshakeFrame + 1))
+        wait(for: [closed], timeout: 5)
+        client.close(nil)
+        serverChannel?.close(nil)
+        listener.cancel()
     }
 
     func testEncryptedFramesOverLocalhost() throws {

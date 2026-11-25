@@ -84,8 +84,10 @@ struct PYLinkBridge {
     private static func store(_ attachment: PYLinkAttachment) -> URL? {
         let fm = FileManager.default
         guard let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
-        let folder = support.appendingPathComponent("PullYard/iPhone Attachments", isDirectory: true).appendingPathComponent(UUID().uuidString.prefix(8).lowercased(), isDirectory: true)
-        var name = (attachment.name as NSString).lastPathComponent.replacingOccurrences(of: ":", with: "-")
+        let root = support.appendingPathComponent("PullYard/iPhone Attachments", isDirectory: true)
+        pruneAttachments(root)
+        let folder = root.appendingPathComponent(UUID().uuidString.prefix(8).lowercased(), isDirectory: true)
+        var name = String((attachment.name as NSString).lastPathComponent.replacingOccurrences(of: ":", with: "-").components(separatedBy: .newlines).joined(separator: " ").prefix(120))
         if name.isEmpty || name.hasPrefix(".") { name = "attachment" + name }
         do {
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -94,6 +96,16 @@ struct PYLinkBridge {
             return url
         } catch {
             return nil
+        }
+    }
+
+    private static func pruneAttachments(_ root: URL) {
+        let fm = FileManager.default
+        guard let folders = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        let cutoff = Date().addingTimeInterval(-7 * 24 * 3600)
+        for folder in folders {
+            let modified = (try? folder.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if modified < cutoff { try? fm.removeItem(at: folder) }
         }
     }
 

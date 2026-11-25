@@ -41,6 +41,7 @@ final class AppRouter: ObservableObject {
     @Published var settingsPath: [Route] = []
     @Published var agentsPath: [Route] = []
     @Published var showSettings = false
+    @Published var pendingPairing: PYLinkPairing?
 
     private struct Snapshot: Codable { var pulls: [Route]; var projects: [Route]?; var inbox: [Route]; var search: [Route] }
 
@@ -185,14 +186,7 @@ struct RootView: View {
             return
         }
         if url.scheme == "pullyard", url.host == "pair", let pairing = PYLinkPairing.parse(url.absoluteString) {
-            Task {
-                do {
-                    try await LinkClient.shared.pair(pairing)
-                    model.feedback.success("Paired with \(pairing.name)")
-                } catch {
-                    model.feedback.error(error, key: "pair")
-                }
-            }
+            router.pendingPairing = pairing
             return
         }
         if url.scheme == "pullyard", url.host == "pending" {
@@ -244,6 +238,12 @@ struct MainTabsView: View {
         .sheet(isPresented: $router.showSettings) {
             settingsStack.pySheetStyle()
         }
+        .alert(String(format: L("Pair with %@?"), router.pendingPairing?.name ?? "Mac"), isPresented: Binding(get: { router.pendingPairing != nil }, set: { if !$0 { router.pendingPairing = nil } }), presenting: router.pendingPairing) { pairing in
+            Button("Pair") { confirmPairing(pairing) }
+            Button("Cancel", role: .cancel) { router.pendingPairing = nil }
+        } message: { pairing in
+            Text(pairingWarning(pairing))
+        }
         .onAppear {
             guard !restored else { return }
             restored = true
@@ -258,6 +258,26 @@ struct MainTabsView: View {
                 do { try await Task.sleep(for: .seconds(refreshMinutes * 60)) } catch { return }
                 guard !Task.isCancelled else { return }
                 await model.refreshVisible()
+            }
+        }
+    }
+
+    private func pairingWarning(_ pairing: PYLinkPairing) -> String {
+        var text = String(format: L("Pair only if this link came from PullYard on your own Mac. The fingerprint must match the one on the Mac: %@"), PYLinkCrypto.fingerprint(pairing.key))
+        if let current = LinkClient.shared.mac, current.id != pairing.id {
+            text += "\n\n" + String(format: L("This replaces %@."), current.name)
+        }
+        return text
+    }
+
+    private func confirmPairing(_ pairing: PYLinkPairing) {
+        router.pendingPairing = nil
+        Task {
+            do {
+                try await LinkClient.shared.pair(pairing)
+                model.feedback.success(String(format: L("Paired with %@"), pairing.name))
+            } catch {
+                model.feedback.error(error, key: "pair")
             }
         }
     }

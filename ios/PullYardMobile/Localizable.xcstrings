@@ -5780,6 +5780,86 @@
           }
         }
       }
+    },
+    "Pair with %@?" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Связать с %@?"
+          }
+        }
+      }
+    },
+    "Pair" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Связать"
+          }
+        }
+      }
+    },
+    "Pair only if this link came from PullYard on your own Mac. The fingerprint must match the one on the Mac: %@" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Связывайте, только если ссылка пришла из PullYard на вашем Mac. Отпечаток должен совпадать с показанным на Mac: %@"
+          }
+        }
+      }
+    },
+    "This replaces %@." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Это заменит %@."
+          }
+        }
+      }
+    },
+    "Paired with %@" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Связано с %@"
+          }
+        }
+      }
+    },
+    "Update PullYard on your Mac to connect." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Обновите PullYard на Mac, чтобы подключиться."
+          }
+        }
+      }
+    },
+    "Couldn't verify your Mac. Pair again from Settings → Mac." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось проверить Mac. Свяжите заново в Настройки → Mac."
+          }
+        }
+      }
+    },
+    "Couldn't set up an encrypted connection." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось установить зашифрованное соединение."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -65,9 +65,6 @@ struct MacLinkSection: View {
             Button("Unpair", role: .destructive) { link.unpair() }
             Button("Cancel", role: .cancel) {}
         }
-        .onReceive(NotificationCenter.default.publisher(for: .pullyardPairing)) { note in
-            if let pairing = note.object as? PYLinkPairing { Task { await pair(pairing) } }
-        }
     }
 
     private func pair(_ pairing: PYLinkPairing) async {

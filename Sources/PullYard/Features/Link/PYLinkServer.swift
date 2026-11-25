@@ -42,6 +42,7 @@ final class PYLinkServer {
     private(set) var port: UInt16?
     private(set) var connected: Set<String> = []
     private(set) var lastError: String?
+    @ObservationIgnored private var pairingFailures = 0
     private(set) var irohID: String?
     private(set) var irohOnline = false
     private(set) var irohError: String?
@@ -171,6 +172,8 @@ final class PYLinkServer {
         let code = String(format: "%06d", Int.random(in: 0..<1_000_000))
         pairing = PYLinkPairing(name: desktopName, id: desktopID, key: PYLinkCrypto.publicKeyString(identity), code: code, hosts: Self.localAddresses(), port: port ?? PYLink.preferredPort, iroh: irohID)
         pairingExpires = Date().addingTimeInterval(10 * 60)
+        pairingFailures = 0
+        lastError = nil
     }
 
     func cancelPairing() {
@@ -185,6 +188,10 @@ final class PYLinkServer {
     }
 
     private func accept(_ channel: PYLinkChannel) {
+        guard clients.values.filter({ !$0.authenticated }).count < 8 else {
+            channel.close(nil)
+            return
+        }
         let client = PYLinkClient(channel: channel)
         let id = ObjectIdentifier(client)
         clients[id] = client
@@ -199,13 +206,29 @@ final class PYLinkServer {
             }
         }
         channel.start()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak client] in
+            guard let client, !client.authenticated else { return }
+            client.channel.close(nil)
+        }
     }
 
     private func handle(_ data: Data, from client: PYLinkClient) {
-        guard client.authenticated else { handshake(data, client: client); return }
-        guard let message = try? JSONDecoder().decode(PYLinkMessage.self, from: data) else { return }
+        guard client.authenticated else {
+            guard !client.greeted else { client.channel.close(nil); return }
+            client.greeted = true
+            handshake(data, client: client)
+            return
+        }
+        guard client.channel.isEncrypted, let message = try? JSONDecoder().decode(PYLinkMessage.self, from: data) else { return }
         PYLinkBridge(server: self, app: app).handle(message, client: client)
         ensurePump()
+    }
+
+    private func reject(_ client: PYLinkClient, hello: PYLinkHello?, authKey: SymmetricKey?, reason: String) {
+        var reply = PYLinkHelloReply(ok: false, desktopID: desktopID, desktopName: desktopName, nonce: PYLinkCrypto.nonce(), reason: reason)
+        if let hello, let authKey { reply.proof = PYLinkCrypto.proof(reply.proofParts(hello: hello), key: authKey) }
+        client.channel.send(json: reply)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { client.channel.close(nil) }
     }
 
     private func handshake(_ data: Data, client: PYLinkClient) {
@@ -213,22 +236,44 @@ final class PYLinkServer {
             client.channel.close(nil)
             return
         }
-        var known = devices.firstIndex { $0.key == hello.deviceKey }
-        if known == nil, let pairing, let expires = pairingExpires, expires > .now, hello.pairingCode == pairing.code {
-            devices.append(PYLinkDevice(id: hello.deviceID, name: hello.deviceName, key: hello.deviceKey, added: .now))
-            known = devices.count - 1
+        guard hello.v >= PYLink.version, let ephemeralString = hello.ephemeral, let peerEphemeral = PYLinkCrypto.publicKey(ephemeralString),
+              let authKey = try? PYLinkCrypto.authKey(privateKey: identity, peer: peer) else {
+            return reject(client, hello: nil, authKey: nil, reason: "Update PullYard on this iPhone to connect to \(desktopName).")
+        }
+        let wantsPairing = hello.pairing == true
+        let activeCode = (pairingExpires ?? .distantPast) > .now ? pairing?.code : nil
+        let code = wantsPairing ? (activeCode ?? "") : ""
+        guard PYLinkCrypto.verify(hello.proof, parts: hello.proofParts(code: code), key: authKey) else {
+            if wantsPairing, activeCode != nil {
+                pairingFailures += 1
+                if pairingFailures >= 5 {
+                    cancelPairing()
+                    lastError = "Pairing stopped after too many wrong attempts. Show a new code to try again."
+                }
+            }
+            return reject(client, hello: hello, authKey: authKey, reason: wantsPairing ? "The pairing code didn't match. Scan the code on \(desktopName) again." : "This iPhone isn't paired with \(desktopName). Pair it again from PullYard Settings → iPhone.")
+        }
+        var index = devices.firstIndex { $0.key == hello.deviceKey }
+        if wantsPairing {
+            if index == nil {
+                devices.append(PYLinkDevice(id: hello.deviceID, name: hello.deviceName, key: hello.deviceKey, added: .now))
+                index = devices.count - 1
+            }
             cancelPairing()
         }
-        let serverNonce = PYLinkCrypto.nonce()
-        guard let index = known, let key = try? PYLinkCrypto.sessionKey(privateKey: identity, peer: peer, clientNonce: hello.nonce, serverNonce: serverNonce) else {
-            client.channel.send(json: PYLinkHelloReply(ok: false, desktopID: desktopID, desktopName: desktopName, nonce: serverNonce, reason: "This iPhone isn't paired with \(desktopName). Pair it again from PullYard Settings → iPhone."))
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { client.channel.close(nil) }
-            return
+        guard let index else {
+            return reject(client, hello: hello, authKey: authKey, reason: "This iPhone isn't paired with \(desktopName). Pair it again from PullYard Settings → iPhone.")
         }
+        let ephemeral = Curve25519.KeyAgreement.PrivateKey()
+        var reply = PYLinkHelloReply(ok: true, desktopID: desktopID, desktopName: desktopName, nonce: PYLinkCrypto.nonce(), ephemeral: PYLinkCrypto.publicKeyString(ephemeral))
+        guard let key = try? PYLinkCrypto.sessionKey(identity: identity, peer: peer, ephemeral: ephemeral, peerEphemeral: peerEphemeral, clientNonce: hello.nonce, serverNonce: reply.nonce) else {
+            return reject(client, hello: hello, authKey: authKey, reason: "Couldn't set up an encrypted connection.")
+        }
+        reply.proof = PYLinkCrypto.proof(reply.proofParts(hello: hello), key: authKey)
         devices[index].lastSeen = .now
-        devices[index].name = hello.deviceName
+        devices[index].name = String(hello.deviceName.prefix(80))
         saveDevices()
-        client.channel.send(json: PYLinkHelloReply(ok: true, desktopID: desktopID, desktopName: desktopName, nonce: serverNonce))
+        client.channel.send(json: reply)
         client.channel.encrypt(with: key)
         client.authenticated = true
         client.deviceID = devices[index].id
@@ -261,12 +306,35 @@ final class PYLinkServer {
     }
 
     private func saveDevices() {
-        if let data = try? JSONEncoder().encode(devices) { UserDefaults.standard.set(data, forKey: Self.devicesKey) }
+        guard let data = try? JSONEncoder().encode(devices) else { return }
+        Self.storeSecret(data, account: "devices")
+        UserDefaults.standard.removeObject(forKey: Self.devicesKey)
     }
 
     private static func loadDevices() -> [PYLinkDevice] {
+        if let data = loadSecret(account: "devices"), let items = try? JSONDecoder().decode([PYLinkDevice].self, from: data) { return items }
         guard let data = UserDefaults.standard.data(forKey: devicesKey), let items = try? JSONDecoder().decode([PYLinkDevice].self, from: data) else { return [] }
+        storeSecret(data, account: "devices")
+        UserDefaults.standard.removeObject(forKey: devicesKey)
         return items
+    }
+
+    private static func loadSecret(account: String) -> Data? {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "dev.pullyard.link", kSecAttrAccount as String: account, kSecReturnData as String: true]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else { return nil }
+        return item as? Data
+    }
+
+    private static func storeSecret(_ data: Data, account: String) {
+        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "dev.pullyard.link", kSecAttrAccount as String: account]
+        let update: [String: Any] = [kSecValueData as String: data]
+        if SecItemUpdate(base as CFDictionary, update as CFDictionary) == errSecItemNotFound {
+            var add = base
+            add[kSecValueData as String] = data
+            add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            SecItemAdd(add as CFDictionary, nil)
+        }
     }
 
     private static func loadIdentity() -> Curve25519.KeyAgreement.PrivateKey {
@@ -303,6 +371,7 @@ final class PYLinkServer {
 final class PYLinkClient {
     let channel: PYLinkChannel
     var authenticated = false
+    var greeted = false
     var deviceID: String?
     var subscriptions: Set<String> = []
     var sentItems: [String: [String: PYLinkItem]] = [:]

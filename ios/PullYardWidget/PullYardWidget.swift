@@ -271,6 +271,7 @@ struct AgentActivityWidget: Widget {
                             .font(.system(size: 15, weight: .semibold, design: .serif))
                             .foregroundStyle(.white)
                             .lineLimit(1)
+                            .privacySensitive()
                         AgentPhasePill(phase: phase, compact: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -398,6 +399,7 @@ private struct AgentDetailLine: View {
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.72))
                 .lineLimit(1)
+                .privacySensitive()
             Spacer(minLength: 6)
             if state.steps > 0 {
                 Text("\(state.steps)")
@@ -431,6 +433,7 @@ private struct AgentLockScreenView: View {
                     .font(.system(size: 17, weight: .semibold, design: .serif))
                     .foregroundStyle(.white)
                     .lineLimit(2)
+                    .privacySensitive()
                 Spacer(minLength: 8)
                 AgentTimer(state: context.state)
                     .font(.system(size: 26, weight: .semibold, design: .rounded).monospacedDigit())

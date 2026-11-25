@@ -440,8 +440,15 @@ final class LinkClient: ObservableObject {
             channel.close(nil)
             throw LinkError.rejected("Invalid pairing key.")
         }
-        let nonce = PYLinkCrypto.nonce()
         let identity = self.identity
+        let ephemeral = Curve25519.KeyAgreement.PrivateKey()
+        let authKey: SymmetricKey
+        do { authKey = try PYLinkCrypto.authKey(privateKey: identity, peer: macKey) } catch {
+            channel.close(nil)
+            throw LinkError.rejected("Invalid pairing key.")
+        }
+        var greeting = PYLinkHello(v: PYLink.version, deviceID: Self.deviceID, deviceName: UIDevice.current.name, deviceKey: PYLinkCrypto.publicKeyString(identity), nonce: PYLinkCrypto.nonce(), ephemeral: PYLinkCrypto.publicKeyString(ephemeral), pairing: pairingCode != nil ? true : nil)
+        greeting.proof = PYLinkCrypto.proof(greeting.proofParts(code: pairingCode ?? ""), key: authKey)
         let hello: Result<PYLinkHelloReply, Error> = await withCheckedContinuation { continuation in
             var done = false
             let complete: (Result<PYLinkHelloReply, Error>) -> Void = { result in
@@ -455,7 +462,7 @@ final class LinkClient: ObservableObject {
             }
             channel.onClose = { _ in complete(.failure(LinkError.unreachable)) }
             channel.start()
-            channel.send(json: PYLinkHello(v: PYLink.version, deviceID: Self.deviceID, deviceName: UIDevice.current.name, deviceKey: PYLinkCrypto.publicKeyString(identity), nonce: nonce, pairingCode: pairingCode))
+            channel.send(json: greeting)
             self.queue.asyncAfter(deadline: .now() + timeout) { complete(.failure(LinkError.timeout)) }
         }
         guard case let .success(reply) = hello else {
@@ -463,15 +470,23 @@ final class LinkClient: ObservableObject {
             if case let .failure(error) = hello { throw error }
             throw LinkError.unreachable
         }
+        guard PYLinkCrypto.verify(reply.proof, parts: reply.proofParts(hello: greeting), key: authKey) else {
+            channel.close(nil)
+            throw LinkError.rejected(reply.proof == nil ? "Update PullYard on your Mac to connect." : "Couldn't verify your Mac. Pair again from Settings → Mac.")
+        }
         guard reply.ok, reply.desktopID == mac.id else {
             channel.close(nil)
             throw LinkError.rejected(reply.reason ?? "The Mac refused the connection.")
         }
-        let key = try PYLinkCrypto.sessionKey(privateKey: identity, peer: macKey, clientNonce: nonce, serverNonce: reply.nonce)
-        channel.encrypt(with: key)
+        guard let peerEphemeral = reply.ephemeral.flatMap(PYLinkCrypto.publicKey),
+              let key = try? PYLinkCrypto.sessionKey(identity: identity, peer: macKey, ephemeral: ephemeral, peerEphemeral: peerEphemeral, clientNonce: greeting.nonce, serverNonce: reply.nonce) else {
+            channel.close(nil)
+            throw LinkError.rejected("Couldn't set up an encrypted connection.")
+        }
         channel.onFrame = { [weak self] data in
             Task { @MainActor in self?.receive(data) }
         }
+        channel.encrypt(with: key)
         channel.onClose = { [weak self, weak channel] _ in
             Task { @MainActor in
                 guard let self, let channel, self.channel === channel else { return }
