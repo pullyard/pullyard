@@ -484,7 +484,7 @@ public sealed class PRContent : Grid, IShortcutHost
         return new Border { Background = Palette.Brush(s.color, 0.08), CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 6, 8, 6), Child = Ui.V(6, grid, list) };
     }
 
-    private static StackPanel RequirementsList(PRDetailViewModel model, PullRequestDetail pr, List<MergeRequirement> requirements, Action? onRequestReview)
+    internal static StackPanel RequirementsList(PRDetailViewModel model, PullRequestDetail pr, List<MergeRequirement> requirements, Action? onRequestReview)
     {
         static int Rank(RequirementState s) => s switch
         {
@@ -858,8 +858,8 @@ public sealed class PRContent : Grid, IShortcutHost
             ? L.F("PR_ApprovePendingQ", "Approve and submit {0} pending comment(s)?", pending)
             : L.T("PR_ApproveQ", "Approve this pull request?");
         var button = pending > 0 ? L.T("PR_ApproveAndSubmit", "Approve and submit") : L.T("PR_Approve", "Approve");
-        if (await Dialogs.Confirm(XamlRoot, title, button, destructive: false))
-            await model.SubmitReview("APPROVE", "");
+        if (await Dialogs.Confirm(XamlRoot, title, button, destructive: false) && await model.SubmitReview("APPROVE", ""))
+            Dialogs.ReviewToast(model, "APPROVE");
     }
 
     private async Task Confirm(string title, string button, Func<Task<bool>> action)
@@ -1514,6 +1514,12 @@ public sealed class PRContent : Grid, IShortcutHost
             case "review":
                 Perform(id);
                 break;
+            case "fullFile":
+                model.ShowFullFile(id).Forget();
+                break;
+            case "changesOnly":
+                model.ShowChangesOnly(id);
+                break;
             case "reveal":
                 model.RevealFile(id);
                 break;
@@ -1632,6 +1638,13 @@ public sealed record FileListItem(DiffFile File, bool Viewed, int Threads) : IRo
 public static class MergeMethods
 {
     public static readonly string[] All = { "MERGE", "SQUASH", "REBASE" };
+
+    public static string Glyph(string m) => m switch
+    {
+        "SQUASH" => "\uE8C6",
+        "REBASE" => "\uE8AB",
+        _ => "\uE8A0"
+    };
 
     public static string Title(string m) => m switch
     {

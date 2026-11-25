@@ -348,6 +348,9 @@ public sealed partial class GitHubApi
         return Send("DELETE", $"/repos/{repo}/git/refs/heads/{encoded}");
     }
 
+    public Task RestoreBranch(string repo, string branch, string sha) =>
+        Send("POST", $"/repos/{repo}/git/refs", new Dictionary<string, object> { ["ref"] = $"refs/heads/{branch}", ["sha"] = sha });
+
     public Task RerunFailedJobs(RepoRef repo, long runId) => Send("POST", $"/repos/{repo.Full}/actions/runs/{runId}/rerun-failed-jobs");
 
     public async Task<string> JobLog(RepoRef repo, long jobId, CancellationToken ct = default)
