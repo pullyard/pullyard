@@ -77,6 +77,7 @@ public sealed partial class AppViewModel : ObservableObject
     {
         var fallback = Section.Prs(PRFilter.ReviewRequested);
         if (NavMemoryOff) return fallback;
+        if (Settings.Shared.GetString(Keys.NavSection) is null) return Section.Overview;
         var key = NavigationMemory.NormalizeSection(Settings.Shared.GetString(Keys.NavSection), Section.AllKeys, fallback.Key, Section.Issues(IssueFilter.Assigned).Key);
         return key is null ? fallback : Section.FromKey(key) ?? fallback;
     }
@@ -84,7 +85,8 @@ public sealed partial class AppViewModel : ObservableObject
     partial void OnSectionChanged(Section? oldValue, Section newValue)
     {
         if (oldValue is null || oldValue == newValue) return;
-        if (oldValue.Kind != SectionKind.Claude) lastListSection = oldValue;
+        if (oldValue.Kind is not (SectionKind.Claude or SectionKind.Overview)) lastListSection = oldValue;
+        if (newValue.Kind == SectionKind.Search) return;
         if (!NavMemoryOff && Phase == Phase.LoggedIn && Settings.Shared.GetString(Keys.NavSection) != newValue.Key) Settings.Shared.Set(Keys.NavSection, newValue.Key);
     }
 
@@ -416,6 +418,7 @@ public sealed partial class AppViewModel : ObservableObject
         SectionKind.Notifications => ForgeCaps.HasInbox,
         SectionKind.Repos => ForgeCaps.Repositories,
         SectionKind.Claude => true,
+        SectionKind.Overview => true,
         _ => false
     };
 
@@ -667,7 +670,7 @@ public sealed partial class AppViewModel : ObservableObject
     public void Open(Route route, bool push = false)
     {
         Remember(route);
-        if (Section.Kind == SectionKind.Claude)
+        if (Section.Kind is SectionKind.Claude or SectionKind.Overview)
         {
             var back = lastListSection is { } last && (Forge is null || ForgeSupports(last)) ? last : Section.Prs(PRFilter.Mine);
             Section = back;
