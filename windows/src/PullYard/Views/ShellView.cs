@@ -592,9 +592,11 @@ public sealed class ShellView : Grid
         Toast(message);
     }
 
-    public static void Toast(string text, bool isError = false)
+    public static void Toast(string text, bool isError = false) => Toast(text, isError, null, null);
+
+    public static void Toast(string text, bool isError, string? actionTitle, Action? action, string? glyph = null, string glyphColor = "green")
     {
-        if (Current is { } shell) shell.ShowToast(text, isError);
+        if (Current is { } shell) shell.ShowToast(text, isError, actionTitle, action, glyph, glyphColor);
         else if (isError) pendingToast = (text, true);
     }
 
@@ -605,7 +607,14 @@ public sealed class ShellView : Grid
         toast.IsHitTestVisible = false;
     }
 
-    private void ShowToast(string text, bool isError = false)
+    private static Brush FloatingBrush()
+    {
+        var overlay = Palette.Get("overlay");
+        if (ThemeService.IsHighContrast) return Palette.Brush("overlay");
+        return new AcrylicBrush { TintColor = overlay, TintOpacity = 0.72, TintLuminosityOpacity = 0.9, FallbackColor = overlay };
+    }
+
+    private void ShowToast(string text, bool isError = false, string? actionTitle = null, Action? action = null, string? glyph = null, string glyphColor = "green")
     {
         if (isError)
         {
@@ -622,14 +631,25 @@ public sealed class ShellView : Grid
         }
         else
         {
-            toast.Child = Ui.H(8, Ui.Glyph("\uE73E", 13, "green"), Ui.Text(text, 13));
+            var row = Ui.H(8, Ui.Glyph(glyph ?? "\uE73E", 13, glyphColor), Ui.Text(text, 13));
+            if (actionTitle is not null && action is not null)
+            {
+                var button = new HyperlinkButton { Content = actionTitle, Padding = new Thickness(6, 2, 6, 2), FontWeight = FontWeights.SemiBold };
+                button.Click += (_, _) =>
+                {
+                    DismissToast();
+                    action();
+                };
+                row.Children.Add(TextZoom.Track(button, 13));
+            }
+            toast.Child = row;
         }
-        toast.IsHitTestVisible = isError;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toast, text);
+        toast.IsHitTestVisible = true;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toast, actionTitle is null ? text : $"{text}, {actionTitle}");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(toast, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
-        toast.Padding = new Thickness(14, 7, 16, 7);
+        toast.Padding = new Thickness(14, 7, actionTitle is null ? 16 : 8, 7);
         toast.CornerRadius = new CornerRadius(20);
-        toast.Background = Palette.Brush("overlay");
+        toast.Background = FloatingBrush();
         toast.BorderBrush = isError ? Palette.Brush("red", 0.5) : Palette.Brush("lineStrong");
         toast.BorderThickness = new Thickness(1);
         toast.Shadow = new ThemeShadow();
@@ -638,7 +658,7 @@ public sealed class ShellView : Grid
         toast.Opacity = 1;
         toastTimer ??= DispatcherQueue.CreateTimer();
         toastTimer.Stop();
-        toastTimer.Interval = TimeSpan.FromMilliseconds(isError ? 8000 : 1800);
+        toastTimer.Interval = TimeSpan.FromMilliseconds(isError ? 8000 : action is not null ? 5000 : 1800);
         toastTimer.IsRepeating = false;
         toastTimer.Tick -= HideToast;
         toastTimer.Tick += HideToast;
