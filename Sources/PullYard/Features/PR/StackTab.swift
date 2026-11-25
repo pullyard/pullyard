@@ -106,6 +106,8 @@ struct StackTab: View {
     @State private var notesFor: Int?
     @State private var refreshingStack = false
     @State private var cache = StackGeometryCache()
+    @State private var action: StackActionRun?
+    @State private var supportCard = false
     private let notes = StackNotes.shared
 
     private var geometry: StackGeometry {
@@ -143,6 +145,10 @@ struct StackTab: View {
                     .foregroundStyle(Color.syMuted)
                     .lineLimit(1)
                 Spacer()
+                StackActionsMenu(tree: tree) { op in
+                    withAnimation(Motion.quick) { action = StackActionRun(operation: op, tree: tree) }
+                }
+                .disabled(action?.running == true)
                 Button {
                     Task {
                         refreshingStack = true
@@ -180,6 +186,20 @@ struct StackTab: View {
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
+            .overlay(alignment: .bottomLeading) {
+                Group {
+                    if let action {
+                        StackActionCard(run: action, tree: tree, confirm: { start(action) }, close: { withAnimation(Motion.quick) { self.action = nil } })
+                    } else if supportCard {
+                        StackSupportCard(buy: {
+                            openInBrowser(Support.pizzaURL)
+                            withAnimation(Motion.quick) { supportCard = false }
+                        }, dismiss: { withAnimation(Motion.quick) { supportCard = false } })
+                    }
+                }
+                .padding(12)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .onChange(of: tree) { bindInput() }
         .onChange(of: notesFor) { bindInput() }
@@ -195,18 +215,15 @@ struct StackTab: View {
     private func askForSupport() {
         guard !supportAsked, isGraph else { return }
         supportAsked = true
-        let alert = NSAlert()
-        alert.messageText = "Like the stack graph?"
-        alert.informativeText = "PullYard is free and built by one developer. If it saves you time, you can be part of it by buying a pizza that keeps it going. We only ask once."
-        alert.addButton(withTitle: "Buy a Pizza 🍕")
-        alert.addButton(withTitle: "OK")
-        let handle: (NSApplication.ModalResponse) -> Void = { response in
-            if response == .alertFirstButtonReturn { openInBrowser(Support.pizzaURL) }
-        }
-        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
-            alert.beginSheetModal(for: window, completionHandler: handle)
-        } else {
-            handle(alert.runModal())
+        withAnimation(Motion.smooth) { supportCard = true }
+    }
+
+    private func start(_ run: StackActionRun) {
+        let base = tree.base
+        Task {
+            await run.run(api: model.api, repo: model.ref.repo, base: base)
+            await model.loadStack(force: true)
+            app.refresh()
         }
     }
 
