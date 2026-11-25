@@ -187,6 +187,16 @@ fn since_title(r: &ReviewedCommit) -> String {
     }
 }
 
+pub fn suggestion_text(current: &str, line: &str) -> String {
+    let block = format!("```suggestion\n{line}\n```");
+    let trimmed = current.trim_end();
+    if trimmed.is_empty() {
+        block
+    } else {
+        format!("{trimmed}\n\n{block}")
+    }
+}
+
 pub fn line_widget(line: &DiffLine, commentable: bool) -> gtk::Box {
     diff_view::line_row(line, &RowOpts { wrap: true, commentable, ..Default::default() }, None)
 }
@@ -1119,6 +1129,31 @@ impl FilesTab {
         b.append(&l);
         b.append(&diff_stat(f.additions, f.deletions));
         b.append(&spacer());
+        if f.status != "removed" && f.has_patch && m.diff_scope.get() == DiffScope::All {
+            if m.full_loading.borrow().contains(&f.id) {
+                b.append(&spinner(12));
+            } else if m.is_full_file(&f.id) {
+                let changes = flat("Show changes only");
+                changes.add_css_class("sy-small");
+                changes.set_tooltip_text(Some("Back to the changed hunks"));
+                let mm = m.clone();
+                let id = f.id.clone();
+                changes.connect_clicked(move |_| mm.show_changes_only(&id));
+                b.append(&changes);
+            } else {
+                let full = flat("Full file");
+                full.add_css_class("sy-small");
+                full.set_tooltip_text(Some("Show the whole file with the changes in place. Lines outside the changes can't take comments."));
+                let mm = m.clone();
+                let id = f.id.clone();
+                full.connect_clicked(move |_| {
+                    let mm = mm.clone();
+                    let id = id.clone();
+                    crate::rt::spawn_local(async move { mm.show_full_file(id).await });
+                });
+                b.append(&full);
+            }
+        }
         let is_viewed = m.viewed.borrow().contains(&f.id);
         let viewed = gtk::CheckButton::with_label("Viewed");
         viewed.set_active(is_viewed);
@@ -1411,6 +1446,32 @@ impl FilesTab {
             m.emit(Change::Diff);
         });
         actions.append(&cancel);
+        if a.side == "RIGHT" {
+            if let Some(text) = self.model.new_line_text(&a.path, a.line) {
+                let suggest = flat("Suggest change");
+                suggest.set_tooltip_text(Some("Insert a suggestion block GitHub can apply (Ctrl+G)"));
+                let comp = Rc::downgrade(&composer);
+                let insert: Rc<dyn Fn()> = Rc::new(move || {
+                    if let Some(c) = comp.upgrade() {
+                        c.set_text(&suggestion_text(&c.text(), &text));
+                        c.grab_focus();
+                    }
+                });
+                let i = insert.clone();
+                suggest.connect_clicked(move |_| i());
+                let keys = gtk::EventControllerKey::new();
+                keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+                keys.connect_key_pressed(move |_, key, _, state| {
+                    if state.contains(gtk::gdk::ModifierType::CONTROL_MASK) && matches!(key, gtk::gdk::Key::g | gtk::gdk::Key::G) {
+                        insert();
+                        return glib::Propagation::Stop;
+                    }
+                    glib::Propagation::Proceed
+                });
+                composer.widget.add_controller(keys);
+                actions.append(&suggest);
+            }
+        }
         actions.append(&spacer());
         let add = button("Add to review");
         add.set_tooltip_text(Some("Save as pending and submit with the review (Ctrl+Enter)"));
@@ -1455,5 +1516,16 @@ impl FilesTab {
 impl Drop for FilesTab {
     fn drop(&mut self) {
         self.remove_keys();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn suggestion_block_wraps_the_line() {
+        assert_eq!(suggestion_text("", "let x = 1;"), "```suggestion\nlet x = 1;\n```");
+        assert_eq!(suggestion_text("Rename this\n", "let x = 1;"), "Rename this\n\n```suggestion\nlet x = 1;\n```");
     }
 }

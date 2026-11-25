@@ -105,6 +105,8 @@ pub struct PrModel {
     pub preview: RefCell<Option<StackNode>>,
     pub html: RefCell<String>,
     pub files: RefCell<Vec<DiffFile>>,
+    pub full_original: RefCell<HashMap<String, Vec<crate::diff::DiffLine>>>,
+    pub full_loading: RefCell<HashSet<String>>,
     pub files_loaded: Cell<bool>,
     pub files_loading: Cell<bool>,
     pub files_error: RefCell<Option<String>>,
@@ -207,6 +209,8 @@ impl PrModel {
             owners_key: RefCell::new(None),
             changed_paths: RefCell::new(vec![]),
             viewed_gen: Cell::new(0),
+            full_original: RefCell::new(HashMap::new()),
+            full_loading: RefCell::new(HashSet::new()),
             changed: Signal::new(),
         })
     }
@@ -791,6 +795,7 @@ impl PrModel {
                     self.files_stale.set(true);
                 }
                 *self.files.borrow_mut() = parsed;
+                self.full_original.borrow_mut().clear();
                 *self.files_oid.borrow_mut() = oid;
                 self.files_loaded.set(true);
                 *self.files_error.borrow_mut() = None;
@@ -798,6 +803,55 @@ impl PrModel {
             Err(e) => *self.files_error.borrow_mut() = Some(e.message),
         }
         self.emit(Change::Files);
+    }
+
+    pub fn is_full_file(&self, path: &str) -> bool {
+        self.full_original.borrow().contains_key(path)
+    }
+
+    pub async fn show_full_file(self: Rc<Self>, path: String) {
+        if self.is_full_file(&path) || !self.full_loading.borrow_mut().insert(path.clone()) {
+            return;
+        }
+        self.emit(Change::Diff);
+        let oid = self.files_oid.borrow().clone().or_else(|| self.pr.borrow().as_ref().map(|p| p.head_ref_oid.clone())).unwrap_or_default();
+        let api = self.api.clone();
+        let repo = self.r.repo.clone();
+        let p = path.clone();
+        let res = crate::rt::run(async move { api.raw_file(&repo, &oid, &p).await }).await;
+        self.full_loading.borrow_mut().remove(&path);
+        let text = match res {
+            Ok(Some(bytes)) => String::from_utf8(bytes).ok(),
+            _ => None,
+        };
+        let Some(text) = text else {
+            crate::app::toast("Couldn't load the full file");
+            self.emit(Change::Diff);
+            return;
+        };
+        {
+            let mut files = self.files.borrow_mut();
+            if let Some(f) = files.iter_mut().find(|f| f.id == path) {
+                let original = std::mem::take(&mut f.lines);
+                f.lines = crate::diff::expand_full(&original, &text);
+                self.full_original.borrow_mut().insert(path.clone(), original);
+            }
+        }
+        self.emit(Change::Diff);
+    }
+
+    pub fn show_changes_only(&self, path: &str) {
+        let Some(original) = self.full_original.borrow_mut().remove(path) else { return };
+        if let Some(f) = self.files.borrow_mut().iter_mut().find(|f| f.id == path) {
+            f.lines = original;
+        }
+        self.emit(Change::Diff);
+    }
+
+    pub fn new_line_text(&self, path: &str, line: i64) -> Option<String> {
+        let files = self.files.borrow();
+        let f = files.iter().find(|f| f.id == path)?;
+        f.lines.iter().find(|l| l.new_line == Some(line) && l.kind != crate::diff::LineKind::Del).map(|l| l.text.clone())
     }
 
     pub fn last_reviewed(&self) -> Option<ReviewedCommit> {

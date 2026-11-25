@@ -17,6 +17,7 @@ pub struct DiffLine {
     pub old_line: Option<i64>,
     pub new_line: Option<i64>,
     pub word: Option<(usize, usize)>,
+    pub outside: bool,
 }
 
 impl DiffLine {
@@ -37,7 +38,7 @@ impl DiffLine {
     }
 
     pub fn commentable(&self) -> bool {
-        matches!(self.kind, LineKind::Add | LineKind::Del | LineKind::Context)
+        !self.outside && matches!(self.kind, LineKind::Add | LineKind::Del | LineKind::Context)
     }
 
     pub fn sign(&self) -> &'static str {
@@ -126,25 +127,25 @@ pub fn parse(patch: &str) -> Vec<DiffLine> {
             let (o, n) = hunk_start(raw);
             old = o;
             new = n;
-            result.push(DiffLine { id: idx, kind: LineKind::Hunk, text: raw.to_string(), old_line: None, new_line: None, word: None });
+            result.push(DiffLine { id: idx, kind: LineKind::Hunk, text: raw.to_string(), old_line: None, new_line: None, word: None, outside: false });
             continue;
         }
         let first = raw.chars().next();
         let body = if raw.is_empty() { String::new() } else { raw[first.map(|c| c.len_utf8()).unwrap_or(0)..].to_string() };
         match first {
             Some('+') => {
-                result.push(DiffLine { id: idx, kind: LineKind::Add, text: body, old_line: None, new_line: Some(new), word: None });
+                result.push(DiffLine { id: idx, kind: LineKind::Add, text: body, old_line: None, new_line: Some(new), word: None, outside: false });
                 new += 1;
             }
             Some('-') => {
-                result.push(DiffLine { id: idx, kind: LineKind::Del, text: body, old_line: Some(old), new_line: None, word: None });
+                result.push(DiffLine { id: idx, kind: LineKind::Del, text: body, old_line: Some(old), new_line: None, word: None, outside: false });
                 old += 1;
             }
             Some('\\') => {
-                result.push(DiffLine { id: idx, kind: LineKind::Meta, text: raw.to_string(), old_line: None, new_line: None, word: None });
+                result.push(DiffLine { id: idx, kind: LineKind::Meta, text: raw.to_string(), old_line: None, new_line: None, word: None, outside: false });
             }
             _ => {
-                result.push(DiffLine { id: idx, kind: LineKind::Context, text: body, old_line: Some(old), new_line: Some(new), word: None });
+                result.push(DiffLine { id: idx, kind: LineKind::Context, text: body, old_line: Some(old), new_line: Some(new), word: None, outside: false });
                 old += 1;
                 new += 1;
             }
@@ -208,6 +209,49 @@ pub fn mark_intraline(lines: &mut [DiffLine]) {
             }
         }
     }
+}
+
+pub fn expand_full(lines: &[DiffLine], full: &str) -> Vec<DiffLine> {
+    let file: Vec<&str> = full.strip_suffix('\n').unwrap_or(full).split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
+    let mut out = Vec::with_capacity(file.len() + lines.len());
+    let mut next_new: i64 = 1;
+    let mut delta: i64 = 0;
+    let mut id = 1_000_000usize;
+    let mut push_outside = |out: &mut Vec<DiffLine>, upto: i64, next_new: &mut i64, delta: i64| {
+        while *next_new < upto && (*next_new as usize) <= file.len() {
+            let text = file[*next_new as usize - 1].to_string();
+            out.push(DiffLine { id, kind: LineKind::Context, text, old_line: Some(*next_new + delta), new_line: Some(*next_new), word: None, outside: true });
+            id += 1;
+            *next_new += 1;
+        }
+    };
+    for line in lines {
+        match line.kind {
+            LineKind::Hunk => {
+                let (old, new) = hunk_start(&line.text);
+                push_outside(&mut out, new, &mut next_new, delta);
+                delta = old - new;
+            }
+            LineKind::Add | LineKind::Context => {
+                if let Some(n) = line.new_line {
+                    next_new = n + 1;
+                    if let Some(o) = line.old_line {
+                        delta = o - n;
+                    }
+                }
+                out.push(line.clone());
+            }
+            LineKind::Del => {
+                if let Some(o) = line.old_line {
+                    delta = o + 1 - next_new;
+                }
+                out.push(line.clone());
+            }
+            LineKind::Meta => out.push(line.clone()),
+        }
+    }
+    push_outside(&mut out, file.len() as i64 + 1, &mut next_new, delta);
+    out
 }
 
 pub fn parse_unified(text: &str) -> Vec<PrFile> {
@@ -294,6 +338,38 @@ pub fn parse_unified(text: &str) -> Vec<PrFile> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn full_file_puts_changes_in_place() {
+        let full = "a\nb\nc2\nd\ne\nf\n";
+        let lines = parse("@@ -2,3 +2,3 @@\n b\n-c\n+c2\n d");
+        let out = expand_full(&lines, full);
+        let shown: Vec<(LineKind, &str, Option<i64>, Option<i64>, bool)> = out.iter().map(|l| (l.kind, l.text.as_str(), l.old_line, l.new_line, l.outside)).collect();
+        assert_eq!(
+            shown,
+            vec![
+                (LineKind::Context, "a", Some(1), Some(1), true),
+                (LineKind::Context, "b", Some(2), Some(2), false),
+                (LineKind::Del, "c", Some(3), None, false),
+                (LineKind::Add, "c2", None, Some(3), false),
+                (LineKind::Context, "d", Some(4), Some(4), false),
+                (LineKind::Context, "e", Some(5), Some(5), true),
+                (LineKind::Context, "f", Some(6), Some(6), true),
+            ]
+        );
+        assert!(!out[0].commentable());
+        assert!(out[3].commentable());
+    }
+
+    #[test]
+    fn full_file_tracks_line_offsets_after_additions() {
+        let full = "x\nnew1\nnew2\ny\nz\n";
+        let lines = parse("@@ -1,2 +1,4 @@\n x\n+new1\n+new2\n y");
+        let out = expand_full(&lines, full);
+        let last = out.last().unwrap();
+        assert_eq!((last.text.as_str(), last.old_line, last.new_line, last.outside), ("z", Some(3), Some(5), true));
+    }
+
 
     #[test]
     fn intraline_marks_only_the_changed_span() {
