@@ -139,7 +139,7 @@ struct RootView: View {
         .id(style)
         .overlay {
             if showSplash {
-                SplashView { withAnimation(.easeOut(duration: 0.35)) { showSplash = false } }
+                SplashView { withAnimation(.easeOut(duration: 0.2)) { showSplash = false } }
                     .transition(.opacity)
                     .zIndex(10)
             }
