@@ -219,6 +219,7 @@ struct FixWithAgentMenu: View {
             NavigationStack {
                 List { MacLinkSection() }
                     .pyListStyle()
+                    .routeDestinations()
                     .navigationTitle("Connect your Mac")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showPairing = false } } }

@@ -38,6 +38,7 @@ final class AppRouter: ObservableObject {
     @Published var projectsPath: [Route] = []
     @Published var inboxPath: [Route] = []
     @Published var searchPath: [Route] = []
+    @Published var settingsPath: [Route] = []
 
     private struct Snapshot: Codable { var pulls: [Route]; var projects: [Route]?; var inbox: [Route]; var search: [Route] }
 
@@ -48,7 +49,7 @@ final class AppRouter: ObservableObject {
         pullsPath = snapshot.pulls; projectsPath = snapshot.projects ?? []; inboxPath = snapshot.inbox; searchPath = snapshot.search
     }
 
-    func reset() { pullsPath = []; projectsPath = []; inboxPath = []; searchPath = [] }
+    func reset() { pullsPath = []; projectsPath = []; inboxPath = []; searchPath = []; settingsPath = [] }
 
     func replaceTop(with route: Route, in tab: AppTab) {
         switch tab {
@@ -56,13 +57,14 @@ final class AppRouter: ObservableObject {
         case .projects: if projectsPath.isEmpty { projectsPath = [route] } else { projectsPath[projectsPath.count - 1] = route }
         case .inbox: if inboxPath.isEmpty { inboxPath = [route] } else { inboxPath[inboxPath.count - 1] = route }
         case .search: if searchPath.isEmpty { searchPath = [route] } else { searchPath[searchPath.count - 1] = route }
-        case .settings: break
+        case .settings: if settingsPath.isEmpty { settingsPath = [route] } else { settingsPath[settingsPath.count - 1] = route }
         }
     }
 
     func open(_ route: Route, in tab: AppTab) {
         switch tab {
-        case .pulls, .settings: pullsPath.append(route)
+        case .pulls: pullsPath.append(route)
+        case .settings: settingsPath.append(route)
         case .projects: projectsPath.append(route)
         case .inbox: inboxPath.append(route)
         case .search: searchPath.append(route)
@@ -74,7 +76,8 @@ final class AppRouter: ObservableObject {
             if let index = path.lastIndex(of: route) { path = Array(path.prefix(through: index)) }
         }
         switch tab {
-        case .pulls, .settings: trim(&pullsPath)
+        case .pulls: trim(&pullsPath)
+        case .settings: trim(&settingsPath)
         case .projects: trim(&projectsPath)
         case .inbox: trim(&inboxPath)
         case .search: trim(&searchPath)
@@ -87,7 +90,7 @@ final class AppRouter: ObservableObject {
         case .projects: projectsPath = []
         case .inbox: inboxPath = []
         case .search: searchPath = []
-        case .settings: break
+        case .settings: settingsPath = []
         }
     }
 }
@@ -268,7 +271,7 @@ struct MainTabsView: View {
     private var projectsStack: some View { NavigationStack(path: $router.projectsPath) { ProjectsView().routeDestinations() } }
     private var inboxStack: some View { NavigationStack(path: $router.inboxPath) { InboxView().routeDestinations() } }
     private var searchStack: some View { NavigationStack(path: $router.searchPath) { SearchView().routeDestinations() } }
-    private var settingsStack: some View { NavigationStack { SettingsView() } }
+    private var settingsStack: some View { NavigationStack(path: $router.settingsPath) { SettingsView().routeDestinations() } }
 
     private var tabSelection: Binding<AppTab> {
         Binding {
