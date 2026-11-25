@@ -1099,7 +1099,24 @@ public sealed class PRContent : Grid, IShortcutHost
         }
         if (model.Pr is { } pr)
         {
-            var items = pr.AllCommits.Items.AsEnumerable().Reverse().Select(c => (object)new CommitRowItem(c.Commit)).ToList();
+            var reviewed = model.LastReviewed?.Oid;
+            var items = new List<object>();
+            var ordered = pr.AllCommits.Items.AsEnumerable().Reverse().Select(c => c.Commit).ToList();
+            var today = DateTimeOffset.Now.Date;
+            string? lastDay = null;
+            for (var i = 0; i < ordered.Count; i++)
+            {
+                var c = ordered[i];
+                var date = c.CommittedDate.ToLocalTime().Date;
+                var day = date == today ? L.T("Commits_Today", "Today") : date == today.AddDays(-1) ? L.T("Commits_Yesterday", "Yesterday") : c.CommittedDate.ToLocalTime().ToString("D", Fmt.Culture);
+                if (day != lastDay)
+                {
+                    items.Add(new CommitDayItem(day));
+                    lastDay = day;
+                }
+                var nextSameDay = i + 1 < ordered.Count && ordered[i + 1].CommittedDate.ToLocalTime().Date == date;
+                items.Add(new CommitRowItem(c, i % 2 == 0 ? "violet" : "sky", reviewed is not null && c.Oid == reviewed, nextSameDay));
+            }
             if ((pr.AllCommits.TotalCount ?? 0) > pr.AllCommits.Items.Count)
                 items.Insert(0, new TextRowItem(L.F("PR_LatestCommits", "Showing the latest {0} of {1} commits", pr.AllCommits.Items.Count, pr.AllCommits.TotalCount ?? 0)));
             if ((pr.AllCommits.TotalCount ?? 0) > pr.AllCommits.Items.Count)
@@ -1651,18 +1668,50 @@ public sealed record ActionRowItem(string Text, Action Action, string Glyph = "�
     }
 }
 
-public sealed record CommitRowItem(CommitInfo Commit) : IRowContent
+public sealed record CommitDayItem(string Day) : IRowContent
+{
+    public UIElement BuildRow()
+    {
+        var t = Ui.Text(Day.ToUpperInvariant(), 10, "muted", FontWeights.SemiBold);
+        t.Margin = new Thickness(0, 12, 0, 4);
+        AutomationProperties.SetHeadingLevel(t, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level3);
+        return t;
+    }
+}
+
+public sealed record CommitRowItem(CommitInfo Commit, string Dot = "violet", bool YourReview = false, bool Continues = false) : IRowContent
 {
     public UIElement BuildRow()
     {
         var c = Commit;
-        var body = Ui.V(2, Ui.Text(c.MessageHeadline, 13, maxLines: 2), Ui.Caption($"{c.Author?.User?.Login ?? c.Author?.Name ?? ""} · {Fmt.Rel(c.CommittedDate)}"));
-        var right = Ui.H(8);
-        if (Ui.CiIcon(c.StatusCheckRollup?.State) is { } ci) right.Children.Add(ci);
-        right.Children.Add(Ui.Text(c.AbbreviatedOid, 12, "muted", mono: true));
-        var grid = Ui.Columns((Ui.Avatar(c.Author?.AvatarUrl, 22), Ui.Auto), (body, Ui.Star), (right, Ui.Auto));
+        var rail = new Grid { Width = 14 };
+        var line = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = 2, Fill = Palette.Brush("line"), HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 14, 0, Continues ? -8 : 0), Visibility = Continues ? Visibility.Visible : Visibility.Collapsed };
+        var dot = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 10, Height = 10, Fill = Palette.Brush(Dot), Stroke = Palette.Brush("panel"), StrokeThickness = 2, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, 0, 0) };
+        rail.Children.Add(line);
+        rail.Children.Add(dot);
+        var meta = Ui.H(6, Ui.Avatar(c.Author?.AvatarUrl, 16), Ui.Caption($"{c.Author?.User?.Login ?? c.Author?.Name ?? ""} · {Fmt.Rel(c.CommittedDate)}"));
+        var body = Ui.V(3, Ui.Text(c.MessageHeadline, 13, maxLines: 2), meta);
+        if (YourReview) body.Children.Add(Ui.StatusChip(L.T("Commits_YourLastReview", "Your last review"), "coral", "\uE7B3"));
+        var right = Ui.H(6);
+        if (Ui.CiChip(c.StatusCheckRollup?.State) is { } ci) right.Children.Add(ci);
+        var sha = new Button
+        {
+            Content = Ui.StatusChip(c.AbbreviatedOid, "slate"),
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
+            MinHeight = 0,
+            VerticalAlignment = VerticalAlignment.Top
+        };
+        ((TextBlock)((StackPanel)((Border)sha.Content).Child).Children[^1]).FontFamily = Ui.Mono;
+        sha.Click += (_, _) => ShellView.Copied(c.Oid, L.F("Toast_CopiedValue", "Copied {0}", c.AbbreviatedOid));
+        Ui.Tip(sha, L.T("Commit_CopySha", "Copy SHA"));
+        AutomationProperties.SetName(sha, L.F("Commit_CopyShaNamed", "Copy SHA {0}", c.AbbreviatedOid));
+        right.Children.Add(sha);
+        right.VerticalAlignment = VerticalAlignment.Top;
+        var grid = Ui.Columns((rail, Ui.Auto), (body, Ui.Star), (right, Ui.Auto));
         grid.ColumnSpacing = 10;
-        grid.Padding = new Thickness(0, 6, 0, 6);
+        grid.Padding = new Thickness(0, 4, 0, 4);
         return grid;
     }
 }
