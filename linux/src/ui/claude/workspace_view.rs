@@ -241,8 +241,9 @@ impl View {
         let ws = app::get().claude.clone();
         let selected = ws.selected.get();
         let key = format!(
-            "{:?}|{}|{}",
+            "{:?}|{}|{}|{}",
             selected,
+            accounts::visible().iter().map(|p| format!("{}:{}", p.id, p.label)).collect::<Vec<_>>().join(","),
             ws.tabs.borrow().iter().map(|t| format!("{}:{}:{}:{}", t.id, t.title.borrow(), t.kind.key(), t.folder)).collect::<Vec<_>>().join(";"),
             ws.projects.borrow().iter().filter(|p| p.exists()).take(12).map(|p| p.path.clone()).collect::<Vec<_>>().join(";")
         );
@@ -272,6 +273,9 @@ impl View {
             title.set_max_width_chars(22);
             chip_box.append(&title);
             chip_box.append(&label_with(&t.project_name(), &["sy-dim", "sy-small"]));
+            if let Some(c) = super::auth_view::account_chip(t.profile().as_ref(), true) {
+                chip_box.append(&c);
+            }
             let close = icon_button("window-close-symbolic", "Close");
             close.add_css_class("circular");
             let tt = t.clone();
@@ -283,14 +287,16 @@ impl View {
         }
         let mut menu = Menu::new();
         if let Some(current) = ws.selected_tab() {
-            let f = current.folder.clone();
+            let owner = current.profile().map(|p| p.id);
+            let (f, o) = (current.folder.clone(), owner.clone());
             menu.item(&format!("Chat in {}", current.project_name()), move || {
-                app::get().claude.new_session(&f, None, None, None, Some(TabKind::Chat));
+                app::get().claude.new_session_as(&f, None, None, None, Some(TabKind::Chat), o.as_deref());
             });
-            let f = current.folder.clone();
+            let (f, o) = (current.folder.clone(), owner);
             menu.item(&format!("Terminal in {}", current.project_name()), move || {
-                app::get().claude.new_session(&f, None, None, None, Some(TabKind::Terminal));
+                app::get().claude.new_session_as(&f, None, None, None, Some(TabKind::Terminal), o.as_deref());
             });
+            super::auth_view::new_session_as_menu(&menu, &current.folder, Some(TabKind::Chat), "New chat as");
             menu.section(None);
         }
         for p in ws.projects.borrow().iter().filter(|p| p.exists()).take(12) {
@@ -323,6 +329,7 @@ impl View {
             tab.chat.as_ref().map(|c| c.model.borrow().clone()).unwrap_or_default(),
             tab.chat.as_ref().map(|c| c.total_cost.get() > 0.0 || c.session_id.borrow().is_some()).unwrap_or(false)
         );
+        let key = format!("{key}|{}", accounts::visible().len());
         if *self.control_key.borrow() == key {
             self.update_badges();
             return;
@@ -331,6 +338,9 @@ impl View {
         clear(&self.control_bar);
         self.control_bar.append(&icon_tile("sy-folder-symbolic", crate::theme::palette_for(&tab.folder), 18));
         self.control_bar.append(&ellipsized(&tab.project_name(), &["sy-bold", "sy-text"]));
+        if let Some(c) = super::auth_view::account_chip(tab.profile().as_ref(), false) {
+            self.control_bar.append(&c);
+        }
         if let Some(b) = tab.git.branch.borrow().as_ref().filter(|b| *b != "HEAD") {
             self.control_bar.append(&branch_tag(b));
         }

@@ -202,7 +202,7 @@ pub struct RateWindow {
     pub resets_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct UsageStore {
     pub windows: Vec<RateWindow>,
     pub subscription: Option<String>,
@@ -211,7 +211,15 @@ pub struct UsageStore {
 }
 
 thread_local! {
-    pub static USAGE: RefCell<UsageStore> = RefCell::new(UsageStore::default());
+    pub static USAGE: RefCell<std::collections::HashMap<String, UsageStore>> = RefCell::new(std::collections::HashMap::new());
+}
+
+pub fn usage_key(config_dir: Option<&str>) -> String {
+    config_dir.unwrap_or("default").to_string()
+}
+
+pub fn usage_for(config_dir: Option<&str>) -> UsageStore {
+    USAGE.with(|u| u.borrow().get(&usage_key(config_dir)).cloned().unwrap_or_default())
 }
 
 #[derive(Clone)]
@@ -1360,8 +1368,10 @@ impl ChatSession {
 
     fn handle_rate_limit(&self, o: &Value) {
         let Some(info) = o.get("rate_limit_info") else { return };
+        let key = usage_key(self.config_dir.as_deref());
         USAGE.with(|u| {
-            let mut u = u.borrow_mut();
+            let mut map = u.borrow_mut();
+            let u = map.entry(key).or_default();
             if let Some(windows) = info.get("unifiedWindows").and_then(|w| w.as_object()) {
                 let order = |k: &str| match k {
                     "five_hour" => 0,
@@ -1436,7 +1446,8 @@ impl ChatSession {
                 })
                 .collect();
             if let Some(sub) = body.get("account").and_then(|a| a.get("subscriptionType")).and_then(|v| v.as_str()) {
-                USAGE.with(|u| u.borrow_mut().subscription = Some(sub.replace("Claude ", "")));
+                let key = usage_key(self.config_dir.as_deref());
+                USAGE.with(|u| u.borrow_mut().entry(key).or_default().subscription = Some(sub.replace("Claude ", "")));
             }
             *self.commands.borrow_mut() = body
                 .get("commands")

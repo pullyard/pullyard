@@ -2651,14 +2651,15 @@ impl ChatComposer {
         compact.set_sensitive(c.running.get() && !c.busy.get());
         b.append(&compact);
         b.append(&line());
-        let (windows, sub, note) = chat::USAGE.with(|u| {
-            let u = u.borrow();
-            (u.windows.clone(), u.subscription.clone(), u.overage_note.clone())
-        });
+        let usage = chat::usage_for(c.config_dir.as_deref());
+        let (windows, sub, note) = (usage.windows, usage.subscription, usage.overage_note);
         let head = hbox(6);
         head.append(&label_with("Plan usage", &["heading"]));
         if let Some(s) = sub {
             head.append(&chip(&s, "coral", None, false));
+        }
+        if let Some(a) = super::auth_view::account_chip(accounts::by_config_dir(c.config_dir.as_deref()).as_ref(), false) {
+            head.append(&a);
         }
         b.append(&head);
         if windows.is_empty() {

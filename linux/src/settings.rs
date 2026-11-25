@@ -113,6 +113,7 @@ pub struct Settings {
     pub issues_collapsed: bool,
     pub queue_seen: HashMap<String, i64>,
     pub queue_snoozed: HashMap<String, i64>,
+    pub agents_account_filter: Option<String>,
 }
 
 impl Default for Settings {
@@ -183,6 +184,7 @@ impl Default for Settings {
             issues_collapsed: false,
             queue_seen: HashMap::new(),
             queue_snoozed: HashMap::new(),
+            agents_account_filter: None,
         }
     }
 }

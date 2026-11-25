@@ -83,6 +83,7 @@ fn agent_projects() -> Vec<crate::claude::sessions::Project> {
         parent_id: parent.map(|p| p.to_string()),
         desktop_id: None,
         archived: false,
+        profile_id: None,
     };
     vec![crate::claude::sessions::Project {
         id: "/tmp".into(),

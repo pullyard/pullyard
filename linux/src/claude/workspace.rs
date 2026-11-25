@@ -135,6 +135,10 @@ impl Tab {
         self.chat.as_ref().map(|c| c.pending_count() > 0).unwrap_or(false)
     }
 
+    pub fn profile(&self) -> Option<crate::settings::ClaudeProfile> {
+        accounts::by_config_dir(self.config_dir.as_deref())
+    }
+
     pub fn project_name(&self) -> String {
         util::last_component(&self.folder)
     }
@@ -155,6 +159,17 @@ impl Tab {
     pub fn pending_tool(&self) -> String {
         self.chat.as_ref().and_then(|c| c.pending.borrow().last().map(|p| p.tool_name.clone())).unwrap_or_default()
     }
+}
+
+fn history_roots() -> Vec<(String, std::path::PathBuf)> {
+    let mut dirs = std::collections::HashSet::new();
+    accounts::visible()
+        .into_iter()
+        .filter_map(|p| {
+            let dir = accounts::config_dir(Some(&p));
+            dirs.insert(dir.clone()).then(|| (p.id.clone(), std::path::PathBuf::from(dir).join("projects")))
+        })
+        .collect()
 }
 
 pub fn new_session_args(session_id: &str, name: Option<String>, prompt: Option<String>) -> Vec<String> {
@@ -486,6 +501,45 @@ impl Workspace {
         }
     }
 
+    pub fn close_tabs(&self, config_dir: Option<&str>) {
+        let doomed: Vec<Rc<Tab>> = self.tabs.borrow().iter().filter(|t| t.config_dir.as_deref() == config_dir).cloned().collect();
+        if doomed.is_empty() {
+            return;
+        }
+        for t in &doomed {
+            if let Some(c) = &t.chat {
+                c.stop();
+            }
+            t.kill_terminal();
+            notifier::withdraw(t.id);
+        }
+        self.tabs.borrow_mut().retain(|t| t.config_dir.as_deref() != config_dir);
+        if let Some(sel) = self.selected.get() {
+            if !self.tabs.borrow().iter().any(|t| t.id == sel) {
+                let first = self.tabs.borrow().first().map(|t| t.id);
+                self.set_selected(first);
+            }
+        }
+        self.emit(WsEvent::Tabs);
+        self.emit(WsEvent::Selection);
+    }
+
+    pub fn account_filter(&self) -> Option<String> {
+        settings::read(|s| s.agents_account_filter.clone()).filter(|id| accounts::is_visible(id))
+    }
+
+    pub fn set_account_filter(&self, id: Option<String>) {
+        settings::update(|s| s.agents_account_filter = id);
+        self.emit(WsEvent::Projects);
+    }
+
+    pub fn visible_sessions(&self, sessions: &[SessionInfo]) -> Vec<SessionInfo> {
+        match self.account_filter().filter(|_| accounts::has_several()) {
+            Some(f) => sessions.iter().filter(|s| s.profile_id.as_deref().unwrap_or(accounts::DEFAULT_ID) == f).cloned().collect(),
+            None => sessions.to_vec(),
+        }
+    }
+
     pub fn close_all_for_profile_switch(&self) {
         for t in self.tabs.borrow().iter() {
             if let Some(c) = &t.chat {
@@ -520,11 +574,11 @@ impl Workspace {
     pub async fn reload_projects(self: &Rc<Self>) {
         self.loading_projects.set(true);
         self.emit(WsEvent::Loading);
-        let root = std::path::PathBuf::from(accounts::config_dir(None)).join("projects");
-        let profile = accounts::active_id();
-        let loaded = crate::rt::blocking(move || sessions::load_all(root)).await;
+        let roots = history_roots();
+        let scope = roots.clone();
+        let loaded = crate::rt::blocking(move || sessions::load_accounts(roots)).await;
         self.loading_projects.set(false);
-        if profile != accounts::active_id() {
+        if scope != history_roots() {
             return;
         }
         let next = match demo::folder() {
@@ -578,10 +632,9 @@ impl Workspace {
         self.tabs.borrow().iter().find(|t| *t.session_id.borrow() == id).cloned()
     }
 
-    fn make_tab(self: &Rc<Self>, folder: &str, kind: TabKind, title: &str, session_id: &str) -> Rc<Tab> {
+    fn make_tab(self: &Rc<Self>, folder: &str, kind: TabKind, title: &str, session_id: &str, config_dir: Option<String>) -> Rc<Tab> {
         let id = self.next_id.get();
         self.next_id.set(id + 1);
-        let config_dir = accounts::active_override();
         let tab = Rc::new(Tab {
             id,
             folder: folder.to_string(),
@@ -628,16 +681,21 @@ impl Workspace {
     }
 
     pub fn new_session(self: &Rc<Self>, folder: &str, prompt: Option<String>, name: Option<String>, mode: Option<ClaudeMode>, kind: Option<TabKind>) -> Rc<Tab> {
+        self.new_session_as(folder, prompt, name, mode, kind, None)
+    }
+
+    pub fn new_session_as(self: &Rc<Self>, folder: &str, prompt: Option<String>, name: Option<String>, mode: Option<ClaudeMode>, kind: Option<TabKind>, profile_id: Option<&str>) -> Rc<Tab> {
         let kind = kind.unwrap_or_else(|| self.preferred_kind());
         let title = name.clone().or_else(|| prompt.as_ref().map(|p| p.chars().take(48).collect())).unwrap_or_else(|| "New session".into());
+        let config_dir = accounts::tab_config_dir(profile_id);
         if kind == TabKind::Chat {
-            let tab = self.make_tab(folder, TabKind::Chat, &title, "");
+            let tab = self.make_tab(folder, TabKind::Chat, &title, "", config_dir);
             self.start_chat(&tab, None, false, prompt, mode);
             return tab;
         }
         let session_id = uuid::Uuid::new_v4().to_string().to_lowercase();
         let args = new_session_args(&session_id, name, prompt);
-        let tab = self.make_tab(folder, TabKind::Terminal, &title, &session_id);
+        let tab = self.make_tab(folder, TabKind::Terminal, &title, &session_id, config_dir);
         self.launch_terminal(&tab, args, mode);
         tab
     }
@@ -650,7 +708,7 @@ impl Workspace {
             }
         }
         let kind = kind.unwrap_or_else(|| self.preferred_kind());
-        let tab = self.make_tab(&s.cwd, kind, &s.title, if fork { "" } else { &s.id });
+        let tab = self.make_tab(&s.cwd, kind, &s.title, if fork { "" } else { &s.id }, accounts::tab_config_dir(s.profile_id.as_deref()));
         if kind == TabKind::Chat {
             if let Some(c) = &tab.chat {
                 c.load_history(&s.file, 600);
@@ -679,7 +737,7 @@ impl Workspace {
             c.stop();
         }
         let title = tab.title.borrow().clone();
-        let t = self.make_tab(&tab.folder, TabKind::Terminal, &title, &sid);
+        let t = self.make_tab(&tab.folder, TabKind::Terminal, &title, &sid, tab.config_dir.clone());
         self.launch_terminal(&t, vec!["--resume".into(), sid], None);
         self.tabs.borrow_mut().retain(|x| x.id != tab.id);
         self.set_selected(Some(t.id));
@@ -694,7 +752,7 @@ impl Workspace {
         }
         tab.kill_terminal();
         let title = tab.title.borrow().clone();
-        let c = self.make_tab(&tab.folder, TabKind::Chat, &title, &sid);
+        let c = self.make_tab(&tab.folder, TabKind::Chat, &title, &sid, tab.config_dir.clone());
         if let (Some(file), Some(chat)) = (self.session_file(&sid), &c.chat) {
             chat.load_history(&file, 600);
         }
@@ -756,7 +814,7 @@ impl Workspace {
                 }
                 new
             }
-            None => self.new_session(&tab.folder, Some(prompt), Some(title.clone()), None, Some(TabKind::Chat)),
+            None => self.new_session_as(&tab.folder, Some(prompt), Some(title.clone()), None, Some(TabKind::Chat), tab.profile().map(|p| p.id).as_deref()),
         };
         *new.title.borrow_mut() = title;
         if let Some(c) = &tab.chat {

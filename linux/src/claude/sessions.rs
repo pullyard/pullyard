@@ -23,6 +23,7 @@ pub struct SessionInfo {
     pub parent_id: Option<String>,
     pub desktop_id: Option<String>,
     pub archived: bool,
+    pub profile_id: Option<String>,
 }
 
 impl SessionInfo {
@@ -62,8 +63,40 @@ pub fn project_root(cwd: &str) -> String {
     }
 }
 
-pub fn load_all(root: PathBuf) -> Vec<Project> {
-    load_with(root, &super::desktop::load())
+pub fn load_accounts(roots: Vec<(String, PathBuf)>) -> Vec<Project> {
+    let desktop = super::desktop::load();
+    let loaded = roots.into_iter().map(|(id, root)| (id, load_with(root, &desktop))).collect();
+    merge_accounts(loaded)
+}
+
+pub fn merge_accounts(loaded: Vec<(String, Vec<Project>)>) -> Vec<Project> {
+    let mut by_path: HashMap<String, Vec<SessionInfo>> = HashMap::new();
+    let mut ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut order: Vec<String> = vec![];
+    for (profile, projects) in loaded {
+        for project in projects {
+            for mut s in project.sessions {
+                if !ids.insert(s.id.clone()) {
+                    continue;
+                }
+                s.profile_id = Some(profile.clone());
+                if !by_path.contains_key(&project.path) {
+                    order.push(project.path.clone());
+                }
+                by_path.entry(project.path.clone()).or_default().push(s);
+            }
+        }
+    }
+    let mut projects: Vec<Project> = order
+        .into_iter()
+        .filter_map(|path| {
+            let mut sessions = by_path.remove(&path)?;
+            sessions.sort_by(|a, b| b.modified.cmp(&a.modified));
+            Some(Project { id: path.clone(), path, sessions })
+        })
+        .collect();
+    projects.sort_by_key(|p| std::cmp::Reverse(p.last_activity()));
+    projects
 }
 
 pub fn load_with(root: PathBuf, desktop: &HashMap<String, super::desktop::Link>) -> Vec<Project> {
@@ -274,6 +307,7 @@ fn parse_uncached(file: &Path, mtime: SystemTime) -> Option<SessionInfo> {
         parent_id: None,
         desktop_id: None,
         archived: false,
+        profile_id: None,
     })
 }
 
@@ -321,7 +355,7 @@ mod tests {
             "{\"type\":\"user\",\"cwd\":\"/home/x/repo\",\"gitBranch\":\"feat-a\",\"message\":{\"content\":\"Fix the bug please\"}}\n{\"type\":\"assistant\",\"message\":{\"model\":\"claude-x\"}}\n{\"type\":\"pr-link\",\"prUrl\":\"https://github.com/a/b/pull/3\",\"prNumber\":3}\n",
         )
         .unwrap();
-        let all = load_all(dir.clone());
+        let all = load_with(dir.clone(), &HashMap::new());
         assert_eq!(all.len(), 1);
         let s = &all[0].sessions[0];
         assert_eq!(s.title, "Fix the bug please");
@@ -352,7 +386,23 @@ mod tests {
             parent_id: parent.map(|p| p.to_string()),
             desktop_id: None,
             archived: false,
+            profile_id: None,
         }
+    }
+
+    #[test]
+    fn merges_history_from_every_account() {
+        let a = vec![Project { id: "/p".into(), path: "/p".into(), sessions: vec![info("s1", None, 10), info("s2", None, 30)] }];
+        let b = vec![
+            Project { id: "/p".into(), path: "/p".into(), sessions: vec![info("s3", None, 20), info("s1", None, 10)] },
+            Project { id: "/q".into(), path: "/q".into(), sessions: vec![info("s4", None, 5)] },
+        ];
+        let merged = merge_accounts(vec![("default".into(), a), ("work".into(), b)]);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].path, "/p");
+        let ids: Vec<(&str, &str)> = merged[0].sessions.iter().map(|s| (s.id.as_str(), s.profile_id.as_deref().unwrap())).collect();
+        assert_eq!(ids, vec![("s2", "default"), ("s3", "work"), ("s1", "default")]);
+        assert_eq!(merged[1].sessions[0].profile_id.as_deref(), Some("work"));
     }
 
     #[test]

@@ -18,13 +18,7 @@ pub fn switch_profile(id: &str) {
         return;
     }
     let a = app::get();
-    a.claude.close_all_for_profile_switch();
     accounts::set_active(id);
-    crate::claude::chat::USAGE.with(|u| {
-        let mut u = u.borrow_mut();
-        u.windows.clear();
-        u.subscription = None;
-    });
     let store = accounts::store();
     *store.status.borrow_mut() = Status::Checking;
     store.changed.emit(&());
@@ -39,6 +33,8 @@ pub fn remove_profile(p: &ClaudeProfile) {
     if p.is_default() {
         return;
     }
+    let ws = app::get().claude.clone();
+    ws.close_tabs(p.config_dir.as_deref());
     if accounts::active_id() == p.id {
         match accounts::visible().into_iter().find(|o| o.id != p.id) {
             Some(other) => switch_profile(&other.id),
@@ -55,11 +51,94 @@ pub fn remove_profile(p: &ClaudeProfile) {
         accounts::store().logout(dir).await;
         accounts::remove(&id);
         accounts::store().changed.emit(&());
+        ws.reload_projects().await;
+    });
+}
+
+pub fn profile_color(p: &ClaudeProfile) -> &'static str {
+    if p.is_default() {
+        "coral"
+    } else {
+        crate::theme::palette_for(&p.id)
+    }
+}
+
+pub fn account_chip(profile: Option<&ClaudeProfile>, compact: bool) -> Option<gtk::Box> {
+    let p = profile.filter(|_| accounts::has_several())?;
+    let c = chip(if compact { p.initial() } else { p.label.clone() }.as_str(), profile_color(p), None, false);
+    c.add_css_class("account-chip");
+    if compact {
+        c.add_css_class("compact");
+    }
+    c.set_tooltip_text(Some(&accounts::display_name(p)));
+    c.update_property(&[gtk::accessible::Property::Label(&format!("Account {}", p.label))]);
+    Some(c)
+}
+
+pub fn account_filter(current: Option<String>, on_pick: impl Fn(Option<String>) + 'static) -> Option<gtk::Box> {
+    if !accounts::has_several() {
+        return None;
+    }
+    let row = gtk::FlowBox::new();
+    row.set_selection_mode(gtk::SelectionMode::None);
+    row.set_column_spacing(4);
+    row.set_row_spacing(4);
+    row.set_max_children_per_line(8);
+    row.set_homogeneous(false);
+    let on_pick = Rc::new(on_pick);
+    let mut first: Option<gtk::ToggleButton> = None;
+    let mut entries: Vec<(Option<String>, String, Option<&'static str>)> = vec![(None, "All".into(), None)];
+    entries.extend(accounts::visible().into_iter().map(|p| (Some(p.id.clone()), p.label.clone(), Some(profile_color(&p)))));
+    for (id, title, color) in entries {
+        let t = gtk::ToggleButton::new();
+        let content = hbox(4);
+        if let Some(color) = color {
+            let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            dot.add_css_class("account-dot");
+            dot.add_css_class(&format!("edge-{color}"));
+            dot.set_valign(gtk::Align::Center);
+            content.append(&dot);
+        }
+        content.append(&ellipsized(&title, &[]));
+        t.set_child(Some(&content));
+        t.set_tooltip_text(Some(&if id.is_none() { "Sessions from all accounts".to_string() } else { format!("Only sessions from {title}") }));
+        set_label(&t, &title);
+        match &first {
+            Some(f) => t.set_group(Some(f)),
+            None => first = Some(t.clone()),
+        }
+        t.set_active(id == current);
+        let pick = on_pick.clone();
+        t.connect_toggled(move |t| {
+            if t.is_active() {
+                pick(id.clone());
+            }
+        });
+        row.insert(&t, -1);
+    }
+    let b = hbox(0);
+    b.add_css_class("account-filter");
+    b.append(&row);
+    Some(b)
+}
+
+pub fn new_session_as_menu(menu: &Menu, folder: &str, kind: Option<crate::claude::TabKind>, label: &str) {
+    if !accounts::has_several() {
+        return;
+    }
+    let folder = folder.to_string();
+    menu.submenu(label, move |sub| {
+        for p in accounts::visible() {
+            let (f, id) = (folder.clone(), p.id.clone());
+            sub.item(&accounts::display_name(&p), move || {
+                app::get().claude.new_session_as(&f, None, None, None, kind, Some(&id));
+            });
+        }
     });
 }
 
 pub fn profile_badge(p: &ClaudeProfile, size: i32) -> gtk::Box {
-    let color = if p.is_default() { "coral" } else { crate::theme::palette_for(&p.id) };
+    let color = profile_color(p);
     let b = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     b.add_css_class("state-dot");
     b.add_css_class(color);

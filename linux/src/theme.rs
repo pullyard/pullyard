@@ -341,6 +341,11 @@ list.sy-sidebar-list > row:selected { background-color: alpha(@sy_text, 0.07); b
 .sy-count { color: @sy_muted; font-feature-settings: "tnum"; }
 .chip { padding: 1px 7px; border-radius: 999px; font-size: 0.82em; font-weight: 500; }
 .chip.mono { font-family: monospace; font-weight: 400; }
+.chip.account-chip { padding: 0 6px; font-size: 0.74em; font-weight: 600; }
+.chip.account-chip.compact { padding: 0 5px; }
+.account-filter button { padding: 2px 9px; min-height: 0; border-radius: 999px; font-size: 0.85em; border: 1px solid @sy_line; background: transparent; color: @sy_muted; }
+.account-filter button:checked { background-color: @sy_raised; border-color: @sy_line_strong; color: @sy_text; font-weight: 600; }
+.account-filter .account-dot { min-width: 6px; min-height: 6px; border-radius: 999px; }
 button.chip-button { padding: 0; min-height: 0; min-width: 0; border-radius: 999px; }
 .state-dot { min-width: 22px; min-height: 22px; border-radius: 999px; }
 .state-pill { padding: 3px 10px; border-radius: 999px; font-weight: 600; color: @sy_on_accent; }
