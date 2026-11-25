@@ -257,6 +257,19 @@ final class LinkClient: ObservableObject {
         }
     }
 
+    func respondRemote(session: String, requestID: String, allow: Bool) async throws {
+        if !isConnected { try await ensureConnected() }
+        var message = PYLinkMessage(type: "permission")
+        message.session = session
+        message.requestID = requestID
+        message.allow = allow
+        message.always = false
+        guard let channel else { throw LinkError.disconnected }
+        channel.send(json: message)
+        chats[session]?.state.pending.removeAll { $0.id == requestID }
+        AgentActivities.answered(session)
+    }
+
     func respond(_ permission: PYLinkPermission, allow: Bool, always: Bool = false, in session: String) {
         var message = PYLinkMessage(type: "permission")
         message.session = session

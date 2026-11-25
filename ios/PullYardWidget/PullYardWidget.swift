@@ -281,6 +281,7 @@ struct AgentActivityWidget: Widget {
                     VStack(spacing: 10) {
                         AgentWake(phase: phase)
                         AgentDetailLine(state: context.state, stale: context.isStale)
+                        AgentPermissionButtons(session: context.attributes.session, state: context.state)
                     }
                     .padding(.horizontal, 6).padding(.top, 6)
                 }
@@ -386,6 +387,34 @@ private struct AgentWake: View {
     }
 }
 
+private struct AgentPermissionButtons: View {
+    let session: String
+    let state: AgentActivityAttributes.ContentState
+
+    var body: some View {
+        if state.phase == .waiting, let request = state.permissionID {
+            HStack(spacing: 10) {
+                Button(intent: AgentPermissionIntent(session: session, request: request, allow: false)) {
+                    Label("Deny", systemImage: "xmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .background(Capsule().fill(.white.opacity(0.14)))
+                Button(intent: AgentPermissionIntent(session: session, request: request, allow: true)) {
+                    Label("Allow", systemImage: "checkmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(WidgetPalette.navy)
+                .background(Capsule().fill(WidgetPalette.green))
+            }
+        }
+    }
+}
+
 private struct AgentDetailLine: View {
     let state: AgentActivityAttributes.ContentState
     let stale: Bool
@@ -443,6 +472,7 @@ private struct AgentLockScreenView: View {
             }
             AgentWake(phase: phase)
             AgentDetailLine(state: context.state, stale: context.isStale)
+            AgentPermissionButtons(session: context.attributes.session, state: context.state)
         }
         .padding(.horizontal, 18).padding(.vertical, 16)
         .background {

@@ -934,6 +934,12 @@ struct AgentChatView: View {
                         if chat.state.busy {
                             AgentWorkingCapsule(status: chat.state.status, since: busySince)
                                 .id("busy")
+                        } else if chat.state.pending.isEmpty, chat.state.error == nil, let summary = AgentTurnSummary(items: chat.items) {
+                            AgentSummaryCard(summary: summary, pull: pullKey) { key in
+                                router.open(.pull(key), in: model.selectedTab)
+                            }
+                            .id("summary")
+                            .transition(.opacity.combined(with: .offset(y: 12)))
                         }
                         if let error = chat.state.error {
                             Label(error, systemImage: "exclamationmark.triangle.fill").mobileFont(size: 13).foregroundStyle(MobileTheme.amberInk)
@@ -1043,6 +1049,12 @@ struct AgentChatView: View {
             link.subscribe(session)
         }
         .onDisappear { link.unsubscribe(session) }
+    }
+
+    private var pullKey: PRKey? {
+        guard let info = link.sessions.first(where: { $0.id == session }) ?? link.history.first(where: { $0.id == session }),
+              let repo = info.repo, let number = info.number else { return nil }
+        return PRKey(repo: repo, number: number)
     }
 
     private func isPending(_ item: PYLinkItem, in chat: AgentChat) -> Bool {
@@ -1284,6 +1296,110 @@ private struct AgentChatPlaceholder: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 60)
         .transition(.opacity)
+    }
+}
+
+struct AgentTurnSummary: Equatable {
+    var files: [String]
+    var commits: Int
+    var pushed: Bool
+    var steps: Int
+
+    init?(items: [PYLinkItem]) {
+        let start = items.lastIndex { $0.kind == "user" }.map { $0 + 1 } ?? 0
+        let turn = items[start...].filter { $0.kind == "tool" }
+        guard !turn.isEmpty, items.last?.kind != "user" else { return nil }
+        var files: [String] = []
+        var commits = 0
+        var pushed = false
+        for item in turn {
+            let tool = item.tool ?? ""
+            if ["Edit", "Write", "MultiEdit", "NotebookEdit"].contains(tool) {
+                let name = (item.text.split(whereSeparator: \.isNewline).first.map(String.init) ?? item.text)
+                let file = (name as NSString).lastPathComponent
+                if !file.isEmpty, !files.contains(file) { files.append(file) }
+            }
+            if tool == "Bash" {
+                if item.text.contains("git commit") { commits += 1 }
+                if item.text.contains("git push") { pushed = true }
+            }
+        }
+        self.files = files
+        self.commits = commits
+        self.pushed = pushed
+        steps = turn.count
+    }
+}
+
+private struct AgentSummaryCard: View {
+    let summary: AgentTurnSummary
+    let pull: PRKey?
+    let open: (PRKey) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 22)).foregroundStyle(MobileTheme.green)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Agent finished").mobileFont(size: 16, weight: .semibold).foregroundStyle(MobileTheme.ink)
+                    Text(String(format: L("%d steps"), summary.steps)).mobileFont(size: 12).foregroundStyle(MobileTheme.muted)
+                }
+                Spacer()
+            }
+            if !summary.files.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(String(format: L("%d files changed"), summary.files.count), systemImage: "doc.text").mobileFont(size: 13, weight: .semibold).foregroundStyle(MobileTheme.ink)
+                    FlowChips(items: Array(summary.files.prefix(6)) + (summary.files.count > 6 ? ["+\(summary.files.count - 6)"] : []))
+                }
+            }
+            HStack(spacing: 14) {
+                if summary.commits > 0 {
+                    Label(String(format: L("%d commits"), summary.commits), systemImage: "point.3.connected.trianglepath.dotted")
+                }
+                if summary.pushed {
+                    Label("Pushed", systemImage: "arrow.up.circle")
+                }
+            }
+            .mobileFont(size: 13, weight: .medium)
+            .foregroundStyle(MobileTheme.muted)
+            if let pull {
+                Button { open(pull) } label: {
+                    Label(String(format: L("Open pull request #%d"), pull.number), systemImage: "arrow.triangle.pull")
+                        .mobileFont(size: 15, weight: .semibold)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Capsule())
+                        .pyGlass(in: Capsule(), tint: MobileTheme.accentFill, interactive: true, fallback: MobileTheme.accentFill)
+                }
+                .buttonStyle(.pyPlain)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MobileTheme.green.opacity(0.07), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(MobileTheme.green.opacity(0.25)))
+    }
+}
+
+private struct FlowChips: View {
+    let items: [String]
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) { chips }
+            VStack(alignment: .leading, spacing: 6) { chips }
+        }
+    }
+
+    @ViewBuilder private var chips: some View {
+        ForEach(items, id: \.self) { item in
+            Text(item)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(MobileTheme.ink)
+                .lineLimit(1)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(MobileTheme.sunken, in: Capsule())
+        }
     }
 }
 

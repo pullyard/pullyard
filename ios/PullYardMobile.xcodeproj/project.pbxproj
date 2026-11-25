@@ -46,6 +46,7 @@
 		92E83F11231596E157BCF6AF /* LocalCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7C5751F2F7DBE975941D203 /* LocalCache.swift */; };
 		99B3E16164BECDEEBEE1220B /* IrohLib in Frameworks */ = {isa = PBXBuildFile; productRef = 334EEADBC434077E8C6D118D /* IrohLib */; };
 		9A76D45247A1ADA13599209C /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B3A0459840F2BE02F504DC5 /* WidgetSnapshot.swift */; };
+		9C9A41575FD72EDC4E015021 /* AgentTurnSummaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D854E33B7127DD7D9C8A882 /* AgentTurnSummaryTests.swift */; };
 		9E1D6A9E230F4A2BF9CC87AB /* WidgetFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDE41B0C24CD4D522D241B3 /* WidgetFetcher.swift */; };
 		A0B2207DDD4EB19A571B3DE2 /* BackgroundSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25B274088D0F1FDAC407D400 /* BackgroundSync.swift */; };
 		A35600335EFD66F8457AEEC2 /* GitHubClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 075F9FC47F2B64F2FC5BA017 /* GitHubClient.swift */; };
@@ -146,6 +147,7 @@
 		5540DD8A1EFE9214A4C8EBAE /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		665A39E542BD09746979B213 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		674809AA8E4123FA4CFAF63B /* AgentAttachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentAttachments.swift; sourceTree = "<group>"; };
+		6D854E33B7127DD7D9C8A882 /* AgentTurnSummaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTurnSummaryTests.swift; sourceTree = "<group>"; };
 		7514C15D3A6E031E05E5E80A /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		7656F08929BF5CF832079205 /* ProjectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsView.swift; sourceTree = "<group>"; };
 		7A695F8DF43A5AF140D29255 /* AppShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcuts.swift; sourceTree = "<group>"; };
@@ -303,6 +305,7 @@
 		A8419B5A223F5069A318F0A6 /* PullYardMobileTests */ = {
 			isa = PBXGroup;
 			children = (
+				6D854E33B7127DD7D9C8A882 /* AgentTurnSummaryTests.swift */,
 				E7ACC95A77417C6758DB98D1 /* JiraKeyFinderTests.swift */,
 				825268025F1A9721844AE423 /* PullYardMobileTests.swift */,
 			);
@@ -549,6 +552,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9C9A41575FD72EDC4E015021 /* AgentTurnSummaryTests.swift in Sources */,
 				FE3185933D64017FD5F03977 /* JiraKeyFinderTests.swift in Sources */,
 				BB2F3FACC07E463B7D375E51 /* PullYardMobileTests.swift in Sources */,
 			);

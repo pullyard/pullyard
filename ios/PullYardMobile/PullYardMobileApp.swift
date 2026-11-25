@@ -12,6 +12,9 @@ struct PullYardMobileApp: App {
         UIRefreshControl.appearance().tintColor = .clear
         ThemeStore.update(ThemeStore.style)
         BackgroundSync.register()
+        AgentIntentBridge.respond = { session, request, allow in
+            try await LinkClient.shared.respondRemote(session: session, requestID: request, allow: allow)
+        }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-PYDemo") {
             _model = StateObject(wrappedValue: AppModel(cache: LocalStore(directory: nil), defaults: UserDefaults(suiteName: "PullYardDemo") ?? .standard, isDemo: true, makeClient: { _ in DemoGitHubAPI() }))

@@ -6080,6 +6080,96 @@
           }
         }
       }
+    },
+    "Agent finished" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Агент закончил"
+          }
+        }
+      }
+    },
+    "%d steps" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Шагов: %d"
+          }
+        }
+      }
+    },
+    "%d files changed" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Изменено файлов: %d"
+          }
+        }
+      }
+    },
+    "%d commits" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Коммитов: %d"
+          }
+        }
+      }
+    },
+    "Pushed" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Запушено"
+          }
+        }
+      }
+    },
+    "Open pull request #%d" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Открыть PR #%d"
+          }
+        }
+      }
+    },
+    "Deny" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Запретить"
+          }
+        }
+      }
+    },
+    "Allow" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Разрешить"
+          }
+        }
+      }
+    },
+    "Answer the agent" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ответить агенту"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -23,6 +23,17 @@ enum AgentActivities {
 
     static func track(_ session: String) { tracked.insert(session) }
 
+    static func answered(_ session: String) {
+        guard let current = activity(for: session) else { return }
+        var state = current.content.state
+        guard state.phase == .waiting else { return }
+        state.phase = .working
+        state.permissionID = nil
+        state.detail = "Continuing…"
+        pending[session] = state
+        flush(session, activity: current)
+    }
+
     static func close(_ session: String) {
         tracked.remove(session)
         pending[session] = nil
@@ -84,7 +95,7 @@ enum AgentActivities {
         }
         let started = previous?.started ?? Date()
         let finished: Date? = (phase == .working || phase == .waiting) ? nil : (previous?.finished ?? Date())
-        return State(phase: phase, detail: detail(chat, phase: phase), steps: tools.count, started: started, finished: finished)
+        return State(phase: phase, detail: detail(chat, phase: phase), steps: tools.count, started: started, finished: finished, permissionID: phase == .waiting ? chat.state.pending.first?.id : nil)
     }
 
     private static func detail(_ chat: AgentChat, phase: State.Phase) -> String {
