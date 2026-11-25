@@ -53,6 +53,18 @@ struct PYLinkBridge {
             chat.respond(request, allow: message.allow ?? false, always: message.always == true ? request.suggestions.first : nil)
         case "stop":
             tab(message.session)?.chat?.interrupt()
+        case "close":
+            if let tab = tab(message.session) { app?.claude.close(tab) }
+            if let session = message.session {
+                client.subscriptions.remove(session)
+                client.sentItems[session] = nil
+                client.sentOrder[session] = nil
+                client.sentState[session] = nil
+            }
+            var reply = PYLinkMessage(type: "sessions")
+            reply.id = message.id
+            reply.sessions = sessions()
+            client.channel.send(json: reply)
         default:
             var reply = PYLinkMessage(type: "error")
             reply.id = message.id

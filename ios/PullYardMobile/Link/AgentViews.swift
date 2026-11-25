@@ -258,6 +258,7 @@ struct AgentSessionsView: View {
     @State private var resuming: String?
     @State private var query = ""
     @State private var reordering = false
+    @State private var closing: PYLinkSession?
     @AppStorage("agents.collapsedProjects") private var collapsedRaw = ""
     @AppStorage("agents.projectOrder") private var orderRaw = ""
 
@@ -349,6 +350,7 @@ struct AgentSessionsView: View {
                         ForEach(active) { session in
                             NavigationLink(value: Route.agent(session.id)) { row(session, showProject: true) }
                                 .pyRow()
+                                .modifier(CloseActions(session: session, closing: $closing))
                         }
                     } header: {
                         HStack(spacing: 8) {
@@ -371,6 +373,7 @@ struct AgentSessionsView: View {
                             ForEach(group.open) { session in
                                 NavigationLink(value: Route.agent(session.id)) { row(session) }
                                     .pyRow()
+                                    .modifier(CloseActions(session: session, closing: $closing))
                             }
                             ForEach(group.closed) { session in
                                 Button { resume(session) } label: {
@@ -410,6 +413,12 @@ struct AgentSessionsView: View {
                 }
                 .disabled(link.sessions.isEmpty && link.history.isEmpty)
             }
+        }
+        .confirmationDialog("Close this session?", isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } }), titleVisibility: .visible, presenting: closing) { session in
+            Button("Close session", role: .destructive) { close(session) }
+            Button("Cancel", role: .cancel) {}
+        } message: { session in
+            Text(session.state == "working" || session.state == "waiting" ? "The agent is working. Closing stops it and closes the tab on your Mac. You can continue it later from History." : "This closes the tab on your Mac. You can continue it later from History.")
         }
         .sheet(isPresented: $reordering) {
             ProjectOrderSheet(projects: groups(filtered: false).map { ($0.id, $0.name) }) { ids in
@@ -452,6 +461,18 @@ struct AgentSessionsView: View {
         await link.refreshSessions()
         await link.loadHistory()
         loading = false
+    }
+
+    private func close(_ session: PYLinkSession) {
+        closing = nil
+        Task {
+            do {
+                try await link.close(session.id)
+                await link.loadHistory()
+            } catch {
+                feedback.error(error, key: "agent-close")
+            }
+        }
     }
 
     private func resume(_ session: PYLinkSession) {
@@ -498,6 +519,21 @@ struct AgentSessionsView: View {
         }
         guard let updated = session.updated else { return place }
         return "\(place) · \(updated.formatted(.relative(presentation: .named)))"
+    }
+}
+
+private struct CloseActions: ViewModifier {
+    let session: PYLinkSession
+    @Binding var closing: PYLinkSession?
+
+    func body(content: Content) -> some View {
+        content
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) { closing = session } label: { Label("Close", systemImage: "xmark") }
+            }
+            .contextMenu {
+                Button(role: .destructive) { closing = session } label: { Label("Close session", systemImage: "xmark.circle") }
+            }
     }
 }
 
@@ -553,6 +589,8 @@ struct AgentChatView: View {
     @State private var scrollRequest = 0
     @State private var userScrolling = false
     @State private var lastCount = 0
+    @State private var confirmClose = false
+    @Environment(\.dismiss) private var dismiss
     @State private var attachments: [AgentAttachment] = []
     @State private var photoSelection: [PhotosPickerItem] = []
     @State private var showPhotos = false
@@ -663,18 +701,40 @@ struct AgentChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
                 if chat?.state.busy == true {
                     Button { link.stop(session) } label: { Image(systemName: "stop.circle.fill").foregroundStyle(MobileTheme.red) }
                         .accessibilityLabel("Stop")
                 }
+                Menu {
+                    Button(role: .destructive) { confirmClose = true } label: { Label("Close session", systemImage: "xmark.circle") }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .disabled(!link.isConnected)
             }
+        }
+        .confirmationDialog("Close this session?", isPresented: $confirmClose, titleVisibility: .visible) {
+            Button("Close session", role: .destructive) { closeSession() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(chat?.state.busy == true ? "The agent is working. Closing stops it and closes the tab on your Mac. You can continue it later from History." : "This closes the tab on your Mac. You can continue it later from History.")
         }
         .task {
             link.connectIfNeeded()
             link.subscribe(session)
         }
         .onDisappear { link.unsubscribe(session) }
+    }
+
+    private func closeSession() {
+        let link = link
+        let feedback = feedback
+        let session = session
+        dismiss()
+        Task {
+            do { try await link.close(session) } catch { feedback.error(error, key: "agent-close") }
+        }
     }
 
     private var contentSignature: String {

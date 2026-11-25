@@ -5460,6 +5460,56 @@
           }
         }
       }
+    },
+    "Close session" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Закрыть сессию"
+          }
+        }
+      }
+    },
+    "Close this session?" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Закрыть эту сессию?"
+          }
+        }
+      }
+    },
+    "Close" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Закрыть"
+          }
+        }
+      }
+    },
+    "The agent is working. Closing stops it and closes the tab on your Mac. You can continue it later from History." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Агент работает. Закрытие остановит его и закроет вкладку на Mac. Продолжить можно позже из Истории."
+          }
+        }
+      }
+    },
+    "This closes the tab on your Mac. You can continue it later from History." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вкладка на Mac закроется. Продолжить можно позже из Истории."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

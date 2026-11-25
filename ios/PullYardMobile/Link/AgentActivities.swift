@@ -13,6 +13,13 @@ enum AgentActivities {
 
     static func track(_ session: String) { tracked.insert(session) }
 
+    static func close(_ session: String) {
+        tracked.remove(session)
+        pending[session] = nil
+        let activities = Activity<AgentActivityAttributes>.activities.filter { $0.attributes.session == session }
+        Task { for activity in activities { await activity.end(nil, dismissalPolicy: .immediate) } }
+    }
+
     static func sync(session: String, chat: AgentChat, mac: String) {
         let current = activity(for: session)
         guard tracked.contains(session) || current != nil else { return }

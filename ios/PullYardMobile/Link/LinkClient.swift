@@ -228,6 +228,18 @@ final class LinkClient: ObservableObject {
         chats[session]?.state.pending.removeAll { $0.id == permission.id }
     }
 
+    func close(_ session: String) async throws {
+        if !isConnected { try await ensureConnected() }
+        var message = PYLinkMessage(type: "close")
+        message.session = session
+        let reply = try await request(message, timeout: 20)
+        if let error = reply.error { throw LinkError.remote(error) }
+        subscriptions.remove(session)
+        sessions = reply.sessions ?? sessions.filter { $0.id != session }
+        chats[session] = nil
+        AgentActivities.close(session)
+    }
+
     func stop(_ session: String) {
         var message = PYLinkMessage(type: "stop")
         message.session = session
