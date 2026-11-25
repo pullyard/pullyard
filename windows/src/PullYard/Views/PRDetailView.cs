@@ -181,12 +181,12 @@ public sealed class PRContent : Grid, IShortcutHost
 
         tabs.SelectionChanged += id => model.Tab = Enum.Parse<PRTab>(id);
         model.PropertyChanged += OnModel;
-        JiraService.Account.Changed += OnJiraChanged;
+        JiraService.Connections.Changed += OnJiraChanged;
         Settings.Shared.Changed += OnSettings;
         Unloaded += (_, _) =>
         {
             model.PropertyChanged -= OnModel;
-            JiraService.Account.Changed -= OnJiraChanged;
+            JiraService.Connections.Changed -= OnJiraChanged;
             Settings.Shared.Changed -= OnSettings;
             WatchFixTab(null);
         };
@@ -194,8 +194,8 @@ public sealed class PRContent : Grid, IShortcutHost
         {
             model.PropertyChanged -= OnModel;
             model.PropertyChanged += OnModel;
-            JiraService.Account.Changed -= OnJiraChanged;
-            JiraService.Account.Changed += OnJiraChanged;
+            JiraService.Connections.Changed -= OnJiraChanged;
+            JiraService.Connections.Changed += OnJiraChanged;
             Settings.Shared.Changed -= OnSettings;
             Settings.Shared.Changed += OnSettings;
             RenderAll();
@@ -273,7 +273,7 @@ public sealed class PRContent : Grid, IShortcutHost
     private bool TabAvailable(PRTab t) => t switch
     {
         PRTab.Stack => model.StackTree is not null,
-        PRTab.Jira => model.Pr is { } pr && JiraService.Account.ShowsTab(pr),
+        PRTab.Jira => model.Pr is { } pr && JiraService.Connections.ShowsTab(pr),
         _ => true
     };
 
@@ -968,7 +968,7 @@ public sealed class PRContent : Grid, IShortcutHost
             new TabSpec(nameof(PRTab.Checks), L.T("PR_TabChecks", "Checks"), "", summary, color),
             new TabSpec(nameof(PRTab.Files), L.T("PR_TabFiles", "Files changed"), "", pr.ChangedFiles.ToString())
         }.Concat(model.StackTree is { } tree ? new[] { new TabSpec(nameof(PRTab.Stack), L.T("PR_TabStack", "Stack"), StackUi.StackGlyph, tree.Count.ToString()) } : Array.Empty<TabSpec>())
-         .Concat(JiraService.Account.ShowsTab(pr) ? new[] { new TabSpec(nameof(PRTab.Jira), L.T("PR_TabJira", "Jira"), "\uE8EC", JiraService.Account.Keys(pr).FirstOrDefault()) } : Array.Empty<TabSpec>()));
+         .Concat(JiraService.Connections.ShowsTab(pr) ? new[] { new TabSpec(nameof(PRTab.Jira), L.T("PR_TabJira", "Jira"), "\uE8EC", JiraService.Connections.Keys(pr).FirstOrDefault()) } : Array.Empty<TabSpec>()));
         tabs.Selected = model.Tab.ToString();
     }
 

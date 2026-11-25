@@ -589,19 +589,28 @@
   <data name="Issue_ReopenShort" xml:space="preserve"><value>Reopen</value></data>
   <data name="Issue_Share" xml:space="preserve"><value>Share</value></data>
   <data name="Item_StackedOn" xml:space="preserve"><value>stacked on {0}</value></data>
+  <data name="Jira_AddConnection" xml:space="preserve"><value>Add Jira connection</value></data>
+  <data name="Jira_AddRule" xml:space="preserve"><value>Add rule</value></data>
+  <data name="Jira_AllOf" xml:space="preserve"><value>All of {0}</value></data>
+  <data name="Jira_AllOfOwner" xml:space="preserve"><value>All of {0}</value></data>
   <data name="Jira_Assignee" xml:space="preserve"><value>Assignee</value></data>
+  <data name="Jira_Automatic" xml:space="preserve"><value>Automatic</value></data>
+  <data name="Jira_ByKey" xml:space="preserve"><value>Jira: by key</value></data>
+  <data name="Jira_ByProjectKey" xml:space="preserve"><value>By project key</value></data>
   <data name="Jira_Cancel" xml:space="preserve"><value>Cancel</value></data>
   <data name="Jira_ChangeStatus" xml:space="preserve"><value>Change status</value></data>
   <data name="Jira_Collapse" xml:space="preserve"><value>Collapse</value></data>
   <data name="Jira_Connect" xml:space="preserve"><value>Connect</value></data>
   <data name="Jira_ConnectHint" xml:space="preserve"><value>Connect Jira to see the ticket for a pull request and move it between statuses. Your API token stays in Windows Credential Manager.</value></data>
   <data name="Jira_Connected" xml:space="preserve"><value>Connected</value></data>
+  <data name="Jira_ConnectionMenu" xml:space="preserve"><value>{0} options</value></data>
   <data name="Jira_Copied" xml:space="preserve"><value>Copied</value></data>
   <data name="Jira_CopyLink" xml:space="preserve"><value>Copy link</value></data>
   <data name="Jira_CreateToken" xml:space="preserve"><value>Create an API token at id.atlassian.com</value></data>
   <data name="Jira_Description" xml:space="preserve"><value>Description</value></data>
-  <data name="Jira_Disconnect" xml:space="preserve"><value>Disconnect</value></data>
+  <data name="Jira_Edit" xml:space="preserve"><value>Edit…</value></data>
   <data name="Jira_EmailPlaceholder" xml:space="preserve"><value>Atlassian account email (empty for a Data Center token)</value></data>
+  <data name="Jira_ForRepo" xml:space="preserve"><value>Jira for {0}</value></data>
   <data name="Jira_Hide" xml:space="preserve"><value>Hide</value></data>
   <data name="Jira_HideOnPr" xml:space="preserve"><value>Hide on this pull request</value></data>
   <data name="Jira_HideTip" xml:space="preserve"><value>Hide this ticket on this pull request</value></data>
@@ -614,14 +623,30 @@
   <data name="Jira_LinkedOne" xml:space="preserve"><value>1 linked ticket</value></data>
   <data name="Jira_Loading" xml:space="preserve"><value>Loading…</value></data>
   <data name="Jira_MoveTo" xml:space="preserve"><value>Move to</value></data>
+  <data name="Jira_NamePlaceholder" xml:space="preserve"><value>Name, e.g. Work</value></data>
+  <data name="Jira_NeedsToken" xml:space="preserve"><value>Needs a new token</value></data>
   <data name="Jira_NoTicket" xml:space="preserve"><value>No Jira ticket on this pull request</value></data>
   <data name="Jira_NoTicketHint" xml:space="preserve"><value>PullYard looks for keys like ABC-123 in the title, branch name and description.</value></data>
   <data name="Jira_NoTransitions" xml:space="preserve"><value>No transitions available</value></data>
   <data name="Jira_Open" xml:space="preserve"><value>Open in Jira</value></data>
   <data name="Jira_ParentTip" xml:space="preserve"><value>Parent ticket — open in Jira</value></data>
   <data name="Jira_Priority" xml:space="preserve"><value>Priority</value></data>
+  <data name="Jira_Reconnect" xml:space="preserve"><value>Reconnect with a new token…</value></data>
+  <data name="Jira_RefreshProjects" xml:space="preserve"><value>Refresh projects</value></data>
   <data name="Jira_Reload" xml:space="preserve"><value>Reload from Jira</value></data>
+  <data name="Jira_Remove" xml:space="preserve"><value>Remove…</value></data>
+  <data name="Jira_RemoveButton" xml:space="preserve"><value>Remove</value></data>
+  <data name="Jira_RemoveHelp" xml:space="preserve"><value>Its API token is deleted from Windows Credential Manager, and rules that point to it go too.</value></data>
+  <data name="Jira_RemoveQ" xml:space="preserve"><value>Remove “{0}”?</value></data>
+  <data name="Jira_RemoveRule" xml:space="preserve"><value>Remove rule for {0}</value></data>
+  <data name="Jira_RemovedConnection" xml:space="preserve"><value>removed connection</value></data>
+  <data name="Jira_RepoChipTip" xml:space="preserve"><value>Which Jira this repository uses</value></data>
+  <data name="Jira_RepoUses" xml:space="preserve"><value>Jira: {0}</value></data>
   <data name="Jira_Reporter" xml:space="preserve"><value>Reporter</value></data>
+  <data name="Jira_RuleOrgPlaceholder" xml:space="preserve"><value>GitHub organization</value></data>
+  <data name="Jira_Rules" xml:space="preserve"><value>Rules</value></data>
+  <data name="Jira_RulesHint" xml:space="preserve"><value>Tickets go to the site that owns their project key. A rule sends every ticket of a repository or organization to one connection.</value></data>
+  <data name="Jira_SameAsOwner" xml:space="preserve"><value>Same as owner ({0})</value></data>
   <data name="Jira_ShowDetails" xml:space="preserve"><value>Show details</value></data>
   <data name="Jira_ShowHiddenMany" xml:space="preserve"><value>Show {0} hidden tickets</value></data>
   <data name="Jira_ShowHiddenOne" xml:space="preserve"><value>Show 1 hidden ticket</value></data>
@@ -629,6 +654,7 @@
   <data name="Jira_ShowMore" xml:space="preserve"><value>Show more</value></data>
   <data name="Jira_SitePlaceholder" xml:space="preserve"><value>Jira address — acme.atlassian.net</value></data>
   <data name="Jira_Title" xml:space="preserve"><value>Jira</value></data>
+  <data name="Jira_TokenKeep" xml:space="preserve"><value>API token (leave empty to keep the current one)</value></data>
   <data name="Jira_TokenPlaceholder" xml:space="preserve"><value>API token</value></data>
   <data name="Jira_Unassigned" xml:space="preserve"><value>Unassigned</value></data>
   <data name="Jira_Unlink" xml:space="preserve"><value>Unlink</value></data>

@@ -899,6 +899,7 @@ public sealed partial class AppViewModel : ObservableObject
 
     public async Task RefreshBadges(bool live = false)
     {
+        if (!Demo.IsOn) PullYard.Views.JiraService.Connections.RefreshAllProjects(PullYard.Core.Jira.JiraConnections.ProjectsMaxAge).Forget();
         BadgesRefreshing = true;
         try
         {

@@ -266,7 +266,7 @@ public static class NextUp
         if (Settings.Shared.GetBool(ChecklistDismissedKey, false)) return null;
         var notifications = NotificationsOn();
         var agents = ClaudeAccountStore.Shared.IsLoggedIn;
-        var jira = JiraService.Account.IsConfigured;
+        var jira = JiraService.Connections.IsConfigured;
         if (notifications && agents && jira) return null;
         var app = AppViewModel.Shared;
         var panel = Ui.V(8);

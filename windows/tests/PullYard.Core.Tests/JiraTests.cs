@@ -179,59 +179,151 @@ public class JiraTests : IDisposable
     }
 
     [Fact]
-    public async Task AccountConnectsCachesAndLinks()
+    public async Task ConnectionsConnectCacheAndLink()
     {
         var stub = new ForgeStub();
         stub.Routes["/rest/api/2/myself"] = (HttpStatusCode.OK, """{"name":"ann"}""");
+        stub.Routes["/rest/api/3/project/search"] = (HttpStatusCode.OK, """{"values":[{"key":"ABC"},{"key":"OPS"}],"isLast":true,"total":2}""");
         stub.Routes["/rest/api/2/issue/ABC-12"] = (HttpStatusCode.OK, IssueJson);
         var settings = new Settings(Path.Combine(dir, "settings.json"));
         var vault = new MemoryVault();
         var clock = DateTimeOffset.FromUnixTimeSeconds(1000);
-        var account = new JiraAccount(settings, vault, stub.Client(), () => clock);
-        Assert.False(account.IsConfigured);
-        Assert.Null(account.Client());
-        await account.Connect("acme.atlassian.net", "", " tok ");
-        Assert.True(account.IsConfigured);
-        Assert.Equal("ann", account.DisplayName);
-        Assert.Equal("tok", vault.Values[JiraAccount.TokenKey]);
+        var store = new JiraConnections(settings, vault, stub.Client(), () => clock);
+        Assert.False(store.IsConfigured);
+        var added = await store.Add("", "acme.atlassian.net/browse/ABC-1", "", " tok ");
+        Assert.True(store.IsConfigured);
+        Assert.False(store.HasSeveral);
+        Assert.Equal("Acme", added.Name);
+        Assert.Equal("ann", added.DisplayName);
+        Assert.Equal(new[] { "ABC", "OPS" }, added.ProjectKeys);
+        Assert.Equal("acme.atlassian.net · ABC, OPS", added.ProjectSummary);
+        Assert.Equal("tok", vault.Values[JiraConnections.TokenKey(added.Id)]);
         Assert.Equal("Bearer tok", stub.Requests[0].Headers.GetValues("Authorization").Single());
 
-        await account.Load("ABC-12");
-        await account.Load("ABC-12");
+        var issue = await store.FetchIssue("ABC-12", null);
+        Assert.Equal(added.Id, issue.ConnectionId);
+        Assert.Equal("https://acme.atlassian.net", issue.SiteBase);
+        await store.FetchIssue("ABC-12", null);
         Assert.Single(stub.Containing("/issue/ABC-12"));
         clock = clock.AddSeconds(61);
-        Assert.Null(account.CachedIssue("ABC-12"));
-        await account.Load("ABC-12");
+        Assert.Null(store.CachedIssue("ABC-12", null));
+        await store.FetchIssue("ABC-12", null);
         Assert.Equal(2, stub.Containing("/issue/ABC-12").Count);
-        account.ClearCache();
-        Assert.Null(account.CachedIssue("ABC-12"));
+        store.ClearCache();
+        Assert.Null(store.CachedIssue("ABC-12", null));
 
         var pr = new PullRequestDetail { Url = "https://github.com/a/b/pull/1", Title = "ONE-1 thing", HeadRefName = "main", Body = "" };
-        Assert.Equal("MAN-5", account.Link(pr.Url, "man-5"));
-        Assert.Null(account.Link(pr.Url, "??"));
-        Assert.Equal(new[] { "MAN-5", "ONE-1" }, account.Keys(pr));
-        var reloaded = new JiraAccount(new Settings(Path.Combine(dir, "settings.json")), vault);
+        Assert.Equal("MAN-5", store.Link(pr.Url, "man-5"));
+        Assert.Null(store.Link(pr.Url, "??"));
+        Assert.Equal(new[] { "MAN-5", "ONE-1" }, store.Keys(pr));
+        var reloaded = new JiraConnections(new Settings(Path.Combine(dir, "settings.json")), vault);
         Assert.Equal(new[] { "MAN-5" }, reloaded.LinkedKeys(pr.Url));
-        Assert.NotNull(reloaded.Client());
-        account.Unlink(pr.Url, "MAN-5");
-        Assert.Empty(account.LinkedKeys(pr.Url));
+        Assert.NotNull(reloaded.Client(added.Id));
+        Assert.Equal(new[] { "ABC", "OPS" }, reloaded.Connection(added.Id)!.ProjectKeys);
+        store.Unlink(pr.Url, "MAN-5");
+        Assert.Empty(store.LinkedKeys(pr.Url));
 
-        account.Hide(pr.Url, "ONE-1");
-        Assert.Empty(account.Keys(pr));
-        Assert.Equal(new[] { "ONE-1" }, account.HiddenKeys(pr.Url));
-        account.ShowHidden(pr.Url);
-        Assert.Equal(new[] { "ONE-1" }, account.Keys(pr));
-        account.Hide(pr.Url, "ONE-1");
-        Assert.Equal("ONE-1", account.Link(pr.Url, "one-1"));
-        Assert.Empty(account.HiddenKeys(pr.Url));
-        Assert.Equal(new[] { "ONE-1" }, account.Keys(pr));
-        account.Unlink(pr.Url, "ONE-1");
+        store.Hide(pr.Url, "ONE-1");
+        Assert.Empty(store.Keys(pr));
+        store.ShowHidden(pr.Url);
+        Assert.Equal(new[] { "ONE-1" }, store.Keys(pr));
+        store.Hide(pr.Url, "ONE-1");
+        Assert.Equal("ONE-1", store.Link(pr.Url, "one-1"));
+        Assert.Empty(store.HiddenKeys(pr.Url));
+        store.Unlink(pr.Url, "ONE-1");
 
-        account.Disconnect();
-        Assert.False(account.IsConfigured);
-        Assert.False(vault.Values.ContainsKey(JiraAccount.TokenKey));
-        Assert.True(account.ShowsTab(pr));
-        Assert.False(account.ShowsTab(new PullRequestDetail { Url = "u", Title = "plain", HeadRefName = "main" }));
+        store.SetRepoOverride(added.Id, new RepoRef("Acme", "App"));
+        store.Remove(added.Id);
+        Assert.False(store.IsConfigured);
+        Assert.Empty(store.RepoOverrides);
+        Assert.False(vault.Values.ContainsKey(JiraConnections.TokenKey(added.Id)));
+        Assert.True(store.ShowsTab(pr));
+        Assert.False(store.ShowsTab(new PullRequestDetail { Url = "u", Title = "plain", HeadRefName = "main" }));
+    }
+
+    [Fact]
+    public async Task FetchFallsBackAcrossConnectionsAndLearns()
+    {
+        var stub = new ForgeStub();
+        stub.Routes["/rest/api/2/myself"] = (HttpStatusCode.OK, """{"name":"ann"}""");
+        stub.Routes["/rest/api/3/project/search"] = (HttpStatusCode.NotFound, "{}");
+        stub.Routes["/rest/api/2/project"] = (HttpStatusCode.OK, """[{"key":"OLD"}]""");
+        stub.Routes["/rest/api/2/issue/ABC-12"] = (HttpStatusCode.OK, IssueJson);
+        var store = new JiraConnections(new Settings(Path.Combine(dir, "settings.json")), new MemoryVault(), stub.Client());
+        var a = await store.Add("A", "a.atlassian.net", "", "t1");
+        var b = await store.Add("B", "b.atlassian.net", "", "t2");
+        Assert.True(store.HasSeveral);
+        Assert.Equal(new[] { "OLD" }, a.ProjectKeys);
+        Assert.Null(store.Resolve("ABC-12", null));
+        var issue = await store.FetchIssue("ABC-12", null);
+        Assert.Equal(a.Id, issue.ConnectionId);
+        Assert.Equal((a.Id, JiraRouteSource.Learned), store.Route("ABC-12", null)!.Value);
+        Assert.Equal("A", store.Names(new[] { issue }));
+        var repo = new RepoRef("Mabrook", "App");
+        store.SetOrgOverride(b.Id, "Mabrook");
+        Assert.Equal(b.Id, store.ConnectionForRepo(repo));
+        Assert.Null(store.Override(repo).Repo);
+        Assert.Equal(b.Id, store.Override(repo).Org);
+        store.SetOrgOverride(null, "mabrook");
+        Assert.Null(store.ConnectionForRepo(repo));
+    }
+
+    [Fact]
+    public void MigratesLegacyConnectionOnce()
+    {
+        var settings = new Settings(Path.Combine(dir, "settings.json"));
+        settings.Set("jira.site", "acme.atlassian.net");
+        settings.Set("jira.email", "a@b.c");
+        settings.Set("jira.name", "Ann");
+        settings.Set("jira.hasToken", true);
+        var vault = new MemoryVault();
+        vault.Save(JiraConnections.LegacyTokenKey, "legacy");
+        var store = new JiraConnections(settings, vault, new ForgeStub().Client());
+        var only = Assert.Single(store.Connections);
+        Assert.Equal("Acme", only.Name);
+        Assert.Equal("a@b.c", only.Email);
+        Assert.Equal("Ann", only.DisplayName);
+        Assert.Equal("legacy", vault.Values[JiraConnections.TokenKey(only.Id)]);
+        Assert.False(vault.Values.ContainsKey(JiraConnections.LegacyTokenKey));
+        Assert.False(settings.Contains("jira.hasToken"));
+        store.Remove(only.Id);
+        vault.Save(JiraConnections.LegacyTokenKey, "again");
+        Assert.Empty(new JiraConnections(settings, vault).Connections);
+        Assert.Equal("Acme", JiraConnections.ShortName("acme.atlassian.net"));
+    }
+
+    [Fact]
+    public void RoutesByOverrideThenProjectKeyThenLearned()
+    {
+        var a = new JiraConnection { Id = "a", Name = "Work A", Site = "a.atlassian.net", Email = "", ProjectKeys = new() { "COM", "PAY" } };
+        var b = new JiraConnection { Id = "b", Name = "Work B", Site = "b.atlassian.net", Email = "", ProjectKeys = new() { "OPS", "PAY" } };
+        var both = new List<JiraConnection> { a, b };
+        var repo = new RepoRef("Mabrook", "App");
+        string? Route(string key, RepoRef? r = null, Dictionary<string, string>? org = null, Dictionary<string, string>? repos = null, Dictionary<string, string>? learned = null, List<JiraConnection>? list = null) =>
+            JiraConnections.Route(key, r, list ?? both, org ?? new(), repos ?? new(), learned ?? new())?.Id;
+        Assert.Equal("a", Route("COM-1"));
+        Assert.Equal("b", Route("OPS-12"));
+        Assert.Null(Route("PAY-3"));
+        Assert.Equal("b", Route("PAY-3", learned: new() { ["PAY"] = "b" }));
+        Assert.Null(Route("NEW-1"));
+        Assert.Equal("a", Route("NEW-1", learned: new() { ["NEW"] = "a" }));
+        Assert.Equal("a", Route("OPS-1", repo, org: new() { ["mabrook"] = "a" }));
+        Assert.Equal("b", Route("OPS-1", repo, org: new() { ["mabrook"] = "a" }, repos: new() { ["mabrook/app"] = "b" }));
+        Assert.Equal("b", Route("OPS-1", repo, org: new() { ["mabrook"] = "gone" }));
+        Assert.Equal("a", Route("XYZ-9", list: new() { a }));
+        Assert.Equal("COM", JiraConnections.ProjectKey("com-12"));
+    }
+
+    [Fact]
+    public void FixPromptListsUpToThreeTickets()
+    {
+        JiraIssue Ticket(string key, string description) => new(key, "Sum " + key, "To Do", "new", null, null, null, null, null, description, "https://a.atlassian.net/browse/" + key, null);
+        var text = Claude.FixPrompt.Tickets(new[] { Ticket("A-1", new string('x', 1300)), Ticket("A-2", ""), Ticket("A-3", "line1\nline2"), Ticket("A-4", "") });
+        Assert.StartsWith("\n## Linked Jira tickets\n", text);
+        Assert.Contains("**A-1** — Sum A-1 (To Do)\nhttps://a.atlassian.net/browse/A-1\n> " + new string('x', 1200) + "…", text);
+        Assert.Contains("> line1\n> line2", text);
+        Assert.DoesNotContain("A-4", text);
+        Assert.Equal("", Claude.FixPrompt.Tickets(Array.Empty<JiraIssue>()));
     }
 
     [Fact]
@@ -240,11 +332,11 @@ public class JiraTests : IDisposable
         var stub = new ForgeStub();
         stub.Routes["/rest/api/2/myself"] = (HttpStatusCode.Unauthorized, "{}");
         var vault = new MemoryVault();
-        var account = new JiraAccount(new Settings(Path.Combine(dir, "settings.json")), vault, stub.Client());
-        await Assert.ThrowsAsync<ApiException>(() => account.Connect("acme.atlassian.net", "me@x.com", "bad"));
+        var store = new JiraConnections(new Settings(Path.Combine(dir, "settings.json")), vault, stub.Client());
+        await Assert.ThrowsAsync<ApiException>(() => store.Add("", "acme.atlassian.net", "me@x.com", "bad"));
         Assert.Empty(vault.Values);
-        Assert.False(account.IsConfigured);
-        await Assert.ThrowsAsync<ApiException>(() => account.Connect("http://insecure", "", "t"));
+        Assert.False(store.IsConfigured);
+        await Assert.ThrowsAsync<ApiException>(() => store.Add("", "http://insecure", "", "t"));
     }
 
     [Fact]

@@ -342,6 +342,7 @@ public sealed class RepoRow : CodeRow
         Ui.Tip(name, repo.NameWithOwner);
         var title = Ui.H(5, name);
         if (repo.IsArchived) title.Children.Add(Ui.Chip(L.T("Repo_Archived", "archived"), "amber"));
+        if (PullYard.Views.JiraRepo.Badge(repo.NameWithOwner) is { } jira) title.Children.Add(jira);
         if (repo.IsFork) title.Children.Add(Ui.StatusGlyph("", 10, "dim", L.T("A11y_Fork", "Fork")));
         var body = Ui.V(3, title);
         if (!string.IsNullOrEmpty(repo.Description)) body.Children.Add(Ui.Text(repo.Description, 12, "muted", maxLines: 2));

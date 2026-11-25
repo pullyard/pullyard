@@ -734,6 +734,7 @@ public static class Dialogs
         var charCount = Ui.Text("", 11, "dim");
         var updating = false;
         var shownText = "";
+        var tickets = new List<PullYard.Core.Jira.JiraIssue>();
 
         string Generated()
         {
@@ -744,7 +745,7 @@ public static class Dialogs
             }
             if (useReviewer && found is not null) return FixPromptExtractor.Wrap(found, pr, options);
             var chosen = threads.Where(t => selected.Contains(t.Id)).ToList();
-            return FixPrompt.Build(pr, model.Ref.Repo, chosen, general, options);
+            return FixPrompt.Build(pr, model.Ref.Repo, chosen, general, options, tickets);
         }
 
         void Regenerate()
@@ -772,6 +773,28 @@ public static class Dialogs
             reset.Visibility = Visibility.Visible;
             charCount.Text = promptBox.Text.Length.ToString();
         };
+
+        async Task LoadTickets()
+        {
+            var store = JiraService.Connections;
+            if (ci || !store.IsConfigured) return;
+            var loaded = new List<PullYard.Core.Jira.JiraIssue>();
+            foreach (var key in store.Keys(pr).Take(3))
+            {
+                try
+                {
+                    loaded.Add(await store.FetchIssue(key, model.Ref.Repo));
+                }
+                catch
+                {
+                }
+            }
+            if (loaded.Count == 0) return;
+            tickets = loaded;
+            if (custom is null && !(useReviewer && found is not null)) Regenerate();
+        }
+
+        LoadTickets().Forget();
 
         var panel = Ui.V(10);
         panel.Children.Add(Ui.H(10, Ui.IconTile("", "coral", 30), Ui.V(1, Ui.Text(L.T("Fix_Button", "Fix with agent"), 15, "text", FontWeights.SemiBold), Ui.H(6, Ui.Text($"#{pr.Number}", 13, "violet", FontWeights.SemiBold), Ui.Text(pr.Title, 13, "muted")))));
