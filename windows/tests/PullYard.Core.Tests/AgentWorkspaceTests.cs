@@ -140,6 +140,60 @@ public class AgentWorkspaceTests : IDisposable
         Assert.True(sessions["cli-2"].Archived);
     }
 
+    [Fact]
+    public void LoadAccountsMergesHistoryAndRemembersOwner()
+    {
+        string Line(string text) => $"{{\"type\":\"user\",\"cwd\":\"C:\\\\code\\\\app\",\"message\":{{\"role\":\"user\",\"content\":\"{text}\"}}}}\n";
+        var main = Path.Combine(root, "main", "projects", "C--code-app");
+        var work = Path.Combine(root, "work", "projects", "C--code-app");
+        Directory.CreateDirectory(main);
+        Directory.CreateDirectory(work);
+        File.WriteAllText(Path.Combine(main, "s-1.jsonl"), Line("main prompt"));
+        File.WriteAllText(Path.Combine(work, "s-2.jsonl"), Line("work prompt"));
+        File.WriteAllText(Path.Combine(work, "s-1.jsonl"), Line("duplicate"));
+        var roots = new[]
+        {
+            ("default", Path.Combine(root, "main", "projects")),
+            ("work", Path.Combine(root, "work", "projects")),
+            ("again", Path.Combine(root, "work", "projects") + Path.DirectorySeparatorChar)
+        };
+        var projects = ClaudeSessionParser.LoadAccounts(roots);
+        var sessions = projects.Single().Sessions.ToDictionary(s => s.Id);
+        Assert.Equal(2, sessions.Count);
+        Assert.Equal("default", sessions["s-1"].ProfileId);
+        Assert.Equal("main prompt", sessions["s-1"].Title);
+        Assert.Equal("work", sessions["s-2"].ProfileId);
+        Assert.Equal("work", sessions["s-2"].With(title: "Renamed").ProfileId);
+        Assert.Equal("default", ClaudeWorkspace.OwnerId(new ClaudeSessionInfo { Id = "x" }));
+    }
+
+    [Fact]
+    public void ProfilesResolveByConfigDirAndUsageIsPerAccount()
+    {
+        var dir = Path.Combine(root, "profiles");
+        var profiles = new ClaudeProfiles(new Settings(Path.Combine(dir, "settings.json")), Path.Combine(dir, "accounts"));
+        Assert.False(profiles.HasSeveral);
+        var work = profiles.Add("Work", false);
+        Assert.True(profiles.HasSeveral);
+        Assert.Same(work, profiles.ProfileFor(work.ConfigDir + Path.DirectorySeparatorChar));
+        Assert.True(profiles.ProfileFor(null)!.IsDefault);
+        Assert.Same(work, profiles.Profile(work.Id));
+        Assert.Null(profiles.Profile(null));
+        Assert.True(ClaudeProfiles.SameDir(null, null));
+        Assert.False(ClaudeProfiles.SameDir(null, work.ConfigDir));
+
+        var store = new ClaudeUsageStore();
+        store.Record(work.ConfigDir, new List<RateWindow> { new("five_hour", 0.4, null) }, null, DateTimeOffset.Now);
+        store.RecordPlan(work.ConfigDir, "Max");
+        store.Record(null, new List<RateWindow> { new("five_hour", 0.9, null) }, "Close to the limit", DateTimeOffset.Now);
+        Assert.Equal(0.4, store.SnapshotFor(work.ConfigDir).Windows.Single().Utilization);
+        Assert.Equal("Max", store.SnapshotFor(work.ConfigDir).Subscription);
+        Assert.Null(store.SnapshotFor(work.ConfigDir).OverageNote);
+        Assert.Equal(0.9, store.SnapshotFor(null).Windows.Single().Utilization);
+        store.Record(work.ConfigDir, null, null, DateTimeOffset.Now);
+        Assert.Equal(0.4, store.SnapshotFor(work.ConfigDir).Windows.Single().Utilization);
+    }
+
     private string Transcript(string name, params string[] lines)
     {
         var path = Path.Combine(root, name);

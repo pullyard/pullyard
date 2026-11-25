@@ -101,6 +101,16 @@ public sealed partial class ClaudeProfiles : ObservableObject
 
     public ClaudeProfile Active => Profiles.FirstOrDefault(p => p.Id == ActiveId) ?? Profiles[0];
 
+    public ClaudeProfile? Profile(string? id) => id is null ? null : Profiles.FirstOrDefault(p => p.Id == id);
+
+    public ClaudeProfile? ProfileFor(string? configDir) =>
+        Profiles.FirstOrDefault(p => SameDir(p.ConfigDir, configDir)) ?? (configDir is not null && SameDir(configDir, DefaultConfigDir) ? Profiles.FirstOrDefault(p => p.IsDefault) : null);
+
+    public static bool SameDir(string? a, string? b) =>
+        a is null || b is null ? a is null && b is null : string.Equals(Path.TrimEndingDirectorySeparator(a), Path.TrimEndingDirectorySeparator(b), StringComparison.OrdinalIgnoreCase);
+
+    public bool HasSeveral => Visible.Count > 1;
+
     public static string DefaultConfigDir
     {
         get
@@ -481,6 +491,8 @@ public sealed partial class ClaudeAccountStore : ObservableObject
 
 public sealed record RateWindow(string Key, double Utilization, DateTimeOffset? ResetsAt);
 
+public sealed record UsageSnapshot(List<RateWindow> Windows, string? Subscription, string? OverageNote, DateTimeOffset? UpdatedAt);
+
 public sealed partial class ClaudeUsageStore : ObservableObject
 {
     public static ClaudeUsageStore Shared { get; } = new();
@@ -489,6 +501,41 @@ public sealed partial class ClaudeUsageStore : ObservableObject
     [ObservableProperty] private string? subscription;
     [ObservableProperty] private string? overageNote;
     [ObservableProperty] private DateTimeOffset? updatedAt;
+
+    private readonly Dictionary<string, UsageSnapshot> byAccount = new(StringComparer.OrdinalIgnoreCase);
+
+    public static string Key(string? configDir) => configDir is null ? "default" : Path.TrimEndingDirectorySeparator(configDir);
+
+    public UsageSnapshot SnapshotFor(string? configDir)
+    {
+        if (byAccount.TryGetValue(Key(configDir), out var snap)) return snap;
+        return ClaudeProfiles.Shared.HasSeveral ? new UsageSnapshot(new(), null, null, null) : new UsageSnapshot(Windows, Subscription, OverageNote, UpdatedAt);
+    }
+
+    public void Record(string? configDir, List<RateWindow>? windows, string? overageNote, DateTimeOffset updated)
+    {
+        if (windows is not null) Windows = windows;
+        OverageNote = overageNote;
+        UpdatedAt = updated;
+        var key = Key(configDir);
+        var previous = byAccount.TryGetValue(key, out var p) ? p : null;
+        byAccount[key] = new UsageSnapshot(windows ?? previous?.Windows ?? new(), previous?.Subscription, overageNote, updated);
+        OnPropertyChanged(nameof(SnapshotFor));
+    }
+
+    public void RecordPlan(string? configDir, string plan)
+    {
+        Subscription = plan;
+        var key = Key(configDir);
+        var previous = byAccount.TryGetValue(key, out var p) ? p : new UsageSnapshot(new(), null, null, null);
+        byAccount[key] = previous with { Subscription = plan };
+        OnPropertyChanged(nameof(SnapshotFor));
+    }
+
+    public void Forget(string? configDir)
+    {
+        if (byAccount.Remove(Key(configDir))) OnPropertyChanged(nameof(SnapshotFor));
+    }
 
     public static string WindowTitle(string key) => key switch
     {
