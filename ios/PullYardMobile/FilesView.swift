@@ -184,6 +184,11 @@ struct FileDiffView: View {
                         Toggle(isOn: $wrap) { Label("Wrap lines", systemImage: "text.word.spacing") }
                         if let url = file.blobUrl { Link(destination: url) { Label("Open on GitHub", systemImage: "safari") } }
                         Button { UIPasteboard.general.string = file.filename } label: { Label("Copy path", systemImage: "doc.on.doc") }
+                        if file.status != "removed" {
+                            NavigationLink(value: Route.browse(repo: key.repo, ref: model.cachedDetail(key)?.insight?.headSHA ?? model.cachedDetail(key)?.pull.head.sha, path: file.filename)) {
+                                Label("View full file", systemImage: "doc.text.magnifyingglass")
+                            }
+                        }
                     } label: { Image(systemName: "ellipsis.circle") }
                 }
             }
@@ -288,7 +293,7 @@ extension FileDiffView {
             guard let pullID = detail?.insight?.nodeID else { throw GitHubError.message("Open the pull request once so PullYard can start a review, then try again.") }
             let pendingID = detail?.reviews.first(where: \.isPending)?.nodeId
             try await model.addPendingLineComment(pullID: pullID, reviewNodeID: pendingID, path: path, line: line, side: side, body: body)
-            feedback.info("Added to your pending review", key: "pending-\(key.id)", actionTitle: "Finish review") { router.popTo(.pull(key), in: model.selectedTab) }
+            feedback.info("Added to your pending review", key: "pending-\(key.id)", actionTitle: "Finish review") { router.open(.finishReview(key), in: model.selectedTab) }
         } else {
             guard let sha = detail?.insight?.headSHA ?? detail?.pull.head.sha, !sha.isEmpty else { throw GitHubError.message("Open the pull request once, then try again.") }
             try await model.addSingleLineComment(key, commitID: sha, path: path, line: line, side: side, body: body)

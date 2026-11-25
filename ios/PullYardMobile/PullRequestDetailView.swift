@@ -364,6 +364,13 @@ struct PRDetailView: View {
             Label(pendingCount.map { "Your pending review · \($0) comment\($0 == 1 ? "" : "s")" } ?? "You have an unfinished review", systemImage: "pencil.and.list.clipboard").mobileFont(size: 15, weight: .semibold).foregroundStyle(MobileTheme.amberInk)
             Text("Only you can see these comments until you submit the review.").mobileFont(size: 14).foregroundStyle(MobileTheme.muted)
             HStack(spacing: 12) {
+                NavigationLink(value: Route.finishReview(key)) {
+                    Text("Finish review").mobileFont(size: 14, weight: .semibold).padding(.horizontal, 14).padding(.vertical, 9)
+                        .foregroundStyle(.white)
+                        .contentShape(Capsule())
+                        .pyGlassCapsule(tint: MobileTheme.greenFill, interactive: true, fallback: MobileTheme.greenFill)
+                }
+                .buttonStyle(.pyPlain)
                 pendingSubmitMenu(review) {
                     Text("Submit review…").mobileFont(size: 14, weight: .semibold).padding(.horizontal, 14).padding(.vertical, 9)
                         .foregroundStyle(.white)
@@ -1071,6 +1078,7 @@ struct ComposerSheet: View {
                         if preview {
                             MarkdownView(markdown: text).pyCard()
                         } else {
+                            TemplatesBar { template in insert((text.isEmpty || text.hasSuffix("\n") || text.hasSuffix(" ") ? "" : " ") + template.body) }
                             mentionSuggestions
                             editor
                         }

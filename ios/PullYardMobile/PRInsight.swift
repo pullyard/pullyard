@@ -274,8 +274,11 @@ struct GHIssue: Codable, Hashable {
     let createdAt: Date
     let updatedAt: Date
     let htmlUrl: URL
+    var pullRequest: IssuePullRef? = nil
     var isOpen: Bool { state == "open" }
 }
+
+struct IssuePullRef: Codable, Hashable { let url: URL? }
 
 enum VisitStore {
     private static let key = "mobile.visits"

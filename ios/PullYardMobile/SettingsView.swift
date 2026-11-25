@@ -92,6 +92,7 @@ struct SettingsView: View {
                 }
                 Toggle("Delete branch after merge", isOn: $deleteBranch)
                 Toggle("Wrap long lines in diffs", isOn: $diffWrap)
+                NavigationLink { TemplatesManagerView() } label: { Label("Reply templates", systemImage: "text.badge.plus") }
             } header: {
                 Text("Pull requests")
             }

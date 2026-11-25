@@ -139,8 +139,8 @@ final class AppModel: ObservableObject {
     func openCount(for queue: PRQueue) -> Int? {
         let key = PRListKey(queue: queue, status: .open)
         guard let total = listTotals[key] else { return nil }
-        guard queue == .needsMyReview else { return total }
-        let hidden = (lists[key] ?? []).filter { pull in pull.key.map { isRecentlyReviewed($0) } ?? false }.count
+        let loaded = lists[key] ?? []
+        let hidden = loaded.count - visible(loaded, in: key).count
         return max(0, total - hidden)
     }
     func hasMore(_ key: PRListKey) -> Bool {
@@ -150,13 +150,15 @@ final class AppModel: ObservableObject {
     func pulls(for key: PRListKey) -> [PullRequest] { visible(lists[key] ?? [], in: key) }
 
     func pulls(for filter: OverviewFilter) -> [PullRequest] {
-        pulls(for: filter.listKey).filter(filter.includes).sorted { $0.updatedAt > $1.updatedAt }
+        if filter == .snoozed { return snoozedPulls }
+        return pulls(for: filter.listKey).filter(filter.includes).sorted { $0.updatedAt > $1.updatedAt }
     }
 
     func count(for filter: OverviewFilter) -> Int? {
         switch filter {
         case let .queue(queue): return openCount(for: queue)
         case .saved: return listTotals[filter.listKey]
+        case .snoozed: return snoozedPulls.count
         default: return lists[filter.listKey] == nil ? nil : pulls(for: filter).count
         }
     }
@@ -185,6 +187,12 @@ final class AppModel: ObservableObject {
     }
 
     func branches(repo: String) async throws -> [String] { try await call { try await $0.branches(repo: repo) } }
+    func pendingComments(_ key: PRKey, reviewID: Int) async throws -> [PRComment] { try await call { try await $0.pendingComments(key, reviewID: reviewID) } }
+    func editReviewComment(repo: String, commentID: Int, body: String) async throws { try await call { try await $0.editReviewComment(repo: repo, commentID: commentID, body: body) } }
+    func deleteReviewComment(repo: String, commentID: Int) async throws { try await call { try await $0.deleteReviewComment(repo: repo, commentID: commentID) } }
+    func issues(repo: String, state: String, page: Int) async throws -> [GHIssue] { try await call { try await $0.issues(repo: repo, state: state, page: page) } }
+    func createIssue(repo: String, title: String, body: String) async throws -> PRKey { try await call { try await $0.createIssue(repo: repo, title: title, body: body) } }
+    func contents(repo: String, path: String, ref: String?) async throws -> RepoContent { try await call { try await $0.contents(repo: repo, path: path, ref: ref) } }
     func defaultBranch(repo: String) async throws -> String { try await call { try await $0.defaultBranch(repo: repo) } }
     func compare(repo: String, base: String, head: String) async throws -> BranchComparison { try await call { try await $0.compare(repo: repo, base: base, head: head) } }
     func createPull(repo: String, title: String, head: String, base: String, body: String, draft: Bool) async throws -> PRKey {
@@ -200,8 +208,45 @@ final class AppModel: ObservableObject {
     }
 
     private func visible(_ pulls: [PullRequest], in key: PRListKey) -> [PullRequest] {
-        guard key.filtersReviewQueue, !recentlyReviewed.isEmpty else { return pulls }
-        return pulls.filter { pull in !(pull.key.map(isRecentlyReviewed) ?? false) }
+        var result = pulls
+        if key.filtersReviewQueue, !recentlyReviewed.isEmpty {
+            result = result.filter { pull in !(pull.key.map(isRecentlyReviewed) ?? false) }
+        }
+        if !snoozed.isEmpty {
+            result = result.filter { pull in pull.key.map { snoozed[$0.id] == nil } ?? true }
+        }
+        if focusPinnedOnly, key.project == nil, !pinnedProjects.isEmpty {
+            result = result.filter { pull in pull.repo.map(pinnedProjects.contains) ?? false }
+        }
+        return result
+    }
+
+    @Published private(set) var snoozed: [String: Date] = SnoozeStore.all()
+    @Published private(set) var focusPinnedOnly = FocusSettings.pinnedOnly
+
+    func reloadFocus() { focusPinnedOnly = FocusSettings.pinnedOnly }
+    func isSnoozed(_ key: PRKey) -> Bool { snoozed[key.id].map { $0 > .now } ?? false }
+
+    func snooze(_ key: PRKey, until date: Date) {
+        snoozed[key.id] = date
+        SnoozeStore.save(snoozed)
+        feedback.info("Snoozed until \(date.formatted(date: .abbreviated, time: .shortened))", key: "snooze-\(key.id)", actionTitle: L("Undo")) { [weak self] in self?.unsnooze(key) }
+    }
+
+    func unsnooze(_ key: PRKey) {
+        snoozed[key.id] = nil
+        SnoozeStore.save(snoozed)
+    }
+
+    var snoozedPulls: [PullRequest] {
+        let all = lists.values.flatMap { $0 }
+        var seen = Set<String>()
+        return all.filter { pull in
+            guard let key = pull.key, snoozed[key.id] != nil, !seen.contains(key.id) else { return false }
+            seen.insert(key.id)
+            return true
+        }
+        .sorted { (snoozed[$0.key?.id ?? ""] ?? .distantFuture) < (snoozed[$1.key?.id ?? ""] ?? .distantFuture) }
     }
 
     func noteReviewed(_ key: PRKey) {
@@ -327,6 +372,7 @@ final class AppModel: ObservableObject {
         notifications = []; inboxState = .idle; locallyRead = []
         projects = []; projectsState = .idle; pinnedProjects = []; detailCache = nil; savedSearches = []; activeSavedSearch = nil; pushedBranches = []
         outbox = []; LocalStore.support.remove("outbox.json")
+        snoozed = [:]; SnoozeStore.save([:]); SpotlightIndexer.clear()
         VisitStore.clear()
         if !isDemo { BackgroundSync.reset() }
         lastUpdated = nil; isRefreshing = false; rateLimitedUntil = nil
@@ -456,6 +502,8 @@ final class AppModel: ObservableObject {
             BackgroundSync.updateBaseline(reviews: lists[reviewKey] ?? [], mine: lists[mineKey] ?? [], notifications: notifications)
         }
         if !connectivityIssue, !outbox.isEmpty { Task { await flushOutbox() } }
+        snoozed = SnoozeStore.all()
+        if !isDemo { SpotlightIndexer.index((lists[reviewKey] ?? []) + (lists[mineKey] ?? [])) }
         let requestCount = keys.count + (includeInbox ? 1 : 0) + (includeUser ? 1 : 0)
         if errors.count < requestCount { lastUpdated = .now }
         saveCache()

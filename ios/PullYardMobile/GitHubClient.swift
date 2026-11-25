@@ -147,6 +147,12 @@ protocol GitHubAPI: AnyObject {
     func defaultBranch(repo: String) async throws -> String
     func compare(repo: String, base: String, head: String) async throws -> BranchComparison
     func createPull(repo: String, title: String, head: String, base: String, body: String, draft: Bool) async throws -> PRKey
+    func pendingComments(_ key: PRKey, reviewID: Int) async throws -> [PRComment]
+    func editReviewComment(repo: String, commentID: Int, body: String) async throws
+    func deleteReviewComment(repo: String, commentID: Int) async throws
+    func issues(repo: String, state: String, page: Int) async throws -> [GHIssue]
+    func createIssue(repo: String, title: String, body: String) async throws -> PRKey
+    func contents(repo: String, path: String, ref: String?) async throws -> RepoContent
 }
 
 extension GitHubAPI {
@@ -176,6 +182,42 @@ extension GitHubAPI {
     func defaultBranch(repo: String) async throws -> String { "main" }
     func compare(repo: String, base: String, head: String) async throws -> BranchComparison { BranchComparison(aheadBy: 0, behindBy: 0, messages: [], files: 0) }
     func createPull(repo: String, title: String, head: String, base: String, body: String, draft: Bool) async throws -> PRKey { throw GitHubError.message("Not available.") }
+    func pendingComments(_ key: PRKey, reviewID: Int) async throws -> [PRComment] { [] }
+    func editReviewComment(repo: String, commentID: Int, body: String) async throws {}
+    func deleteReviewComment(repo: String, commentID: Int) async throws {}
+    func issues(repo: String, state: String, page: Int) async throws -> [GHIssue] { [] }
+    func createIssue(repo: String, title: String, body: String) async throws -> PRKey { throw GitHubError.message("Not available.") }
+    func contents(repo: String, path: String, ref: String?) async throws -> RepoContent { .directory([]) }
+}
+
+enum RepoContent: Hashable {
+    case directory([RepoEntry])
+    case file(RepoFile)
+}
+
+struct RepoEntry: Codable, Hashable, Identifiable {
+    let name: String
+    let path: String
+    let type: String
+    let size: Int?
+    var id: String { path }
+    var isDirectory: Bool { type == "dir" }
+}
+
+struct RepoFile: Codable, Hashable {
+    let name: String
+    let path: String
+    let size: Int?
+    let content: String?
+    let encoding: String?
+    let htmlUrl: URL?
+    let downloadUrl: URL?
+
+    var text: String? {
+        guard encoding == "base64", let content, let data = Data(base64Encoded: content.replacingOccurrences(of: "\n", with: "")) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+    var isImage: Bool { ["png", "jpg", "jpeg", "gif", "webp", "heic"].contains((name as NSString).pathExtension.lowercased()) }
 }
 
 struct BranchComparison: Hashable {
@@ -974,5 +1016,40 @@ extension GitHubClient {
         let (data, _) = try await raw("POST", "/repos/\(path(repo))/pulls", body: ["title": title, "head": head, "base": base, "body": body, "draft": draft], conditional: false)
         let created = try decode(Created.self, data)
         return PRKey(repo: repo, number: created.number)
+    }
+}
+
+extension GitHubClient {
+    func pendingComments(_ key: PRKey, reviewID: Int) async throws -> [PRComment] {
+        try await paginated("/repos/\(path(key.repo))/pulls/\(key.number)/reviews/\(reviewID)/comments?per_page=100", maxPages: 3)
+    }
+
+    func editReviewComment(repo: String, commentID: Int, body: String) async throws {
+        try await send("PATCH", "/repos/\(path(repo))/pulls/comments/\(commentID)", body: ["body": body])
+    }
+
+    func deleteReviewComment(repo: String, commentID: Int) async throws {
+        try await send("DELETE", "/repos/\(path(repo))/pulls/comments/\(commentID)")
+    }
+
+    func issues(repo: String, state: String, page: Int) async throws -> [GHIssue] {
+        let items: [GHIssue] = try await get("/repos/\(path(repo))/issues?state=\(state)&sort=updated&per_page=50&page=\(page)")
+        return items.filter { $0.pullRequest == nil }
+    }
+
+    func createIssue(repo: String, title: String, body: String) async throws -> PRKey {
+        struct Created: Decodable { let number: Int }
+        let (data, _) = try await raw("POST", "/repos/\(path(repo))/issues", body: ["title": title, "body": body], conditional: false)
+        return PRKey(repo: repo, number: try decode(Created.self, data).number)
+    }
+
+    func contents(repo: String, path filePath: String, ref: String?) async throws -> RepoContent {
+        let suffix = ref.map { "?ref=\(encodeQuery($0))" } ?? ""
+        let location = filePath.isEmpty ? "/repos/\(path(repo))/contents\(suffix)" : "/repos/\(path(repo))/contents/\(path(filePath))\(suffix)"
+        let (data, _) = try await raw("GET", location)
+        if let entries = try? decoder.decode([RepoEntry].self, from: data) {
+            return .directory(entries.sorted { ($0.isDirectory ? 0 : 1, $0.name.lowercased()) < ($1.isDirectory ? 0 : 1, $1.name.lowercased()) })
+        }
+        return .file(try decode(RepoFile.self, data))
     }
 }

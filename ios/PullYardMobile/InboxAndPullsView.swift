@@ -362,7 +362,13 @@ struct PullRequestsView: View {
         let key = pr.key ?? PRKey(repo: pr.repoName, number: pr.number)
         return NavigationLink(value: Route.pull(key)) { PullRequestRow(pr: pr, hideState: pr.displayState == .open && model.statusFilter == .open, showRepo: showRepo) }
             .pyRow()
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                if let key = pr.key, let tomorrow = SnoozeStore.presets().dropFirst(2).first?.1 {
+                    Button { withAnimation { model.snooze(key, until: tomorrow) } } label: { Label("Tomorrow", systemImage: "moon.zzz") }.tint(MobileTheme.violetFill)
+                }
+            }
             .contextMenu {
+                if let key = pr.key { SnoozeMenu(key: key) }
                 PullRowMenu(pr: pr)
             } preview: {
                 PullRequestPreview(pr: pr)

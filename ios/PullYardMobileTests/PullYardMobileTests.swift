@@ -184,6 +184,24 @@ final class BackgroundSyncTests: XCTestCase {
     }
 }
 
+final class FeatureHelpersTests: XCTestCase {
+    func testSnoozePresetsAreInTheFuture() {
+        let now = Date()
+        let presets = SnoozeStore.presets(now: now)
+        XCTAssertEqual(presets.count, 4)
+        XCTAssertTrue(presets.allSatisfy { $0.1 > now })
+    }
+
+    func testRepoFileDecodesBase64() {
+        let file = RepoFile(name: "a.txt", path: "a.txt", size: 5, content: Data("hello".utf8).base64EncodedString() + "\n", encoding: "base64", htmlUrl: nil, downloadUrl: nil)
+        XCTAssertEqual(file.text, "hello")
+    }
+
+    func testTemplatesHaveDefaults() {
+        XCTAssertFalse(TemplateStore.defaults.isEmpty)
+    }
+}
+
 final class MarkdownParserTests: XCTestCase {
     func testParsesBlocksAndStripsComments() {
         let source = "<!-- hidden -->\n## Summary\n- [x] done\n- [ ] todo\n\n```swift\nlet a = 1\n```\n> quoted\n\n| a | b |\n|---|---|\n| 1 | 2 |"

@@ -49,12 +49,17 @@ struct LocalAlert: Equatable {
     let url: URL?
     let thread: String
     var notificationID: String? = nil
+    var key: PRKey? = nil
+    var canApprove = false
 }
 
 enum BackgroundSync {
     static let taskID = "com.pullyard.mobile.refresh"
     static let category = "PULLYARD_ITEM"
+    static let reviewCategory = "PULLYARD_REVIEW"
     static let markReadAction = "MARK_READ"
+    static let replyAction = "REPLY"
+    static let approveAction = "APPROVE"
     private static let store = LocalStore.support
     private static let baselineFile = "notify-baseline.json"
 
@@ -63,9 +68,14 @@ enum BackgroundSync {
             guard let refresh = task as? BGAppRefreshTask else { task.setTaskCompleted(success: false); return }
             handle(refresh)
         }
-        let markRead = UNNotificationAction(identifier: markReadAction, title: "Mark as read")
-        let open = UNNotificationAction(identifier: "OPEN", title: "Open", options: [.foreground])
-        UNUserNotificationCenter.current().setNotificationCategories([UNNotificationCategory(identifier: category, actions: [open, markRead], intentIdentifiers: [])])
+        let markRead = UNNotificationAction(identifier: markReadAction, title: L("Mark as read"))
+        let open = UNNotificationAction(identifier: "OPEN", title: L("Open"), options: [.foreground])
+        let reply = UNTextInputNotificationAction(identifier: replyAction, title: L("Reply"), options: [.authenticationRequired], textInputButtonTitle: L("Send"), textInputPlaceholder: L("Write a comment"))
+        let approve = UNNotificationAction(identifier: approveAction, title: L("Approve"), options: [.authenticationRequired])
+        UNUserNotificationCenter.current().setNotificationCategories([
+            UNNotificationCategory(identifier: category, actions: [reply, open, markRead], intentIdentifiers: []),
+            UNNotificationCategory(identifier: reviewCategory, actions: [approve, reply, open], intentIdentifiers: []),
+        ])
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
     }
 
@@ -97,8 +107,8 @@ enum BackgroundSync {
             let notifications = (try? await client.notifications()) ?? []
             let previous = loadBaseline()
             let (alerts, next) = diff(previous: previous, reviews: reviews.items, mine: mine.items, notifications: notifications)
-            if NotifyPrefs.flag(NotifyPrefs.enabled, default: false) {
-                for alert in alerts { await post(alert) }
+            if NotifyPrefs.flag(NotifyPrefs.enabled, default: false) && !FocusSettings.pauseNotifications {
+                for alert in alerts where !SnoozeStore.isSnoozed(alert.key) { await post(alert) }
             }
             saveBaseline(next)
             await updateBadge(unread: notifications.filter(\.unread).count)
@@ -129,7 +139,7 @@ enum BackgroundSync {
             guard let key = pull.key else { continue }
             next.reviewKeys.insert(key.id)
             if let previous, enabledReviews, !previous.reviewKeys.contains(key.id) {
-                alerts.append(LocalAlert(id: "review-\(key.id)", title: "Review requested · \(key.repo)", body: "\(pull.user?.login ?? "Someone"): \(pull.title)", url: URL(string: "pullyard://pull/\(key.repo)/\(key.number)"), thread: key.repo))
+                alerts.append(LocalAlert(id: "review-\(key.id)", title: "Review requested · \(key.repo)", body: "\(pull.user?.login ?? "Someone"): \(pull.title)", url: URL(string: "pullyard://pull/\(key.repo)/\(key.number)"), thread: key.repo, key: key, canApprove: !pull.isDraft))
             }
         }
 
@@ -140,7 +150,7 @@ enum BackgroundSync {
             guard let previous, let old = previous.mine[key.id] else { continue }
             if enabledMine, state.decision != old.decision, let decision = state.decision, decision == "APPROVED" || decision == "CHANGES_REQUESTED" {
                 let approved = decision == "APPROVED"
-                alerts.append(LocalAlert(id: "decision-\(key.id)-\(decision)", title: approved ? "Approved · \(key.repo)#\(key.number)" : "Changes requested · \(key.repo)#\(key.number)", body: pull.title, url: URL(string: "pullyard://pull/\(key.repo)/\(key.number)"), thread: key.repo))
+                alerts.append(LocalAlert(id: "decision-\(key.id)-\(decision)", title: approved ? "Approved · \(key.repo)#\(key.number)" : "Changes requested · \(key.repo)#\(key.number)", body: pull.title, url: URL(string: "pullyard://pull/\(key.repo)/\(key.number)"), thread: key.repo, key: key))
             }
             if enabledCI, state.ci != old.ci, let ci = state.ci, ci == "FAILURE" || ci == "ERROR" {
                 alerts.append(LocalAlert(id: "ci-\(key.id)", title: "Checks failed · \(key.repo)#\(key.number)", body: pull.title, url: URL(string: "pullyard://pull/\(key.repo)/\(key.number)"), thread: key.repo))
@@ -151,7 +161,7 @@ enum BackgroundSync {
             next.notifiedThreads.insert(item.id)
             guard let previous, enabledMentions, !previous.notifiedThreads.contains(item.id), item.reason == "mention" || item.reason == "team_mention" else { continue }
             let url = item.pullKey.map { URL(string: "pullyard://pull/\($0.repo)/\($0.number)") } ?? item.webURL
-            alerts.append(LocalAlert(id: "mention-\(item.id)", title: "Mentioned · \(item.repository.fullName)", body: item.subject.title, url: url ?? nil, thread: item.repository.fullName, notificationID: item.id))
+            alerts.append(LocalAlert(id: "mention-\(item.id)", title: "Mentioned · \(item.repository.fullName)", body: item.subject.title, url: url ?? nil, thread: item.repository.fullName, notificationID: item.id, key: item.pullKey ?? item.issueKey))
         }
         return (alerts, next)
     }
@@ -162,10 +172,11 @@ enum BackgroundSync {
         content.body = alert.body
         content.sound = .default
         content.threadIdentifier = alert.thread
-        content.categoryIdentifier = category
+        content.categoryIdentifier = alert.canApprove ? reviewCategory : category
         var info: [String: String] = [:]
         if let url = alert.url { info["url"] = url.absoluteString }
         if let id = alert.notificationID { info["notificationID"] = id }
+        if let key = alert.key { info["repo"] = key.repo; info["number"] = String(key.number) }
         content.userInfo = info
         try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: alert.id, content: content, trigger: nil))
     }
@@ -189,6 +200,30 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
+        if response.actionIdentifier == BackgroundSync.replyAction || response.actionIdentifier == BackgroundSync.approveAction {
+            guard let repo = info["repo"] as? String, let number = (info["number"] as? String).flatMap(Int.init), case let .found(token) = CredentialVault().read() else { return }
+            let key = PRKey(repo: repo, number: number)
+            let client = GitHubClient(token: token)
+            let confirmation = UNMutableNotificationContent()
+            confirmation.threadIdentifier = repo
+            do {
+                if let text = (response as? UNTextInputNotificationResponse)?.userText.trimmingCharacters(in: .whitespacesAndNewlines), response.actionIdentifier == BackgroundSync.replyAction {
+                    guard !text.isEmpty else { return }
+                    try await client.addComment(key, body: text)
+                    confirmation.title = L("Reply posted")
+                } else {
+                    try await client.submitReview(key, event: .approve, body: "")
+                    confirmation.title = L("Approved")
+                }
+                confirmation.body = "\(repo) #\(number)"
+                if let id = info["notificationID"] as? String { try? await client.markRead(id) }
+            } catch {
+                confirmation.title = L("Couldn't send")
+                confirmation.body = error.localizedDescription
+            }
+            try? await center.add(UNNotificationRequest(identifier: "result-\(UUID().uuidString)", content: confirmation, trigger: nil))
+            return
+        }
         if response.actionIdentifier == BackgroundSync.markReadAction {
             guard let id = info["notificationID"] as? String, case let .found(token) = CredentialVault().read() else { return }
             try? await GitHubClient(token: token).markRead(id)

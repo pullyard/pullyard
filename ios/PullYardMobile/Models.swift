@@ -378,6 +378,9 @@ enum Route: Codable, Hashable {
     case list(OverviewFilter)
     case allPulls
     case newPull(repo: String, head: String?)
+    case finishReview(PRKey)
+    case newIssue(String)
+    case browse(repo: String, ref: String?, path: String)
 }
 
 struct PushedBranch: Codable, Hashable, Identifiable {
@@ -395,6 +398,7 @@ enum OverviewFilter: Codable, Hashable {
     case readyToMerge
     case failingChecks
     case changesRequested
+    case snoozed
     case saved(String)
 
     var title: String {
@@ -403,6 +407,7 @@ enum OverviewFilter: Codable, Hashable {
         case .readyToMerge: "Ready to merge"
         case .failingChecks: "Failing checks"
         case .changesRequested: "Changes requested"
+        case .snoozed: "Snoozed"
         case let .saved(query): query
         }
     }
@@ -413,6 +418,7 @@ enum OverviewFilter: Codable, Hashable {
         case .readyToMerge: "arrow.triangle.merge"
         case .failingChecks: "xmark.octagon"
         case .changesRequested: "arrow.uturn.backward.circle"
+        case .snoozed: "moon.zzz"
         case .saved: "bookmark"
         }
     }
@@ -420,14 +426,14 @@ enum OverviewFilter: Codable, Hashable {
     var listKey: PRListKey {
         switch self {
         case let .queue(queue): PRListKey(queue: queue, status: .open)
-        case .readyToMerge, .failingChecks, .changesRequested: PRListKey(queue: .createdByMe, status: .open)
+        case .readyToMerge, .failingChecks, .changesRequested, .snoozed: PRListKey(queue: .createdByMe, status: .open)
         case let .saved(query): .saved(query, status: .open)
         }
     }
 
     func includes(_ pull: PullRequest) -> Bool {
         switch self {
-        case .queue, .saved: true
+        case .queue, .saved, .snoozed: true
         case .readyToMerge: pull.reviewState == .approved && pull.ciState != .failing && !pull.isDraft
         case .failingChecks: pull.ciState == .failing
         case .changesRequested: pull.reviewState == .changesRequested

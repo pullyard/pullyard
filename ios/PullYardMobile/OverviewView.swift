@@ -20,6 +20,12 @@ struct OverviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
+                if model.focusPinnedOnly && !model.pinnedProjects.isEmpty {
+                    Label("Focus: pinned projects only", systemImage: "moon.circle.fill")
+                        .mobileFont(size: 13, weight: .semibold).foregroundStyle(MobileTheme.violet)
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .pyGlassCapsule(tint: MobileTheme.violet.opacity(0.15), fallback: MobileTheme.violet.opacity(0.12))
+                }
                 heroCard
                 OutboxCard()
                 PushedBranchesCard()
@@ -29,6 +35,12 @@ struct OverviewView: View {
                         let tint = item.1
                         NavigationLink(value: Route.list(filter)) {
                             OverviewTile(title: filter.title, symbol: filter.symbol, count: model.count(for: filter), tint: tint)
+                        }
+                        .buttonStyle(.pyPlain)
+                    }
+                    if !model.snoozedPulls.isEmpty {
+                        NavigationLink(value: Route.list(.snoozed)) {
+                            OverviewTile(title: "Snoozed", symbol: "moon.zzz", count: model.snoozedPulls.count, tint: MobileTheme.violet)
                         }
                         .buttonStyle(.pyPlain)
                     }
@@ -132,6 +144,7 @@ struct OverviewView: View {
                             }
                         }
                         .buttonStyle(.pyPlain)
+                        .contextMenu { if let key = pr.key { SnoozeMenu(key: key) } }
                     }
                 }
             }
@@ -305,7 +318,17 @@ struct FilteredPullsView: View {
             PullRequestRow(pr: pr, hideState: pr.displayState == .open, showRepo: showRepo)
         }
         .pyRow()
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            if let key = pr.key {
+                if model.isSnoozed(key) {
+                    Button { withAnimation { model.unsnooze(key) } } label: { Label("Unsnooze", systemImage: "bell") }.tint(MobileTheme.accentFill)
+                } else if let tomorrow = SnoozeStore.presets().dropFirst(2).first?.1 {
+                    Button { withAnimation { model.snooze(key, until: tomorrow) } } label: { Label("Tomorrow", systemImage: "moon.zzz") }.tint(MobileTheme.violetFill)
+                }
+            }
+        }
         .contextMenu {
+            if let key = pr.key { SnoozeMenu(key: key) }
             Link(destination: pr.htmlUrl) { Label("Open on GitHub", systemImage: "safari") }
             Button { UIPasteboard.general.url = pr.htmlUrl } label: { Label("Copy link", systemImage: "link") }
             ShareLink(item: pr.htmlUrl) { Label("Share", systemImage: "square.and.arrow.up") }

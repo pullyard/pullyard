@@ -202,6 +202,7 @@ struct ProjectDetailView: View {
     let repo: String
     @EnvironmentObject private var model: AppModel
     @State private var status: PRStatusFilter = .open
+    @State private var showIssues = false
     @State private var audience: ProjectAudience = .everyone
 
     private var key: PRListKey { .project(repo, status: status, audience: audience) }
@@ -217,7 +218,9 @@ struct ProjectDetailView: View {
             }
             .listSectionSeparator(.hidden)
 
-            if pulls.isEmpty {
+            if showIssues {
+                ProjectIssuesSections(repo: repo, state: status == .open ? "open" : status == .all ? "all" : "closed")
+            } else if pulls.isEmpty {
                 Section {
                     Group {
                         switch model.listState(key) {
@@ -262,8 +265,12 @@ struct ProjectDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink(value: Route.newPull(repo: repo, head: nil)) { Image(systemName: "plus") }
-                    .accessibilityLabel("New pull request")
+                Menu {
+                    NavigationLink(value: Route.newPull(repo: repo, head: nil)) { Label("New pull request", systemImage: "arrow.triangle.pull") }
+                    NavigationLink(value: Route.newIssue(repo)) { Label("New issue", systemImage: "smallcircle.filled.circle") }
+                    NavigationLink(value: Route.browse(repo: repo, ref: nil, path: "")) { Label("Browse code", systemImage: "folder") }
+                } label: { Image(systemName: "plus") }
+                .accessibilityLabel("Create")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { withAnimation { model.togglePin(repo) } } label: {
@@ -297,6 +304,9 @@ struct ProjectDetailView: View {
                 }
             }
             .padding(.horizontal, 20)
+            SectionSwitcherBar(showIssues: $showIssues)
+                .padding(.horizontal, 16)
+            if !showIssues {
             ScrollView(.horizontal, showsIndicators: false) {
                 PYGlassGroup {
                     HStack(spacing: 8) {
@@ -309,8 +319,9 @@ struct ProjectDetailView: View {
                 }
                 .padding(.horizontal, 16).padding(.vertical, 6)
             }
+            }
             Picker("Status", selection: $status) {
-                ForEach(PRStatusFilter.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(PRStatusFilter.allCases.filter { !showIssues || $0 != .merged }) { Text(L($0.rawValue)).tag($0) }
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
@@ -338,5 +349,34 @@ struct ProjectDetailView: View {
         case .needsMyReview: return "Nothing in \(repo) is waiting for your review."
         case .mine: return "You have no \(state)pull requests in \(repo)."
         }
+    }
+}
+
+private struct SectionSwitcherBar: View {
+    @Binding var showIssues: Bool
+    @Namespace private var namespace
+
+    var body: some View {
+        HStack(spacing: 4) {
+            item("Pull requests", symbol: "arrow.triangle.pull", selected: !showIssues) { showIssues = false }
+            item("Issues", symbol: "smallcircle.filled.circle", selected: showIssues) { showIssues = true }
+        }
+        .padding(4)
+        .pyGlassCapsule(fallback: MobileTheme.card)
+        .sensoryFeedback(.selection, trigger: showIssues)
+    }
+
+    private func item(_ title: String, symbol: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button { withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { action() } } label: {
+            Label(L(title), systemImage: symbol)
+                .mobileFont(size: 14, weight: .semibold)
+                .foregroundStyle(selected ? Color.white : MobileTheme.ink)
+                .frame(maxWidth: .infinity, minHeight: 36)
+                .background {
+                    if selected { Capsule().fill(MobileTheme.accentFill).matchedGeometryEffect(id: "tab", in: namespace) }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.pyPlain)
     }
 }

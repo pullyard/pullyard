@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreSpotlight
 import Combine
 
 @main
@@ -124,11 +125,17 @@ struct RootView: View {
             return .handled
         })
         .onReceive(NotificationCenter.default.publisher(for: .pullyardPendingLink)) { _ in consumePendingLink() }
+        .onReceive(NotificationCenter.default.publisher(for: .pullyardFocusChanged)) { _ in model.reloadFocus() }
+        .onContinueUserActivity(CSSearchableItemActionType) { activity in
+            guard model.isSignedIn, let route = SpotlightIndexer.route(from: activity) else { return }
+            router.open(route, in: model.selectedTab)
+        }
         .onOpenURL { url in handleURL(url) }
         .tint(MobileTheme.accent)
         .preferredColorScheme(AppearanceMode(rawValue: appearanceRaw)?.colorScheme)
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                model.reloadFocus()
                 model.handleForeground()
                 consumePendingLink()
             }
@@ -276,6 +283,12 @@ struct RouteDestination: View {
             PullRequestsView()
         case let .newPull(repo, head):
             CreatePullView(repo: repo, initialHead: head)
+        case let .finishReview(key):
+            FinishReviewView(key: key)
+        case let .newIssue(repo):
+            CreateIssueView(repo: repo)
+        case let .browse(repo, ref, path):
+            RepoBrowserView(repo: repo, ref: ref, path: path)
         case let .fileDiff(key, path):
             FileDiffView(key: key, path: path)
         case let .notification(id):

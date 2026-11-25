@@ -301,6 +301,16 @@
         }
       }
     },
+    "Branch": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ветка"
+          }
+        }
+      }
+    },
     "Branch update started": {
       "localizations": {
         "ru": {
@@ -327,6 +337,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Все pull requests"
+          }
+        }
+      }
+    },
+    "Browse code": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Код"
           }
         }
       }
@@ -377,6 +397,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Штиль. Когда вас попросят о ревью, запрос появится здесь."
+          }
+        }
+      }
+    },
+    "Can't preview this file": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Файл нельзя показать"
           }
         }
       }
@@ -861,6 +891,16 @@
         }
       }
     },
+    "Couldn't load issues": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось загрузить issues"
+          }
+        }
+      }
+    },
     "Couldn't load projects": {
       "localizations": {
         "ru": {
@@ -897,6 +937,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Не удалось загрузить входящие"
+          }
+        }
+      }
+    },
+    "Couldn't open": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось открыть"
+          }
+        }
+      }
+    },
+    "Couldn't send": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось отправить"
+          }
+        }
+      }
+    },
+    "Create": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Создать"
           }
         }
       }
@@ -961,12 +1031,32 @@
         }
       }
     },
+    "Create issue": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Создать issue"
+          }
+        }
+      }
+    },
     "Create pull request": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
             "value": "Создать pull request"
+          }
+        }
+      }
+    },
+    "Creating…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Создаём…"
           }
         }
       }
@@ -981,6 +1071,16 @@
         }
       }
     },
+    "Delete": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Удалить"
+          }
+        }
+      }
+    },
     "Delete branch after merge": {
       "localizations": {
         "ru": {
@@ -991,12 +1091,32 @@
         }
       }
     },
+    "Delete comment": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Удалить комментарий"
+          }
+        }
+      }
+    },
     "Delete queued item": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
             "value": "Удалить из очереди"
+          }
+        }
+      }
+    },
+    "Delete this comment?": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Удалить комментарий?"
           }
         }
       }
@@ -1147,6 +1267,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ранее"
+          }
+        }
+      }
+    },
+    "Edit": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Изменить"
+          }
+        }
+      }
+    },
+    "Edit comment": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Изменить комментарий"
           }
         }
       }
@@ -1321,6 +1461,16 @@
         }
       }
     },
+    "Focus: pinned projects only": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Фокус: только закреплённые проекты"
+          }
+        }
+      }
+    },
     "Follow checks on Lock Screen": {
       "localizations": {
         "ru": {
@@ -1337,6 +1487,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Проверки на экране блокировки"
+          }
+        }
+      }
+    },
+    "For an hour": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "На час"
           }
         }
       }
@@ -1601,6 +1761,16 @@
         }
       }
     },
+    "Issues": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Issues"
+          }
+        }
+      }
+    },
     "It may have been marked as done on another device.": {
       "localizations": {
         "ru": {
@@ -1751,6 +1921,16 @@
         }
       }
     },
+    "Loading issues…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Загружаем issues…"
+          }
+        }
+      }
+    },
     "Loading issue…": {
       "localizations": {
         "ru": {
@@ -1807,6 +1987,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Загружаем проекты…"
+          }
+        }
+      }
+    },
+    "Loading your review…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Загружаем ревью…"
+          }
+        }
+      }
+    },
+    "Loading…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Загрузка…"
           }
         }
       }
@@ -2091,6 +2291,16 @@
         }
       }
     },
+    "New issue": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Новый issue"
+          }
+        }
+      }
+    },
     "New pull request": {
       "localizations": {
         "ru": {
@@ -2107,6 +2317,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Новое с прошлого визита"
+          }
+        }
+      }
+    },
+    "New template": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Новый шаблон"
           }
         }
       }
@@ -2171,6 +2391,16 @@
         }
       }
     },
+    "No issues": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нет issues"
+          }
+        }
+      }
+    },
     "No matching projects": {
       "localizations": {
         "ru": {
@@ -2197,6 +2427,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Нет подходящих открытых PR."
+          }
+        }
+      }
+    },
+    "No pending review": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нет незавершённого ревью"
           }
         }
       }
@@ -2427,6 +2667,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Откройте настройки токенов GitHub"
+          }
+        }
+      }
+    },
+    "Open changed files": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Открыть файлы"
           }
         }
       }
@@ -2921,6 +3171,16 @@
         }
       }
     },
+    "Reply templates": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Шаблоны ответов"
+          }
+        }
+      }
+    },
     "Reply to thread": {
       "localizations": {
         "ru": {
@@ -3007,6 +3267,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Решённое обсуждение"
+          }
+        }
+      }
+    },
+    "Restore defaults": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вернуть стандартные"
           }
         }
       }
@@ -3171,6 +3441,16 @@
         }
       }
     },
+    "Save": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сохранить"
+          }
+        }
+      }
+    },
     "Save draft": {
       "localizations": {
         "ru": {
@@ -3291,6 +3571,16 @@
         }
       }
     },
+    "Send": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отправить"
+          }
+        }
+      }
+    },
     "Send feedback": {
       "localizations": {
         "ru": {
@@ -3347,6 +3637,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Поделитесь ссылкой на PR, issue или репозиторий GitHub, чтобы открыть её в PullYard."
+          }
+        }
+      }
+    },
+    "Short name": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Короткое имя"
           }
         }
       }
@@ -3501,6 +3801,26 @@
         }
       }
     },
+    "Snooze": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отложить"
+          }
+        }
+      }
+    },
+    "Snoozed": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отложенные"
+          }
+        }
+      }
+    },
     "Source code": {
       "localizations": {
         "ru": {
@@ -3597,6 +3917,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Предложенное изменение"
+          }
+        }
+      }
+    },
+    "Summary": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Итог"
           }
         }
       }
@@ -3751,6 +4081,16 @@
         }
       }
     },
+    "Tomorrow": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Завтра"
+          }
+        }
+      }
+    },
     "Triage pull requests, follow checks and reply to your team — wherever you are.": {
       "localizations": {
         "ru": {
@@ -3851,6 +4191,46 @@
         }
       }
     },
+    "Unsnooze": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вернуть"
+          }
+        }
+      }
+    },
+    "Until next week": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "До следующей недели"
+          }
+        }
+      }
+    },
+    "Until this evening": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "До вечера"
+          }
+        }
+      }
+    },
+    "Until tomorrow": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "До завтра"
+          }
+        }
+      }
+    },
     "Update branch": {
       "localizations": {
         "ru": {
@@ -3907,6 +4287,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Своё OAuth-приложение"
+          }
+        }
+      }
+    },
+    "View full file": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Весь файл"
           }
         }
       }
