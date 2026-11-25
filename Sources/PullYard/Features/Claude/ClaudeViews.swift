@@ -380,8 +380,18 @@ struct ProjectHeader: View {
                 .foregroundStyle(Color.syDim)
                 .rotationEffect(.degrees(expanded ? 90 : 0))
                 .frame(width: 10)
+            Image(systemName: "folder.fill")
+                .font(.syIcon(10))
+                .foregroundStyle(project.exists ? Color.syCoral : Color.syDim)
+                .frame(width: 20, height: 20)
+                .background(RoundedRectangle(cornerRadius: 6).fill((project.exists ? Color.syCoral : Color.syDim).opacity(0.12)))
             Text(project.name).font(.syCallout.weight(.semibold)).foregroundStyle(project.exists ? Color.syText : Color.syMuted).lineLimit(1)
-            Text("\(project.sessions.count)").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
+            Text("\(project.sessions.count)")
+                .font(.syCaption2.monospacedDigit().weight(.medium))
+                .foregroundStyle(Color.syMuted)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(Color.syText.opacity(0.06)))
             Spacer()
             Button(action: onNew) { Image(systemName: "plus") }
                 .buttonStyle(.borderless)
@@ -482,11 +492,22 @@ struct SessionRow: View {
                 .accessibilityLabel(collapsed ? "Expand" : "Collapse")
             }
             Spacer(minLength: 8)
-            if session.prNumber != nil {
-                Image(systemName: "arrow.triangle.pull").font(.syCaption).foregroundStyle(Color.syViolet.opacity(0.85)).accessibilityLabel("Pull request")
+            if let n = session.prNumber {
+                Text("#\(n)")
+                    .font(.syCaption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(Color.syViolet)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.syViolet.opacity(0.12)))
+                    .accessibilityLabel("Pull request \(n)")
             }
             if childCount > 0 {
                 Text("\(childCount)").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
+            }
+            if depth == 0, indicator == .none {
+                Text(Self.age(session.modified))
+                    .font(.syCaption2.monospacedDigit())
+                    .foregroundStyle(Color.syDim)
             }
             SessionIndicatorDot(indicator: expired ? SessionIndicator(closed: session) : indicator)
                 .task(id: indicator == .working && !open) {
@@ -500,6 +521,17 @@ struct SessionRow: View {
         .padding(.leading, 4)
         .frame(minHeight: 32)
         .help(details)
+    }
+
+    static func age(_ date: Date) -> String {
+        let s = max(0, Int(Date().timeIntervalSince(date)))
+        switch s {
+        case ..<60: return "now"
+        case ..<3600: return "\(s / 60)m"
+        case ..<86_400: return "\(s / 3600)h"
+        case ..<604_800: return "\(s / 86_400)d"
+        default: return "\(s / 604_800)w"
+        }
     }
 
     private var details: String {
@@ -792,27 +824,7 @@ struct ClaudeTabBar: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
                 ForEach(ws.tabs) { tab in
-                    let selected = tab.id == ws.selectedTabID
-                    HStack(spacing: 6) {
-                        SessionStateGlyph(state: tab.state)
-                        Text(tab.title).lineLimit(1).frame(maxWidth: 180, alignment: .leading).foregroundStyle(selected ? Color.syText : Color.syMuted)
-                        Text(tab.projectName).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
-                        Button { ws.requestClose(tab) } label: { Image(systemName: "xmark").font(.syCaption2.weight(.bold)).frame(width: 16, height: 16).contentShape(Rectangle()) }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(Color.syMuted)
-                            .help("Close \(tab.title)")
-                            .accessibilityLabel("Close \(tab.title)")
-                    }
-                    .font(.syCallout)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: Radius.m).fill(selected ? Color.sySelected : Color.clear))
-                    .contentShape(Rectangle())
-                    .onTapGesture { ws.selectedTabID = tab.id }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel("\(tab.title), \(tab.projectName), \(tab.state.title)")
-                    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-                    .accessibilityAction { ws.selectedTabID = tab.id }
+                    ClaudeTabChip(tab: tab, selected: tab.id == ws.selectedTabID)
                 }
                 Menu {
                     if let current = ws.selectedTab {
@@ -1030,7 +1042,7 @@ struct ChangesPanel: View {
             HStack(spacing: 8) {
                 if git.loading { PYLoader(size: 12) }
                 Text(git.changes.isEmpty ? "No uncommitted changes" : plural(git.changes.count, "file changed", "files changed"))
-                    .font(.syCaption).foregroundStyle(Color.syMuted)
+                    .font(.syCaption.weight(.medium)).foregroundStyle(git.changes.isEmpty ? Color.syMuted : Color.syText)
                 if !git.changes.isEmpty {
                     DiffStat(additions: git.changes.reduce(0) { $0 + $1.additions }, deletions: git.changes.reduce(0) { $0 + $1.deletions })
                 }
@@ -1043,28 +1055,37 @@ struct ChangesPanel: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             if !git.unpushed.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Unpushed commits" + " · \(git.unpushed.count)").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.up.circle.fill").foregroundStyle(Color.syCoral)
+                        Text(plural(git.unpushed.count, "unpushed commit", "unpushed commits"))
+                            .font(.sy(size: 10, weight: .semibold))
+                            .textCase(.uppercase)
+                            .tracking(0.5)
+                            .foregroundStyle(Color.syCoralInk)
+                    }
                     ForEach(git.unpushed.prefix(6)) { c in
                         HStack(spacing: 6) {
-                            Text(c.short).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
-                            Text(c.subject).font(.syCaption).lineLimit(1)
+                            Text(c.short)
+                                .font(.syCaption2.monospaced())
+                                .foregroundStyle(Color.syMuted)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.syText.opacity(0.05)))
+                            Text(c.subject).font(.syCaption).foregroundStyle(Color.syText).lineLimit(1)
                         }
                     }
                 }
+                .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.syCoral.opacity(0.06)))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syCoral.opacity(0.2)))
                 .padding(.horizontal, 10)
-                .padding(.bottom, 6)
+                .padding(.bottom, 8)
             }
             ClaudeHairline()
             if git.changes.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle").font(.syLargeTitle).foregroundStyle(Color.syDim)
-                    Text("Changes Claude makes will show up here automatically")
-                        .font(.syCallout).foregroundStyle(Color.syMuted).multilineTextAlignment(.center)
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                InspectorEmptyState(icon: "checkmark.seal", title: "Working tree clean", message: "Changes the agent makes will show up here automatically.")
             } else {
                 PlainDiffList(files: git.changes, collapsed: $collapsed, scrollTarget: target) { path in
                     NSWorkspace.shared.open(URL(fileURLWithPath: tab.folder + "/" + path))
@@ -1771,5 +1792,93 @@ struct Collapsible<Content: View>: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
             }
         }
+    }
+}
+
+private struct ClaudeTabChip: View {
+    let tab: ClaudeTab
+    let selected: Bool
+    @Environment(AppModel.self) private var app
+    @State private var hovering = false
+
+    var body: some View {
+        let ws = app.claude
+        let waiting = tab.state == .waiting
+        HStack(spacing: 6) {
+            SessionStateGlyph(state: tab.state)
+            Text(tab.title)
+                .lineLimit(1)
+                .frame(maxWidth: 180, alignment: .leading)
+                .foregroundStyle(selected ? Color.syText : Color.syMuted)
+                .fontWeight(selected ? .medium : .regular)
+            if waiting {
+                Text("Needs you")
+                    .font(.sy(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.syCoralInk)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.syCoral.opacity(0.14)))
+            } else {
+                Text(tab.projectName).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
+            }
+            Button { ws.requestClose(tab) } label: { Image(systemName: "xmark").font(.syCaption2.weight(.bold)).frame(width: 16, height: 16).contentShape(Rectangle()) }
+                .buttonStyle(.borderless)
+                .foregroundStyle(Color.syMuted)
+                .opacity(selected || hovering ? 1 : 0)
+                .help("Close \(tab.title)")
+                .accessibilityLabel("Close \(tab.title)")
+        }
+        .font(.syCallout)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background {
+            RoundedRectangle(cornerRadius: Radius.m)
+                .fill(selected ? Color.syRaised : (hovering ? Color.syHover : Color.clear))
+                .shadow(color: .black.opacity(selected ? 0.06 : 0), radius: 4, y: 1)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: Radius.m)
+                .strokeBorder(selected ? Color.syLineStrong : (waiting ? Color.syCoral.opacity(0.4) : Color.clear))
+        }
+        .overlay(alignment: .bottom) {
+            if selected {
+                Capsule().fill(Color.syAgentAccent).frame(height: 2).padding(.horizontal, 10).offset(y: 1)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { ws.selectedTabID = tab.id }
+        .onHover { h in withAnimation(.easeOut(duration: Motion.Dur.micro)) { hovering = h } }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(tab.title), \(tab.projectName), \(tab.state.title)")
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { ws.selectedTabID = tab.id }
+    }
+}
+
+struct InspectorEmptyState: View {
+    let icon: String
+    let title: String
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.syIcon(18))
+                .foregroundStyle(Color.syAgentAccent)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(Color.syAgentAccent.opacity(0.1)))
+                .overlay(Circle().strokeBorder(Color.syAgentAccent.opacity(0.2)))
+            Text(title)
+                .font(.system(size: TextZoom.shared.size(15), weight: .semibold, design: .serif))
+                .foregroundStyle(Color.syText)
+            Text(message)
+                .font(.syCaption)
+                .foregroundStyle(Color.syMuted)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 240)
+            HarborWaves().frame(width: 90, height: 12).opacity(0.7)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

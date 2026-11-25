@@ -222,28 +222,99 @@ struct PullYardLoader: View {
 }
 
 struct WakeLoader: View {
-    @State private var start = Date()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: Motion.reduced)) { context in
-            let t = context.date.timeIntervalSince(start)
-            Canvas { ctx, size in
-                let colors = [LogoGeometry.sky, Color(red: 0.43, green: 0.65, blue: 0.98), LogoGeometry.violet]
-                for i in 0..<3 {
-                    let phase = Motion.reduced ? 0.5 : (t * 1.6 - Double(i) * 0.22).truncatingRemainder(dividingBy: 1)
-                    let p = phase < 0 ? phase + 1 : phase
-                    let x = size.width * (0.12 + 0.3 * CGFloat(i))
-                    let lift = CGFloat(sin(p * .pi)) * size.height * 0.28
-                    let y = size.height * 0.62 - lift
-                    var wave = Path()
-                    wave.move(to: CGPoint(x: x - 3, y: y))
-                    wave.addQuadCurve(to: CGPoint(x: x + 3, y: y), control: CGPoint(x: x, y: y - 3))
-                    ctx.stroke(wave, with: .color(colors[i].opacity(0.45 + 0.55 * sin(p * .pi))), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                }
-            }
+        WakeLayer(animated: !reduceMotion)
+            .frame(width: 20, height: 12)
+            .accessibilityLabel("Running")
+    }
+}
+
+private struct WakeLayer: NSViewRepresentable {
+    let animated: Bool
+
+    func makeNSView(context: Context) -> WakeLayerView { WakeLayerView() }
+
+    func updateNSView(_ view: WakeLayerView, context: Context) {
+        view.animated = animated
+    }
+}
+
+final class WakeLayerView: NSView {
+    private var arcs: [CAShapeLayer] = []
+    var animated = true {
+        didSet { if animated != oldValue { restart() } }
+    }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.isGeometryFlipped = true
+        for _ in 0..<3 {
+            let arc = CAShapeLayer()
+            arc.fillColor = nil
+            arc.lineWidth = 2
+            arc.lineCap = .round
+            layer?.addSublayer(arc)
+            arcs.append(arc)
         }
-        .frame(width: 20, height: 12)
-        .accessibilityLabel("Running")
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { restart() }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    override func layout() {
+        super.layout()
+        let w = bounds.width, h = bounds.height
+        for (i, arc) in arcs.enumerated() {
+            let x = w * (0.12 + 0.3 * CGFloat(i))
+            let y = h * 0.62
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: x - 3, y: y))
+            path.addQuadCurve(to: CGPoint(x: x + 3, y: y), control: CGPoint(x: x, y: y - 3))
+            arc.frame = bounds
+            arc.path = path
+        }
+        applyColors()
+    }
+
+    private func applyColors() {
+        let colors = [NSColor(srgbRed: 0.22, green: 0.741, blue: 0.973, alpha: 1), NSColor(srgbRed: 0.43, green: 0.65, blue: 0.98, alpha: 1), NSColor(srgbRed: 0.655, green: 0.545, blue: 0.98, alpha: 1)]
+        for (i, arc) in arcs.enumerated() { arc.strokeColor = colors[i].cgColor }
+    }
+
+    private func restart() {
+        for (i, arc) in arcs.enumerated() {
+            arc.removeAllAnimations()
+            arc.opacity = animated ? 0.45 : 0.8
+            guard animated, window != nil else { continue }
+            let lift = CAKeyframeAnimation(keyPath: "transform.translation.y")
+            lift.values = [0, -3.4, 0]
+            lift.keyTimes = [0, 0.5, 1]
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.values = [0.45, 1, 0.45]
+            fade.keyTimes = [0, 0.5, 1]
+            let group = CAAnimationGroup()
+            group.animations = [lift, fade]
+            group.duration = 0.625
+            group.repeatCount = .infinity
+            group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            group.beginTime = CACurrentMediaTime() + Double(i) * 0.1375
+            group.isRemovedOnCompletion = false
+            arc.add(group, forKey: "wake")
+        }
     }
 }
 

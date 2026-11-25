@@ -25,8 +25,11 @@ struct ChatView: View {
                         if chat.items.isEmpty {
                             ChatWelcome(chat: chat, folder: tab.folder)
                         }
-                        ForEach(chat.displayItems) { entry in
-                            Group {
+                        let entries = chat.displayItems
+                        let starts = Self.turnStarts(entries)
+                        ForEach(entries) { entry in
+                            VStack(alignment: .leading, spacing: 6) {
+                                if starts.contains(entry.id) { AgentTurnMark() }
                                 switch entry {
                                 case .item(let item):
                                     ChatItemView(item: item, chat: chat, folder: tab.folder)
@@ -136,6 +139,23 @@ struct ChatView: View {
             Button("") { search.open = true }.keyboardShortcut("f", modifiers: [.command]).hidden()
         }
         .onDrop(of: ChatDropDelegate.types, delegate: ChatDropDelegate(chat: chat))
+    }
+
+    static func turnStarts(_ entries: [ChatDisplayItem]) -> Set<String> {
+        var out: Set<String> = []
+        var afterUser = false
+        for entry in entries {
+            switch entry {
+            case .item(.user):
+                afterUser = true
+            case .item(.notice):
+                continue
+            default:
+                if afterUser { out.insert(entry.id) }
+                afterUser = false
+            }
+        }
+        return out
     }
 
     private var topAnchor: Binding<String?> {
@@ -460,29 +480,30 @@ struct ChatWelcome: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .center, spacing: 14) {
-                PullYardLogoMark(progress: 1, size: 54)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text((folder as NSString).lastPathComponent).font(.syTitle2.weight(.semibold)).foregroundStyle(Color.syText)
-                    HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .center, spacing: 16) {
+                DrawnLogoMark(key: "chat-welcome-\(folder)", size: 64)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text((folder as NSString).lastPathComponent)
+                        .font(.system(size: TextZoom.shared.size(24), weight: .semibold, design: .serif))
+                        .foregroundStyle(Color.syText)
+                    HStack(spacing: 6) {
                         if let git = tab?.git, let branch = git.branch {
-                            Label(branch, systemImage: "arrow.triangle.branch").lineLimit(1)
+                            StatusChip(text: branch, icon: "arrow.triangle.branch", color: .syMuted)
                             if !git.changes.isEmpty {
-                                Text("· \(git.changes.count) changed").foregroundStyle(Color.syAmber)
+                                StatusChip(text: "\(git.changes.count) changed", icon: "pencil", color: .syAmberInk)
                             }
                             if git.ahead > 0 {
-                                Text("· \(git.ahead) unpushed")
+                                StatusChip(text: "\(git.ahead) unpushed", icon: "arrow.up", color: .syCoralInk)
                             }
                         } else {
-                            Text(folder).lineLimit(1).truncationMode(.head)
+                            Text(folder).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.head)
                         }
                     }
-                    .font(.syCallout)
-                    .foregroundStyle(Color.syMuted)
                 }
             }
             Text("Describe a task. The agent reads the code, proposes changes and asks before acting.")
+                .font(.syCallout)
                 .foregroundStyle(Color.syMuted)
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                 ForEach(suggestions, id: \.self) { s in
@@ -490,8 +511,13 @@ struct ChatWelcome: View {
                 }
             }
             if !recent.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Recent in this project").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syDim)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Recent in this project")
+                        .font(.sy(size: 10, weight: .semibold))
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+                        .foregroundStyle(Color.syMuted)
+                        .padding(.bottom, 2)
                     ForEach(recent) { s in
                         Button {
                             app.claude.resume(s)
@@ -501,22 +527,47 @@ struct ChatWelcome: View {
                                 Text(AgentSessionPrefs.shared.title(s)).foregroundStyle(Color.syText).lineLimit(1)
                                 Spacer(minLength: 8)
                                 Text(Fmt.rel(s.modified)).font(.syCaption).foregroundStyle(Color.syDim)
+                                Image(systemName: "arrow.right").font(.syIcon(9)).foregroundStyle(Color.syDim)
                             }
                             .font(.syCallout)
-                            .padding(.vertical, 4)
+                            .padding(.vertical, 5)
+                            .padding(.horizontal, 6)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .hoverHighlight(radius: 7)
                     }
                 }
             }
-            Text("/ commands · @ files · ⇧↩ new line · paste a screenshot ⌘V · ⇧⌘K switch session")
-                .font(.syCaption)
-                .foregroundStyle(Color.syDim)
+            HStack(spacing: 14) {
+                hint("/", "commands")
+                hint("@", "files")
+                hint("⇧↩", "new line")
+                hint("⌘V", "screenshot")
+                hint("⇧⌘K", "switch session")
+            }
         }
-        .padding(20)
+        .padding(24)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .card(radius: 14)
+        .background {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.syRaised)
+                if Theme.isBrand {
+                    BrandAurora()
+                        .opacity(0.6)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+            }
+        }
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.syLine))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 6)
+    }
+
+    private func hint(_ key: String, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            Keycap(key: key)
+            Text(label).font(.syCaption).foregroundStyle(Color.syMuted)
+        }
     }
 }
 
@@ -539,12 +590,14 @@ struct WelcomeSuggestionButton: View {
             .font(.syCallout)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.syText.opacity(hover ? 0.07 : 0.035)))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(hover ? BrandMark.violet.opacity(0.45) : Color.syLine))
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color.syPanel.opacity(hover ? 1 : 0.8)))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(hover ? BrandMark.violet.opacity(0.45) : Color.syLine))
+            .shadow(color: .black.opacity(hover ? 0.07 : 0), radius: 8, y: 3)
+            .offset(y: hover && !Motion.reduced ? -1 : 0)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressScale())
         .onHover { h in withAnimation(Motion.fade) { hover = h } }
     }
 }
@@ -799,8 +852,14 @@ struct UserBubble: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.syAgentAccent.opacity(0.13)))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.syAgentAccent.opacity(0.22)))
+            .background(
+                UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: 18, bottomTrailingRadius: 6, topTrailingRadius: 18, style: .continuous)
+                    .fill(LinearGradient(colors: [Color.syAgentAccent.opacity(0.16), Color.syAgentAccent.opacity(0.09)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            )
+            .overlay(
+                UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: 18, bottomTrailingRadius: 6, topTrailingRadius: 18, style: .continuous)
+                    .strokeBorder(Color.syAgentAccent.opacity(0.24))
+            )
         }
     }
 
@@ -942,7 +1001,11 @@ struct ThinkingView: View {
                     HStack(spacing: 5) {
                         Image(systemName: "chevron.right").font(.syCaption2).rotationEffect(.degrees(open ? 90 : 0))
                         Image(systemName: "brain").foregroundStyle(Color.syViolet.opacity(0.8))
-                        Text("Thinking")
+                        if text.finalized {
+                            Text("Thinking")
+                        } else {
+                            ShimmerLabel(text: "Thinking…")
+                        }
                     }
                     .font(.syCaption)
                     .foregroundStyle(Color.syMuted)
@@ -1226,7 +1289,8 @@ struct InlineDiff: View {
             }
         }
         .background(Color.sySunken)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syLine))
     }
 }
 
@@ -1257,6 +1321,7 @@ struct PermissionCard: View {
     let folder: String
     @State private var feedback = ""
     @State private var answers: [String: String] = [:]
+    @State private var pulse = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1279,36 +1344,72 @@ struct PermissionCard: View {
                 }
                 denyRow(placeholder: "What to change in the plan…")
             default:
-                Text(question).font(.syCaption).foregroundStyle(Color.syAmber)
-                if let d = request.description, !d.isEmpty { Text(d).font(.syCallout).foregroundStyle(Color.syMuted) }
-                if let path = request.blockedPath {
-                    Text(ToolPresentation.relative(path, folder)).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Button("Allow") { chat.respond(request, allow: true) }
-                            .buttonStyle(.borderedProminent)
-                            .keyboardShortcut(chat.pendingPermissions.first(where: { !$0.resolved })?.id == request.id ? KeyboardShortcut(.return, modifiers: [.command]) : nil)
-                        Spacer()
-                        Text("⌘↩").font(.syCaption).foregroundStyle(Color.syDim)
+                HStack(spacing: 10) {
+                    Image(systemName: "hand.raised.fill")
+                        .font(.syIcon(12))
+                        .foregroundStyle(Color.syAmberInk)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.syAmber.opacity(0.18)))
+                        .scaleEffect(pulse ? 1.06 : 1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(question).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText)
+                        if let d = request.description, !d.isEmpty {
+                            Text(d).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(3)
+                        }
                     }
+                }
+                if let command = request.input["command"] as? String, !command.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        Text(command)
+                            .font(.sy(size: 12, design: .monospaced))
+                            .foregroundStyle(Color.syText)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: true, vertical: true)
+                            .padding(10)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.sySunken))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.syLine))
+                }
+                if let path = request.blockedPath ?? (request.input["file_path"] as? String) {
+                    Label(ToolPresentation.relative(path, folder), systemImage: "doc.text")
+                        .font(.syCaption.monospaced())
+                        .foregroundStyle(Color.syMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                HStack(spacing: 8) {
+                    Button { chat.respond(request, allow: true) } label: {
+                        HStack(spacing: 6) {
+                            Text("Allow")
+                            Text("⌘↩").font(.syCaption.monospaced()).opacity(0.75)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.syGreenFill)
+                    .keyboardShortcut(chat.pendingPermissions.first(where: { !$0.resolved })?.id == request.id ? KeyboardShortcut(.return, modifiers: [.command]) : nil)
                     ForEach(Array(request.suggestions.enumerated()), id: \.offset) { _, s in
                         Button { chat.respond(request, allow: true, always: s) } label: {
-                            Text("Allow, and don't ask again for " + s.label)
-                                .lineLimit(1)
+                            Text("Always allow " + s.label).lineLimit(1)
                         }
-                        .buttonStyle(.link)
+                        .help("Allow, and don't ask again for " + s.label)
                     }
+                    Spacer(minLength: 0)
                 }
+                .controlSize(.regular)
                 denyRow(placeholder: "No — tell Claude what to do instead…")
             }
         }
-        .padding(12)
-        .padding(.leading, 3)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.syRaised)
-        .overlay(alignment: .leading) { Rectangle().fill(Color.syAmber).frame(width: 3) }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.syRaised))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.syAmber.opacity(0.55), lineWidth: 1.5))
+        .shadow(color: Color.syAmber.opacity(0.18), radius: 12, y: 3)
+        .onAppear {
+            guard !Motion.reduced else { return }
+            withAnimation(.easeInOut(duration: 1.1).repeatCount(3, autoreverses: true)) { pulse = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.4) { withAnimation(Motion.fade) { pulse = false } }
+        }
     }
 
     private var question: String {
@@ -1417,5 +1518,44 @@ enum QuestionAnswer {
         guard multi else { return other }
         let picked = parts(answer, labels: labels).picked
         return (picked + (other.isEmpty ? [] : [other])).joined(separator: separator)
+    }
+}
+
+struct ShimmerLabel: View {
+    let text: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var phase: CGFloat = -1
+
+    var body: some View {
+        Text(text)
+            .foregroundStyle(Color.syMuted)
+            .overlay {
+                if !reduceMotion {
+                    GeometryReader { geo in
+                        LinearGradient(colors: [.clear, Color.syViolet.opacity(0.9), Color.syAccent.opacity(0.9), .clear], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: geo.size.width * 0.6)
+                            .offset(x: phase * geo.size.width * 1.3)
+                    }
+                    .mask(Text(text))
+                    .allowsHitTesting(false)
+                }
+            }
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) { phase = 1 }
+            }
+    }
+}
+
+struct AgentTurnMark: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            PullYardLogoMark(progress: 1, size: 20)
+            Text("Agent")
+                .font(.sy(size: 11, weight: .semibold))
+                .foregroundStyle(Color.syMuted)
+        }
+        .padding(.bottom, 2)
+        .accessibilityHidden(true)
     }
 }

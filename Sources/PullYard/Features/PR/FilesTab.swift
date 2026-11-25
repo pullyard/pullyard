@@ -666,9 +666,12 @@ struct DiffLineView: View, Equatable {
                 .background(Self.hunkBG)
         } else {
             HStack(alignment: .top, spacing: 0) {
+                Rectangle()
+                    .fill(line.kind == .add ? Color.syGreen : line.kind == .del ? Color.syRed : Color.clear)
+                    .frame(width: 3)
                 Text(gutterText)
-                    .foregroundStyle(Color.syDim)
-                    .frame(width: TextZoom.shared.size(108), alignment: .trailing)
+                    .foregroundStyle(Color(nsColor: .syGutter))
+                    .frame(width: TextZoom.shared.size(105), alignment: .trailing)
                     .onTapGesture { if line.commentable { onComment?() } }
                 Text(sign + line.text)
                     .foregroundStyle(line.kind == .meta ? .secondary : .primary)
