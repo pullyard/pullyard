@@ -168,8 +168,15 @@ public sealed class PRContent : Grid, IShortcutHost
         tabRow.Margin = new Thickness(0, 6, 0, 0);
         SetRow(tabRow, 2);
         Children.Add(tabRow);
-        SetRow(tabArea, 3);
-        Children.Add(tabArea);
+        var work = new Grid();
+        work.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        work.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        work.Children.Add(tabArea);
+        SetColumn(panelHost, 1);
+        work.Children.Add(panelHost);
+        SetRow(work, 3);
+        Children.Add(work);
+        SyncReviewPanel();
         Shortcuts.ShortLinkKey(this);
 
         tabs.SelectionChanged += id => model.Tab = Enum.Parse<PRTab>(id);
@@ -200,6 +207,23 @@ public sealed class PRContent : Grid, IShortcutHost
 
     private PullRequestDetail Pr => model.Pr!;
 
+    private readonly ContentControl panelHost = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch, IsTabStop = false };
+
+    private void ToggleReviewPanel()
+    {
+        Settings.Shared.Set(ReviewPanel.OpenKey, !ReviewPanel.IsOpen);
+        SyncReviewPanel();
+        RenderToolbar();
+    }
+
+    private void SyncReviewPanel()
+    {
+        var show = ReviewPanel.IsOpen && model.Pr is { IsOpen: true };
+        if (show && panelHost.Content is null) panelHost.Content = new ReviewPanel(model, ToggleReviewPanel);
+        else if (!show) panelHost.Content = null;
+        panelHost.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private void AddShortcuts()
     {
         var index = 0;
@@ -225,6 +249,13 @@ public sealed class PRContent : Grid, IShortcutHost
             };
             KeyboardAccelerators.Add(acc);
         }
+        var panelKey = new KeyboardAccelerator { Key = VirtualKey.I, Modifiers = VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu };
+        panelKey.Invoked += (_, e) =>
+        {
+            e.Handled = true;
+            if (model.Pr is { IsOpen: true }) ToggleReviewPanel();
+        };
+        KeyboardAccelerators.Add(panelKey);
         Review(VirtualKey.R, () =>
         {
             if (Pr.IsOpen) Dialogs.Review(XamlRoot, model).Forget();
@@ -339,6 +370,7 @@ public sealed class PRContent : Grid, IShortcutHost
     private void RenderAll()
     {
         if (model.Pr is null) return;
+        SyncReviewPanel();
         RenderBanners();
         RenderHeader();
         RenderToolbar();
@@ -793,6 +825,7 @@ public sealed class PRContent : Grid, IShortcutHost
             flyout.Items.Add(Ui.Separator());
             flyout.Items.Add(Ui.MenuItem(L.T("PR_RequestReviewMenu", "Request review…"), () => Dialogs.Reviewers(XamlRoot, model).Forget(), ""));
             review.Flyout = flyout;
+            flyout.Items.Insert(1, Ui.MenuItem(ReviewPanel.IsOpen ? L.T("PR_HideReviewPanel", "Hide review panel") : L.T("PR_ShowReviewPanel", "Review beside the diff"), ToggleReviewPanel, "\uE8A0"));
             Ui.Tip(review, L.T("PR_SubmitReviewHint", "Submit review (Ctrl+Shift+R)"));
             AutomationProperties.SetAcceleratorKey(review, "Ctrl+Shift+R");
             Ui.Named(review, reviewText, L.T("PR_SubmitReview", "Submit review"));
