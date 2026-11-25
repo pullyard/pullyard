@@ -14,7 +14,11 @@ fn prefix(item: &SearchItem) -> &'static str {
 }
 
 pub fn spoken_label(item: &SearchItem) -> String {
-    let mut parts = vec![item.title.clone(), format!("{}{}{}", item.repository.name_with_owner, prefix(item), item.number)];
+    let mut parts = vec![];
+    if crate::queue::has_news(crate::queue::seen(&item.item_ref().title()), item.updated_at) {
+        parts.push("New activity".to_string());
+    }
+    parts.extend([item.title.clone(), format!("{}{}{}", item.repository.name_with_owner, prefix(item), item.number)]);
     if let Some(login) = item.author.as_ref().map(|a| a.login.as_str()).filter(|l| !l.is_empty()) {
         parts.push(format!("by {login}"));
     }
@@ -47,9 +51,25 @@ pub fn describe_row(row: &gtk::ListBoxRow, item: &SearchItem) {
 }
 
 pub fn item_row(item: &SearchItem, show_repo: bool) -> gtk::Box {
+    item_row_with(item, show_repo, false)
+}
+
+pub fn item_row_with(item: &SearchItem, show_repo: bool, news: bool) -> gtk::Box {
     let row = hbox(10);
     margins(&row, 4, 0, 4, 0);
-    row.append(&state_badge(item.visual_state(), true));
+    let lead = gtk::Overlay::new();
+    lead.set_child(Some(&state_badge(item.visual_state(), true)));
+    lead.set_valign(gtk::Align::Start);
+    if news {
+        let dot = fixed_box(&["news-dot"], 6, 6);
+        dot.set_halign(gtk::Align::Start);
+        dot.set_valign(gtk::Align::Start);
+        dot.set_margin_start(0);
+        dot.set_tooltip_text(Some("New activity since you looked"));
+        lead.add_overlay(&dot);
+        lead.set_tooltip_text(Some("New activity since you looked"));
+    }
+    row.append(&lead);
     let col = vbox(4);
     col.set_hexpand(true);
     let title = wrap_label(&item.title, &["sy-row-title"]);

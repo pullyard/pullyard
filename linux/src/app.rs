@@ -600,6 +600,9 @@ pub fn forward() {
 }
 
 pub fn remember_recent(route: &Route) {
+    if let Route::Pr(r) | Route::Issue(r) = route {
+        crate::queue::mark_seen(&r.title(), chrono::Utc::now());
+    }
     let Some(stored) = crate::nav_memory::encode(route, &cache_account()) else { return };
     if matches!(route, Route::Repo(_)) || settings::read(|s| s.recent_routes.first() == Some(&stored)) {
         return;

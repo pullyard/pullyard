@@ -24,6 +24,7 @@ mod list_cache;
 mod list_sort;
 mod local_repo;
 mod nav_memory;
+mod queue;
 mod notify;
 mod rt;
 mod secret;
