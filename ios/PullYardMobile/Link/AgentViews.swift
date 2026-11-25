@@ -4,8 +4,7 @@ import SwiftUI
 
 struct MacLinkSection: View {
     @ObservedObject private var link = LinkClient.shared
-    @State private var scanning = false
-    @State private var pairingError: String?
+    @EnvironmentObject private var router: AppRouter
     @State private var manualHost = ""
     @State private var confirmUnpair = false
     @AppStorage(AgentActivities.enabledKey) private var liveActivity = true
@@ -42,10 +41,7 @@ struct MacLinkSection: View {
                 .onAppear { manualHost = mac.manualHost ?? "" }
                 Button(role: .destructive) { confirmUnpair = true } label: { Label("Unpair Mac", systemImage: "xmark.circle") }
             } else {
-                Button { scanning = true } label: { Label("Pair with PullYard on Mac", systemImage: "qrcode.viewfinder") }
-            }
-            if let pairingError {
-                Text(pairingError).mobileFont(size: 13).foregroundStyle(MobileTheme.red)
+                Button { router.showScanner = true } label: { Label("Pair with PullYard on Mac", systemImage: "qrcode.viewfinder") }
             }
         } header: {
             Text("Mac")
@@ -53,22 +49,12 @@ struct MacLinkSection: View {
             Text("On the Mac open PullYard → Settings → iPhone → Show pairing code. Your iPhone can then start agent fixes on the Mac and follow the chat. The connection is end-to-end encrypted.")
         }
         .pyRow()
-        .sheet(isPresented: $scanning) {
-            PairingScanner { pairing in
-                try await link.pair(pairing)
-            }
-            .pySheetStyle()
-        }
         .confirmationDialog("Unpair this Mac?", isPresented: $confirmUnpair, titleVisibility: .visible) {
             Button("Unpair", role: .destructive) { link.unpair() }
             Button("Cancel", role: .cancel) {}
         }
     }
 
-    private func pair(_ pairing: PYLinkPairing) async {
-        pairingError = nil
-        do { try await link.pair(pairing) } catch { pairingError = error.localizedDescription }
-    }
 
     private var statusText: String {
         switch link.status {
@@ -207,9 +193,12 @@ struct PairingScanner: View {
         case .paired:
             VStack(spacing: 10) {
                 Button {
+                    router.showScanner = false
                     dismiss()
-                    router.showSettings = false
-                    model.selectedTab = .agents
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        router.showSettings = false
+                        model.selectedTab = .agents
+                    }
                 } label: {
                     Label("Open Agents", systemImage: "wand.and.stars")
                         .mobileFont(size: 16, weight: .semibold).foregroundStyle(.white)
@@ -408,7 +397,6 @@ struct FixWithAgentMenu: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var feedback: FeedbackCenter
     @State private var starting = false
-    @State private var showPairing = false
     @State private var customTask = false
     @State private var customText = ""
     @State private var review: PromptReview?
@@ -439,17 +427,6 @@ struct FixWithAgentMenu: View {
             .pyGlass(in: Capsule(), tint: MobileTheme.coral, interactive: true, fallback: MobileTheme.coral)
         }
         .disabled(starting || launching)
-        .sheet(isPresented: $showPairing) {
-            NavigationStack {
-                List { MacLinkSection() }
-                    .pyListStyle()
-                    .routeDestinations()
-                    .navigationTitle("Connect your Mac")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showPairing = false } } }
-            }
-            .pySheetStyle()
-        }
         .sheet(item: $review) { item in
             PromptReviewSheet(review: item) { prompt in
                 launch(item, prompt: prompt)
@@ -464,7 +441,7 @@ struct FixWithAgentMenu: View {
     }
 
     private func start(_ kind: String, text: String? = nil) {
-        guard link.mac != nil else { showPairing = true; return }
+        guard link.mac != nil else { router.showScanner = true; return }
         starting = true
         Task {
             defer { starting = false }

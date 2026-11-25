@@ -42,6 +42,7 @@ final class AppRouter: ObservableObject {
     @Published var agentsPath: [Route] = []
     @Published var showSettings = false
     @Published var pendingPairing: PYLinkPairing?
+    @Published var showScanner = false
 
     private struct Snapshot: Codable { var pulls: [Route]; var projects: [Route]?; var inbox: [Route]; var search: [Route] }
 
@@ -238,6 +239,7 @@ struct MainTabsView: View {
         .sheet(isPresented: $router.showSettings) {
             settingsStack.pySheetStyle()
         }
+        .fullScreenCover(isPresented: scannerBinding(inSettings: false)) { scanner }
         .alert(String(format: L("Pair with %@?"), router.pendingPairing?.name ?? "Mac"), isPresented: Binding(get: { router.pendingPairing != nil }, set: { if !$0 { router.pendingPairing = nil } }), presenting: router.pendingPairing) { pairing in
             Button("Pair") { confirmPairing(pairing) }
             Button("Cancel", role: .cancel) { router.pendingPairing = nil }
@@ -333,6 +335,19 @@ struct MainTabsView: View {
                         Button("Done") { router.showSettings = false }.fontWeight(.semibold)
                     }
                 }
+        }
+        .fullScreenCover(isPresented: scannerBinding(inSettings: true)) { scanner }
+    }
+
+    private var scanner: some View {
+        PairingScanner { pairing in try await LinkClient.shared.pair(pairing) }
+    }
+
+    private func scannerBinding(inSettings: Bool) -> Binding<Bool> {
+        Binding {
+            router.showScanner && router.showSettings == inSettings
+        } set: { shown in
+            if !shown { router.showScanner = false }
         }
     }
 

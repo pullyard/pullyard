@@ -89,7 +89,7 @@ private struct AgentsConnectView: View {
                 }
                 VStack(spacing: 10) {
                     if mode == .unpaired {
-                        primary("Pair with your Mac", symbol: "qrcode.viewfinder", busy: false) { openSettings() }
+                        primary("Pair with your Mac", symbol: "qrcode.viewfinder", busy: false) { router.showScanner = true }
                     } else {
                         primary(mode == .connecting ? "Connecting…" : "Try again", symbol: "arrow.clockwise", busy: mode == .connecting) {
                             follow(.connecting)
