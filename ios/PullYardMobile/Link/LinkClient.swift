@@ -82,6 +82,8 @@ final class LinkClient: ObservableObject {
         pathMonitor.start(queue: queue)
     }
 
+    var connectTaskRunning: Bool { connectTask != nil }
+
     var isConnected: Bool { if case .connected = status { return true }; return false }
     var macName: String { mac?.name ?? "Mac" }
 

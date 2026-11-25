@@ -28,10 +28,32 @@ private struct AgentsConnectView: View {
 
     private enum Mode { case unpaired, connecting, offline }
 
-    private var mode: Mode {
+    @State private var shown: Mode?
+    @State private var connectingSince = Date.distantPast
+    @State private var settle: Task<Void, Never>?
+
+    private var live: Mode {
         guard link.mac != nil else { return .unpaired }
         if case .connecting = link.status { return .connecting }
+        if link.connectTaskRunning { return .connecting }
         return .offline
+    }
+
+    private var mode: Mode { shown ?? live }
+
+    private func follow(_ next: Mode) {
+        settle?.cancel()
+        if next == .connecting {
+            if mode != .connecting { connectingSince = Date() }
+            withAnimation(.easeInOut(duration: 0.25)) { shown = .connecting }
+            return
+        }
+        let wait = mode == .connecting ? max(0, 0.9 - Date().timeIntervalSince(connectingSince)) : 0
+        settle = Task { @MainActor in
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.25)) { shown = next }
+        }
     }
 
     var body: some View {
@@ -44,11 +66,15 @@ private struct AgentsConnectView: View {
                         .mobileFont(size: 26, weight: .regular, design: .serif)
                         .foregroundStyle(MobileTheme.ink)
                         .multilineTextAlignment(.center)
+                        .frame(minHeight: 66, alignment: .bottom)
+                        .contentTransition(.opacity)
                     Text(LocalizedStringKey(message))
                         .mobileFont(size: 15)
                         .foregroundStyle(MobileTheme.muted)
                         .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(4)
+                        .frame(minHeight: 84, alignment: .top)
+                        .contentTransition(.opacity)
                 }
                 .padding(.horizontal, 8)
                 if mode == .unpaired {
@@ -62,12 +88,13 @@ private struct AgentsConnectView: View {
                     .pyGlass(in: RoundedRectangle(cornerRadius: PYRadius.large, style: .continuous), fallback: MobileTheme.card)
                 }
                 VStack(spacing: 10) {
-                    if mode == .offline {
-                        primary("Try again", symbol: "arrow.clockwise") { link.connectIfNeeded() }
-                        secondary("Open Settings", symbol: "gearshape") { openSettings() }
-                    } else if mode == .unpaired {
-                        primary("Pair with your Mac", symbol: "qrcode.viewfinder") { openSettings() }
+                    if mode == .unpaired {
+                        primary("Pair with your Mac", symbol: "qrcode.viewfinder", busy: false) { openSettings() }
                     } else {
+                        primary(mode == .connecting ? "Connecting…" : "Try again", symbol: "arrow.clockwise", busy: mode == .connecting) {
+                            follow(.connecting)
+                            link.connectIfNeeded()
+                        }
                         secondary("Open Settings", symbol: "gearshape") { openSettings() }
                     }
                 }
@@ -79,7 +106,8 @@ private struct AgentsConnectView: View {
         .background(BrandBackdrop())
         .navigationTitle("Agents")
         .task { if link.mac != nil { link.connectIfNeeded() } }
-        .animation(.snappy, value: mode)
+        .onChange(of: live, initial: true) { _, next in follow(next) }
+        .onDisappear { settle?.cancel() }
     }
 
     private var title: String {
@@ -117,16 +145,25 @@ private struct AgentsConnectView: View {
         }
     }
 
-    private func primary(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+    private func primary(_ title: String, symbol: String, busy: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(LocalizedStringKey(title), systemImage: symbol)
-                .mobileFont(size: 16, weight: .semibold)
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .contentShape(Capsule())
-                .pyGlass(in: Capsule(), tint: MobileTheme.coral, interactive: true, fallback: MobileTheme.coral)
+            HStack(spacing: 10) {
+                ZStack {
+                    Image(systemName: symbol).opacity(busy ? 0 : 1)
+                    if busy { PullYardLoader(size: 22, style: .monochrome(.white)) }
+                }
+                .frame(width: 24, height: 24)
+                Text(LocalizedStringKey(title)).contentTransition(.opacity)
+            }
+            .mobileFont(size: 16, weight: .semibold)
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .contentShape(Capsule())
+            .pyGlass(in: Capsule(), tint: MobileTheme.coral, interactive: true, fallback: MobileTheme.coral)
         }
         .buttonStyle(.pyPlain)
+        .disabled(busy)
+        .animation(.easeInOut(duration: 0.25), value: busy)
     }
 
     private func secondary(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
@@ -151,14 +188,14 @@ private struct ConnectionIllustration: View {
         HStack(spacing: 14) {
             device("iphone")
             TimelineView(.animation(minimumInterval: 0.12, paused: reduceMotion)) { context in
-                let t = context.date.timeIntervalSinceReferenceDate * (active ? 2.2 : 1.1)
+                let t = context.date.timeIntervalSinceReferenceDate * 1.8
                 HStack(spacing: 7) {
                     ForEach(0..<5, id: \.self) { index in
                         let wave = (sin(t - Double(index) * 0.7) + 1) / 2
                         Circle()
                             .fill(LinearGradient(colors: [MobileTheme.violet, MobileTheme.sky], startPoint: .leading, endPoint: .trailing))
                             .frame(width: 7, height: 7)
-                            .opacity(reduceMotion ? 0.6 : 0.25 + 0.75 * wave)
+                            .opacity(reduceMotion ? 0.6 : (active ? 0.3 + 0.7 * wave : 0.15 + 0.45 * wave))
                             .scaleEffect(reduceMotion ? 1 : 0.75 + 0.35 * wave)
                     }
                 }
