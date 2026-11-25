@@ -101,6 +101,7 @@ struct InboxView: View {
         .refreshable { await model.refreshInbox() }
         .pullToRefreshLogo(isRefreshing: model.isRefreshing && !model.notifications.isEmpty)
         .navigationTitle("Inbox")
+        .accountButton()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {

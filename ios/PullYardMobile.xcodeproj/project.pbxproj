@@ -55,6 +55,7 @@
 		B1413CDBEF43100087FE0FC5 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDA54E3ED6B7AF977D609157 /* SignInView.swift */; };
 		B264EBAC9931CC0836F01300 /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2737E2F8BBDBAFD693B2442C /* SplashView.swift */; };
 		B3A6057C181D5CD52957DB81 /* Outbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84B06A7A58C99EBB0092CBDF /* Outbox.swift */; };
+		B3AAE7789CAB50805BDCBB31 /* AccountButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = CECF9D56E8C81A04CF10EBAF /* AccountButton.swift */; };
 		B7F186FA168D1403810754FA /* CIActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0C66F8D185CD5194B079AE /* CIActivity.swift */; };
 		BB2F3FACC07E463B7D375E51 /* PullYardMobileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 825268025F1A9721844AE423 /* PullYardMobileTests.swift */; };
 		C070820FA7D4B882307E041E /* LiveActivities.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E1C772FE09ECA4404FF0B3 /* LiveActivities.swift */; };
@@ -167,6 +168,7 @@
 		C19694612AE062E76BC181B6 /* AgentActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivity.swift; sourceTree = "<group>"; };
 		CDA54E3ED6B7AF977D609157 /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		CE425C9086597B1189109F0E /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
+		CECF9D56E8C81A04CF10EBAF /* AccountButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountButton.swift; sourceTree = "<group>"; };
 		D7C5751F2F7DBE975941D203 /* LocalCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCache.swift; sourceTree = "<group>"; };
 		D84E1D600AC299AC39B48E39 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		D8AAB054FDE6EB8D7BD4069E /* RepoViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoViews.swift; sourceTree = "<group>"; };
@@ -238,6 +240,7 @@
 		5CED7FE0F1DF8D51BBEB9287 /* PullYardMobile */ = {
 			isa = PBXGroup;
 			children = (
+				CECF9D56E8C81A04CF10EBAF /* AccountButton.swift */,
 				ECB22B19338EC4FCC87BFDAB /* AppModel.swift */,
 				7A695F8DF43A5AF140D29255 /* AppShortcuts.swift */,
 				4E906B2E7B97FCF8016A2F05 /* AppTheme.swift */,
@@ -457,6 +460,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B3AAE7789CAB50805BDCBB31 /* AccountButton.swift in Sources */,
 				499F195ABE538B364E01A5E0 /* AgentActivities.swift in Sources */,
 				2D62B9013668D115E229ED24 /* AgentActivity.swift in Sources */,
 				FF7A2D02F762BA8BCC2827C6 /* AgentAttachments.swift in Sources */,

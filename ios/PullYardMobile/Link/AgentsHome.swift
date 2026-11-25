@@ -17,6 +17,7 @@ struct AgentsHome: View {
             }
         }
         .animation(.snappy, value: showsSessions)
+        .accountButton()
     }
 }
 
@@ -101,7 +102,7 @@ private struct AgentsConnectView: View {
 
     private func openSettings() {
         router.popToRoot(.settings)
-        model.selectedTab = .settings
+        router.showSettings = true
     }
 
     private func step(_ number: Int, _ text: String) -> some View {

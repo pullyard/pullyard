@@ -76,6 +76,7 @@ struct OverviewView: View {
         }
         .pullToRefreshLogo(isRefreshing: pulling)
         .navigationTitle("Overview")
+        .accountButton()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { Task { await model.refreshOverview() } } label: { RefreshGlyph(isRefreshing: model.isRefreshing) }

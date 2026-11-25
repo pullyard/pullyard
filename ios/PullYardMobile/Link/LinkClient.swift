@@ -22,6 +22,7 @@ struct AgentChat: Identifiable, Equatable {
     var items: [PYLinkItem] = []
     var state = PYLinkSessionState(running: false, busy: false, status: nil, error: nil, pending: [])
     var aliases: [String: String] = [:]
+    var received = false
 
     func remoteID(_ displayID: String) -> String {
         aliases.first { $0.value == displayID }?.key ?? displayID
@@ -249,7 +250,7 @@ final class LinkClient: ObservableObject {
         if !attachments.isEmpty { message.attachments = attachments.map(\.payload) }
         channel?.send(json: message)
         AgentActivities.track(session)
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
+        do {
             chats[session]?.items.append(PYLinkItem(id: localID ?? "local-\(UUID().uuidString)", kind: "user", text: text, files: attachments.isEmpty ? nil : attachments.map { $0.isImage ? "image" : $0.name }))
         }
     }
@@ -536,6 +537,7 @@ final class LinkClient: ObservableObject {
             chat.items = composed.map { item in aliases[item.id].map { item.with(id: $0) } ?? item } + pendingLocals
             chat.aliases = aliases
             if let state = message.state { chat.state = state }
+            chat.received = true
             let inserted = chat.items.count - previous.items.count
             let stateMoved = previous.state.busy != chat.state.busy || previous.state.pending.count != chat.state.pending.count
             if !previous.items.isEmpty, inserted >= 0, inserted <= 3, inserted > 0 || stateMoved {

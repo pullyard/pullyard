@@ -5740,6 +5740,46 @@
           }
         }
       }
+    },
+    "No messages yet" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Пока нет сообщений"
+          }
+        }
+      }
+    },
+    "Write to the agent below." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Напишите агенту ниже."
+          }
+        }
+      }
+    },
+    "This session is asleep on your Mac. Send a message to wake it up." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сессия спит на Mac. Отправьте сообщение, чтобы разбудить её."
+          }
+        }
+      }
+    },
+    "Loading the chat…" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загружаю чат…"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

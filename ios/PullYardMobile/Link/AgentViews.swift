@@ -700,6 +700,8 @@ struct AgentChatView: View {
     @State private var confirmClose = false
     @State private var editingItem: PYLinkItem?
     @State private var outgoingID = "local-\(UUID().uuidString)"
+    @State private var chatProxy: ScrollViewProxy?
+    @State private var sentAt = Date.distantPast
     @Namespace private var flight
     @State private var draftBeforeEdit = ""
     @EnvironmentObject private var router: AppRouter
@@ -719,6 +721,9 @@ struct AgentChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
+                    if let chat, chat.items.isEmpty, chat.state.pending.isEmpty, !chat.state.busy {
+                        AgentChatPlaceholder(received: chat.received, running: chat.state.running, connected: link.isConnected)
+                    }
                     if let chat {
                         ForEach(chat.items) { item in
                             AgentItemView(item: item, flight: flight, pending: isPending(item, in: chat), onEdit: editAction(item, in: chat))
@@ -771,6 +776,7 @@ struct AgentChatView: View {
                 let count = chat?.items.count ?? 0
                 let delta = count - lastCount
                 lastCount = count
+                if Date().timeIntervalSince(sentAt) < 0.6 { return }
                 if userScrolling {
                     if !atBottom { unseen = true }
                     return
@@ -783,7 +789,10 @@ struct AgentChatView: View {
             }
             .onChange(of: scrollRequest) { _, _ in scrollToEnd(proxy, animated: true) }
             .onChange(of: chat?.state.busy, initial: true) { _, busy in busySince = busy == true ? (busySince ?? Date()) : nil }
-            .onAppear { scrollToEnd(proxy, animated: false) }
+            .onAppear {
+                chatProxy = proxy
+                scrollToEnd(proxy, animated: false)
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .overlay { AgentDropOverlay(active: dropTargeted) }
@@ -813,7 +822,6 @@ struct AgentChatView: View {
         }
         .navigationTitle(chat?.title ?? L("Agent"))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if chat?.state.busy == true {
@@ -929,14 +937,6 @@ struct AgentChatView: View {
             withTransaction(transaction) { proxy.scrollTo("bottom", anchor: .bottom) }
             if chat?.items.isEmpty == false { settled = true }
         }
-        if animated {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
-                guard !userScrolling, atBottom else { return }
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { proxy.scrollTo("bottom", anchor: .bottom) }
-            }
-        }
     }
 
     private var canSend: Bool {
@@ -994,43 +994,59 @@ struct AgentChatView: View {
                     .lineLimit(1...5)
                     .mobileFont(size: 16)
                     .padding(.vertical, 11)
-                    .background(alignment: .trailing) {
-                        Color.clear.modifier(Flight(id: outgoingID, namespace: flight))
+                    .background(alignment: .bottomTrailing) {
+                        Color.clear.frame(width: 1, height: 1).modifier(Flight(id: outgoingID, namespace: flight))
                     }
-                Button {
-                    let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard canSend else { return }
-                    if let editingItem { submitEdit(editingItem); return }
-                    let id = outgoingID
-                    withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
-                        link.send(text, attachments: attachments, localID: id, to: session)
-                        draft = ""
-                        attachments = []
-                        outgoingID = "local-\(UUID().uuidString)"
+                    .padding(.trailing, showSend ? 0 : 12)
+                if showSend {
+                    Button(action: sendDraft) {
+                        Image(systemName: editingItem == nil ? "arrow.up" : "checkmark")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                            .background(MobileTheme.accentFill, in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
                     }
-                    scrollRequest += 1
-                } label: {
-                    Image(systemName: editingItem == nil ? "arrow.up" : "checkmark")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 34, height: 34)
-                        .background(canSend ? MobileTheme.accentFill : MobileTheme.slate.opacity(0.35), in: Circle())
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
+                    .buttonStyle(.pyPlain)
+                    .disabled(!link.isConnected)
+                    .opacity(link.isConnected ? 1 : 0.5)
+                    .accessibilityLabel("Send")
+                    .transition(.scale(scale: 0.4).combined(with: .opacity))
                 }
-                .buttonStyle(.pyPlain)
-                .disabled(!canSend)
-                .accessibilityLabel("Send")
             }
             .padding(.horizontal, 4)
+            .animation(.spring(response: 0.32, dampingFraction: 0.72), value: showSend)
         }
         .pyGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous), fallback: MobileTheme.card)
         .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(focused ? MobileTheme.accent.opacity(0.35) : MobileTheme.line))
         .padding(.horizontal, 12).padding(.vertical, 8)
         .animation(.snappy, value: attachments.count)
         .animation(.easeOut(duration: 0.15), value: focused)
-        .animation(.easeOut(duration: 0.15), value: canSend)
         .animation(.snappy, value: editingItem?.id)
+    }
+
+    private var showSend: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (editingItem == nil && !attachments.isEmpty)
+    }
+
+    private func sendDraft() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canSend else { return }
+        if let editingItem { submitEdit(editingItem); return }
+        let id = outgoingID
+        sentAt = Date()
+        followUntil = Date().addingTimeInterval(0.6)
+        atBottom = true
+        unseen = false
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) {
+            link.send(text, attachments: attachments, localID: id, to: session)
+            draft = ""
+            attachments = []
+            outgoingID = "local-\(UUID().uuidString)"
+            chatProxy?.scrollTo("bottom", anchor: .bottom)
+        }
+        lastCount = chat?.items.count ?? lastCount
     }
 
     private func append(_ attachment: AgentAttachment) {
@@ -1053,13 +1069,35 @@ struct AgentChatView: View {
     }
 }
 
+private struct AgentChatPlaceholder: View {
+    let received: Bool
+    let running: Bool
+    let connected: Bool
+
+    var body: some View {
+        VStack(spacing: 14) {
+            if !received {
+                PullYardLoader(title: connected ? "Loading the chat…" : "Connecting to your Mac…", size: 64)
+            } else {
+                PullYardLogoMark(progress: 1, size: 64)
+                Text("No messages yet").mobileFont(size: 18, weight: .regular, design: .serif).foregroundStyle(MobileTheme.ink)
+                Text(running ? "Write to the agent below." : "This session is asleep on your Mac. Send a message to wake it up.")
+                    .mobileFont(size: 14).foregroundStyle(MobileTheme.muted).multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 60)
+        .transition(.opacity)
+    }
+}
+
 private struct Flight: ViewModifier {
     let id: String
     let namespace: Namespace.ID?
 
     func body(content: Content) -> some View {
         if let namespace {
-            content.matchedGeometryEffect(id: id, in: namespace, properties: .frame, anchor: .bottomTrailing)
+            content.matchedGeometryEffect(id: id, in: namespace, properties: .position, anchor: .bottomTrailing)
         } else {
             content
         }

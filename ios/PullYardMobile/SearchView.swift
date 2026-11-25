@@ -106,6 +106,7 @@ struct SearchView: View {
         .refreshable { if !activeQuery.isEmpty { await search(activeQuery) } }
         .pullToRefreshLogo(isRefreshing: isSearching && !results.isEmpty)
         .navigationTitle("Search")
+        .accountButton()
         .searchable(text: $query, prompt: "Pull requests, repos, authors")
         .searchSuggestions {
             if trimmedQuery.count >= 1 {

@@ -40,6 +40,7 @@ final class AppRouter: ObservableObject {
     @Published var searchPath: [Route] = []
     @Published var settingsPath: [Route] = []
     @Published var agentsPath: [Route] = []
+    @Published var showSettings = false
 
     private struct Snapshot: Codable { var pulls: [Route]; var projects: [Route]?; var inbox: [Route]; var search: [Route] }
 
@@ -211,7 +212,10 @@ struct RootView: View {
             return
         }
         guard let route = DeepLink.route(from: url) else { return }
-        if model.selectedTab == .settings { model.selectedTab = .pulls }
+        if model.selectedTab == .settings || router.showSettings {
+            router.showSettings = false
+            if model.selectedTab == .settings { model.selectedTab = .pulls }
+        }
         router.open(route, in: model.selectedTab)
     }
 }
@@ -237,6 +241,9 @@ struct MainTabsView: View {
 
     var body: some View {
         tabs
+        .sheet(isPresented: $router.showSettings) {
+            settingsStack.pySheetStyle()
+        }
         .onAppear {
             guard !restored else { return }
             restored = true
@@ -265,7 +272,6 @@ struct MainTabsView: View {
                     .badge(model.unreadCount)
                 Tab("Agents", systemImage: "wand.and.stars", value: AppTab.agents) { agentsStack }
                     .badge(agentBadge.count)
-                Tab("Settings", systemImage: "gearshape", value: AppTab.settings) { settingsStack }
                 Tab(value: AppTab.search, role: .search) { searchStack }
             }
             .pyTabBarMinimizeOnScroll()
@@ -289,9 +295,6 @@ struct MainTabsView: View {
                     .tabItem { Label("Agents", systemImage: "wand.and.stars") }
                     .tag(AppTab.agents)
                     .badge(agentBadge.count)
-                settingsStack
-                    .tabItem { Label("Settings", systemImage: "gearshape") }
-                    .tag(AppTab.settings)
             }
         }
     }
@@ -301,7 +304,17 @@ struct MainTabsView: View {
     private var inboxStack: some View { NavigationStack(path: $router.inboxPath) { InboxView().routeDestinations() } }
     private var searchStack: some View { NavigationStack(path: $router.searchPath) { SearchView().routeDestinations() } }
     private var agentsStack: some View { NavigationStack(path: $router.agentsPath) { AgentsHome().routeDestinations() } }
-    private var settingsStack: some View { NavigationStack(path: $router.settingsPath) { SettingsView().routeDestinations() } }
+    private var settingsStack: some View {
+        NavigationStack(path: $router.settingsPath) {
+            SettingsView()
+                .routeDestinations()
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { router.showSettings = false }.fontWeight(.semibold)
+                    }
+                }
+        }
+    }
 
     private var tabSelection: Binding<AppTab> {
         Binding {

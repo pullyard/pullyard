@@ -100,7 +100,8 @@ final class AppModel: ObservableObject {
         self.feedback = feedback ?? FeedbackCenter()
         self.isDemo = isDemo
         self.makeClient = makeClient
-        selectedTab = defaults.string(forKey: "mobile.selectedTab").flatMap(AppTab.init(rawValue:)) ?? .pulls
+        let storedTab = defaults.string(forKey: "mobile.selectedTab").flatMap(AppTab.init(rawValue:)) ?? .pulls
+        selectedTab = storedTab == .settings ? .pulls : storedTab
         queue = defaults.string(forKey: "mobile.queue").flatMap(PRQueue.init(rawValue:)) ?? .needsMyReview
         restoreSession()
     }

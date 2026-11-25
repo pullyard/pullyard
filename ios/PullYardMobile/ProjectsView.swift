@@ -113,6 +113,7 @@ struct ProjectsView: View {
         .refreshable { await model.refreshProjects() }
         .pullToRefreshLogo(isRefreshing: model.projectsState == .loading && !all.isEmpty)
         .navigationTitle("Projects")
+        .accountButton()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { Task { await model.refreshProjects() } } label: { RefreshGlyph(isRefreshing: model.projectsState == .loading) }

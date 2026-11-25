@@ -24,6 +24,7 @@ struct PYLinkBridge {
             resume(message, client: client)
         case "subscribe":
             guard let session = message.session else { return }
+            tab(session)?.loadPendingHistory()
             if client.subscriptions.insert(session).inserted || message.text == "reset" {
                 client.sentItems[session] = nil
                 client.sentOrder[session] = nil
@@ -34,6 +35,7 @@ struct PYLinkBridge {
             if let session = message.session { client.subscriptions.remove(session) }
         case "send":
             guard let tab = tab(message.session), let chat = tab.chat else { return }
+            tab.loadPendingHistory()
             let text = message.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let attachments = message.attachments ?? []
             guard !text.isEmpty || !attachments.isEmpty else { return }
@@ -151,6 +153,7 @@ struct PYLinkBridge {
             if app.claude.sessionsByID[id] == nil { await app.claude.reloadProjects(force: true) }
             let tab: ClaudeTab
             if let open = app.claude.tabs.first(where: { $0.sessionId == id && $0.chat != nil }) {
+                open.loadPendingHistory()
                 tab = open
             } else if let info = app.claude.sessionsByID[id] {
                 guard FileManager.default.fileExists(atPath: info.cwd) else { return fail("The folder of this session no longer exists on \(server.desktopName).") }
