@@ -574,113 +574,186 @@ impl PrPage {
         }
     }
 
+    fn check_row(self: &Rc<Self>, c: CheckContext, required: bool) -> gtk::ListBoxRow {
+        let row = gtk::ListBoxRow::new();
+        let b = hbox(10);
+        margins(&b, 2, 0, 2, 0);
+        b.append(&outcome_icon(c.outcome()));
+        let col = vbox(1);
+        col.set_hexpand(true);
+        let title_row = hbox(6);
+        title_row.append(&ellipsized(&c.title(), &["sy-text"]));
+        if required {
+            title_row.append(&status_chip("Required", "slate", None));
+        }
+        col.append(&title_row);
+        let mut parts = vec![match c.outcome() {
+            CheckOutcome::Success => "Successful".to_string(),
+            CheckOutcome::Failure => "Failed".into(),
+            CheckOutcome::Pending => {
+                if c.status.as_deref() == Some("QUEUED") {
+                    "Queued".into()
+                } else {
+                    "In progress".into()
+                }
+            }
+            CheckOutcome::Neutral => {
+                if c.conclusion.as_deref() == Some("CANCELLED") {
+                    "Cancelled".into()
+                } else {
+                    "Neutral".into()
+                }
+            }
+            CheckOutcome::Skipped => "Skipped".into(),
+        }];
+        if let Some(d) = c.duration() {
+            parts.push(d);
+        }
+        if let Some(d) = c.description.clone().filter(|d| !d.is_empty()) {
+            parts.push(d);
+        }
+        col.append(&ellipsized(&parts.join(" · "), &["sy-muted", "sy-small"]));
+        b.append(&col);
+        if c.is_actions_job() && c.outcome() != CheckOutcome::Pending && c.outcome() != CheckOutcome::Skipped {
+            let log = button("Log");
+            log.add_css_class("flat");
+            let m = self.model.clone();
+            let cc = c.clone();
+            let failed = crate::ci_fix::is_fixable(&c);
+            log.connect_clicked(move |_| {
+                let fix: Option<Rc<dyn Fn(Option<String>)>> = if failed {
+                    let m = m.clone();
+                    let id = cc.id();
+                    Some(Rc::new(move |text: Option<String>| match text {
+                        Some(t) => fix_claude::show_ci_with_log(m.clone(), id.clone(), t),
+                        None => fix_claude::show_ci(m.clone(), Some(id.clone())),
+                    }))
+                } else {
+                    None
+                };
+                sheets::job_log(m.api.clone(), m.r.repo.clone(), cc.clone(), fix);
+            });
+            b.append(&log);
+        }
+        if crate::ci_fix::is_fixable(&c) {
+            let fix = icon_label_button("sy-sparkles-symbolic", "Fix with agent");
+            fix.add_css_class("flat");
+            fix.set_tooltip_text(Some("Send this check's failure log to a new agent session"));
+            let m = self.model.clone();
+            let id = c.id();
+            fix.connect_clicked(move |_| fix_claude::show_ci(m.clone(), Some(id.clone())));
+            b.append(&fix);
+        }
+        if let Some(link) = c.link() {
+            let open = icon_button("sy-external-symbolic", "Open in browser");
+            open.connect_clicked(move |_| util::open_url(&link));
+            b.append(&open);
+        }
+        row.set_child(Some(&b));
+        row
+    }
+
     fn render_checks(self: &Rc<Self>, l: &gtk::ListBox, pr: &PullRequestDetail) {
         l.remove_all();
-        let mut checks = pr.checks();
-        checks.sort_by(|a, b| (a.outcome(), a.title()).cmp(&(b.outcome(), b.title())));
+        let checks = pr.checks();
         let failed_runs: std::collections::HashSet<i64> = checks.iter().filter(|c| c.outcome() == CheckOutcome::Failure).filter_map(|c| c.run_id()).collect();
         if checks.is_empty() {
             let row = gtk::ListBoxRow::new();
             row.set_child(Some(&label_with("No checks for the latest commit", &["sy-muted"])));
             l.append(&row);
         }
-        if !failed_runs.is_empty() && self.model.can_write() {
-            let b = icon_label_button("view-refresh-symbolic", &format!("Re-run failed jobs ({} workflow)", failed_runs.len()));
-            b.add_css_class("flat");
-            b.set_halign(gtk::Align::Start);
-            let m = self.model.clone();
-            let n = failed_runs.len() as i64;
-            b.connect_clicked(move |_| {
-                let m = m.clone();
-                dialogs::confirm(
-                    "Re-run failed jobs?",
-                    Some(format!("GitHub re-runs only the failed jobs of {} on the latest commit.", util::plural(n, "workflow run", "workflow runs")).as_str()),
-                    "Re-run",
-                    false,
-                    move || {
-                        let m = m.clone();
-                        crate::rt::spawn_local(async move {
-                            m.rerun_failed().await;
-                        });
-                    },
-                );
-            });
+        let rules = self.model.rules_state.borrow().clone();
+        let breakdown = merge_readiness::check_breakdown(&checks, rules.rules());
+        let required_ids: std::collections::HashSet<String> = if breakdown.required_known { breakdown.required.iter().map(|c| c.id()).collect() } else { Default::default() };
+        if !checks.is_empty() {
+            let failed = checks.iter().filter(|c| c.outcome() == CheckOutcome::Failure).count();
+            let pending = checks.iter().filter(|c| c.outcome() == CheckOutcome::Pending).count();
+            let passed = checks.iter().filter(|c| c.outcome() == CheckOutcome::Success).count();
+            let summary = hbox(6);
+            margins(&summary, 4, 0, 4, 0);
+            if failed > 0 {
+                summary.append(&status_chip(&format!("{failed} failing"), "red", Some("sy-x-circle-symbolic")));
+            }
+            if pending > 0 {
+                summary.append(&status_chip(&format!("{pending} running"), "amber", Some("sy-clock-symbolic")));
+            }
+            summary.append(&status_chip(&format!("{passed} passing"), "green", Some("sy-check-circle-symbolic")));
+            if breakdown.required_known && !breakdown.required.is_empty() {
+                let ok = breakdown.required.iter().filter(|c| c.outcome() == CheckOutcome::Success).count();
+                summary.append(&status_chip(&format!("Required {ok}/{}", breakdown.required.len()), if ok == breakdown.required.len() { "green" } else { "slate" }, None));
+            }
+            summary.append(&spacer());
+            if !failed_runs.is_empty() && self.model.can_write() {
+                let b = icon_label_button("view-refresh-symbolic", "Re-run failed");
+                b.add_css_class("flat");
+                b.set_tooltip_text(Some(&format!("Re-run failed jobs ({})", util::plural(failed_runs.len() as i64, "workflow", "workflows"))));
+                let m = self.model.clone();
+                let n = failed_runs.len() as i64;
+                b.connect_clicked(move |_| {
+                    let m = m.clone();
+                    dialogs::confirm(
+                        "Re-run failed jobs?",
+                        Some(format!("GitHub re-runs only the failed jobs of {} on the latest commit.", util::plural(n, "workflow run", "workflow runs")).as_str()),
+                        "Re-run",
+                        false,
+                        move || {
+                            let m = m.clone();
+                            crate::rt::spawn_local(async move {
+                                m.rerun_failed().await;
+                            });
+                        },
+                    );
+                });
+                summary.append(&b);
+            }
             let row = gtk::ListBoxRow::new();
-            row.set_child(Some(&b));
+            row.set_activatable(false);
+            row.set_child(Some(&summary));
             l.append(&row);
         }
-        for c in checks {
-            let row = gtk::ListBoxRow::new();
-            let b = hbox(10);
-            margins(&b, 2, 0, 2, 0);
-            b.append(&outcome_icon(c.outcome()));
-            let col = vbox(1);
-            col.set_hexpand(true);
-            col.append(&ellipsized(&c.workflow_name().map(|w| format!("{w} / {}", c.title())).unwrap_or_else(|| c.title()), &["sy-text"]));
-            let mut parts = vec![match c.outcome() {
-                CheckOutcome::Success => "Successful".to_string(),
-                CheckOutcome::Failure => "Failed".into(),
-                CheckOutcome::Pending => {
-                    if c.status.as_deref() == Some("QUEUED") {
-                        "Queued".into()
-                    } else {
-                        "In progress".into()
-                    }
+        for group in merge_readiness::group_checks(&checks) {
+            let key = format!("{}|{}", self.model.r.title(), group.name);
+            let open = CHECK_GROUPS.with(|g| g.borrow().get(&key).copied()).unwrap_or_else(|| group.expanded_by_default());
+            let head = gtk::Button::new();
+            head.add_css_class("flat");
+            head.add_css_class("check-group-head");
+            let hb = hbox(8);
+            let chevron = icon(if open { "pan-down-symbolic" } else { "pan-end-symbolic" }, 12);
+            hb.append(&chevron);
+            hb.append(&label_with(&group.name, &["sy-heading", "sy-text"]));
+            let (failed, pending) = (group.failed(), group.pending());
+            let (text, color) = if failed > 0 {
+                (format!("{failed} failing"), "red")
+            } else if pending > 0 {
+                (format!("{pending} running"), "amber")
+            } else {
+                (format!("{} passing", group.checks.len()), "green")
+            };
+            hb.append(&status_chip(&text, color, None));
+            head.set_child(Some(&hb));
+            set_expanded(&head, open);
+            set_label(&head, &format!("{}, {text}", group.name));
+            let head_row = gtk::ListBoxRow::new();
+            head_row.set_activatable(false);
+            head_row.set_child(Some(&head));
+            l.append(&head_row);
+            let mut rows = vec![];
+            for c in group.checks {
+                let required = required_ids.contains(&c.id());
+                let row = self.check_row(c, required);
+                row.set_visible(open);
+                l.append(&row);
+                rows.push(row);
+            }
+            head.connect_clicked(move |b| {
+                let show = !rows.first().is_some_and(|r| r.is_visible());
+                for r in &rows {
+                    r.set_visible(show);
                 }
-                CheckOutcome::Neutral => {
-                    if c.conclusion.as_deref() == Some("CANCELLED") {
-                        "Cancelled".into()
-                    } else {
-                        "Neutral".into()
-                    }
-                }
-                CheckOutcome::Skipped => "Skipped".into(),
-            }];
-            if let Some(d) = c.duration() {
-                parts.push(d);
-            }
-            if let Some(d) = c.description.clone().filter(|d| !d.is_empty()) {
-                parts.push(d);
-            }
-            col.append(&ellipsized(&parts.join(" · "), &["sy-muted", "sy-small"]));
-            b.append(&col);
-            if c.is_actions_job() && c.outcome() != CheckOutcome::Pending && c.outcome() != CheckOutcome::Skipped {
-                let log = button("Log");
-                log.add_css_class("flat");
-                let m = self.model.clone();
-                let cc = c.clone();
-                let failed = crate::ci_fix::is_fixable(&c);
-                log.connect_clicked(move |_| {
-                    let fix: Option<Rc<dyn Fn(Option<String>)>> = if failed {
-                        let m = m.clone();
-                        let id = cc.id();
-                        Some(Rc::new(move |text: Option<String>| match text {
-                            Some(t) => fix_claude::show_ci_with_log(m.clone(), id.clone(), t),
-                            None => fix_claude::show_ci(m.clone(), Some(id.clone())),
-                        }))
-                    } else {
-                        None
-                    };
-                    sheets::job_log(m.api.clone(), m.r.repo.clone(), cc.clone(), fix);
-                });
-                b.append(&log);
-            }
-            if crate::ci_fix::is_fixable(&c) {
-                let fix = icon_label_button("sy-sparkles-symbolic", "Fix with agent");
-                fix.add_css_class("flat");
-                fix.set_tooltip_text(Some("Send this check's failure log to a new Claude Code session"));
-                let m = self.model.clone();
-                let id = c.id();
-                fix.connect_clicked(move |_| fix_claude::show_ci(m.clone(), Some(id.clone())));
-                b.append(&fix);
-            }
-            if let Some(link) = c.link() {
-                let open = icon_button("sy-external-symbolic", "Open in browser");
-                open.connect_clicked(move |_| util::open_url(&link));
-                b.append(&open);
-            }
-            row.set_child(Some(&b));
-            l.append(&row);
+                chevron.set_icon_name(Some(if show { "pan-down-symbolic" } else { "pan-end-symbolic" }));
+                set_expanded(b, show);
+                CHECK_GROUPS.with(|g| g.borrow_mut().insert(key.clone(), show));
+            });
         }
         let hidden = self.model.hidden_check_count();
         if hidden > 0 {
@@ -1124,6 +1197,7 @@ pub fn merge_status(pr: &PullRequestDetail, requirements: &[MergeRequirement]) -
 
 thread_local! {
     static REQUIREMENTS_EXPANDED: Cell<bool> = const { Cell::new(true) };
+    static CHECK_GROUPS: RefCell<std::collections::HashMap<String, bool>> = RefCell::new(std::collections::HashMap::new());
 }
 
 pub fn merge_status_bar(model: &Rc<PrModel>, pr: &PullRequestDetail, on_merge: Rc<dyn Fn()>, on_request_review: Option<Rc<dyn Fn()>>) -> Option<gtk::Box> {

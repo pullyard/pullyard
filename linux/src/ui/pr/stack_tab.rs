@@ -452,7 +452,7 @@ impl StackTab {
             holder.append(&label_with(&key, &["sy-mono", "sy-muted", "sy-small"]));
         }
         if self.sessions.borrow().contains_key(&number) {
-            holder.append(&tooltip(colored_icon("sy-sparkles-symbolic", 12, "coral"), "Has a Claude Code session"));
+            holder.append(&tooltip(colored_icon("sy-sparkles-symbolic", 12, "coral"), "Has an agent session"));
         }
         holder.append(&chip(&node.head_ref_name, if current { "violet" } else { "slate" }, Some("sy-branch-symbolic"), true));
         holder.append(&self.note_button(number));
@@ -661,7 +661,7 @@ impl StackTab {
             row.append(&l);
             let link = ellipsized(&s.title, &["fg-accent", "sy-small"]);
             link.set_hexpand(true);
-            link.set_tooltip_text(Some("Resume Claude Code session"));
+            link.set_tooltip_text(Some("Resume agent session"));
             on_click_widget(&link, move || resume(&s));
             row.append(&link);
             card.append(&row);

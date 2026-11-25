@@ -512,6 +512,9 @@ splitbutton.tint-coral > button, splitbutton.tint-coral > menubutton > button { 
 splitbutton.tint-coral > button:hover, splitbutton.tint-coral > menubutton > button:hover { background-color: shade(@sy_coral_fill, 1.06); }
 splitbutton.tint-coral > separator { background-color: alpha(@sy_on_coral, 0.35); }
 button.merge-blocked { color: @sy_muted; }
+button.check-group-head { padding: 4px 6px; }
+button.notif-done { opacity: 0; transition: opacity 120ms ease-out; }
+list.sy-list > row:hover button.notif-done, list.sy-list > row:selected button.notif-done, button.notif-done:focus { opacity: 1; }
 button.merge-anyway { box-shadow: inset 0 0 0 1px @sy_red; color: @sy_red; }
 button.sy-section-toggle { padding: 0; min-height: 0; margin: 0; background: none; box-shadow: none; }
 button.sy-section-toggle .sy-section-title { margin-right: 0; }

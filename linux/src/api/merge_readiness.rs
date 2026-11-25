@@ -215,6 +215,45 @@ pub fn check_breakdown(checks: &[CheckContext], rules: Option<&BranchRules>) -> 
     b
 }
 
+#[derive(Debug, Clone)]
+pub struct CheckGroup {
+    pub name: String,
+    pub checks: Vec<CheckContext>,
+}
+
+impl CheckGroup {
+    pub fn failed(&self) -> usize {
+        self.checks.iter().filter(|c| c.outcome() == CheckOutcome::Failure).count()
+    }
+
+    pub fn pending(&self) -> usize {
+        self.checks.iter().filter(|c| c.outcome() == CheckOutcome::Pending).count()
+    }
+
+    pub fn expanded_by_default(&self) -> bool {
+        self.failed() > 0 || self.pending() > 0
+    }
+}
+
+pub fn group_checks(checks: &[CheckContext]) -> Vec<CheckGroup> {
+    let mut groups: Vec<CheckGroup> = vec![];
+    for c in checks {
+        let name = c.workflow_name().unwrap_or_else(|| "Other checks".to_string());
+        match groups.iter_mut().find(|g| g.name == name) {
+            Some(g) => g.checks.push(c.clone()),
+            None => groups.push(CheckGroup { name, checks: vec![c.clone()] }),
+        }
+    }
+    for g in &mut groups {
+        g.checks.sort_by(|a, b| (a.outcome(), a.title()).cmp(&(b.outcome(), b.title())));
+    }
+    groups.sort_by(|a, b| {
+        let rank = |g: &CheckGroup| if g.failed() > 0 { 0 } else if g.pending() > 0 { 1 } else { 2 };
+        (rank(a), a.name.to_lowercase()).cmp(&(rank(b), b.name.to_lowercase()))
+    });
+    groups
+}
+
 fn count(n: usize, noun: &str) -> String {
     if n == 1 {
         format!("1 {noun}")
@@ -394,6 +433,30 @@ fn conversation_requirement(pr: &PullRequestDetail, rules: Option<&BranchRules>,
 
 #[cfg(test)]
 mod tests {
+
+    fn workflow_run(workflow: &str, name: &str, conclusion: Option<&str>) -> CheckContext {
+        let mut n = run(name, conclusion, None);
+        n["checkSuite"] = json!({ "workflowRun": { "databaseId": 7, "workflow": { "name": workflow } } });
+        serde_json::from_value(n).unwrap()
+    }
+
+    #[test]
+    fn checks_group_by_workflow_failures_first() {
+        let checks = vec![
+            workflow_run("Lint", "eslint", Some("SUCCESS")),
+            workflow_run("CI", "unit", Some("SUCCESS")),
+            workflow_run("CI", "e2e", Some("FAILURE")),
+            workflow_run("Deploy", "preview", None),
+        ];
+        let groups = group_checks(&checks);
+        let names: Vec<&str> = groups.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names, vec!["CI", "Deploy", "Lint"]);
+        assert_eq!(groups[0].checks[0].title(), "e2e");
+        assert!(groups[0].expanded_by_default());
+        assert!(groups[1].expanded_by_default());
+        assert!(!groups[2].expanded_by_default());
+    }
+
     use super::*;
     use serde_json::{json, Value};
 
