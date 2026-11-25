@@ -212,6 +212,38 @@ struct DetailColumn: View {
     }
 }
 
+struct DetachedRouteWindow: View {
+    let route: Route
+    @Environment(AppModel.self) private var app
+    @State private var path: [Route] = []
+
+    var body: some View {
+        Group {
+            if app.phase == .loggedIn {
+                NavigationStack(path: $path) {
+                    RouteView(route: route, detached: true)
+                        .navigationDestination(for: Route.self) { RouteView(route: $0, detached: true) }
+                }
+            } else {
+                PYEmptyState(title: "PullYard is locked", message: "Open the main window to sign in or unlock.")
+            }
+        }
+        .surface(.panel)
+        .frame(minWidth: 720, minHeight: 520)
+    }
+}
+
+struct OpenInNewWindowCommand: View {
+    let app: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Open in New Window") { if let route = app.frontRoute { openWindow(value: route) } }
+            .keyboardShortcut(AppCommand.newWindow)
+            .disabled(app.frontRoute == nil || app.section == .claude || app.phase != .loggedIn)
+    }
+}
+
 struct SidebarToggleButton: View {
     @Binding var hidden: Bool
 
@@ -274,6 +306,7 @@ struct ColumnResizeHandle: View {
 
 struct RouteView: View {
     let route: Route
+    var detached = false
     @Environment(AppModel.self) private var app
 
     var body: some View {
@@ -286,7 +319,7 @@ struct RouteView: View {
             case .commit(let repo, let sha): CommitDetailView(repo: repo, sha: sha)
             }
         }
-        .environment(\.liveFront, app.frontRoute == route)
+        .environment(\.liveFront, detached || app.frontRoute == route)
         .environment(\.detailKey, "\(route)")
     }
 }

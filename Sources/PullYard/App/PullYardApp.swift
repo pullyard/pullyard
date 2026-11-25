@@ -54,6 +54,9 @@ struct PullYardApp: App {
         }
         .defaultSize(width: 1380, height: 860)
         .commands {
+            CommandGroup(after: .newItem) {
+                OpenInNewWindowCommand(app: app)
+            }
             ToolbarCommands()
             SidebarCommands()
             CommandMenu("Pull Request") {
@@ -118,6 +121,16 @@ struct PullYardApp: App {
                 HelpCommands(app: app)
             }
         }
+
+        WindowGroup("Detail", for: Route.self) { $route in
+            ThemedRoot {
+                if let route {
+                    DetachedRouteWindow(route: route).environment(app)
+                }
+            }
+        }
+        .defaultSize(width: 1120, height: 820)
+        .commandsRemoved()
 
         MenuBarExtra(isInserted: Binding(get: { app.showMenuBar }, set: { app.showMenuBar = $0 })) {
             ThemedRoot { MenuBarView().environment(app) }

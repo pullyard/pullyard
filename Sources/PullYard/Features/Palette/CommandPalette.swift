@@ -535,6 +535,11 @@ struct CommandPalette: View {
                 if !app.detailPath.isEmpty { app.detailPath.removeLast() }
             })
         }
+        if let route = app.frontRoute, app.section != .claude {
+            out.append(PaletteCommand(id: "new-window", section: .actions, icon: "macwindow.badge.plus", tint: .syMuted, title: "Open in New Window", detail: "Current item", shortcut: AppCommand.newWindow.glyph, keywords: "window detach separate") {
+                openWindow(value: route)
+            })
+        }
         if let url = currentURL {
             out.append(PaletteCommand(id: "browser", section: .actions, icon: "safari", tint: .sySky, title: "Open in Browser", detail: "Current item", keywords: "web github") {
                 openInBrowser(url)

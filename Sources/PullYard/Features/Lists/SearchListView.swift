@@ -670,6 +670,7 @@ struct ItemContextMenu: View {
         Button("Mark as Seen") { queue.markSeen(item.ref) }
             .disabled(!queue.hasNews(item))
         Divider()
+        OpenItemInWindowButton(route: item.route)
         Button("Open in Browser") { openInBrowser(item.url) }
         Button("Copy Link") { copyToPasteboard(item.url) }
         Button("Copy Short Link") { app.copyShortLink(item.ref) }
@@ -856,5 +857,14 @@ struct ItemRow: View {
                 }
             }
         }
+    }
+}
+
+struct OpenItemInWindowButton: View {
+    let route: Route
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Open in New Window") { openWindow(value: route) }
     }
 }
