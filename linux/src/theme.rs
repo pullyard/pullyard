@@ -508,6 +508,11 @@ button.status-chip-button { padding: 0; min-height: 0; min-width: 0; border-radi
 .next-card { background-color: @sy_raised; border: 1px solid @sy_line; border-radius: 10px; padding: 12px 14px; }
 button.next-card:hover { background-color: shade(@sy_raised, 0.98); border-color: @sy_line_strong; }
 .news-dot { background-color: @sy_coral; border-radius: 999px; min-width: 6px; min-height: 6px; }
+splitbutton.tint-coral > button, splitbutton.tint-coral > menubutton > button { background-color: @sy_coral_fill; color: @sy_on_coral; }
+splitbutton.tint-coral > button:hover, splitbutton.tint-coral > menubutton > button:hover { background-color: shade(@sy_coral_fill, 1.06); }
+splitbutton.tint-coral > separator { background-color: alpha(@sy_on_coral, 0.35); }
+button.merge-blocked { color: @sy_muted; }
+button.merge-anyway { box-shadow: inset 0 0 0 1px @sy_red; color: @sy_red; }
 button.sy-section-toggle { padding: 0; min-height: 0; margin: 0; background: none; box-shadow: none; }
 button.sy-section-toggle .sy-section-title { margin-right: 0; }
 button.sy-today { padding: 10px 12px; }

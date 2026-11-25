@@ -423,6 +423,57 @@ pub fn toast_with(msg: &str, button: &str, f: impl Fn() + 'static) {
     }
 }
 
+pub fn toast_action(msg: &str, button: &str, f: impl Fn() + 'static) {
+    if let Some(t) = try_get().and_then(|a| a.toasts.borrow().clone()) {
+        let toast = adw::Toast::new(msg);
+        toast.set_timeout(5);
+        toast.set_button_label(Some(button));
+        toast.connect_button_clicked(move |_| f());
+        t.add_toast(toast);
+    }
+}
+
+pub fn toast_undoable(msg: &str, commit: impl FnOnce() + 'static, undo: impl FnOnce() + 'static) {
+    let Some(t) = try_get().and_then(|a| a.toasts.borrow().clone()) else {
+        commit();
+        return;
+    };
+    let toast = adw::Toast::new(msg);
+    toast.set_timeout(5);
+    toast.set_button_label(Some("Undo"));
+    let undone = Rc::new(Cell::new(false));
+    let u = undone.clone();
+    let undo = RefCell::new(Some(undo));
+    toast.connect_button_clicked(move |_| {
+        u.set(true);
+        if let Some(f) = undo.borrow_mut().take() {
+            f();
+        }
+    });
+    let commit = RefCell::new(Some(commit));
+    toast.connect_dismissed(move |_| {
+        if !undone.get() {
+            if let Some(f) = commit.borrow_mut().take() {
+                f();
+            }
+        }
+    });
+    t.add_toast(toast);
+}
+
+pub fn next_review(current: Option<&ItemRef>) -> Option<Route> {
+    let a = try_get()?;
+    let s = a.state.borrow();
+    s.review_requests.iter().map(|i| i.route()).find(|r| !matches!((r, current), (Route::Pr(x), Some(c)) if x == c))
+}
+
+pub fn open_next_review(current: Option<&ItemRef>) {
+    match next_review(current) {
+        Some(r) => open(r, false),
+        None => toast("No more reviews waiting"),
+    }
+}
+
 pub fn quit() {
     if let Some(a) = try_get() {
         a.flush_drafts();

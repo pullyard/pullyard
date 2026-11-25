@@ -1084,6 +1084,10 @@ impl PrModel {
         self.run(true, move |api| async move { api.request_reviewers(&r, &logins).await }).await
     }
 
+    pub async fn restore_branch(self: Rc<Self>, repo: String, branch: String, sha: String) -> bool {
+        self.run(true, move |api| async move { api.create_branch(&repo, &branch, &sha).await }).await
+    }
+
     pub async fn delete_branch(self: Rc<Self>) -> bool {
         let Some(pr) = self.pr.borrow().clone() else { return false };
         let Some(head) = pr.head_repository.clone() else { return false };

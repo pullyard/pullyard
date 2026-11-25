@@ -145,6 +145,7 @@ impl PrPage {
                     let pr = me.model.pr.borrow().clone();
                     if let Some(pr) = pr {
                         me.render_banners(&pr);
+                        me.render_header();
                     }
                 }
                 true
@@ -713,6 +714,9 @@ impl PrPage {
         meta.append(&branch_chip(&pr.head_ref_name, "violet"));
         meta.append(&diff_stat(pr.additions, pr.deletions));
         meta.append(&spacer());
+        if let Some(chip) = agent_chip(&self.model.r) {
+            meta.append(&chip);
+        }
         let created = label_with(&util::rel(Some(pr.created_at)), &["sy-muted"]);
         created.set_tooltip_text(Some(&util::full_date(pr.created_at)));
         meta.append(&created);
@@ -805,10 +809,6 @@ impl PrPage {
         }
         self.ci_session.set(fix_claude::ci_session(&self.model.r).map(|(_, s)| s));
         let m = self.model.clone();
-        if let Some(b) = fix_claude::ci_banner(pr, &self.model.r, move || fix_claude::show_ci(m.clone(), None)) {
-            self.banners.append(&b);
-        }
-        let m = self.model.clone();
         if let Some(b) = fix_claude::banner(pr, move || fix_claude::show(m.clone())) {
             self.banners.append(&b);
         }
@@ -840,7 +840,7 @@ impl PrPage {
     fn render_actions(self: &Rc<Self>, pr: &PullRequestDetail) {
         let m = self.model.clone();
         let key = format!(
-            "{}|{}|{}|{}|{}|{}|{}|{:?}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}|{:?}|{}|{}|{}|{}|{}|{}|{}",
             pr.number,
             pr.state,
             pr.is_draft,
@@ -852,7 +852,10 @@ impl PrPage {
             pr.auto_merge_request.is_some(),
             pr.head_ref.is_some(),
             m.pending.borrow().len(),
-            pr.head_ref_name
+            pr.head_ref_name,
+            merge_status(pr, &m.requirements()).ready,
+            crate::ci_fix::failing(pr).len(),
+            pr.review_threads.nodes.iter().filter(|t| !t.is_resolved && !t.is_outdated).count()
         );
         if *self.actions_key.borrow() == key {
             return;
@@ -881,16 +884,39 @@ impl PrPage {
             rr.connect_clicked(move |_| sheets::reviewers(mm.clone()));
             self.actions.append(&rr);
         }
-        let fix = icon_label_button("sy-sparkles-symbolic", "Fix with agent");
-        fix.set_tooltip_text(Some("Send review comments and failing checks to a new agent session"));
-        set_label(&fix, "Fix with agent");
+        let unresolved = pr.review_threads.nodes.iter().filter(|t| !t.is_resolved && !t.is_outdated).count();
+        let failing = crate::ci_fix::failing(pr).len();
+        let fix = adw::SplitButton::new();
+        fix.set_child(Some(&icon_label_content("sy-sparkles-symbolic", "Fix with agent")));
+        fix.add_css_class("tint-coral");
+        let checks_first = unresolved == 0 && failing > 0;
+        fix.set_tooltip_text(Some(if checks_first { "Send the failing checks to a new agent session" } else { "Send review comments and failing checks to a new agent session" }));
+        let fix_menu = Menu::new();
         let mm = m.clone();
-        fix.connect_clicked(move |_| fix_claude::show(mm.clone()));
+        fix_menu.item(&format!("Review comments ({unresolved})"), move || fix_claude::show(mm.clone()));
+        let mm = m.clone();
+        fix_menu.item(&format!("Failing checks ({failing})"), move || fix_claude::show_ci(mm.clone(), None));
+        fix.set_menu_model(Some(&fix_menu.model));
+        fix_menu.attach(&fix);
+        let mm = m.clone();
+        fix.connect_clicked(move |_| {
+            if checks_first {
+                fix_claude::show_ci(mm.clone(), None);
+            } else {
+                fix_claude::show(mm.clone());
+            }
+        });
         self.actions.append(&fix);
         if pr.is_open() && !pr.is_draft && m.can_write() {
+            let st = merge_status(pr, &m.requirements());
             let merge = icon_label_button("sy-merge-symbolic", "Merge");
-            merge.add_css_class("suggested-action");
-            merge.set_tooltip_text(Some("Merge pull request (Ctrl+Shift+M)"));
+            if st.ready {
+                merge.add_css_class("tint-green");
+                merge.set_tooltip_text(Some("Ready to merge (Ctrl+Shift+M)"));
+            } else {
+                merge.add_css_class("merge-blocked");
+                merge.set_tooltip_text(Some(&format!("{} · Merge (Ctrl+Shift+M)", st.text)));
+            }
             set_label(&merge, "Merge");
             let mm = m.clone();
             merge.connect_clicked(move |_| sheets::merge(mm.clone()));
@@ -994,7 +1020,10 @@ pub fn confirm_approve(model: Rc<PrModel>) {
     dialogs::confirm(&heading, None, label, false, move || {
         let mm = model.clone();
         crate::rt::spawn_local(async move {
-            mm.submit_review("APPROVE".into(), String::new()).await;
+            let number = mm.r.number;
+            if mm.clone().submit_review("APPROVE".into(), String::new()).await {
+                sheets::after_review(&mm, sheets::Verdict::Approve, number);
+            }
         });
     });
 }
@@ -1137,6 +1166,7 @@ pub fn merge_status_bar(model: &Rc<PrModel>, pr: &PullRequestDetail, on_merge: R
         b.append(&btn);
     }
     b.append(&spacer());
+    let mut inline_actions: Vec<gtk::Button> = vec![];
     if pr.merge_state_status.as_deref() == Some("BEHIND") && (model.can_write() || pr.viewer_can_update) {
         let u = button("Update branch");
         let m = model.clone();
@@ -1147,6 +1177,19 @@ pub fn merge_status_bar(model: &Rc<PrModel>, pr: &PullRequestDetail, on_merge: R
             });
         });
         b.append(&u);
+        inline_actions.push(u);
+    }
+    if pr.is_draft && pr.viewer_can_update {
+        let r = button("Ready for review");
+        let m = model.clone();
+        r.connect_clicked(move |_| {
+            let m = m.clone();
+            crate::rt::spawn_local(async move {
+                m.simple(q::READY_FOR_REVIEW).await;
+            });
+        });
+        b.append(&r);
+        inline_actions.push(r);
     }
     if model.can_write() && !pr.is_draft {
         let mbtn = if st.ready { tinted("Merge…", "green") } else { button("Merge…") };
@@ -1162,7 +1205,11 @@ pub fn merge_status_bar(model: &Rc<PrModel>, pr: &PullRequestDetail, on_merge: R
         toggle.add_css_class("flat");
         let sync = {
             let toggle = toggle.clone();
+            let inline_actions = inline_actions.clone();
             move |open: bool| {
+                for a in &inline_actions {
+                    a.set_visible(!open);
+                }
                 toggle.set_icon_name(if open { "pan-down-symbolic" } else { "pan-end-symbolic" });
                 let label = if open { "Hide merge requirements" } else { "Show merge requirements" };
                 toggle.set_tooltip_text(Some(label));
@@ -1183,11 +1230,12 @@ pub fn merge_status_bar(model: &Rc<PrModel>, pr: &PullRequestDetail, on_merge: R
     Some(outer)
 }
 
-fn requirements_list(model: &Rc<PrModel>, pr: &PullRequestDetail, requirements: &[MergeRequirement], on_request_review: Option<Rc<dyn Fn()>>) -> gtk::Box {
+pub fn requirements_list(model: &Rc<PrModel>, pr: &PullRequestDetail, requirements: &[MergeRequirement], on_request_review: Option<Rc<dyn Fn()>>) -> gtk::Box {
     let list = vbox(4);
     list.update_property(&[gtk::accessible::Property::Label("Merge requirements")]);
     let mut ordered: Vec<&MergeRequirement> = requirements.iter().collect();
     ordered.sort_by_key(|r| r.state);
+    let mut fixed_checks = false;
     for r in ordered {
         let (icon_name, color, spoken) = match r.state {
             RequirementState::Satisfied => ("sy-check-circle-symbolic", "green", "met"),
@@ -1214,7 +1262,7 @@ fn requirements_list(model: &Rc<PrModel>, pr: &PullRequestDetail, requirements: 
         if let Some(action) = r.action.filter(|_| r.state != RequirementState::Satisfied) {
             let allowed = match action {
                 RequirementAction::RequestReview => on_request_review.is_some() && (model.can_write() || pr.viewer_did_author),
-                RequirementAction::UpdateBranch => false,
+                RequirementAction::UpdateBranch => model.can_write() || pr.viewer_can_update,
                 RequirementAction::ReadyForReview => pr.viewer_can_update,
                 _ => true,
             };
@@ -1258,8 +1306,26 @@ fn requirements_list(model: &Rc<PrModel>, pr: &PullRequestDetail, requirements: 
                 });
                 row.append(&btn);
             }
+            if action == RequirementAction::ShowChecks && r.state == RequirementState::Missing && !crate::ci_fix::failing(pr).is_empty() {
+                checks_fix_actions(model, pr, &row);
+                fixed_checks = true;
+            }
         }
         row.update_property(&[gtk::accessible::Property::Description(spoken)]);
+        list.append(&row);
+    }
+    let failing = crate::ci_fix::failing(pr).len();
+    if failing > 0 && !fixed_checks {
+        let row = hbox(8);
+        let ic = colored_icon("sy-x-circle-symbolic", 14, "red");
+        ic.set_valign(gtk::Align::Start);
+        row.append(&ic);
+        let text = vbox(1);
+        text.set_hexpand(true);
+        text.append(&wrap_label(&util::plural(failing as i64, "check failing", "checks failing"), &["sy-text"]));
+        text.append(&wrap_label("Not required to merge", &["sy-muted", "sy-small"]));
+        row.append(&text);
+        checks_fix_actions(model, pr, &row);
         list.append(&row);
     }
     if let Some(ownership) = model.ownership().filter(|o| !o.groups.is_empty() || !o.unowned.is_empty()) {
@@ -1267,6 +1333,54 @@ fn requirements_list(model: &Rc<PrModel>, pr: &PullRequestDetail, requirements: 
         list.append(&code_owners_section(&ownership, on_request_review.filter(|_| can_request)));
     }
     list
+}
+
+fn checks_fix_actions(model: &Rc<PrModel>, pr: &PullRequestDetail, row: &gtk::Box) {
+    let fix = link_button("Fix with agent");
+    fix.add_css_class("ink-coral");
+    fix.set_valign(gtk::Align::Start);
+    let m = model.clone();
+    fix.connect_clicked(move |_| fix_claude::show_ci(m.clone(), None));
+    row.append(&fix);
+    let runs = pr.checks().iter().filter(|c| c.outcome() == CheckOutcome::Failure).filter_map(|c| c.run_id()).collect::<std::collections::HashSet<_>>().len();
+    if runs > 0 && model.can_write() {
+        let rerun = link_button("Re-run failed");
+        rerun.set_valign(gtk::Align::Start);
+        let m = model.clone();
+        rerun.connect_clicked(move |_| {
+            let m = m.clone();
+            crate::rt::spawn_local(async move {
+                if m.clone().rerun_failed().await {
+                    app::toast("Re-running failed jobs");
+                }
+            });
+        });
+        row.append(&rerun);
+    }
+}
+
+pub fn agent_chip(r: &ItemRef) -> Option<gtk::Button> {
+    let (tab, state) = fix_claude::ci_session(r)?;
+    let (text, color) = match state {
+        crate::claude::TabState::Waiting => ("Agent needs you".to_string(), "amber"),
+        crate::claude::TabState::Working => ("Agent running".to_string(), "coral"),
+        _ => ("Agent session open".to_string(), "coral"),
+    };
+    let b = gtk::Button::new();
+    b.add_css_class("status-chip-button");
+    let chip = status_chip(&text, color, Some("sy-sparkles-symbolic"));
+    if state == crate::claude::TabState::Working {
+        chip.prepend(&wake_spinner(10));
+    }
+    b.set_child(Some(&chip));
+    b.set_tooltip_text(Some("Open the agent session"));
+    set_label(&b, &text);
+    let id = tab.id;
+    b.connect_clicked(move |_| {
+        app::set_section(app::Section::Claude);
+        app::get().claude.select(id);
+    });
+    Some(b)
 }
 
 const OWNER_GROUP_LIMIT: usize = 6;
