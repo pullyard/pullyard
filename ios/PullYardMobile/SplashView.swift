@@ -10,7 +10,7 @@ struct SplashView: View {
 
     var body: some View {
         ZStack {
-            Color(hex: 0x0C1220).ignoresSafeArea()
+            Color(hex: 0x0C1220)
             ZStack {
                 Circle().fill(Color(hex: 0x6B55D6).opacity(0.55)).frame(width: 240).blur(radius: 60).offset(x: -60, y: -20)
                 Circle().fill(Color(hex: 0x38BDF8).opacity(0.45)).frame(width: 220).blur(radius: 60).offset(x: 70, y: 10)
@@ -31,6 +31,8 @@ struct SplashView: View {
             }
             .offset(y: 29)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea()
         .opacity(leave ? 0 : 1)
         .accessibilityHidden(true)
         .task {
