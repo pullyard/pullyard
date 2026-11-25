@@ -1,0 +1,72 @@
+name: PullYardMobile
+options:
+  bundleIdPrefix: com.pullyard
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    PY_GITHUB_CLIENT_ID: ""
+    GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_KEY_CFBundleDisplayName: PullYard
+    INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+    INFOPLIST_KEY_UIStatusBarStyle: UIStatusBarStyleDefault
+targets:
+  PullYardMobile:
+    type: application
+    platform: iOS
+    sources:
+      - path: PullYardMobile
+      - path: Shared
+    dependencies:
+      - target: PullYardWidget
+        embed: true
+    entitlements:
+      path: Support/PullYardMobile.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pullyard.mobile
+        CODE_SIGN_ENTITLEMENTS: Support/PullYardMobile.entitlements
+        INFOPLIST_FILE: Support/Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: PullYard
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  PullYardWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PullYardWidget
+      - path: Shared
+    entitlements:
+      path: Support/PullYardWidget.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pullyard.mobile.widget
+        CODE_SIGN_ENTITLEMENTS: Support/PullYardWidget.entitlements
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: PullYard
+        INFOPLIST_FILE: Support/Widget-Info.plist
+        SKIP_INSTALL: YES
+  PullYardMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: PullYardMobileTests
+    dependencies:
+      - target: PullYardMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pullyard.mobile.tests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  PullYardMobile:
+    build:
+      targets:
+        PullYardMobile: all
+        PullYardMobileTests: [test]
+    test:
+      targets:
+        - PullYardMobileTests
