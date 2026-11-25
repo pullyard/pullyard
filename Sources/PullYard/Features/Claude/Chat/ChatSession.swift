@@ -151,6 +151,20 @@ final class ClaudeUsageStore {
     var subscription: String?
     var overageNote: String?
     var updatedAt: Date?
+    var byAccount: [String: Snapshot] = [:]
+
+    struct Snapshot {
+        var windows: [RateWindow] = []
+        var subscription: String?
+        var overageNote: String?
+        var updatedAt: Date?
+    }
+
+    static func key(_ configDir: String?) -> String { configDir ?? "default" }
+
+    func snapshot(for configDir: String?) -> Snapshot {
+        byAccount[Self.key(configDir)] ?? Snapshot(windows: windows, subscription: subscription, overageNote: overageNote, updatedAt: updatedAt)
+    }
 }
 
 struct MCPServerStatus: Identifiable, Hashable {
@@ -960,6 +974,13 @@ final class ChatSession {
             store.overageNote = nil
         }
         store.updatedAt = Date()
+        let key = ClaudeUsageStore.key(configDir)
+        var snap = store.byAccount[key] ?? .init()
+        snap.windows = store.windows
+        snap.overageNote = store.overageNote
+        snap.updatedAt = store.updatedAt
+        snap.subscription = snap.subscription ?? store.subscription
+        store.byAccount[key] = snap
     }
 
     func refreshContext() {
@@ -989,7 +1010,9 @@ final class ChatSession {
             }
             AgentDefaults.shared.remember(models: models)
             if let sub = (body["account"] as? [String: Any])?["subscriptionType"] as? String {
-                ClaudeUsageStore.shared.subscription = sub.replacingOccurrences(of: "Claude ", with: "")
+                let plan = sub.replacingOccurrences(of: "Claude ", with: "")
+                ClaudeUsageStore.shared.subscription = plan
+                ClaudeUsageStore.shared.byAccount[ClaudeUsageStore.key(configDir), default: .init()].subscription = plan
             }
             commands = (body["commands"] as? [[String: Any]] ?? []).compactMap { c in
                 guard let n = c["name"] as? String else { return nil }

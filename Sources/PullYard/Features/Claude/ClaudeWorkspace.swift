@@ -114,15 +114,18 @@ final class ClaudeTab: Identifiable {
     @ObservationIgnored var restartChat: (() -> Void)?
     @ObservationIgnored var openNewChat: (() -> Void)?
 
-    init(folder: String, kind: ClaudeTabKind, title: String, sessionId: String, git: GitWorkingCopy) {
+    init(folder: String, kind: ClaudeTabKind, title: String, sessionId: String, git: GitWorkingCopy, configDir: String?? = .none) {
         self.folder = folder
         self.kind = kind
         self.title = title
         self.sessionId = sessionId
         self.git = git
-        configDir = ClaudeProfiles.shared.activeOverride
-        chat = kind == .chat ? ChatSession(folder: folder, configDir: ClaudeProfiles.shared.activeOverride) : nil
+        let dir = configDir ?? ClaudeProfiles.shared.activeOverride
+        self.configDir = dir
+        chat = kind == .chat ? ChatSession(folder: folder, configDir: dir) : nil
     }
+
+    var profile: ClaudeProfile? { ClaudeProfiles.shared.profile(configDir: configDir) }
 
     var terminal: ClaudeTerminalView {
         if let t = _terminal { return t }
@@ -267,6 +270,25 @@ final class ClaudeWorkspace {
         projects = []
     }
 
+    func closeTabs(configDir: String?) {
+        let doomed = tabs.filter { $0.configDir == configDir }
+        for tab in doomed {
+            tab.chat?.stop()
+            if tab.terminalRunning { tab.terminal.terminate() }
+        }
+        tabs.removeAll { $0.configDir == configDir }
+        if let selected = selectedTabID, !tabs.contains(where: { $0.id == selected }) { selectedTabID = tabs.first?.id }
+    }
+
+    var accountFilter: String? = UserDefaults.standard.string(forKey: "agents.accountFilter") {
+        didSet { UserDefaults.standard.set(accountFilter, forKey: "agents.accountFilter") }
+    }
+
+    func visibleSessions(_ sessions: [ClaudeSessionInfo]) -> [ClaudeSessionInfo] {
+        guard let filter = accountFilter, ClaudeProfiles.shared.hasSeveral else { return sessions }
+        return sessions.filter { ($0.profileID ?? ClaudeProfiles.defaultID) == filter }
+    }
+
     func sleepAll() {
         for tab in tabs where tab.running && tab.state != .working && tab.state != .waiting { tab.sleepNow() }
     }
@@ -294,14 +316,32 @@ final class ClaudeWorkspace {
         if !force, let last = projectsUpdated, Date().timeIntervalSince(last) < 10 { return }
         loadingProjects = true
         defer { loadingProjects = false }
-        let root = URL(fileURLWithPath: ClaudeProfiles.shared.configDir()).appendingPathComponent("projects", isDirectory: true)
-        let profileID = ClaudeProfiles.shared.activeID
+        let profiles = ClaudeProfiles.shared
+        var seenDirs = Set<String>()
+        let roots: [(id: String, root: URL)] = profiles.visible.compactMap { p in
+            let dir = profiles.configDir(for: p)
+            guard seenDirs.insert(dir).inserted else { return nil }
+            return (p.id, URL(fileURLWithPath: dir).appendingPathComponent("projects", isDirectory: true))
+        }
+        let scopeKey = roots.map(\.id).joined(separator: ",")
         let loaded = await Task.detached(priority: .userInitiated) { () -> [ClaudeProject] in
-            let projects = ClaudeSessionParser.loadAll(root: root)
+            var byPath: [String: [ClaudeSessionInfo]] = [:]
+            var seenIDs = Set<String>()
+            for (id, root) in roots {
+                for project in ClaudeSessionParser.loadAll(root: root) {
+                    for var s in project.sessions where seenIDs.insert(s.id).inserted {
+                        s.profileID = id
+                        byPath[project.path, default: []].append(s)
+                    }
+                }
+            }
             MemoryRelief.release()
-            return projects
+            return byPath.map { path, sessions in
+                ClaudeProject(id: path, path: path, sessions: sessions.sorted { $0.modified > $1.modified })
+            }
+            .sorted { $0.lastActivity > $1.lastActivity }
         }.value
-        guard profileID == ClaudeProfiles.shared.activeID else { return }
+        guard scopeKey == ClaudeProfiles.shared.visible.map(\.id).filter({ id in roots.contains { $0.id == id } }).joined(separator: ",") else { return }
         let next = Demo.folder.map { f in loaded.filter { $0.path.hasPrefix(f) } } ?? loaded
         projectsUpdated = Date()
         guard next != projects else { return }
@@ -360,11 +400,12 @@ final class ClaudeWorkspace {
     }
 
     @discardableResult
-    func newSession(folder: String, prompt: String? = nil, name: String? = nil, mode: ClaudeMode? = nil, kind: ClaudeTabKind? = nil) -> ClaudeTab {
+    func newSession(folder: String, prompt: String? = nil, name: String? = nil, mode: ClaudeMode? = nil, kind: ClaudeTabKind? = nil, profileID: String? = nil) -> ClaudeTab {
         let kind = kind ?? preferredKind
         let title = name ?? prompt.map { String($0.prefix(48)) } ?? "New session"
+        let configDir = ClaudeProfiles.shared.profile(id: profileID)?.configDir ?? (profileID == nil ? ClaudeProfiles.shared.activeOverride : nil)
         if kind == .chat {
-            let tab = makeTab(folder: folder, kind: .chat, title: title, sessionId: "")
+            let tab = makeTab(folder: folder, kind: .chat, title: title, sessionId: "", configDir: configDir)
             startChat(tab, resume: nil, prompt: prompt, mode: mode)
             return tab
         }
@@ -372,7 +413,7 @@ final class ClaudeWorkspace {
         var args = ["--session-id", sessionId]
         if let name, !name.isEmpty { args += ["-n", name] }
         if let prompt, !prompt.isEmpty { args.append(ClaudeLauncher.positionalPrompt(prompt)) }
-        let tab = makeTab(folder: folder, kind: .terminal, title: title, sessionId: sessionId)
+        let tab = makeTab(folder: folder, kind: .terminal, title: title, sessionId: sessionId, configDir: configDir)
         launchTerminal(tab, extra: args, mode: mode)
         return tab
     }
@@ -384,7 +425,9 @@ final class ClaudeWorkspace {
             return open
         }
         let kind = kind ?? preferredKind
-        let tab = makeTab(folder: s.cwd, kind: kind, title: s.title, sessionId: fork ? "" : s.id)
+        let owner = ClaudeProfiles.shared.profile(id: s.profileID)
+        let configDir = owner.map(\.configDir) ?? ClaudeProfiles.shared.activeOverride
+        let tab = makeTab(folder: s.cwd, kind: kind, title: s.title, sessionId: fork ? "" : s.id, configDir: configDir)
         if kind == .chat {
             tab.chat?.loadHistory(from: s.file)
             startChat(tab, resume: s.id, fork: fork, prompt: nil, mode: nil)
@@ -587,15 +630,15 @@ final class ClaudeWorkspace {
         makeTab(folder: folder, kind: .chat, title: title, sessionId: "")
     }
 
-    private func makeTab(folder: String, kind: ClaudeTabKind, title: String, sessionId: String) -> ClaudeTab {
-        let tab = ClaudeTab(folder: folder, kind: kind, title: title, sessionId: sessionId, git: git(for: folder))
+    private func makeTab(folder: String, kind: ClaudeTabKind, title: String, sessionId: String, configDir: String?? = .none) -> ClaudeTab {
+        let tab = ClaudeTab(folder: folder, kind: kind, title: title, sessionId: sessionId, git: git(for: folder), configDir: configDir)
         tab.restartChat = { [weak self, weak tab] in
             guard let self, let tab else { return }
             self.restart(tab)
         }
         tab.openNewChat = { [weak self, weak tab] in
             guard let self, let tab else { return }
-            self.newSession(folder: tab.folder, kind: .chat)
+            self.newSession(folder: tab.folder, kind: .chat, profileID: tab.profile?.id)
         }
         wire(tab)
         tabs.append(tab)

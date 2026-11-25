@@ -89,9 +89,17 @@ struct ClaudeProjectsColumn: View {
         return true
     }
 
-    private var filtered: [ClaudeProject] {
-        guard !query.isEmpty else { return ws.projects }
+    private var accountScoped: [ClaudeProject] {
+        guard ws.accountFilter != nil, ClaudeProfiles.shared.hasSeveral else { return ws.projects }
         return ws.projects.compactMap { p in
+            let s = ws.visibleSessions(p.sessions)
+            return s.isEmpty ? nil : ClaudeProject(id: p.id, path: p.path, sessions: s)
+        }
+    }
+
+    private var filtered: [ClaudeProject] {
+        guard !query.isEmpty else { return accountScoped }
+        return accountScoped.compactMap { p in
             if p.name.localizedCaseInsensitiveContains(query) { return p }
             let s = p.sessions.filter { $0.title.localizedCaseInsensitiveContains(query) || ($0.branch ?? "").localizedCaseInsensitiveContains(query) }
             return s.isEmpty ? nil : ClaudeProject(id: p.id, path: p.path, sessions: s)
@@ -121,7 +129,12 @@ struct ClaudeProjectsColumn: View {
                 default:
                     EmptyView()
                 }
-                if ClaudeAccountStore.shared.isLoggedIn {
+                if ClaudeProfiles.shared.hasSeveral {
+                    AgentAccountFilter()
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 4)
+                }
+                if ClaudeAccountStore.shared.isLoggedIn || ClaudeProfiles.shared.hasSeveral {
                     if ready { historyContent }
                 } else if case .checking = ClaudeAccountStore.shared.status {
                     HStack { Spacer(); PullYardLoader(size: 32); Spacer() }.padding(.top, 20)
@@ -261,9 +274,16 @@ struct ClaudeProjectsColumn: View {
                         if expanded.contains(project.id) { expanded.remove(project.id) } else { expanded.insert(project.id) }
                     }
                 } onNew: {
-                    ws.newSession(folder: project.path)
+                    ws.newSession(folder: project.path, profileID: ws.accountFilter)
                 }
                 .padding(.horizontal, 8)
+                .contextMenu {
+                    if ClaudeProfiles.shared.hasSeveral {
+                        ForEach(ClaudeProfiles.shared.visible) { p in
+                            Button("New Session as \(p.label)") { ws.newSession(folder: project.path, profileID: p.id) }
+                        }
+                    }
+                }
                 Collapsible(open: open) {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(nodes(project)) { node in
@@ -504,6 +524,7 @@ struct SessionRow: View {
             if childCount > 0 {
                 Text("\(childCount)").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
             }
+            AgentAccountChip(profile: ClaudeProfiles.shared.profile(id: session.profileID), compact: true)
             if depth == 0, indicator == .none {
                 Text(Self.age(session.modified))
                     .font(.syCaption2.monospacedDigit())
@@ -828,8 +849,15 @@ struct ClaudeTabBar: View {
                 }
                 Menu {
                     if let current = ws.selectedTab {
-                        Button("Chat in \(current.projectName)") { ws.newSession(folder: current.folder, kind: .chat) }
-                        Button("Terminal in \(current.projectName)") { ws.newSession(folder: current.folder, kind: .terminal) }
+                        Button("Chat in \(current.projectName)") { ws.newSession(folder: current.folder, kind: .chat, profileID: current.profile?.id) }
+                        Button("Terminal in \(current.projectName)") { ws.newSession(folder: current.folder, kind: .terminal, profileID: current.profile?.id) }
+                        if ClaudeProfiles.shared.hasSeveral {
+                            Menu("New Chat As") {
+                                ForEach(ClaudeProfiles.shared.visible) { p in
+                                    Button(p.email.map { "\(p.label) · \($0)" } ?? p.label) { ws.newSession(folder: current.folder, kind: .chat, profileID: p.id) }
+                                }
+                            }
+                        }
                         Divider()
                     }
                     ForEach(ws.projects.filter(\.exists).prefix(12)) { p in
@@ -860,6 +888,7 @@ struct ClaudeControlBar: View {
         HStack(spacing: 6) {
             HStack(spacing: 8) {
                 Text(tab.projectName).fontWeight(.semibold).foregroundStyle(Color.syText).lineLimit(1)
+                AgentAccountChip(profile: tab.profile)
                 AgentBranchMenu(tab: tab, pr: ws.pullRequest(for: tab))
                 TabStateBadge(state: tab.state, memory: tab.memoryBytes)
             }
@@ -1811,6 +1840,7 @@ private struct ClaudeTabChip: View {
                 .frame(maxWidth: 180, alignment: .leading)
                 .foregroundStyle(selected ? Color.syText : Color.syMuted)
                 .fontWeight(selected ? .medium : .regular)
+            AgentAccountChip(profile: tab.profile, compact: true)
             if waiting {
                 Text("Needs you")
                     .font(.sy(size: 10, weight: .semibold))
@@ -1880,5 +1910,66 @@ struct InspectorEmptyState: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct AgentAccountChip: View {
+    let profile: ClaudeProfile?
+    var compact = false
+
+    static func color(for id: String) -> Color {
+        let palette: [Color] = [.sySky, .syViolet, .syTeal, .syAmberInk, .syIndigo, .syCoralInk]
+        let sum = id.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+        return palette[id == ClaudeProfiles.defaultID ? 0 : 1 + sum % (palette.count - 1)]
+    }
+
+    var body: some View {
+        if ClaudeProfiles.shared.hasSeveral, let profile {
+            let tint = Self.color(for: profile.id)
+            Text(compact ? profile.initial : profile.label)
+                .font(.sy(size: 10, weight: .semibold))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .padding(.horizontal, compact ? 5 : 6)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(tint.opacity(0.14)))
+                .help(profile.email.map { "\(profile.label) · \($0)" } ?? profile.label)
+                .accessibilityLabel("Account \(profile.label)")
+        }
+    }
+}
+
+struct AgentAccountFilter: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        let ws = app.claude
+        HStack(spacing: 4) {
+            filterButton(title: "All", id: nil, tint: .syMuted, selected: ws.accountFilter == nil)
+            ForEach(ClaudeProfiles.shared.visible) { p in
+                filterButton(title: p.label, id: p.id, tint: AgentAccountChip.color(for: p.id), selected: ws.accountFilter == p.id)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func filterButton(title: String, id: String?, tint: Color, selected: Bool) -> some View {
+        Button {
+            app.claude.accountFilter = id
+        } label: {
+            HStack(spacing: 4) {
+                if id != nil { Circle().fill(tint).frame(width: 6, height: 6) }
+                Text(title).lineLimit(1)
+            }
+            .font(.syCaption.weight(selected ? .semibold : .regular))
+            .foregroundStyle(selected ? Color.syText : Color.syMuted)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(selected ? Color.syRaised : Color.clear))
+            .overlay(Capsule().strokeBorder(selected ? Color.syLineStrong : Color.syLine))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(id == nil ? "Sessions from all accounts" : "Only sessions from \(title)")
     }
 }
