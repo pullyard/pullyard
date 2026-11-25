@@ -373,7 +373,9 @@ struct AgentActivityWidget: Widget {
                         .font(.system(size: 22, weight: .semibold, design: .rounded).monospacedDigit())
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.trailing)
-                        .frame(maxWidth: 90, alignment: .trailing)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .frame(width: 82, alignment: .trailing)
                         .padding(.trailing, 6).padding(.top, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
@@ -403,7 +405,10 @@ struct AgentActivityWidget: Widget {
                     AgentTimer(state: context.state)
                         .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
                         .foregroundStyle(AgentPhaseStyle.color(phase))
-                        .frame(maxWidth: 46)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .frame(width: 42)
                 } else {
                     Image(systemName: AgentPhaseStyle.symbol(phase)).font(.system(size: 13, weight: .bold)).foregroundStyle(AgentPhaseStyle.color(phase))
                 }
@@ -579,7 +584,9 @@ private struct AgentLockScreenView: View {
                     .font(.system(size: 26, weight: .semibold, design: .rounded).monospacedDigit())
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.trailing)
-                    .frame(maxWidth: 100, alignment: .trailing)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .frame(width: 96, alignment: .trailing)
             }
             AgentWake(phase: phase)
             AgentDetailLine(state: context.state, stale: context.isStale)
