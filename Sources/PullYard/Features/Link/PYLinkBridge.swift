@@ -332,6 +332,7 @@ struct PYLinkBridge {
                 client.subscriptions.remove(session)
                 continue
             }
+            if chat.items.isEmpty && (chat.historyLoading || tab.pendingHistory != nil) { continue }
             let previous = client.sentItems[session] ?? [:]
             let items = Self.items(chat.items.suffix(previous.isEmpty ? 40 : 200))
             let order = items.map(\.id)
