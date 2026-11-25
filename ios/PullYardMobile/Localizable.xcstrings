@@ -5190,6 +5190,36 @@
           }
         }
       }
+    },
+    "Connected over the internet" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подключено через интернет"
+          }
+        }
+      }
+    },
+    "Connected on this network" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подключено в этой сети"
+          }
+        }
+      }
+    },
+    "Pair again with the latest PullYard on your Mac to connect from anywhere, not only on the same Wi‑Fi." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Привяжите заново с новой версией PullYard на Mac, чтобы подключаться откуда угодно, а не только в той же Wi‑Fi."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

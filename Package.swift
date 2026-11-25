@@ -3,9 +3,10 @@ import PackageDescription
 
 let package = Package(
     name: "PullYard",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("14.5")],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm", exact: "1.20.0")
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm", exact: "1.20.0"),
+        .package(url: "https://github.com/n0-computer/iroh-ffi", exact: "1.2.0")
     ],
     targets: [
         .target(
@@ -19,7 +20,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "PullYard",
-            dependencies: ["StackNotesKit", .product(name: "SwiftTerm", package: "SwiftTerm")],
+            dependencies: ["StackNotesKit", .product(name: "SwiftTerm", package: "SwiftTerm"), .product(name: "IrohLib", package: "iroh-ffi")],
             path: "Sources/PullYard"
         ),
         .testTarget(

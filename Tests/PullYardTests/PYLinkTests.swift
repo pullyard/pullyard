@@ -1,11 +1,12 @@
 import CryptoKit
+import IrohLib
 import Network
 import XCTest
 @testable import PullYard
 
 final class PYLinkTests: XCTestCase {
     func testPairingURLRoundTrip() {
-        let pairing = PYLinkPairing(name: "Studio Mac", id: "abc", key: "key==", code: "123456", hosts: ["192.168.1.5", "100.64.0.2"], port: 47811)
+        let pairing = PYLinkPairing(name: "Studio Mac", id: "abc", key: "key==", code: "123456", hosts: ["192.168.1.5", "100.64.0.2"], port: 47811, iroh: "abcdef")
         XCTAssertEqual(PYLinkPairing.parse(pairing.url), pairing)
         XCTAssertNil(PYLinkPairing.parse("pullyard://pull/a/b/1"))
     }
@@ -55,5 +56,56 @@ final class PYLinkTests: XCTestCase {
         client.close(nil)
         serverChannel?.close(nil)
         listener.cancel()
+    }
+
+    func testEncryptedFramesOverIroh() async throws {
+        let key = SymmetricKey(size: .bits256)
+        let server = try await Endpoint.bind(options: EndpointOptions(preset: presetN0(), alpns: [PYLink.irohALPN], relayMode: RelayMode.disabled()))
+        let client = try await Endpoint.bind(options: EndpointOptions(preset: presetN0(), relayMode: RelayMode.disabled()))
+        let received = expectation(description: "server got frames")
+        let replied = expectation(description: "client got reply")
+        let box = FrameBox()
+        let serverTask = Task {
+            let incoming = await server.acceptNext()!
+            let connection = try await incoming.accept().connect()
+            let stream = try await connection.acceptBi()
+            let channel = PYLinkChannel(pipe: PYLinkIrohPipe(connection: connection, stream: stream), isServer: true)
+            channel.encrypt(with: key)
+            channel.onFrame = { data in
+                if box.append(String(decoding: data, as: UTF8.self)) == 2 {
+                    received.fulfill()
+                    channel.send(Data("pong".utf8))
+                }
+            }
+            channel.start()
+            return channel
+        }
+        let connection = try await client.connect(addr: server.addr(), alpn: PYLink.irohALPN)
+        let stream = try await connection.openBi()
+        let channel = PYLinkChannel(pipe: PYLinkIrohPipe(connection: connection, stream: stream), isServer: false)
+        channel.encrypt(with: key)
+        channel.onFrame = { data in if String(decoding: data, as: UTF8.self) == "pong" { replied.fulfill() } }
+        channel.start()
+        channel.send(Data("first".utf8))
+        channel.send(Data(String(repeating: "x", count: 200_000).utf8))
+        await fulfillment(of: [received, replied], timeout: 15)
+        XCTAssertEqual(box.frames.first, "first")
+        XCTAssertEqual(box.frames.last?.count, 200_000)
+        channel.close(nil)
+        try await serverTask.value.close(nil)
+        try? await client.close()
+        try? await server.close()
+    }
+}
+
+private final class FrameBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var frames: [String] = []
+
+    func append(_ frame: String) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        frames.append(frame)
+        return frames.count
     }
 }

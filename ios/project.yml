@@ -2,7 +2,11 @@ name: PullYardMobile
 options:
   bundleIdPrefix: com.pullyard
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "17.5"
+packages:
+  IrohLib:
+    url: https://github.com/n0-computer/iroh-ffi
+    exactVersion: 1.2.0
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -26,6 +30,7 @@ targets:
         embed: true
       - target: PullYardShare
         embed: true
+      - package: IrohLib
     entitlements:
       path: Support/PullYardMobile.entitlements
     settings:

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import IrohLib
 import Network
 import Security
 import UIKit
@@ -11,6 +12,7 @@ struct PairedMac: Codable, Equatable {
     var hosts: [String]
     var port: UInt16
     var manualHost: String?
+    var iroh: String?
 }
 
 struct AgentChat: Identifiable, Equatable {
@@ -30,6 +32,7 @@ final class LinkClient: ObservableObject {
     @Published private(set) var status: Status = .unpaired
     @Published private(set) var sessions: [PYLinkSession] = []
     @Published private(set) var chats: [String: AgentChat] = [:]
+    @Published private(set) var viaInternet = false
 
     private var channel: PYLinkChannel?
     private var browser: NWBrowser?
@@ -37,6 +40,7 @@ final class LinkClient: ObservableObject {
     private var waiting: [String: CheckedContinuation<PYLinkMessage, Error>] = [:]
     private var subscriptions: Set<String> = []
     private var connectTask: Task<Void, Never>?
+    private var irohEndpoint: Endpoint?
     private lazy var identity: Curve25519.KeyAgreement.PrivateKey = LinkClient.loadIdentity()
 
     private init() {
@@ -48,7 +52,7 @@ final class LinkClient: ObservableObject {
 
     func pair(_ pairing: PYLinkPairing) async throws {
         disconnect()
-        let candidate = PairedMac(id: pairing.id, name: pairing.name, key: pairing.key, hosts: pairing.hosts, port: pairing.port, manualHost: mac?.manualHost)
+        let candidate = PairedMac(id: pairing.id, name: pairing.name, key: pairing.key, hosts: pairing.hosts, port: pairing.port, manualHost: mac?.manualHost, iroh: pairing.iroh)
         try await connect(to: candidate, pairingCode: pairing.code)
         mac = candidate
         save()
@@ -86,6 +90,9 @@ final class LinkClient: ObservableObject {
         channel = nil
         browser?.cancel()
         browser = nil
+        if let endpoint = irohEndpoint { Task { try? await endpoint.close() } }
+        irohEndpoint = nil
+        viaInternet = false
         if mac != nil { status = .offline }
         for continuation in waiting.values { continuation.resume(throwing: LinkError.disconnected) }
         waiting = [:]
@@ -175,9 +182,10 @@ final class LinkClient: ObservableObject {
     private func connect(to mac: PairedMac, pairingCode: String?) async throws {
         status = .connecting
         var lastError: Error = LinkError.unreachable
-        for endpoint in await endpoints(for: mac) {
+        for route in await routes(for: mac) {
             do {
-                try await handshake(endpoint: endpoint, mac: mac, pairingCode: pairingCode)
+                try await handshake(channel: channel(for: route), mac: mac, pairingCode: pairingCode)
+                if case .internet = route { viaInternet = true } else { viaInternet = false }
                 status = .connected(mac.name)
                 for session in subscriptions { subscribe(session) }
                 await refreshSessions()
@@ -193,19 +201,61 @@ final class LinkClient: ObservableObject {
         throw lastError
     }
 
-    private func endpoints(for mac: PairedMac) async -> [NWEndpoint] {
-        var result: [NWEndpoint] = []
-        if let found = await discover(macID: mac.id) { result.append(found) }
+    private enum Route {
+        case local(NWEndpoint)
+        case internet(String)
+    }
+
+    private func routes(for mac: PairedMac) async -> [Route] {
+        var result: [Route] = []
+        if let found = await discover(macID: mac.id) { result.append(.local(found)) }
         if let manual = mac.manualHost {
             let parts = manual.split(separator: ":")
             let host = String(parts.first ?? "")
             let port = parts.count > 1 ? UInt16(parts[1]) ?? mac.port : mac.port
-            if let nwPort = NWEndpoint.Port(rawValue: port), !host.isEmpty { result.append(.hostPort(host: NWEndpoint.Host(host), port: nwPort)) }
+            if let nwPort = NWEndpoint.Port(rawValue: port), !host.isEmpty { result.append(.local(.hostPort(host: NWEndpoint.Host(host), port: nwPort))) }
         }
+        if let iroh = mac.iroh { result.append(.internet(iroh)) }
         if let port = NWEndpoint.Port(rawValue: mac.port) {
-            result += mac.hosts.map { .hostPort(host: NWEndpoint.Host($0), port: port) }
+            result += mac.hosts.map { .local(.hostPort(host: NWEndpoint.Host($0), port: port)) }
         }
         return result
+    }
+
+    private func channel(for route: Route) async throws -> PYLinkChannel {
+        switch route {
+        case let .local(endpoint):
+            let parameters = NWParameters.tcp
+            parameters.includePeerToPeer = true
+            return PYLinkChannel(connection: NWConnection(to: endpoint, using: parameters), isServer: false, queue: queue)
+        case let .internet(id):
+            let endpoint: Endpoint
+            if let existing = irohEndpoint {
+                endpoint = existing
+            } else {
+                endpoint = try await Endpoint.bind(options: EndpointOptions(preset: presetN0()))
+                irohEndpoint = endpoint
+            }
+            let target = try EndpointId.fromString(s: id)
+            let connection = try await Self.withTimeout(20) {
+                try await endpoint.connect(addr: EndpointAddr(id: target, relayUrl: nil, addresses: []), alpn: PYLink.irohALPN)
+            }
+            let stream = try await connection.openBi()
+            return PYLinkChannel(pipe: PYLinkIrohPipe(connection: connection, stream: stream), isServer: false)
+        }
+    }
+
+    private static func withTimeout<T: Sendable>(_ seconds: Double, _ work: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await work() }
+            group.addTask {
+                try await Task.sleep(for: .seconds(seconds))
+                throw LinkError.unreachable
+            }
+            guard let first = try await group.next() else { throw LinkError.unreachable }
+            group.cancelAll()
+            return first
+        }
     }
 
     private func discover(macID: String) async -> NWEndpoint? {
@@ -230,20 +280,19 @@ final class LinkClient: ObservableObject {
         }
     }
 
-    private func handshake(endpoint: NWEndpoint, mac: PairedMac, pairingCode: String?) async throws {
-        guard let macKey = PYLinkCrypto.publicKey(mac.key) else { throw LinkError.rejected("Invalid pairing key.") }
-        let parameters = NWParameters.tcp
-        parameters.includePeerToPeer = true
-        let connection = NWConnection(to: endpoint, using: parameters)
-        let channel = PYLinkChannel(connection: connection, isServer: false, queue: queue)
+    private func handshake(channel: PYLinkChannel, mac: PairedMac, pairingCode: String?) async throws {
+        guard let macKey = PYLinkCrypto.publicKey(mac.key) else {
+            channel.close(nil)
+            throw LinkError.rejected("Invalid pairing key.")
+        }
         let nonce = PYLinkCrypto.nonce()
         let identity = self.identity
-        let reply: PYLinkHelloReply = try await withCheckedThrowingContinuation { continuation in
+        let hello: Result<PYLinkHelloReply, Error> = await withCheckedContinuation { continuation in
             var done = false
             let complete: (Result<PYLinkHelloReply, Error>) -> Void = { result in
                 guard !done else { return }
                 done = true
-                continuation.resume(with: result)
+                continuation.resume(returning: result)
             }
             channel.onFrame = { data in
                 guard let reply = try? JSONDecoder().decode(PYLinkHelloReply.self, from: data) else { complete(.failure(LinkError.unreachable)); return }
@@ -252,7 +301,12 @@ final class LinkClient: ObservableObject {
             channel.onClose = { _ in complete(.failure(LinkError.unreachable)) }
             channel.start()
             channel.send(json: PYLinkHello(v: PYLink.version, deviceID: Self.deviceID, deviceName: UIDevice.current.name, deviceKey: PYLinkCrypto.publicKeyString(identity), nonce: nonce, pairingCode: pairingCode))
-            self.queue.asyncAfter(deadline: .now() + 6) { complete(.failure(LinkError.timeout)) }
+            self.queue.asyncAfter(deadline: .now() + 10) { complete(.failure(LinkError.timeout)) }
+        }
+        guard case let .success(reply) = hello else {
+            channel.close(nil)
+            if case let .failure(error) = hello { throw error }
+            throw LinkError.unreachable
         }
         guard reply.ok, reply.desktopID == mac.id else {
             channel.close(nil)
@@ -349,7 +403,7 @@ enum LinkError: LocalizedError {
         case .notPaired: "Pair this iPhone with PullYard on your Mac first: Settings → Mac."
         case .disconnected: "The connection to your Mac was lost."
         case .timeout: "Your Mac didn't answer in time."
-        case .unreachable: "Can't reach your Mac. Make sure PullYard is open on it and both are on the same Wi‑Fi or VPN."
+        case .unreachable: "Can't reach your Mac. Make sure PullYard is open on it with iPhone access on. Without Connect from anywhere both need the same Wi‑Fi or VPN."
         case let .rejected(reason): reason
         case let .remote(reason): reason
         }

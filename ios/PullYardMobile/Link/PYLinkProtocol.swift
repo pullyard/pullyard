@@ -7,6 +7,7 @@ enum PYLink {
     static let version = 1
     static let preferredPort: UInt16 = 47811
     static let maxFrame = 4 * 1024 * 1024
+    static let irohALPN = Data("pullyard/link/1".utf8)
 }
 
 struct PYLinkPairing: Codable, Equatable {
@@ -17,6 +18,7 @@ struct PYLinkPairing: Codable, Equatable {
     let code: String
     let hosts: [String]
     let port: UInt16
+    var iroh: String? = nil
 
     var url: String {
         let data = (try? JSONEncoder().encode(self)) ?? Data()
@@ -137,10 +139,62 @@ enum PYLinkCrypto {
     }
 }
 
-final class PYLinkChannel: @unchecked Sendable {
+protocol PYLinkPipe: AnyObject {
+    func start(onData: @escaping (Data) -> Void, onClose: @escaping (Error?) -> Void)
+    func write(_ data: Data)
+    func close()
+}
+
+final class PYLinkNWPipe: PYLinkPipe, @unchecked Sendable {
     let connection: NWConnection
-    private var buffer = Data()
     private let queue: DispatchQueue
+    private var onClose: ((Error?) -> Void)?
+
+    init(connection: NWConnection, queue: DispatchQueue) {
+        self.connection = connection
+        self.queue = queue
+    }
+
+    func start(onData: @escaping (Data) -> Void, onClose: @escaping (Error?) -> Void) {
+        self.onClose = onClose
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .failed(let error): self?.finish(error)
+            case .cancelled: self?.finish(nil)
+            default: break
+            }
+        }
+        connection.start(queue: queue)
+        receive(onData)
+    }
+
+    func write(_ data: Data) {
+        connection.send(content: data, completion: .contentProcessed { [weak self] error in if let error { self?.finish(error) } })
+    }
+
+    func close() { connection.cancel() }
+
+    private func finish(_ error: Error?) {
+        let handler = onClose
+        onClose = nil
+        handler?(error)
+    }
+
+    private func receive(_ onData: @escaping (Data) -> Void) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, complete, error in
+            guard let self else { return }
+            if let data, !data.isEmpty { onData(data) }
+            if let error { self.finish(error); return }
+            if complete { self.finish(nil); return }
+            self.receive(onData)
+        }
+    }
+}
+
+final class PYLinkChannel: @unchecked Sendable {
+    let pipe: PYLinkPipe
+    private var buffer = Data()
+    private let lock = NSLock()
     private var key: SymmetricKey?
     private let sendDirection: String
     private let receiveDirection: String
@@ -148,34 +202,32 @@ final class PYLinkChannel: @unchecked Sendable {
     var onClose: ((Error?) -> Void)?
     private var closed = false
 
-    init(connection: NWConnection, isServer: Bool, queue: DispatchQueue) {
-        self.connection = connection
-        self.queue = queue
+    init(pipe: PYLinkPipe, isServer: Bool) {
+        self.pipe = pipe
         sendDirection = isServer ? "s2c" : "c2s"
         receiveDirection = isServer ? "c2s" : "s2c"
     }
 
-    func start() {
-        connection.stateUpdateHandler = { [weak self] state in
-            switch state {
-            case .failed(let error): self?.close(error)
-            case .cancelled: self?.close(nil)
-            default: break
-            }
-        }
-        connection.start(queue: queue)
-        receive()
+    convenience init(connection: NWConnection, isServer: Bool, queue: DispatchQueue) {
+        self.init(pipe: PYLinkNWPipe(connection: connection, queue: queue), isServer: isServer)
     }
 
-    func encrypt(with key: SymmetricKey) { self.key = key }
+    func start() {
+        pipe.start(onData: { [weak self] data in self?.received(data) }, onClose: { [weak self] error in self?.close(error) })
+    }
+
+    func encrypt(with key: SymmetricKey) {
+        lock.lock(); self.key = key; lock.unlock()
+    }
 
     func send(_ payload: Data) {
+        lock.lock(); let key = self.key; lock.unlock()
         let body: Data
         if let key { guard let sealed = try? PYLinkCrypto.seal(payload, key: key, direction: sendDirection) else { return }; body = sealed } else { body = payload }
         var length = UInt32(body.count).bigEndian
         var frame = Data(bytes: &length, count: 4)
         frame.append(body)
-        connection.send(content: frame, completion: .contentProcessed { [weak self] error in if let error { self?.close(error) } })
+        pipe.write(frame)
     }
 
     func send<T: Encodable>(json value: T) {
@@ -184,32 +236,32 @@ final class PYLinkChannel: @unchecked Sendable {
     }
 
     func close(_ error: Error?) {
-        guard !closed else { return }
+        lock.lock()
+        guard !closed else { lock.unlock(); return }
         closed = true
-        connection.cancel()
+        lock.unlock()
+        pipe.close()
         onClose?(error)
     }
 
-    private func receive() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, complete, error in
-            guard let self else { return }
-            if let data, !data.isEmpty {
-                self.buffer.append(data)
-                self.drain()
-            }
-            if let error { self.close(error); return }
-            if complete { self.close(nil); return }
-            self.receive()
-        }
+    private func received(_ data: Data) {
+        lock.lock()
+        buffer.append(data)
+        lock.unlock()
+        drain()
     }
 
     private func drain() {
-        while buffer.count >= 4 {
+        while true {
+            lock.lock()
+            guard buffer.count >= 4 else { lock.unlock(); return }
             let length = Int(buffer.prefix(4).reduce(UInt32(0)) { ($0 << 8) | UInt32($1) })
-            guard length <= PYLink.maxFrame else { close(nil); return }
-            guard buffer.count >= 4 + length else { return }
+            guard length <= PYLink.maxFrame else { lock.unlock(); close(nil); return }
+            guard buffer.count >= 4 + length else { lock.unlock(); return }
             let body = buffer.subdata(in: buffer.startIndex + 4 ..< buffer.startIndex + 4 + length)
             buffer.removeSubrange(buffer.startIndex ..< buffer.startIndex + 4 + length)
+            let key = self.key
+            lock.unlock()
             if let key {
                 guard let opened = try? PYLinkCrypto.open(body, key: key, direction: receiveDirection) else { close(nil); return }
                 onFrame?(opened)

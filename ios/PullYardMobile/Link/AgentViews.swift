@@ -20,6 +20,10 @@ struct MacLinkSection: View {
                     Spacer()
                     if case .connecting = link.status { PullYardLoader(size: 26) }
                 }
+                if mac.iroh == nil {
+                    Text("Pair again with the latest PullYard on your Mac to connect from anywhere, not only on the same Wi‑Fi.")
+                        .mobileFont(size: 12).foregroundStyle(MobileTheme.muted)
+                }
                 if !link.isConnected {
                     Button { link.connectIfNeeded() } label: { Label("Connect", systemImage: "bolt.horizontal.circle") }
                 }
@@ -70,7 +74,7 @@ struct MacLinkSection: View {
 
     private var statusText: String {
         switch link.status {
-        case .connected: return L("Connected")
+        case .connected: return link.viaInternet ? L("Connected over the internet") : L("Connected on this network")
         case .connecting: return L("Connecting…")
         case .offline: return L("Not connected")
         case let .failed(reason): return reason

@@ -21,8 +21,20 @@ struct PYLinkSettingsView: View {
                         Text("Off").foregroundStyle(Color.syMuted)
                     }
                 }
+                Toggle("Connect from anywhere", isOn: Binding(get: { server.internet }, set: { server.internet = $0 }))
+                if server.enabled && server.internet {
+                    LabeledContent("Internet") {
+                        if server.irohOnline {
+                            Text("Reachable").foregroundStyle(Color.syGreen)
+                        } else if let error = server.irohError {
+                            Text(error).foregroundStyle(Color.syRed)
+                        } else {
+                            Text("Connecting…").foregroundStyle(Color.syMuted)
+                        }
+                    }
+                }
             } footer: {
-                Text("Your iPhone can start agent fixes on this Mac and follow the chat live. The connection is end-to-end encrypted with keys exchanged through the QR code. It works on the same Wi‑Fi or over Tailscale and other VPNs.")
+                Text("Your iPhone can start agent fixes on this Mac and follow the chat live. The connection is end-to-end encrypted with keys exchanged through the QR code. On the same Wi‑Fi it goes straight to this Mac. With Connect from anywhere on, it also works over cellular and other networks through a direct peer-to-peer link, with a public relay as fallback that only sees encrypted traffic.")
             }
 
             Section("Pair an iPhone") {

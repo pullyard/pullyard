@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import IrohLib
 import Network
 import Observation
 import Security
@@ -20,11 +21,19 @@ final class PYLinkServer {
     private static let enabledKey = "link.enabled"
     private static let devicesKey = "link.devices"
     private static let desktopIDKey = "link.desktopID"
+    private static let internetKey = "link.internet"
 
     var enabled: Bool = UserDefaults.standard.bool(forKey: PYLinkServer.enabledKey) {
         didSet {
             UserDefaults.standard.set(enabled, forKey: Self.enabledKey)
             enabled ? start() : stop()
+        }
+    }
+    var internet: Bool = UserDefaults.standard.object(forKey: PYLinkServer.internetKey) as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(internet, forKey: Self.internetKey)
+            guard listener != nil else { return }
+            internet ? startIroh() : stopIroh()
         }
     }
     private(set) var devices: [PYLinkDevice] = PYLinkServer.loadDevices()
@@ -33,12 +42,17 @@ final class PYLinkServer {
     private(set) var port: UInt16?
     private(set) var connected: Set<String> = []
     private(set) var lastError: String?
+    private(set) var irohID: String?
+    private(set) var irohOnline = false
+    private(set) var irohError: String?
 
     @ObservationIgnored private weak var app: AppModel?
     @ObservationIgnored private var listener: NWListener?
     @ObservationIgnored private var clients: [ObjectIdentifier: PYLinkClient] = [:]
     @ObservationIgnored private let queue = DispatchQueue(label: "pullyard.link")
     @ObservationIgnored private var pump: Task<Void, Never>?
+    @ObservationIgnored private var irohEndpoint: Endpoint?
+    @ObservationIgnored private var irohTask: Task<Void, Never>?
     @ObservationIgnored lazy var identity: Curve25519.KeyAgreement.PrivateKey = PYLinkServer.loadIdentity()
 
     let desktopID: String = {
@@ -82,10 +96,14 @@ final class PYLinkServer {
                 }
             }
             listener.newConnectionHandler = { [weak self] connection in
-                Task { @MainActor in self?.accept(connection) }
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.accept(PYLinkChannel(connection: connection, isServer: true, queue: self.queue))
+                }
             }
             listener.start(queue: queue)
             self.listener = listener
+            if internet { startIroh() }
         } catch {
             lastError = error.localizedDescription
         }
@@ -100,12 +118,57 @@ final class PYLinkServer {
         connected = []
         pump?.cancel()
         pump = nil
+        stopIroh()
+    }
+
+    private func startIroh() {
+        guard irohTask == nil else { return }
+        irohError = nil
+        let secret = PYLinkIrohKeys.secret(service: "dev.pullyard.link")
+        irohTask = Task { @MainActor [weak self] in
+            do {
+                let endpoint = try await Endpoint.bind(options: EndpointOptions(preset: presetN0(), secretKey: secret, alpns: [PYLink.irohALPN]))
+                guard let self, !Task.isCancelled else {
+                    try? await endpoint.close()
+                    return
+                }
+                self.irohEndpoint = endpoint
+                self.irohID = endpoint.id().description
+                if self.pairing != nil { self.pairing?.iroh = self.irohID }
+                Task { @MainActor [weak self] in
+                    await endpoint.online()
+                    if self?.irohEndpoint === endpoint { self?.irohOnline = true }
+                }
+                while !Task.isCancelled, let incoming = await endpoint.acceptNext() {
+                    Task { @MainActor [weak self] in
+                        guard let connection = try? await incoming.accept().connect(), let stream = try? await connection.acceptBi() else { return }
+                        guard let self, self.irohEndpoint === endpoint else {
+                            try? connection.close(errorCode: 0, reason: Data())
+                            return
+                        }
+                        self.accept(PYLinkChannel(pipe: PYLinkIrohPipe(connection: connection, stream: stream), isServer: true))
+                    }
+                }
+            } catch {
+                self?.irohError = error.localizedDescription
+                self?.irohTask = nil
+            }
+        }
+    }
+
+    private func stopIroh() {
+        irohTask?.cancel()
+        irohTask = nil
+        if let endpoint = irohEndpoint { Task { try? await endpoint.close() } }
+        irohEndpoint = nil
+        irohID = nil
+        irohOnline = false
     }
 
     func beginPairing() {
         if !enabled { enabled = true }
         let code = String(format: "%06d", Int.random(in: 0..<1_000_000))
-        pairing = PYLinkPairing(name: desktopName, id: desktopID, key: PYLinkCrypto.publicKeyString(identity), code: code, hosts: Self.localAddresses(), port: port ?? PYLink.preferredPort)
+        pairing = PYLinkPairing(name: desktopName, id: desktopID, key: PYLinkCrypto.publicKeyString(identity), code: code, hosts: Self.localAddresses(), port: port ?? PYLink.preferredPort, iroh: irohID)
         pairingExpires = Date().addingTimeInterval(10 * 60)
     }
 
@@ -120,8 +183,7 @@ final class PYLinkServer {
         for client in clients.values where client.deviceID == device.id { client.channel.close(nil) }
     }
 
-    private func accept(_ connection: NWConnection) {
-        let channel = PYLinkChannel(connection: connection, isServer: true, queue: queue)
+    private func accept(_ channel: PYLinkChannel) {
         let client = PYLinkClient(channel: channel)
         let id = ObjectIdentifier(client)
         clients[id] = client

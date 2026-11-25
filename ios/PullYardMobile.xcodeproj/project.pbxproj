@@ -35,6 +35,7 @@
 		88B3ABC287AA0225B1C590C2 /* PRWorkflowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DFC7599C7E90CF3EEB1CA67 /* PRWorkflowViews.swift */; };
 		913880650AD7451FD9B6B524 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 217D8A69A51C4BD4F78683B0 /* Assets.xcassets */; };
 		92E83F11231596E157BCF6AF /* LocalCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7C5751F2F7DBE975941D203 /* LocalCache.swift */; };
+		99B3E16164BECDEEBEE1220B /* IrohLib in Frameworks */ = {isa = PBXBuildFile; productRef = 334EEADBC434077E8C6D118D /* IrohLib */; };
 		9A76D45247A1ADA13599209C /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B3A0459840F2BE02F504DC5 /* WidgetSnapshot.swift */; };
 		9E1D6A9E230F4A2BF9CC87AB /* WidgetFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDE41B0C24CD4D522D241B3 /* WidgetFetcher.swift */; };
 		A0B2207DDD4EB19A571B3DE2 /* BackgroundSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25B274088D0F1FDAC407D400 /* BackgroundSync.swift */; };
@@ -62,6 +63,7 @@
 		EA6A54B14DC2A5F6BFB3CCC3 /* CredentialVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D18762764859FE93B40155 /* CredentialVault.swift */; };
 		F126D8433948F1AF3BE7B615 /* LinkClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492802CE69238D7B67870B90 /* LinkClient.swift */; };
 		F3685C0831F795EA5528C863 /* CreatePullView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 127360F43A2B43F3766FC2DA /* CreatePullView.swift */; };
+		F3E1B1E8C0E98071559D75A5 /* PYLinkIroh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F9F1FEBE741DDBE8177BA81 /* PYLinkIroh.swift */; };
 		F68C66514A56887F1B265E54 /* CIActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0C66F8D185CD5194B079AE /* CIActivity.swift */; };
 		FE8B3F91653EC44B4BD8D825 /* ProjectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7656F08929BF5CF832079205 /* ProjectsView.swift */; };
 /* End PBXBuildFile section */
@@ -140,6 +142,7 @@
 		94231697E07DA3DAFF6139C2 /* PYLinkProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PYLinkProtocol.swift; sourceTree = "<group>"; };
 		9662C0C9DC3339E5CD6B7A47 /* Snooze.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Snooze.swift; sourceTree = "<group>"; };
 		9DE0272495E9EE917571D595 /* FinishReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinishReviewView.swift; sourceTree = "<group>"; };
+		9F9F1FEBE741DDBE8177BA81 /* PYLinkIroh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PYLinkIroh.swift; sourceTree = "<group>"; };
 		A2D18762764859FE93B40155 /* CredentialVault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialVault.swift; sourceTree = "<group>"; };
 		AA0C66F8D185CD5194B079AE /* CIActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CIActivity.swift; sourceTree = "<group>"; };
 		AC50A581502EF04854200F81 /* DemoData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoData.swift; sourceTree = "<group>"; };
@@ -158,6 +161,17 @@
 		F6E1C772FE09ECA4404FF0B3 /* LiveActivities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivities.swift; sourceTree = "<group>"; };
 		F704A55C1B2862A9E81B2369 /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		2144367A4E537D40BE174BE6 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				99B3E16164BECDEEBEE1220B /* IrohLib in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		1B52AFF51EA352760C730059 = {
@@ -196,6 +210,7 @@
 			children = (
 				8699E5CDC258955E31456B7A /* AgentViews.swift */,
 				492802CE69238D7B67870B90 /* LinkClient.swift */,
+				9F9F1FEBE741DDBE8177BA81 /* PYLinkIroh.swift */,
 				94231697E07DA3DAFF6139C2 /* PYLinkProtocol.swift */,
 			);
 			path = Link;
@@ -300,6 +315,7 @@
 			buildPhases = (
 				27A3504E6A5F1A267A8CD3C4 /* Sources */,
 				657FE1999C15169C7AD7083C /* Resources */,
+				2144367A4E537D40BE174BE6 /* Frameworks */,
 				442FC5C6750194A7EBD7C66A /* Embed Foundation Extensions */,
 			);
 			buildRules = (
@@ -310,6 +326,7 @@
 			);
 			name = PullYardMobile;
 			packageProductDependencies = (
+				334EEADBC434077E8C6D118D /* IrohLib */,
 			);
 			productName = PullYardMobile;
 			productReference = BF51D71B18FDD71AD5E3A9A7 /* PullYardMobile.app */;
@@ -370,6 +387,9 @@
 			);
 			mainGroup = 1B52AFF51EA352760C730059;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				ECB1CE9B76545F5932EF39D4 /* XCRemoteSwiftPackageReference "iroh-ffi" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2B3C90A0C0FE22ABB901A0E7 /* Products */;
 			projectDirPath = "";
@@ -441,6 +461,7 @@
 				CA50426C9CEAEBCEA447ABE8 /* OverviewView.swift in Sources */,
 				0F54810514276B7405122E94 /* PRInsight.swift in Sources */,
 				88B3ABC287AA0225B1C590C2 /* PRWorkflowViews.swift in Sources */,
+				F3E1B1E8C0E98071559D75A5 /* PYLinkIroh.swift in Sources */,
 				2447CE6CB79EEE43B34463B2 /* PYLinkProtocol.swift in Sources */,
 				FE8B3F91653EC44B4BD8D825 /* ProjectsView.swift in Sources */,
 				A5C63EF30A6A9F50E262E55B /* PullRequestDetailView.swift in Sources */,
@@ -573,7 +594,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = PullYard;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
 				MARKETING_VERSION = 1.0.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -695,7 +716,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = PullYard;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
 				MARKETING_VERSION = 1.0.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -830,6 +851,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		ECB1CE9B76545F5932EF39D4 /* XCRemoteSwiftPackageReference "iroh-ffi" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/n0-computer/iroh-ffi";
+			requirement = {
+				kind = exactVersion;
+				version = 1.2.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		334EEADBC434077E8C6D118D /* IrohLib */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = ECB1CE9B76545F5932EF39D4 /* XCRemoteSwiftPackageReference "iroh-ffi" */;
+			productName = IrohLib;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 9F113BADCBDA69C22A470BF5 /* Project object */;
 }
