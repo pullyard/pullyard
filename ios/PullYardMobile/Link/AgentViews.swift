@@ -257,13 +257,59 @@ struct AgentSessionsView: View {
     @State private var loading = false
     @State private var resuming: String?
     @State private var query = ""
+    @State private var reordering = false
+    @AppStorage("agents.collapsedProjects") private var collapsedRaw = ""
+    @AppStorage("agents.projectOrder") private var orderRaw = ""
 
-    private var closed: [PYLinkSession] {
-        link.history.filter { $0.state == "closed" && matches($0) }
+    private struct ProjectGroup: Identifiable {
+        let id: String
+        var open: [PYLinkSession] = []
+        var closed: [PYLinkSession] = []
+        var latest = Date.distantPast
+
+        var name: String { (id as NSString).lastPathComponent }
+        var count: Int { open.count + closed.count }
+        var working: Bool { open.contains { $0.state == "working" || $0.state == "waiting" } }
     }
 
-    private var open: [PYLinkSession] {
-        link.sessions.filter(matches)
+    private var collapsed: Set<String> { Set(collapsedRaw.split(separator: "\n").map(String.init)) }
+    private var order: [String] { orderRaw.split(separator: "\n").map(String.init) }
+    private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    private func groups(filtered: Bool = true) -> [ProjectGroup] {
+        var map: [String: ProjectGroup] = [:]
+        for session in link.sessions where !filtered || matches(session) {
+            let root = Self.projectRoot(session.folder)
+            map[root, default: ProjectGroup(id: root)].open.append(session)
+            map[root]?.latest = .distantFuture
+        }
+        for session in link.history where session.state == "closed" && (!filtered || matches(session)) {
+            let root = Self.projectRoot(session.folder)
+            map[root, default: ProjectGroup(id: root)].closed.append(session)
+            if let updated = session.updated, updated > (map[root]?.latest ?? .distantPast) { map[root]?.latest = updated }
+        }
+        let order = order
+        return map.values.sorted { a, b in
+            switch (order.firstIndex(of: a.id), order.firstIndex(of: b.id)) {
+            case let (x?, y?): return x < y
+            case (.some, nil): return true
+            case (nil, .some): return false
+            default: return a.latest == b.latest ? a.name < b.name : a.latest > b.latest
+            }
+        }
+    }
+
+    static func projectRoot(_ folder: String) -> String {
+        if let range = folder.range(of: "/.claude/worktrees/") { return String(folder[..<range.lowerBound]) }
+        let parent = (folder as NSString).deletingLastPathComponent
+        if parent.hasSuffix("-worktrees") { return String(parent.dropLast("-worktrees".count)) }
+        return folder
+    }
+
+    private func toggle(_ project: String) {
+        var set = collapsed
+        if set.contains(project) { set.remove(project) } else { set.insert(project) }
+        withAnimation(.snappy) { collapsedRaw = set.sorted().joined(separator: "\n") }
     }
 
     private func matches(_ session: PYLinkSession) -> Bool {
@@ -290,35 +336,33 @@ struct AgentSessionsView: View {
                     .frame(maxWidth: .infinity).padding(.vertical, 40)
                     .listRowBackground(Color.clear)
             } else {
-                if !open.isEmpty {
-                    Section("Open on \(link.macName)") {
-                        ForEach(open) { session in
-                            NavigationLink(value: Route.agent(session.id)) { row(session) }
-                                .pyRow()
-                        }
-                    }
-                }
-                if !closed.isEmpty {
+                ForEach(groups()) { group in
+                    let isCollapsed = !searching && collapsed.contains(group.id)
                     Section {
-                        ForEach(closed) { session in
-                            Button { resume(session) } label: {
-                                HStack {
-                                    row(session)
-                                    Spacer(minLength: 8)
-                                    if resuming == session.id { PullYardLoader(size: 22) } else { Image(systemName: "arrow.uturn.forward.circle").foregroundStyle(MobileTheme.accent) }
-                                }
-                                .contentShape(Rectangle())
+                        if !isCollapsed {
+                            ForEach(group.open) { session in
+                                NavigationLink(value: Route.agent(session.id)) { row(session) }
+                                    .pyRow()
                             }
-                            .buttonStyle(.pyPlain)
-                            .disabled(resuming != nil)
-                            .pyRow()
+                            ForEach(group.closed) { session in
+                                Button { resume(session) } label: {
+                                    HStack {
+                                        row(session)
+                                        Spacer(minLength: 8)
+                                        if resuming == session.id { PullYardLoader(size: 22) } else { Image(systemName: "arrow.uturn.forward.circle").foregroundStyle(MobileTheme.accent) }
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.pyPlain)
+                                .disabled(resuming != nil)
+                                .pyRow()
+                            }
                         }
                     } header: {
-                        Text("History")
-                    } footer: {
-                        Text("Tap a session to continue it in PullYard on \(link.macName).")
+                        projectHeader(group, collapsed: isCollapsed)
                     }
-                } else if loading, !link.sessions.isEmpty {
+                }
+                if loading, link.history.isEmpty, !link.sessions.isEmpty {
                     HStack { Spacer(); PullYardLoader(size: 26); Spacer() }.listRowBackground(Color.clear)
                 }
             }
@@ -327,7 +371,52 @@ struct AgentSessionsView: View {
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search sessions, projects or #PR")
         .refreshable { await load() }
         .navigationTitle("Agents")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button { reordering = true } label: { Label("Reorder projects", systemImage: "arrow.up.arrow.down") }
+                    Button { withAnimation(.snappy) { collapsedRaw = groups(filtered: false).map(\.id).joined(separator: "\n") } } label: { Label("Collapse all", systemImage: "rectangle.compress.vertical") }
+                    Button { withAnimation(.snappy) { collapsedRaw = "" } } label: { Label("Expand all", systemImage: "rectangle.expand.vertical") }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .disabled(link.sessions.isEmpty && link.history.isEmpty)
+            }
+        }
+        .sheet(isPresented: $reordering) {
+            ProjectOrderSheet(projects: groups(filtered: false).map { ($0.id, $0.name) }) { ids in
+                orderRaw = ids.joined(separator: "\n")
+            }
+            .pySheetStyle()
+        }
         .task { await load() }
+    }
+
+    private func projectHeader(_ group: ProjectGroup, collapsed: Bool) -> some View {
+        Button { toggle(group.id) } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "folder.fill").font(.system(size: 13)).foregroundStyle(MobileTheme.accent)
+                Text(group.name).mobileFont(size: 14, weight: .semibold).foregroundStyle(MobileTheme.ink).lineLimit(1)
+                Text("\(group.count)")
+                    .mobileFont(size: 11, weight: .semibold).monospacedDigit()
+                    .foregroundStyle(MobileTheme.muted)
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(MobileTheme.ink.opacity(0.07), in: Capsule())
+                if group.working { AgentStateDot(state: "working") }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(MobileTheme.muted)
+                    .rotationEffect(.degrees(collapsed ? -90 : 0))
+            }
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.pyPlain)
+        .textCase(nil)
+        .disabled(searching)
+        .accessibilityLabel(group.name)
+        .accessibilityValue(collapsed ? L("Collapsed") : L("Expanded"))
     }
 
     private func load() async {
@@ -369,6 +458,45 @@ struct AgentSessionsView: View {
         }
         guard let updated = session.updated else { return place }
         return "\(place) · \(updated.formatted(.relative(presentation: .named)))"
+    }
+}
+
+private struct ProjectOrderSheet: View {
+    @State var items: [(id: String, name: String)]
+    let save: ([String]) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    init(projects: [(String, String)], save: @escaping ([String]) -> Void) {
+        _items = State(initialValue: projects.map { (id: $0.0, name: $0.1) })
+        self.save = save
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(items, id: \.id) { item in
+                    Label(item.name, systemImage: "folder.fill")
+                        .mobileFont(size: 15, weight: .medium)
+                        .foregroundStyle(MobileTheme.ink)
+                        .pyRow()
+                }
+                .onMove { from, to in items.move(fromOffsets: from, toOffset: to) }
+            }
+            .pyListStyle()
+            .environment(\.editMode, .constant(.active))
+            .navigationTitle("Reorder projects")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        save(items.map(\.id))
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
     }
 }
 
