@@ -103,7 +103,7 @@ struct FirstRunChecklist: View {
     @Environment(\.openSettings) private var openSettings
     @State private var notifications: UNAuthorizationStatus = .notDetermined
     @State private var agents = ClaudeAccountStore.shared
-    @State private var jira = JiraAccount.shared
+    @State private var jira = JiraConnections.shared
 
     private var allDone: Bool {
         notifications != .notDetermined && agents.isLoggedIn && jira.isConfigured

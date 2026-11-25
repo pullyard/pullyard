@@ -1,57 +1,152 @@
 import SwiftUI
 
 struct JiraConnectForm: View {
-    var compact = false
-    @State private var account = JiraAccount.shared
-    @State private var site = JiraAccount.shared.site
-    @State private var email = JiraAccount.shared.email
+    @State private var store = JiraConnections.shared
+    @State private var editing: JiraConnection?
+    @State private var adding = false
+    @State private var removing: JiraConnection?
+    @State private var refreshing: Set<String> = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if store.connections.isEmpty && !adding {
+                JiraConnectionEditor(existing: nil) { adding = false }
+            } else {
+                ForEach(store.connections) { c in
+                    if editing?.id == c.id {
+                        JiraConnectionEditor(existing: c) { editing = nil }
+                    } else {
+                        row(c)
+                    }
+                }
+                if adding {
+                    JiraConnectionEditor(existing: nil) { adding = false }
+                } else {
+                    Button { adding = true } label: { Label("Add Jira connection", systemImage: "plus") }
+                        .controlSize(.small)
+                }
+                if store.hasSeveral || !store.orgOverrides.isEmpty || !store.repoOverrides.isEmpty {
+                    JiraRoutingRules()
+                }
+            }
+        }
+        .confirmationDialog("Remove \(removing?.name ?? "this connection")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
+            Button("Remove", role: .destructive) {
+                if let id = removing?.id { store.remove(id) }
+                removing = nil
+            }
+        } message: {
+            Text("Its API token is deleted from the Keychain. Rules that point to it are removed too.")
+        }
+    }
+
+    private func row(_ c: JiraConnection) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: store.token(for: c.id) == nil ? "exclamationmark.triangle.fill" : "checkmark.seal.fill")
+                .foregroundStyle(store.token(for: c.id) == nil ? Color.syAmber : Color.syGreen)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(c.name).foregroundStyle(Color.syText)
+                    if let me = c.displayName { Text(me).font(.syCaption).foregroundStyle(Color.syMuted) }
+                }
+                Text(subtitle(c)).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
+                    .help(c.projectKeys.joined(separator: ", "))
+            }
+            Spacer()
+            if refreshing.contains(c.id) { WakeLoader() }
+            Menu {
+                Button("Edit…") { editing = c }
+                Button("Reconnect with a new token…") { editing = c }
+                Button("Refresh projects") { refresh(c.id) }
+                Divider()
+                Button("Remove…", role: .destructive) { removing = c }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel("Actions for \(c.name)")
+        }
+    }
+
+    private func subtitle(_ c: JiraConnection) -> String {
+        var parts = [c.host]
+        if !c.projectKeys.isEmpty {
+            let shown = c.projectKeys.prefix(5).joined(separator: ", ")
+            parts.append(c.projectKeys.count > 5 ? "\(shown) +\(c.projectKeys.count - 5)" : shown)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func refresh(_ id: String) {
+        refreshing.insert(id)
+        Task {
+            await store.refreshProjects(id)
+            refreshing.remove(id)
+        }
+    }
+}
+
+struct JiraConnectionEditor: View {
+    let existing: JiraConnection?
+    let done: () -> Void
+    @State private var name = ""
+    @State private var site = ""
+    @State private var email = ""
     @State private var token = ""
     @State private var busy = false
     @State private var error: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if account.isConfigured {
-                HStack(spacing: 10) {
-                    Image(systemName: "checkmark.seal.fill").foregroundStyle(Color.syGreen)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(account.displayName ?? "Connected").foregroundStyle(Color.syText)
-                        Text(account.baseURL?.host ?? "").font(.syCaption).foregroundStyle(Color.syMuted)
-                    }
-                    Spacer()
-                    Button("Disconnect") { account.disconnect() }
-                }
-            } else {
-                Text("Connect Jira to see the ticket for a pull request and move it between statuses. Your API token stays in the Keychain.")
+            if existing == nil {
+                Text(JiraConnections.shared.isConfigured ? "Add another Jira site. PullYard picks the right one for each ticket by its project key." : "Connect Jira to see the ticket for a pull request and move it between statuses. Your API token stays in the Keychain.")
                     .font(.syCallout)
                     .foregroundStyle(Color.syMuted)
-                TextField("Jira address — acme.atlassian.net", text: $site).textFieldStyle(.roundedBorder)
-                TextField("Atlassian account email (empty for a Data Center token)", text: $email).textFieldStyle(.roundedBorder).textContentType(.username)
-                HStack {
-                    SecureField("API token", text: $token).textFieldStyle(.roundedBorder).onSubmit(connect)
-                    Button(action: connect) {
-                        if busy { WakeLoader() } else { Text("Connect") }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(busy || site.trimmingCharacters(in: .whitespaces).isEmpty || token.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            TextField("Name — e.g. Work A", text: $name).textFieldStyle(.roundedBorder)
+            TextField("Jira address — acme.atlassian.net", text: $site).textFieldStyle(.roundedBorder)
+            TextField("Atlassian account email (empty for a Data Center token)", text: $email).textFieldStyle(.roundedBorder).textContentType(.username)
+            HStack {
+                SecureField(existing == nil ? "API token" : "New API token (leave empty to keep the current one)", text: $token).textFieldStyle(.roundedBorder).onSubmit(save)
+                Button(action: save) {
+                    if busy { WakeLoader() } else { Text(existing == nil ? "Connect" : "Save") }
                 }
-                Button("Create an API token at id.atlassian.com") { openInBrowser("https://id.atlassian.com/manage-profile/security/api-tokens") }
-                    .buttonStyle(.link)
-                if let error {
-                    Label(error, systemImage: "exclamationmark.triangle.fill").font(.syCaption).foregroundStyle(Color.syRed).textSelection(.enabled)
+                .buttonStyle(.borderedProminent)
+                .disabled(busy || site.trimmingCharacters(in: .whitespaces).isEmpty || (existing == nil && token.trimmingCharacters(in: .whitespaces).isEmpty))
+                if existing != nil || JiraConnections.shared.isConfigured {
+                    Button("Cancel", action: done).keyboardShortcut(.cancelAction)
                 }
             }
+            Button("Create an API token at id.atlassian.com") { openInBrowser("https://id.atlassian.com/manage-profile/security/api-tokens") }
+                .buttonStyle(.link)
+            if let error {
+                Label(error, systemImage: "exclamationmark.triangle.fill").font(.syCaption).foregroundStyle(Color.syRed).textSelection(.enabled)
+            }
+        }
+        .padding(existing == nil && !JiraConnections.shared.isConfigured ? 0 : 12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.syText.opacity(existing == nil && !JiraConnections.shared.isConfigured ? 0 : 0.04)))
+        .onAppear {
+            guard let existing else { return }
+            name = existing.name
+            site = existing.site
+            email = existing.email
         }
     }
 
-    private func connect() {
+    private func save() {
         busy = true
         error = nil
         Task {
             do {
-                try await account.connect(site: site, email: email, token: token)
-                site = account.site
+                if let existing {
+                    try await JiraConnections.shared.update(existing.id, name: name, site: site, email: email, token: token)
+                } else {
+                    try await JiraConnections.shared.add(name: name, site: site, email: email, token: token)
+                }
                 token = ""
+                done()
             } catch {
                 self.error = error.localizedDescription
             }
@@ -60,9 +155,141 @@ struct JiraConnectForm: View {
     }
 }
 
+struct JiraRoutingRules: View {
+    @State private var store = JiraConnections.shared
+    @State private var org = ""
+    @State private var target = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Rules").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syDim)
+            Text("Tickets go to the site that owns their project key. A rule wins over that: a repository rule first, then an organization rule.")
+                .font(.syCaption)
+                .foregroundStyle(Color.syMuted)
+            ForEach(rules, id: \.key) { rule in
+                HStack(spacing: 8) {
+                    Image(systemName: rule.isRepo ? "book.closed" : "building.2").foregroundStyle(Color.syMuted).frame(width: 16)
+                    Text(rule.isRepo ? rule.key : rule.key + "/*").font(.syCallout.monospaced())
+                    Image(systemName: "arrow.right").font(.syCaption2).foregroundStyle(Color.syDim)
+                    Text(store.connection(rule.id)?.name ?? "—").font(.syCallout)
+                    Spacer()
+                    Button {
+                        if rule.isRepo {
+                            if let repo = RepoRef(full: rule.key) { store.setRepoOverride(nil, for: repo) }
+                        } else {
+                            store.setOrgOverride(nil, for: rule.key)
+                        }
+                    } label: { Image(systemName: "minus.circle") }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Color.syMuted)
+                    .help("Remove this rule")
+                    .accessibilityLabel("Remove rule for \(rule.key)")
+                }
+            }
+            HStack(spacing: 8) {
+                TextField("GitHub organization", text: $org).textFieldStyle(.roundedBorder).frame(maxWidth: 200).onSubmit(addOrg)
+                Picker("Jira", selection: $target) {
+                    ForEach(store.connections) { Text($0.name).tag($0.id) }
+                }
+                .labelsHidden()
+                .fixedSize()
+                Button("Add rule", action: addOrg)
+                    .disabled(org.trimmingCharacters(in: .whitespaces).isEmpty || store.connection(target) == nil)
+            }
+            .controlSize(.small)
+        }
+        .padding(.top, 6)
+        .onAppear { if store.connection(target) == nil { target = store.connections.first?.id ?? "" } }
+    }
+
+    private var rules: [(key: String, id: String, isRepo: Bool)] {
+        store.repoOverrides.sorted { $0.key < $1.key }.map { ($0.key, $0.value, true) }
+            + store.orgOverrides.sorted { $0.key < $1.key }.map { ($0.key, $0.value, false) }
+    }
+
+    private func addOrg() {
+        let name = org.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "@/*"))
+        guard !name.isEmpty, store.connection(target) != nil else { return }
+        store.setOrgOverride(target, for: name)
+        org = ""
+    }
+}
+
+struct JiraRepoChip: View {
+    let repo: RepoRef
+    @State private var store = JiraConnections.shared
+
+    var body: some View {
+        if store.isConfigured {
+            let current = store.override(for: repo)
+            let id = store.connectionForRepo(repo)
+            Menu {
+                Section("Jira for \(repo.full)") {
+                    Button { store.setRepoOverride(nil, for: repo) } label: {
+                        if current.repo == nil { Label(automaticTitle(org: current.org), systemImage: "checkmark") } else { Text(automaticTitle(org: current.org)) }
+                    }
+                    ForEach(store.connections) { c in
+                        Button { store.setRepoOverride(c.id, for: repo) } label: {
+                            if current.repo == c.id { Label(c.name, systemImage: "checkmark") } else { Text(c.name) }
+                        }
+                    }
+                }
+                if store.hasSeveral {
+                    Section("All of \(repo.owner)") {
+                        Button { store.setOrgOverride(nil, for: repo.owner) } label: {
+                            if current.org == nil { Label("By project key", systemImage: "checkmark") } else { Text("By project key") }
+                        }
+                        ForEach(store.connections) { c in
+                            Button { store.setOrgOverride(c.id, for: repo.owner) } label: {
+                                if current.org == c.id { Label(c.name, systemImage: "checkmark") } else { Text(c.name) }
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "ticket")
+                    Text(store.connection(id)?.name ?? "Jira: by key")
+                }
+                .font(.syCaption.weight(.medium))
+                .foregroundStyle(Color.sySky)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(Color.sySky.opacity(0.12)))
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Which Jira this repository's tickets come from")
+        }
+    }
+
+    private func automaticTitle(org: String?) -> String {
+        if let name = store.connection(org)?.name { return "Same as \(repo.owner) (\(name))" }
+        return store.hasSeveral ? "Automatic — by project key" : "Automatic"
+    }
+}
+
+struct JiraRepoBadge: View {
+    let full: String
+    @State private var store = JiraConnections.shared
+
+    var body: some View {
+        if store.hasSeveral, let repo = RepoRef(full: full), let c = store.connection(store.connectionForRepo(repo)) {
+            Label(c.name, systemImage: "ticket")
+                .font(.syCaption2)
+                .foregroundStyle(Color.sySky)
+                .lineLimit(1)
+                .help("Jira tickets come from \(c.name)")
+        }
+    }
+}
+
 struct JiraTab: View {
     let pr: PullRequestDetail
-    @State private var account = JiraAccount.shared
+    var repo: RepoRef?
+    @State private var account = JiraConnections.shared
     @State private var issues: [JiraIssue] = []
     @State private var errors: [String: String] = [:]
     @State private var loading = false
@@ -74,8 +301,8 @@ struct JiraTab: View {
     @Environment(AppModel.self) private var app
 
     static func keys(for pr: PullRequestDetail) -> [String] {
-        let linked = JiraAccount.shared.linkedKeys(for: pr.url)
-        let hidden = Set(JiraAccount.shared.hiddenKeys(for: pr.url))
+        let linked = JiraConnections.shared.linkedKeys(for: pr.url)
+        let hidden = Set(JiraConnections.shared.hiddenKeys(for: pr.url))
         var out: [String] = []
         for k in linked + JiraKeys.detected(title: pr.title, branch: pr.headRefName, body: pr.body) where !out.contains(k) && (linked.contains(k) || !hidden.contains(k)) { out.append(k) }
         return out
@@ -115,8 +342,13 @@ struct JiraTab: View {
             .animation(Motion.smooth, value: linking)
             .animation(Motion.smooth, value: open)
         }
-        .task(id: "\(account.isConfigured)|\(keys.joined(separator: ","))|\(reload)") { await load(keys) }
-        .onChange(of: app.refreshTick) { Task { await load(Self.keys(for: pr), force: true) } }
+        .task(id: "\(account.connections.map(\.id).joined())|\(keys.joined(separator: ","))|\(reload)") { await load(keys) }
+        .onChange(of: app.refreshTick) {
+            Task {
+                await account.refreshAllProjects(olderThan: 600)
+                await load(Self.keys(for: pr), force: true)
+            }
+        }
     }
 
     private func header(count: Int) -> some View {
@@ -124,7 +356,7 @@ struct JiraTab: View {
             IconTile(systemImage: "ticket", color: .sySky, size: 26)
             VStack(alignment: .leading, spacing: 1) {
                 Text(count == 1 ? "1 linked ticket" : "\(count) linked tickets").font(.syHeadline).foregroundStyle(Color.syText)
-                Text(account.baseURL?.host ?? "").font(.syCaption).foregroundStyle(Color.syMuted)
+                Text(sourceLine).font(.syCaption).foregroundStyle(Color.syMuted)
             }
             Spacer()
             RefreshPill(updated: lastUpdated, refreshing: loading, error: errors.isEmpty ? nil : errors.values.first) {
@@ -151,12 +383,20 @@ struct JiraTab: View {
         }
     }
 
+    private var sourceLine: String {
+        var names: [String] = []
+        for issue in issues {
+            if let c = account.connection(issue.connectionID), !names.contains(c.name) { names.append(c.name) }
+        }
+        if names.isEmpty, let only = account.connections.first, !account.hasSeveral { return only.host }
+        return names.joined(separator: " · ")
+    }
+
     @ViewBuilder
     private func entry(_ key: String, primary: Bool, manual: Bool) -> some View {
         if let issue = issues.first(where: { $0.key == key }) {
             if primary || open.contains(key) {
                 JiraIssueCard(issue: issue, manual: manual, onUnlink: { unlink(key) }, onHide: manual ? nil : { hide(key) }, onCollapse: primary ? nil : { open.remove(key) }) { updated in
-                    account.remember(updated)
                     if let i = issues.firstIndex(where: { $0.key == updated.key }) { issues[i] = updated }
                 }
             } else {
@@ -242,9 +482,10 @@ struct JiraTab: View {
     }
 
     private func load(_ keys: [String], force: Bool = false) async {
-        guard let client = account.client(), !(force && loading) else { return }
+        guard account.isConfigured, !(force && loading) else { return }
+        let repo = repo
         for key in keys where !issues.contains(where: { $0.key == key }) {
-            if let hit = account.cachedIssue(key) { issues.append(hit) }
+            if let hit = account.cachedIssue(key, repo: repo) { issues.append(hit) }
         }
         let missing = force ? keys : keys.filter { key in !issues.contains(where: { $0.key == key }) && errors[key] == nil }
         guard !missing.isEmpty else {
@@ -256,10 +497,11 @@ struct JiraTab: View {
             loading = false
             lastUpdated = Date()
         }
+        let store = account
         await withTaskGroup(of: (String, Result<JiraIssue, Error>).self) { group in
             for key in missing {
                 group.addTask {
-                    do { return (key, .success(try await client.issue(key))) } catch { return (key, .failure(error)) }
+                    do { return (key, .success(try await store.fetchIssue(key, repo: repo))) } catch { return (key, .failure(error)) }
                 }
             }
             for await (key, result) in group {
@@ -267,7 +509,6 @@ struct JiraTab: View {
                 case .success(let issue):
                     if let i = issues.firstIndex(where: { $0.key == key }) { issues[i] = issue } else { issues.append(issue) }
                     errors[key] = nil
-                    account.remember(issue)
                 case .failure(let e): errors[key] = e.localizedDescription
                 }
             }
@@ -394,7 +635,7 @@ struct JiraIssueCard: View {
         VStack(alignment: .leading, spacing: 14) {
             if let parent = issue.parentKey {
                 Button {
-                    if let base = JiraAccount.shared.baseURL { openInBrowser(base.absoluteString + "/browse/" + parent) }
+                    openInBrowser(issue.siteBase + "/browse/" + parent)
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "arrow.turn.left.up").font(.syCaption2)
@@ -410,6 +651,15 @@ struct JiraIssueCard: View {
                 IconTile(systemImage: JiraStyle.typeIcon(issue.type), color: JiraStyle.typeColor(issue.type), size: 24)
                 Text(issue.key).font(.syCallout.weight(.semibold).monospaced()).foregroundStyle(Color.syText)
                 if let type = issue.type { Text(type).font(.syCaption).foregroundStyle(Color.syMuted) }
+                if JiraConnections.shared.hasSeveral, let c = JiraConnections.shared.connection(issue.connectionID) {
+                    Text(c.name)
+                        .font(.syCaption2.weight(.semibold))
+                        .foregroundStyle(Color.sySky)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.sySky.opacity(0.12)))
+                        .help(c.host)
+                }
                 Spacer()
                 statusMenu
                 if let onCollapse {
@@ -544,20 +794,24 @@ struct JiraIssueCard: View {
     }
 
     private func loadTransitions() async {
-        guard let client = JiraAccount.shared.client() else { return }
+        guard let client = JiraConnections.shared.client(for: issue.connectionID) else { return }
         loadingTransitions = true
         transitions = (try? await client.transitions(issue.key)) ?? []
         loadingTransitions = false
     }
 
     private func move(_ t: JiraTransition) {
-        guard let client = JiraAccount.shared.client() else { return }
+        guard let client = JiraConnections.shared.client(for: issue.connectionID) else { return }
+        let id = issue.connectionID
         moving = true
         error = nil
         Task {
             do {
                 try await client.transition(issue.key, to: t.id)
-                onChange(try await client.issue(issue.key))
+                var updated = try await client.issue(issue.key)
+                updated.connectionID = id
+                JiraConnections.shared.remember(updated)
+                onChange(updated)
             } catch {
                 self.error = error.localizedDescription
             }

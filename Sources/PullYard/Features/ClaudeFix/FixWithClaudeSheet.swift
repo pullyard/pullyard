@@ -29,6 +29,7 @@ struct FixWithClaudeSheet: View {
     @State private var ciHead: String?
     @State private var ciNonce = CIFixPrompt.nonce()
     @State private var ciStale = false
+    @State private var tickets: [JiraIssue] = []
 
     private var allFailing: [CheckContext] { CIFailureCollector.failing(pr.checks) }
     private var failing: [CheckContext] { CIFailureCollector.shown(allFailing, focus: ci?.focus) }
@@ -45,7 +46,7 @@ struct FixWithClaudeSheet: View {
             return CIFixPrompt.build(pr: pr, repo: model.ref.repo, failures: chosen.compactMap { ciItems[$0.id] }, pending: chosen.filter { ciItems[$0.id] == nil }.map { CIFailure(check: $0).name }, options: options, nonce: ciNonce)
         }
         let chosen = threads.filter { selected.contains($0.id) }
-        return FixPrompt.build(pr: pr, repo: model.ref.repo, threads: chosen, general: general, options: options)
+        return FixPrompt.build(pr: pr, repo: model.ref.repo, threads: chosen, general: general, options: options, tickets: tickets)
     }
 
     private var prompt: String { custom ?? generated }
@@ -119,6 +120,16 @@ struct FixWithClaudeSheet: View {
             if selected.isEmpty { selected = Set(threads.map(\.id)) }
             folder = await LocalRepoStore.detect(model.ref.repo)
             detecting = false
+        }
+        .task(id: pr.url) {
+            let store = JiraConnections.shared
+            guard store.isConfigured else { return }
+            var found: [JiraIssue] = []
+            for key in JiraTab.keys(for: pr).prefix(3) {
+                if let issue = try? await store.fetchIssue(key, repo: model.ref.repo) { found.append(issue) }
+            }
+            guard !found.isEmpty else { return }
+            tickets = found
         }
     }
 
