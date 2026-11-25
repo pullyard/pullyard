@@ -304,8 +304,13 @@ struct PRDetailView: View {
     }
 
     @ViewBuilder private func overview(_ pr: PullRequest) -> some View {
-        if pr.isOpen {
-            FixWithAgentMenu(key: key, hasConflicts: insight?.hasConflicts ?? (pr.mergeable == false))
+        if pr.isOpen, let insight {
+            let comments = insight.unresolvedCount > 0 || insight.reviewDecision == "CHANGES_REQUESTED"
+            let conflicts = insight.hasConflicts
+            let sessions = LinkClient.shared.sessions.contains { $0.repo?.caseInsensitiveCompare(key.repo) == .orderedSame && $0.number == key.number }
+            if comments || conflicts || sessions {
+                FixWithAgentMenu(key: key, hasComments: comments, hasConflicts: conflicts)
+            }
         }
         if pr.isOpen, let insight {
             MergeReadinessCard(insight: insight, checks: ChecksSummary(checks)) {

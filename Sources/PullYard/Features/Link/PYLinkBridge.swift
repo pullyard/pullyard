@@ -14,6 +14,10 @@ struct PYLinkBridge {
             client.channel.send(json: reply)
         case "fix":
             startFix(message, client: client)
+        case "preview":
+            preview(message, client: client)
+        case "edit":
+            editMessage(message, client: client)
         case "history":
             sendHistory(message, client: client)
         case "resume":
@@ -164,6 +168,114 @@ struct PYLinkBridge {
         }
     }
 
+    private struct FixPlan {
+        let pr: PullRequestDetail
+        let repo: RepoRef
+        let folder: String
+        let prompt: String
+        let name: String
+        let kind: String
+        let number: Int
+    }
+
+    private enum FixFailure: LocalizedError {
+        case message(String)
+        var errorDescription: String? { if case let .message(text) = self { return text }; return nil }
+    }
+
+    private func plan(_ message: PYLinkMessage) async throws -> FixPlan {
+        guard let app, let api = app.api else { throw FixFailure.message("PullYard on \(server.desktopName) isn't signed in to GitHub.") }
+        guard let full = message.repo, let repo = RepoRef(full: full), let number = message.number else { throw FixFailure.message("Missing pull request.") }
+        let kind = message.kind ?? "comments"
+        let extra = message.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let response = try await api.pullRequest(ItemRef(repo: repo, number: number))
+        guard let pr = response.repository?.pullRequest else { throw FixFailure.message("\(full) #\(number) isn't available to this account.") }
+        guard let folder = await LocalRepoStore.detect(repo) else {
+            throw FixFailure.message("There's no local clone of \(full) on \(server.desktopName). Open the pull request once in PullYard on the Mac and pick its folder.")
+        }
+        var prompt: String
+        let name: String
+        switch kind {
+        case "conflicts":
+            prompt = ConflictPrompt.build(pr: pr, repo: repo, files: [], push: true)
+            name = "Resolve conflicts PR #\(number): \(pr.title)"
+        case "custom":
+            prompt = "Work on pull request #\(number) \"\(pr.title)\" in \(full).\nPR: \(pr.url)\nBranch: \(pr.headRefName) → \(pr.baseRefName)\n\n1. \(FixPrompt.checkoutStep(number))"
+            name = "PR #\(number): \(pr.title)"
+        default:
+            let threads = pr.reviewThreads.nodes.filter { !$0.isResolved && !$0.isOutdated }
+            prompt = FixPrompt.build(pr: pr, repo: repo, threads: threads, general: FixPrompt.generalFeedback(pr), options: FixOptions(includeGeneral: true, commit: true, push: true, replyAndResolve: false))
+            name = "Fix PR #\(number): \(pr.title)"
+        }
+        if !extra.isEmpty { prompt += "\n\nAdditional instructions from the iPhone:\n\(extra)" }
+        if let edited = message.prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !edited.isEmpty { prompt = edited }
+        return FixPlan(pr: pr, repo: repo, folder: folder, prompt: prompt, name: name, kind: kind, number: number)
+    }
+
+    private func editMessage(_ message: PYLinkMessage, client: PYLinkClient) {
+        func fail(_ text: String) {
+            var reply = PYLinkMessage(type: "error")
+            reply.id = message.id
+            reply.error = text
+            client.channel.send(json: reply)
+        }
+        guard let app, let tab = tab(message.session), let chat = tab.chat else { return fail("This session isn't open on \(server.desktopName).") }
+        let replacement = message.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !replacement.isEmpty else { return fail("The message is empty.") }
+        guard !chat.busy else { return fail("The agent is working. Stop it first, then edit the message.") }
+        guard chat.sessionId?.isEmpty == false else { return fail("This session can't be edited yet.") }
+        guard let itemID = message.replacesItem, itemID.hasPrefix("u") else { return fail("Only your own messages can be edited.") }
+        let uid = String(itemID.dropFirst())
+        guard let index = chat.items.firstIndex(where: { if case .user(let id, _, _) = $0 { return id == uid } else { return false } }),
+              case let .user(_, original, images) = chat.items[index] else { return fail("That message isn't in this session anymore.") }
+        let later = chat.items[(index + 1)...].filter { if case .user(_, let text, _) = $0 { return text == original } else { return false } }.count
+        let touchedFiles = chat.items[(index + 1)...].contains {
+            if case .tool(let call) = $0 { return ["Edit", "Write", "MultiEdit", "NotebookEdit"].contains(call.name) }
+            return false
+        }
+        let before = Set(app.claude.tabs.map(\.id))
+        let previousError = chat.lastError
+        app.claude.rewind(tab, to: original, occurrenceFromEnd: later, replacement: replacement, images: images, filesChanged: touchedFiles)
+        Task { @MainActor in
+            for _ in 0..<75 {
+                try? await Task.sleep(for: .milliseconds(200))
+                if let next = app.claude.tabs.first(where: { !before.contains($0.id) && $0.chat != nil }) {
+                    let old = tab.id.uuidString
+                    client.subscriptions.remove(old)
+                    client.sentItems[old] = nil
+                    client.sentOrder[old] = nil
+                    client.sentState[old] = nil
+                    var reply = PYLinkMessage(type: "started")
+                    reply.id = message.id
+                    reply.session = next.id.uuidString
+                    reply.sessions = sessions()
+                    client.channel.send(json: reply)
+                    client.subscriptions.insert(next.id.uuidString)
+                    pushUpdates(to: client, only: next.id.uuidString)
+                    return
+                }
+                if let error = chat.lastError, error != previousError { return fail(error) }
+            }
+            fail("Editing didn't finish on \(server.desktopName).")
+        }
+    }
+
+    private func preview(_ message: PYLinkMessage, client: PYLinkClient) {
+        Task { @MainActor in
+            var reply = PYLinkMessage(type: "preview")
+            reply.id = message.id
+            do {
+                let plan = try await plan(message)
+                reply.prompt = plan.prompt
+                reply.text = plan.name
+            } catch {
+                reply.type = "error"
+                reply.error = error.localizedDescription
+            }
+            client.channel.send(json: reply)
+        }
+    }
+
     private func startFix(_ message: PYLinkMessage, client: PYLinkClient) {
         func fail(_ text: String) {
             var reply = PYLinkMessage(type: "error")
@@ -171,39 +283,17 @@ struct PYLinkBridge {
             reply.error = text
             client.channel.send(json: reply)
         }
-        guard let app, let api = app.api else { return fail("PullYard on \(server.desktopName) isn't signed in to GitHub.") }
-        guard let full = message.repo, let repo = RepoRef(full: full), let number = message.number else { return fail("Missing pull request.") }
-        let kind = message.kind ?? "comments"
-        let extra = message.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let app else { return }
         Task { @MainActor in
             do {
-                let response = try await api.pullRequest(ItemRef(repo: repo, number: number))
-                guard let pr = response.repository?.pullRequest else { return fail("\(full) #\(number) isn't available to this account.") }
-                guard let folder = await LocalRepoStore.detect(repo) else {
-                    return fail("There's no local clone of \(full) on \(server.desktopName). Open the pull request once in PullYard on the Mac and pick its folder.")
-                }
-                var prompt: String
-                let name: String
-                switch kind {
-                case "conflicts":
-                    prompt = ConflictPrompt.build(pr: pr, repo: repo, files: [], push: true)
-                    name = "Resolve conflicts PR #\(number): \(pr.title)"
-                case "custom":
-                    prompt = "Work on pull request #\(number) \"\(pr.title)\" in \(full).\nPR: \(pr.url)\nBranch: \(pr.headRefName) → \(pr.baseRefName)\n\n1. \(FixPrompt.checkoutStep(number))"
-                    name = "PR #\(number): \(pr.title)"
-                default:
-                    let threads = pr.reviewThreads.nodes.filter { !$0.isResolved && !$0.isOutdated }
-                    prompt = FixPrompt.build(pr: pr, repo: repo, threads: threads, general: FixPrompt.generalFeedback(pr), options: FixOptions(includeGeneral: true, commit: true, push: true, replyAndResolve: false))
-                    name = "Fix PR #\(number): \(pr.title)"
-                }
-                if !extra.isEmpty { prompt += "\n\nAdditional instructions from the iPhone:\n\(extra)" }
+                let plan = try await plan(message)
                 let isolate = UserDefaults.standard.object(forKey: "agentFix.isolatedWorktree") as? Bool ?? true
                 let mode = ClaudePermissionMode(rawValue: UserDefaults.standard.string(forKey: "claudeMode") ?? "") ?? .standard
-                guard let tab = try await ClaudeLauncher.startForPR(app: app, prompt: prompt, folder: folder, isolate: isolate, pr: pr, repo: repo, target: .app, mode: mode, name: name) else {
+                guard let tab = try await ClaudeLauncher.startForPR(app: app, prompt: plan.prompt, folder: plan.folder, isolate: isolate, pr: plan.pr, repo: plan.repo, target: .app, mode: mode, name: plan.name) else {
                     return fail("The agent didn't start on \(server.desktopName).")
                 }
-                if kind == "conflicts" || kind == "comments" {
-                    app.claude.prFixes[ItemRef(repo: repo, number: number)] = CIFixLaunch(tabID: tab.id, target: .app, headOid: pr.headRefOid, at: Date())
+                if plan.kind == "conflicts" || plan.kind == "comments" {
+                    app.claude.prFixes[ItemRef(repo: plan.repo, number: plan.number)] = CIFixLaunch(tabID: tab.id, target: .app, headOid: plan.pr.headRefOid, at: Date())
                 }
                 var reply = PYLinkMessage(type: "started")
                 reply.id = message.id

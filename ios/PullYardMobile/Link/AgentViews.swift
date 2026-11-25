@@ -184,6 +184,7 @@ struct QRScannerView: UIViewControllerRepresentable {
 
 struct FixWithAgentMenu: View {
     let key: PRKey
+    let hasComments: Bool
     let hasConflicts: Bool
     @ObservedObject private var link = LinkClient.shared
     @EnvironmentObject private var router: AppRouter
@@ -193,10 +194,12 @@ struct FixWithAgentMenu: View {
     @State private var showPairing = false
     @State private var customTask = false
     @State private var customText = ""
+    @State private var review: PromptReview?
+    @State private var launching = false
 
     var body: some View {
         Menu {
-            Button { start("comments") } label: { Label("Fix review comments", systemImage: "text.bubble") }
+            if hasComments { Button { start("comments") } label: { Label("Fix review comments", systemImage: "text.bubble") } }
             if hasConflicts { Button { start("conflicts") } label: { Label("Resolve conflicts", systemImage: "arrow.triangle.merge") } }
             Button { customTask = true } label: { Label("Custom task…", systemImage: "pencil") }
             let existing = link.sessions.filter { $0.repo?.caseInsensitiveCompare(key.repo) == .orderedSame && $0.number == key.number }
@@ -209,8 +212,8 @@ struct FixWithAgentMenu: View {
             }
         } label: {
             HStack(spacing: 8) {
-                if starting { PullYardLoader(size: 26, style: .monochrome(.white)) } else { Image(systemName: "wand.and.stars") }
-                Text(starting ? "Starting on \(link.macName)…" : "Fix with agent")
+                if starting || launching { PullYardLoader(size: 26, style: .monochrome(.white)) } else { Image(systemName: "wand.and.stars") }
+                Text(launching ? "Starting on \(link.macName)…" : starting ? "Preparing on \(link.macName)…" : "Fix with agent")
             }
             .mobileFont(size: 15, weight: .semibold)
             .foregroundStyle(.white)
@@ -218,7 +221,7 @@ struct FixWithAgentMenu: View {
             .contentShape(Capsule())
             .pyGlass(in: Capsule(), tint: MobileTheme.coral, interactive: true, fallback: MobileTheme.coral)
         }
-        .disabled(starting)
+        .disabled(starting || launching)
         .sheet(isPresented: $showPairing) {
             NavigationStack {
                 List { MacLinkSection() }
@@ -227,6 +230,12 @@ struct FixWithAgentMenu: View {
                     .navigationTitle("Connect your Mac")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showPairing = false } } }
+            }
+            .pySheetStyle()
+        }
+        .sheet(item: $review) { item in
+            PromptReviewSheet(review: item) { prompt in
+                launch(item, prompt: prompt)
             }
             .pySheetStyle()
         }
@@ -243,10 +252,107 @@ struct FixWithAgentMenu: View {
         Task {
             defer { starting = false }
             do {
-                let session = try await link.startFix(repo: key.repo, number: key.number, kind: kind, text: text)
+                let preview = try await link.previewFix(repo: key.repo, number: key.number, kind: kind, text: text)
+                review = PromptReview(kind: kind, text: text, name: preview.name, prompt: preview.prompt)
+            } catch {
+                feedback.error(error, key: "agent-start")
+            }
+        }
+    }
+
+    private func launch(_ item: PromptReview, prompt: String) {
+        review = nil
+        launching = true
+        Task {
+            defer { launching = false }
+            do {
+                let edited = prompt == item.prompt ? nil : prompt
+                let session = try await link.startFix(repo: key.repo, number: key.number, kind: item.kind, text: item.text, prompt: edited)
                 router.open(.agent(session), in: model.selectedTab)
             } catch {
                 feedback.error(error, key: "agent-start")
+            }
+        }
+    }
+}
+
+struct PromptReview: Identifiable {
+    let id = UUID()
+    let kind: String
+    let text: String?
+    let name: String
+    let prompt: String
+}
+
+private struct PromptReviewSheet: View {
+    let review: PromptReview
+    let start: (String) -> Void
+    @State private var prompt: String
+    @State private var editing = false
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var link = LinkClient.shared
+
+    init(review: PromptReview, start: @escaping (String) -> Void) {
+        self.review = review
+        self.start = start
+        _prompt = State(initialValue: review.prompt)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(review.name).mobileFont(size: 17, weight: .semibold, design: .serif).foregroundStyle(MobileTheme.ink).lineLimit(2)
+                    Text(String(format: L("This is what the agent on %@ receives. You can change it before starting."), link.macName))
+                        .mobileFont(size: 13).foregroundStyle(MobileTheme.muted)
+                }
+                Group {
+                    if editing {
+                        TextEditor(text: $prompt)
+                            .font(.system(size: 13, design: .monospaced))
+                            .scrollContentBackground(.hidden)
+                    } else {
+                        ScrollView {
+                            Text(prompt)
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundStyle(MobileTheme.ink)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                .padding(12)
+                .frame(maxHeight: .infinity)
+                .background(MobileTheme.sunken, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(editing ? MobileTheme.accent.opacity(0.5) : MobileTheme.line))
+                Button {
+                    start(prompt)
+                } label: {
+                    Label("Start on \(link.macName)", systemImage: "wand.and.stars")
+                        .mobileFont(size: 16, weight: .semibold)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .contentShape(Capsule())
+                        .pyGlass(in: Capsule(), tint: MobileTheme.coral, interactive: true, fallback: MobileTheme.coral)
+                }
+                .buttonStyle(.pyPlain)
+                .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(16)
+            .background(BrandBackdrop())
+            .navigationTitle("Prompt")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .primaryAction) {
+                    Button(editing ? "Done" : "Edit") { withAnimation(.snappy) { editing.toggle() } }
+                        .fontWeight(.semibold)
+                }
+                if prompt != review.prompt {
+                    ToolbarItem(placement: .bottomBar) {
+                        Button("Reset to original") { withAnimation(.snappy) { prompt = review.prompt } }
+                    }
+                }
             }
         }
     }
@@ -593,6 +699,10 @@ struct AgentChatView: View {
     @State private var userScrolling = false
     @State private var lastCount = 0
     @State private var confirmClose = false
+    @State private var editingItem: PYLinkItem?
+    @State private var draftBeforeEdit = ""
+    @EnvironmentObject private var router: AppRouter
+    @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var attachments: [AgentAttachment] = []
     @State private var photoSelection: [PhotosPickerItem] = []
@@ -610,9 +720,9 @@ struct AgentChatView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     if let chat {
                         ForEach(chat.items) { item in
-                            AgentItemView(item: item)
+                            AgentItemView(item: item, pending: isPending(item, in: chat), onEdit: editAction(item, in: chat))
                                 .id(item.id)
-                                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 14)), removal: .opacity))
+                                .transition(.asymmetric(insertion: item.kind == "user" ? .scale(scale: 0.9, anchor: .bottomTrailing).combined(with: .opacity) : .opacity.combined(with: .offset(y: 16)), removal: .opacity))
                         }
                         ForEach(chat.state.pending) { permission in
                             PermissionCard(permission: permission) { allow, always in
@@ -730,6 +840,52 @@ struct AgentChatView: View {
         .onDisappear { link.unsubscribe(session) }
     }
 
+    private func isPending(_ item: PYLinkItem, in chat: AgentChat) -> Bool {
+        item.id.hasPrefix("local-") && !chat.aliases.values.contains(item.id)
+    }
+
+    private func editAction(_ item: PYLinkItem, in chat: AgentChat) -> (() -> Void)? {
+        guard item.kind == "user", !item.text.isEmpty, !chat.state.busy, link.isConnected, chat.remoteID(item.id).hasPrefix("u") else { return nil }
+        return {
+            withAnimation(.snappy) {
+                if editingItem == nil { draftBeforeEdit = draft }
+                editingItem = item
+                draft = item.text
+                attachments = []
+            }
+            focused = true
+        }
+    }
+
+    private func cancelEdit() {
+        withAnimation(.snappy) {
+            editingItem = nil
+            draft = draftBeforeEdit
+            draftBeforeEdit = ""
+        }
+    }
+
+    private func submitEdit(_ item: PYLinkItem) {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        guard text != item.text else { cancelEdit(); return }
+        withAnimation(.snappy) {
+            editingItem = nil
+            draft = draftBeforeEdit
+            draftBeforeEdit = ""
+        }
+        focused = false
+        let session = session
+        Task {
+            do {
+                let next = try await link.edit(item, text: text, in: session)
+                router.replaceTop(with: .agent(next), in: model.selectedTab)
+            } catch {
+                feedback.error(error, key: "agent-edit")
+            }
+        }
+    }
+
     private func closeSession() {
         let link = link
         let feedback = feedback
@@ -783,17 +939,36 @@ struct AgentChatView: View {
     }
 
     private var canSend: Bool {
-        link.isConnected && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty)
+        link.isConnected && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (editingItem == nil && !attachments.isEmpty))
     }
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let editingItem {
+                HStack(spacing: 10) {
+                    Capsule().fill(MobileTheme.accent).frame(width: 3, height: 30)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Edit message").mobileFont(size: 12, weight: .semibold).foregroundStyle(MobileTheme.accent)
+                        Text(editingItem.text).mobileFont(size: 13).foregroundStyle(MobileTheme.muted).lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Button(action: cancelEdit) {
+                        Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).foregroundStyle(MobileTheme.muted)
+                            .frame(width: 32, height: 32).contentShape(Circle())
+                    }
+                    .buttonStyle(.pyPlain)
+                    .accessibilityLabel("Cancel editing")
+                }
+                .padding(.leading, 14).padding(.trailing, 6).padding(.top, 8)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             if !attachments.isEmpty {
                 AgentAttachmentStrip(attachments: attachments) { item in attachments.removeAll { $0.id == item.id } }
                     .padding(.horizontal, 10).padding(.top, 4)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             HStack(alignment: .bottom, spacing: 6) {
+                if editingItem == nil {
                 Menu {
                     Button { showPhotos = true } label: { Label("Photo Library", systemImage: "photo.on.rectangle") }
                     Button { showFiles = true } label: { Label("Files", systemImage: "folder") }
@@ -807,6 +982,12 @@ struct AgentChatView: View {
                         .contentShape(Circle())
                 }
                 .accessibilityLabel("Attach")
+                } else {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(MobileTheme.accent)
+                        .frame(width: 44, height: 44)
+                }
                 TextField("Message the agent", text: $draft, axis: .vertical)
                     .focused($focused)
                     .lineLimit(1...5)
@@ -815,12 +996,13 @@ struct AgentChatView: View {
                 Button {
                     let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard canSend else { return }
+                    if let editingItem { submitEdit(editingItem); return }
                     link.send(text, attachments: attachments, to: session)
                     draft = ""
                     withAnimation(.snappy) { attachments = [] }
                     scrollRequest += 1
                 } label: {
-                    Image(systemName: "arrow.up")
+                    Image(systemName: editingItem == nil ? "arrow.up" : "checkmark")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 34, height: 34)
@@ -840,6 +1022,7 @@ struct AgentChatView: View {
         .animation(.snappy, value: attachments.count)
         .animation(.easeOut(duration: 0.15), value: focused)
         .animation(.easeOut(duration: 0.15), value: canSend)
+        .animation(.snappy, value: editingItem?.id)
     }
 
     private func append(_ attachment: AgentAttachment) {
@@ -916,6 +1099,8 @@ private struct JumpToLatestButton: View {
 
 private struct AgentItemView: View {
     let item: PYLinkItem
+    var pending = false
+    var onEdit: (() -> Void)? = nil
     @State private var expanded = false
 
     var body: some View {
@@ -938,9 +1123,20 @@ private struct AgentItemView: View {
                         Text(item.text).mobileFont(size: 15).foregroundStyle(.white)
                             .padding(.horizontal, 14).padding(.vertical, 10)
                             .background(MobileTheme.accentFill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            .textSelection(.enabled)
+                            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .contextMenu {
+                                Button { UIPasteboard.general.string = item.text } label: { Label("Copy", systemImage: "doc.on.doc") }
+                                if let onEdit {
+                                    Button(action: onEdit) { Label("Edit", systemImage: "pencil") }
+                                }
+                            }
+                    }
+                    if pending {
+                        Image(systemName: "clock").font(.system(size: 10, weight: .semibold)).foregroundStyle(MobileTheme.muted)
+                            .transition(.opacity)
                     }
                 }
+                .opacity(pending ? 0.8 : 1)
             }
         case "text":
             MarkdownView(markdown: item.text)

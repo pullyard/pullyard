@@ -21,6 +21,17 @@ struct AgentChat: Identifiable, Equatable {
     var title: String
     var items: [PYLinkItem] = []
     var state = PYLinkSessionState(running: false, busy: false, status: nil, error: nil, pending: [])
+    var aliases: [String: String] = [:]
+
+    func remoteID(_ displayID: String) -> String {
+        aliases.first { $0.value == displayID }?.key ?? displayID
+    }
+}
+
+extension PYLinkItem {
+    func with(id: String) -> PYLinkItem {
+        PYLinkItem(id: id, kind: kind, text: text, tool: tool, status: status, permission: permission, files: files)
+    }
 }
 
 @MainActor
@@ -174,13 +185,27 @@ final class LinkClient: ObservableObject {
         return session
     }
 
-    func startFix(repo: String, number: Int, kind: String, text: String?) async throws -> String {
+    func previewFix(repo: String, number: Int, kind: String, text: String?) async throws -> (name: String, prompt: String) {
+        if !isConnected { try await ensureConnected() }
+        var message = PYLinkMessage(type: "preview")
+        message.repo = repo
+        message.number = number
+        message.kind = kind
+        message.text = text
+        let reply = try await request(message, timeout: 60)
+        if let error = reply.error { throw LinkError.remote(error) }
+        guard let prompt = reply.prompt else { throw LinkError.remote("The Mac didn't return a prompt.") }
+        return (reply.text ?? "", prompt)
+    }
+
+    func startFix(repo: String, number: Int, kind: String, text: String?, prompt: String? = nil) async throws -> String {
         if !isConnected { try await ensureConnected() }
         var message = PYLinkMessage(type: "fix")
         message.repo = repo
         message.number = number
         message.kind = kind
         message.text = text
+        message.prompt = prompt
         let reply = try await request(message, timeout: 90)
         if let error = reply.error { throw LinkError.remote(error) }
         guard let session = reply.session else { throw LinkError.remote("The Mac didn't return a session.") }
@@ -238,6 +263,29 @@ final class LinkClient: ObservableObject {
         sessions = reply.sessions ?? sessions.filter { $0.id != session }
         chats[session] = nil
         AgentActivities.close(session)
+    }
+
+    func edit(_ item: PYLinkItem, text: String, in session: String) async throws -> String {
+        if !isConnected { try await ensureConnected() }
+        var message = PYLinkMessage(type: "edit")
+        message.session = session
+        message.text = text
+        message.replacesItem = chats[session]?.remoteID(item.id) ?? item.id
+        let reply = try await request(message, timeout: 30)
+        if let error = reply.error { throw LinkError.remote(error) }
+        guard let next = reply.session else { throw LinkError.remote("The Mac didn't return the edited session.") }
+        sessions = reply.sessions ?? sessions
+        subscriptions.remove(session)
+        subscriptions.insert(next)
+        AgentActivities.track(next)
+        if chats[next] == nil, let old = chats[session] {
+            var copy = AgentChat(id: next, title: old.title)
+            if let index = old.items.firstIndex(where: { $0.id == item.id }) {
+                copy.items = old.items[..<index].map { $0.id.hasPrefix("local-") ? $0.with(id: old.remoteID($0.id)) : $0 } + [PYLinkItem(id: "local-\(UUID().uuidString)", kind: "user", text: text)]
+            }
+            chats[next] = copy
+        }
+        return next
     }
 
     func stop(_ session: String) {
@@ -439,20 +487,48 @@ final class LinkClient: ObservableObject {
             guard let session = message.session else { return }
             var chat = chats[session] ?? AgentChat(id: session, title: message.text ?? "Agent")
             if let title = message.text { chat.title = title }
-            var byID = Dictionary(chat.items.filter { !$0.id.hasPrefix("local-") }.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
-            for item in message.items ?? [] { byID[item.id] = item }
-            if let order = message.order {
-                chat.items = order.compactMap { byID[$0] }
-            } else {
-                let existing = chat.items.filter { !$0.id.hasPrefix("local-") }.map(\.id)
-                let added = (message.items ?? []).map(\.id).filter { !existing.contains($0) }
-                chat.items = (existing + added).compactMap { byID[$0] }
+            let previous = chat
+            var aliases = chat.aliases
+            let reverse = Dictionary(aliases.map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+            var byID: [String: PYLinkItem] = [:]
+            var existing: [String] = []
+            var pendingLocals: [PYLinkItem] = []
+            for item in chat.items {
+                if item.id.hasPrefix("local-") {
+                    if let remote = reverse[item.id] {
+                        byID[remote] = item.with(id: remote)
+                        existing.append(remote)
+                    } else {
+                        pendingLocals.append(item)
+                    }
+                } else {
+                    byID[item.id] = item
+                    existing.append(item.id)
+                }
             }
+            for item in message.items ?? [] {
+                if byID[item.id] == nil, item.kind == "user", aliases[item.id] == nil,
+                   let local = pendingLocals.first(where: { Self.echoes(item, $0) }) {
+                    aliases[item.id] = local.id
+                    pendingLocals.removeAll { $0.id == local.id }
+                }
+                byID[item.id] = item
+            }
+            let composed: [PYLinkItem]
+            if let order = message.order {
+                composed = order.compactMap { byID[$0] }
+                aliases = aliases.filter { order.contains($0.key) }
+            } else {
+                let added = (message.items ?? []).map(\.id).filter { !existing.contains($0) }
+                composed = (existing + added).compactMap { byID[$0] }
+            }
+            chat.items = composed.map { item in aliases[item.id].map { item.with(id: $0) } ?? item } + pendingLocals
+            chat.aliases = aliases
             if let state = message.state { chat.state = state }
-            let before = chats[session]?.items.count ?? 0
-            let inserted = chat.items.count - before
-            if before > 0, inserted > 0, inserted <= 3 {
-                withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) { chats[session] = chat }
+            let inserted = chat.items.count - previous.items.count
+            let stateMoved = previous.state.busy != chat.state.busy || previous.state.pending.count != chat.state.pending.count
+            if !previous.items.isEmpty, inserted >= 0, inserted <= 3, inserted > 0 || stateMoved {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.88)) { chats[session] = chat }
             } else {
                 chats[session] = chat
             }
@@ -462,6 +538,12 @@ final class LinkClient: ObservableObject {
         default:
             break
         }
+    }
+
+    private static func echoes(_ remote: PYLinkItem, _ local: PYLinkItem) -> Bool {
+        let text = local.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { return local.files != nil && remote.files != nil || remote.text.hasPrefix("Files attached from the iPhone") }
+        return remote.text == text || remote.text.hasPrefix(text)
     }
 
     private func save() {

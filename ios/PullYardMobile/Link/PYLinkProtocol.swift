@@ -113,6 +113,8 @@ struct PYLinkMessage: Codable {
     var error: String?
     var url: String?
     var attachments: [PYLinkAttachment]?
+    var prompt: String?
+    var replacesItem: String?
 
     init(type: String) { self.type = type }
 }
