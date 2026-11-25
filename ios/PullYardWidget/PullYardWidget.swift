@@ -162,85 +162,196 @@ private struct RefreshButton: View {
 struct CIActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: CIActivityAttributes.self) { context in
-            CILockScreenView(context: context)
+            VoyageLockScreen(context: context)
                 .activityBackgroundTint(WidgetPalette.navy)
                 .activitySystemActionForegroundColor(.white)
-                .widgetURL(URL(string: "pullyard://pull/\(context.attributes.repo)/\(context.attributes.number)"))
+                .widgetURL(Self.url(context))
         } dynamicIsland: { context in
-            DynamicIsland {
+            let state = context.state
+            return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label("#\(context.attributes.number)", systemImage: "arrow.triangle.pull").font(.caption.weight(.semibold)).foregroundStyle(WidgetPalette.sky)
+                    ShipGlyph(size: 38)
+                        .rotationEffect(.degrees(state.failed > 0 && !state.isMerged ? -8 : 0))
+                        .padding(.leading, 6).padding(.top, 6)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    CIStateIcon(state: context.state).font(.title3)
+                    VoyageScore(state: state, large: true)
+                        .padding(.trailing, 6).padding(.top, 6)
                 }
                 DynamicIslandExpandedRegion(.center) {
-                    Text(context.attributes.title).font(.caption.weight(.semibold)).lineLimit(1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(context.attributes.title)
+                            .font(.system(size: 15, weight: .semibold, design: .serif))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .privacySensitive()
+                        Text("\(context.attributes.repo.split(separator: "/").last.map(String.init) ?? context.attributes.repo) #\(context.attributes.number)")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(spacing: 6) {
-                        CIProgressBar(state: context.state)
-                        Text(context.state.headline).font(.caption2).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        SeaLane(state: state).frame(height: 34)
+                        Text(state.voyage)
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(VoyageTone.color(state))
                     }
+                    .padding(.horizontal, 6).padding(.bottom, 2)
                 }
             } compactLeading: {
-                Image(systemName: "arrow.triangle.pull").foregroundStyle(WidgetPalette.sky)
+                ShipGlyph(size: 24)
+                    .rotationEffect(.degrees(state.failed > 0 && !state.isMerged ? -8 : 0))
             } compactTrailing: {
-                CIStateIcon(state: context.state)
+                VoyageScore(state: state, large: false)
             } minimal: {
-                CIStateIcon(state: context.state)
+                ZStack {
+                    Circle().stroke(.white.opacity(0.15), lineWidth: 2.5)
+                    Circle()
+                        .trim(from: 0, to: state.isMerged ? 1 : max(0.08, state.progress / 0.9))
+                        .stroke(VoyageTone.color(state), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    ShipGlyph(size: 13)
+                }
+                .padding(1)
             }
-            .widgetURL(URL(string: "pullyard://pull/\(context.attributes.repo)/\(context.attributes.number)"))
+            .widgetURL(Self.url(context))
+            .keylineTint(VoyageTone.color(state))
         }
+    }
+
+    private static func url(_ context: ActivityViewContext<CIActivityAttributes>) -> URL? {
+        URL(string: "pullyard://pull/\(context.attributes.repo)/\(context.attributes.number)")
     }
 }
 
-private struct CIStateIcon: View {
+private enum VoyageTone {
+    static func color(_ state: CIActivityAttributes.ContentState) -> Color {
+        if state.isMerged { return WidgetPalette.green }
+        if state.failed > 0 { return WidgetPalette.red }
+        if state.running > 0 { return WidgetPalette.sky }
+        return WidgetPalette.green
+    }
+}
+
+private struct VoyageScore: View {
     let state: CIActivityAttributes.ContentState
+    let large: Bool
+
     var body: some View {
-        if state.failed > 0 {
-            Image(systemName: "xmark.circle.fill").foregroundStyle(WidgetPalette.red)
-        } else if state.running > 0 {
-            Image(systemName: "clock.fill").foregroundStyle(WidgetPalette.amber)
-        } else {
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(WidgetPalette.green)
+        Group {
+            if state.isMerged {
+                Image(systemName: "checkmark.circle.fill")
+            } else if state.failed > 0 {
+                Label("\(state.failed)", systemImage: "xmark")
+                    .labelStyle(.titleAndIcon)
+            } else if state.running > 0 {
+                Text("\(state.passed + state.skipped)/\(state.total)")
+            } else {
+                Image(systemName: "anchor")
+            }
         }
+        .font(.system(size: large ? 20 : 13, weight: .bold, design: .rounded).monospacedDigit())
+        .foregroundStyle(VoyageTone.color(state))
     }
 }
 
-private struct CIProgressBar: View {
+private struct SeaLane: View {
     let state: CIActivityAttributes.ContentState
+
     var body: some View {
         GeometryReader { geo in
-            let total = CGFloat(max(state.total, 1))
-            HStack(spacing: 2) {
-                if state.failed > 0 { Capsule().fill(WidgetPalette.red).frame(width: geo.size.width * CGFloat(state.failed) / total) }
-                if state.running > 0 { Capsule().fill(WidgetPalette.amber).frame(width: geo.size.width * CGFloat(state.running) / total) }
-                if state.passed > 0 { Capsule().fill(WidgetPalette.green).frame(width: geo.size.width * CGFloat(state.passed) / total) }
-                if state.skipped > 0 { Capsule().fill(Color.gray.opacity(0.5)).frame(width: geo.size.width * CGFloat(state.skipped) / total) }
+            let width = geo.size.width
+            let height = geo.size.height
+            let shipWidth: CGFloat = 30
+            let travel = width - shipWidth - 22
+            let x = 8 + travel * state.progress
+            let storm = state.failed > 0 && !state.isMerged
+            ZStack(alignment: .topLeading) {
+                WaveLine(phase: state.progress * 9, amplitude: storm ? 3.2 : 1.6)
+                    .stroke(storm ? WidgetPalette.red.opacity(0.55) : WidgetPalette.sky.opacity(0.35), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+                    .frame(height: 10)
+                    .offset(y: height - 10)
+                Capsule()
+                    .fill(LinearGradient(colors: [WidgetPalette.violet.opacity(0.0), WidgetPalette.violet.opacity(0.7), WidgetPalette.sky], startPoint: .leading, endPoint: .trailing))
+                    .frame(width: max(0, x + 4), height: 3)
+                    .offset(y: height - 6.5)
+                Circle()
+                    .fill(WidgetPalette.violet)
+                    .frame(width: 7, height: 7)
+                    .offset(x: 0, y: height - 8.5)
+                Image(systemName: state.isMerged ? "checkmark.seal.fill" : "flag.checkered")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(state.isMerged ? WidgetPalette.green : .white.opacity(0.55))
+                    .frame(width: 18)
+                    .offset(x: width - 18, y: height - 22)
+                ShipGlyph(size: shipWidth)
+                    .rotationEffect(.degrees(storm ? -9 : 0), anchor: .bottom)
+                    .offset(x: x, y: height - 26)
             }
         }
-        .frame(height: 6)
     }
 }
 
-private struct CILockScreenView: View {
-    let context: ActivityViewContext<CIActivityAttributes>
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                CIStateIcon(state: context.state).font(.title3)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(context.attributes.title).font(.subheadline.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
-                    Text("\(context.attributes.repo) #\(context.attributes.number)").font(.caption).foregroundStyle(.white.opacity(0.6))
-                }
-                Spacer()
-                Text(context.state.updated, style: .relative).font(.caption2).foregroundStyle(.white.opacity(0.5))
-            }
-            CIProgressBar(state: context.state)
-            Text(context.state.headline).font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.85))
+private struct WaveLine: Shape {
+    var phase: Double
+    var amplitude: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let steps = max(Int(rect.width / 3), 2)
+        for step in 0...steps {
+            let x = rect.width * CGFloat(step) / CGFloat(steps)
+            let y = rect.midY + sin(Double(x) / 9 + phase) * amplitude
+            if step == 0 { path.move(to: CGPoint(x: x, y: y)) } else { path.addLine(to: CGPoint(x: x, y: y)) }
         }
-        .padding(16)
+        return path
+    }
+}
+
+private struct VoyageLockScreen: View {
+    let context: ActivityViewContext<CIActivityAttributes>
+
+    var body: some View {
+        let state = context.state
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
+                PullYardLogoMark(progress: 1, size: 30, flatten: false)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(context.attributes.title)
+                        .font(.system(size: 16, weight: .semibold, design: .serif))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .privacySensitive()
+                    Text("\(context.attributes.repo) #\(context.attributes.number)")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                VoyageScore(state: state, large: true)
+            }
+            SeaLane(state: state).frame(height: 40)
+            HStack {
+                Text(state.voyage)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(VoyageTone.color(state))
+                Spacer()
+                Text(state.updated, style: .relative)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+        }
+        .padding(.horizontal, 18).padding(.vertical, 16)
+        .background {
+            ZStack {
+                LinearGradient(colors: [WidgetPalette.navyTop, WidgetPalette.navy], startPoint: .topLeading, endPoint: .bottomTrailing)
+                RadialGradient(colors: [WidgetPalette.violet.opacity(0.26), .clear], center: .topLeading, startRadius: 0, endRadius: 220)
+                RadialGradient(colors: [VoyageTone.color(state).opacity(0.16), .clear], center: .bottomTrailing, startRadius: 0, endRadius: 200)
+            }
+        }
     }
 }
 

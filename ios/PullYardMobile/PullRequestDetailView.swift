@@ -783,6 +783,10 @@ struct PRDetailView: View {
         guard let pull, let insight else { return }
         try await model.merge(key, method: method, title: title, message: message, sha: insight.headSHA)
         successPulse += 1
+        let mergedTitle = pull.title
+        let mergedChecks = checks ?? []
+        let mergedKey = key
+        Task { await LiveActivityManager.docked(mergedKey, title: mergedTitle, checks: mergedChecks) }
         if deleteBranch {
             do { try await model.deleteBranch(repo: key.repo, branch: insight.headRefName) }
             catch { feedback.error(error, key: "delete-branch") }

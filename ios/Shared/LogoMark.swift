@@ -90,11 +90,17 @@ enum LogoGeometry {
 
 struct LogoPart: Shape {
     let base: Path
+    var box = LogoGeometry.box
 
     init(_ base: Path) { self.base = base }
 
+    init(_ base: Path, box: CGRect) {
+        self.base = base
+        self.box = box
+    }
+
     func path(in rect: CGRect) -> Path {
-        let box = LogoGeometry.box
+        let box = self.box
         let scale = min(rect.width / box.width, rect.height / box.height)
         let dx = rect.midX - box.midX * scale
         let dy = rect.midY - box.midY * scale
@@ -192,4 +198,28 @@ private struct LogoFlatten: ViewModifier {
     func body(content: Content) -> some View {
         if enabled { content.drawingGroup() } else { content }
     }
+}
+
+struct ShipGlyph: View {
+    var size: CGFloat = 28
+    var tint: Color? = nil
+
+    private static let box = CGRect(x: 462, y: 386, width: 412, height: 348)
+
+    var body: some View {
+        ZStack {
+            part(LogoGeometry.chimneyPath).fill(tint ?? LogoGeometry.cabinShade)
+            part(LogoGeometry.chimneyTopPath).fill(tint ?? LogoGeometry.hullTop)
+            part(LogoGeometry.cabinPath).fill(tint?.opacity(0.85) ?? LogoGeometry.cabin)
+            part(LogoGeometry.cabinShadePath).fill(tint?.opacity(0.7) ?? LogoGeometry.cabinShade)
+            part(LogoGeometry.windowsPath).fill(LogoGeometry.window)
+            part(LogoGeometry.hullPath).fill(tint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(LinearGradient(colors: [LogoGeometry.hullTop, LogoGeometry.hullBottom], startPoint: .top, endPoint: .bottom)))
+            part(LogoGeometry.deckPath).fill(tint?.opacity(0.6) ?? LogoGeometry.deck)
+            part(LogoGeometry.portholePath).fill(tint?.opacity(0.6) ?? LogoGeometry.deck)
+        }
+        .frame(width: size, height: size * Self.box.height / Self.box.width)
+        .accessibilityHidden(true)
+    }
+
+    private func part(_ path: Path) -> LogoPart { LogoPart(path, box: Self.box) }
 }

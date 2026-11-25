@@ -71,6 +71,7 @@
 		CAA9A496F59DC926C60CD187 /* AgentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8699E5CDC258955E31456B7A /* AgentViews.swift */; };
 		CFDC447B91E3011E6E4FA655 /* WidgetFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDE41B0C24CD4D522D241B3 /* WidgetFetcher.swift */; };
 		D28BB13CEFDD66B5F9ED5C1F /* Logo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D381A401A2B8C7378B7DFA6 /* Logo.swift */; };
+		D4F07CCFDBC294ABE56885C3 /* VoyageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEFDE3973B2CC94C18370636 /* VoyageTests.swift */; };
 		DFFDA8D1E1C8DBD15AAA522F /* LogoMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960D80A6217273D4ADFA762B /* LogoMark.swift */; };
 		E091E2815B9F07E313E36493 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 665A39E542BD09746979B213 /* PrivacyInfo.xcprivacy */; };
 		E5B9913DEBE75D2D0681044E /* CIActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0C66F8D185CD5194B079AE /* CIActivity.swift */; };
@@ -188,6 +189,7 @@
 		E89E11B5D2A4EE80E9B6378A /* JiraViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraViews.swift; sourceTree = "<group>"; };
 		EBD4F0DC8CF7BE8F81827D8C /* DeviceFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceFlow.swift; sourceTree = "<group>"; };
 		ECB22B19338EC4FCC87BFDAB /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		EEFDE3973B2CC94C18370636 /* VoyageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoyageTests.swift; sourceTree = "<group>"; };
 		EF3D1252337A283C4B3F84BE /* FilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesView.swift; sourceTree = "<group>"; };
 		F3F70BD21D0F88FEBEA3A71C /* Templates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Templates.swift; sourceTree = "<group>"; };
 		F6E1C772FE09ECA4404FF0B3 /* LiveActivities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivities.swift; sourceTree = "<group>"; };
@@ -317,6 +319,7 @@
 				6D854E33B7127DD7D9C8A882 /* AgentTurnSummaryTests.swift */,
 				E7ACC95A77417C6758DB98D1 /* JiraKeyFinderTests.swift */,
 				825268025F1A9721844AE423 /* PullYardMobileTests.swift */,
+				EEFDE3973B2CC94C18370636 /* VoyageTests.swift */,
 			);
 			path = PullYardMobileTests;
 			sourceTree = "<group>";
@@ -567,6 +570,7 @@
 				9C9A41575FD72EDC4E015021 /* AgentTurnSummaryTests.swift in Sources */,
 				FE3185933D64017FD5F03977 /* JiraKeyFinderTests.swift in Sources */,
 				BB2F3FACC07E463B7D375E51 /* PullYardMobileTests.swift in Sources */,
+				D4F07CCFDBC294ABE56885C3 /* VoyageTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
