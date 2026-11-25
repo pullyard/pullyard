@@ -272,13 +272,21 @@ struct AgentSessionsView: View {
         var working: Bool { open.contains { $0.state == "working" || $0.state == "waiting" } }
     }
 
+    private var active: [PYLinkSession] {
+        let rank = ["waiting": 0, "working": 1, "active": 2]
+        return link.sessions
+            .filter { rank[$0.state] != nil && matches($0) }
+            .sorted { (rank[$0.state] ?? 3) < (rank[$1.state] ?? 3) }
+    }
+
     private var collapsed: Set<String> { Set(collapsedRaw.split(separator: "\n").map(String.init)) }
     private var order: [String] { orderRaw.split(separator: "\n").map(String.init) }
     private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
     private func groups(filtered: Bool = true) -> [ProjectGroup] {
         var map: [String: ProjectGroup] = [:]
-        for session in link.sessions where !filtered || matches(session) {
+        let activeIDs = Set(active.map(\.id))
+        for session in link.sessions where (!filtered || matches(session)) && !(filtered && activeIDs.contains(session.id)) {
             let root = Self.projectRoot(session.folder)
             map[root, default: ProjectGroup(id: root)].open.append(session)
             map[root]?.latest = .distantFuture
@@ -336,6 +344,26 @@ struct AgentSessionsView: View {
                     .frame(maxWidth: .infinity).padding(.vertical, 40)
                     .listRowBackground(Color.clear)
             } else {
+                if !active.isEmpty {
+                    Section {
+                        ForEach(active) { session in
+                            NavigationLink(value: Route.agent(session.id)) { row(session, showProject: true) }
+                                .pyRow()
+                        }
+                    } header: {
+                        HStack(spacing: 8) {
+                            Circle().fill(MobileTheme.green).frame(width: 7, height: 7)
+                            Text("Active").mobileFont(size: 14, weight: .semibold).foregroundStyle(MobileTheme.ink)
+                            Text("\(active.count)")
+                                .mobileFont(size: 11, weight: .semibold).monospacedDigit()
+                                .foregroundStyle(MobileTheme.muted)
+                                .padding(.horizontal, 7).padding(.vertical, 2)
+                                .background(MobileTheme.ink.opacity(0.07), in: Capsule())
+                        }
+                        .padding(.vertical, 6)
+                        .textCase(nil)
+                    }
+                }
                 ForEach(groups()) { group in
                     let isCollapsed = !searching && collapsed.contains(group.id)
                     Section {
@@ -439,14 +467,26 @@ struct AgentSessionsView: View {
         }
     }
 
-    private func row(_ session: PYLinkSession) -> some View {
+    private func row(_ session: PYLinkSession, showProject: Bool = false) -> some View {
         HStack(spacing: 10) {
             AgentStateDot(state: session.state)
             VStack(alignment: .leading, spacing: 2) {
                 Text(session.title).mobileFont(size: 15, weight: .semibold).lineLimit(2).foregroundStyle(MobileTheme.ink)
-                Text(subtitle(session)).mobileFont(size: 12).foregroundStyle(MobileTheme.muted).lineLimit(1)
+                Text(showProject ? projectSubtitle(session) : subtitle(session)).mobileFont(size: 12).foregroundStyle(MobileTheme.muted).lineLimit(1)
             }
         }
+    }
+
+    private func projectSubtitle(_ session: PYLinkSession) -> String {
+        let project = (Self.projectRoot(session.folder) as NSString).lastPathComponent
+        let state: String
+        switch session.state {
+        case "working": state = L("Working")
+        case "waiting": state = L("Needs you")
+        default: state = L("Idle")
+        }
+        if let number = session.number { return "\(project) · #\(number) · \(state)" }
+        return "\(project) · \(state)"
     }
 
     private func subtitle(_ session: PYLinkSession) -> String {
@@ -511,6 +551,8 @@ struct AgentChatView: View {
     @State private var followUntil = Date.distantPast
     @State private var viewportHeight: CGFloat = 0
     @State private var scrollRequest = 0
+    @State private var userScrolling = false
+    @State private var lastCount = 0
     @State private var attachments: [AgentAttachment] = []
     @State private var photoSelection: [PhotosPickerItem] = []
     @State private var showPhotos = false
@@ -526,7 +568,11 @@ struct AgentChatView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     if let chat {
-                        ForEach(chat.items) { item in AgentItemView(item: item).id(item.id) }
+                        ForEach(chat.items) { item in
+                            AgentItemView(item: item)
+                                .id(item.id)
+                                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 14)), removal: .opacity))
+                        }
                         ForEach(chat.state.pending) { permission in
                             PermissionCard(permission: permission) { allow, always in
                                 link.respond(permission, allow: allow, always: always, in: session)
@@ -552,6 +598,8 @@ struct AgentChatView: View {
                 .padding(16)
             }
             .coordinateSpace(.named("agentChat"))
+            .modifier(ScrollInteraction(active: $userScrolling))
+            .onChange(of: userScrolling) { _, scrolling in if scrolling { followUntil = .distantPast } }
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                 let follow = atBottom && viewportHeight > 0 && height != viewportHeight
                 viewportHeight = height
@@ -568,8 +616,15 @@ struct AgentChatView: View {
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.8), value: settled && !atBottom)
             .onChange(of: contentSignature) { _, _ in
+                let count = chat?.items.count ?? 0
+                let delta = count - lastCount
+                lastCount = count
+                if userScrolling {
+                    if !atBottom { unseen = true }
+                    return
+                }
                 if !settled || atBottom || Date() < followUntil {
-                    scrollToEnd(proxy, animated: false)
+                    scrollToEnd(proxy, animated: settled && delta > 0 && delta <= 3)
                 } else {
                     unseen = true
                 }
@@ -631,17 +686,17 @@ struct AgentChatView: View {
     private func trackBottom(_ minY: CGFloat) {
         guard viewportHeight > 0 else { return }
         let bottom = minY <= viewportHeight + 48
-        if !bottom, Date() < followUntil { return }
+        if !bottom, Date() < followUntil, !userScrolling { return }
         if bottom != atBottom { atBottom = bottom }
         if bottom, unseen { unseen = false }
     }
 
     private func scrollToEnd(_ proxy: ScrollViewProxy, animated: Bool) {
-        followUntil = Date().addingTimeInterval(animated ? 0.6 : 0.15)
+        followUntil = Date().addingTimeInterval(animated ? 0.5 : 0.15)
         atBottom = true
         unseen = false
         if animated {
-            withAnimation(.snappy(duration: 0.4)) { proxy.scrollTo("bottom", anchor: .bottom) }
+            withAnimation(.smooth(duration: 0.38)) { proxy.scrollTo("bottom", anchor: .bottom) }
         } else {
             var transaction = Transaction()
             transaction.disablesAnimations = true
@@ -655,7 +710,8 @@ struct AgentChatView: View {
             if chat?.items.isEmpty == false { settled = true }
         }
         if animated {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
+                guard !userScrolling, atBottom else { return }
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) { proxy.scrollTo("bottom", anchor: .bottom) }
@@ -739,6 +795,21 @@ struct AgentChatView: View {
             } catch {
                 feedback.error(error, key: "agent-attach")
             }
+        }
+    }
+}
+
+private struct ScrollInteraction: ViewModifier {
+    @Binding var active: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollPhaseChange { _, phase in
+                let interacting = phase == .interacting || phase == .decelerating || phase == .tracking
+                if interacting != active { active = interacting }
+            }
+        } else {
+            content
         }
     }
 }

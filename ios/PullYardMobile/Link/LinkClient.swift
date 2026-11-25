@@ -3,6 +3,7 @@ import Foundation
 import IrohLib
 import Network
 import Security
+import SwiftUI
 import UIKit
 
 struct PairedMac: Codable, Equatable {
@@ -212,7 +213,9 @@ final class LinkClient: ObservableObject {
         if !attachments.isEmpty { message.attachments = attachments.map(\.payload) }
         channel?.send(json: message)
         AgentActivities.track(session)
-        chats[session]?.items.append(PYLinkItem(id: "local-\(UUID().uuidString)", kind: "user", text: text, files: attachments.isEmpty ? nil : attachments.map { $0.isImage ? "image" : $0.name }))
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
+            chats[session]?.items.append(PYLinkItem(id: "local-\(UUID().uuidString)", kind: "user", text: text, files: attachments.isEmpty ? nil : attachments.map { $0.isImage ? "image" : $0.name }))
+        }
     }
 
     func respond(_ permission: PYLinkPermission, allow: Bool, always: Bool = false, in session: String) {
@@ -434,7 +437,13 @@ final class LinkClient: ObservableObject {
                 chat.items = (existing + added).compactMap { byID[$0] }
             }
             if let state = message.state { chat.state = state }
-            chats[session] = chat
+            let before = chats[session]?.items.count ?? 0
+            let inserted = chat.items.count - before
+            if before > 0, inserted > 0, inserted <= 3 {
+                withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) { chats[session] = chat }
+            } else {
+                chats[session] = chat
+            }
             AgentActivities.sync(session: session, chat: chat, mac: macName)
         case "sessions":
             sessions = message.sessions ?? sessions

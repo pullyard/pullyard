@@ -5420,6 +5420,46 @@
           }
         }
       }
+    },
+    "Active" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Активные"
+          }
+        }
+      }
+    },
+    "Idle" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ждёт сообщения"
+          }
+        }
+      }
+    },
+    "Needs you" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нужен ты"
+          }
+        }
+      }
+    },
+    "Working" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Работает"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
