@@ -20,10 +20,11 @@ struct PYLinkBridge {
             resume(message, client: client)
         case "subscribe":
             guard let session = message.session else { return }
-            client.subscriptions.insert(session)
-            client.sentItems[session] = nil
-            client.sentOrder[session] = nil
-            client.sentState[session] = nil
+            if client.subscriptions.insert(session).inserted || message.text == "reset" {
+                client.sentItems[session] = nil
+                client.sentOrder[session] = nil
+                client.sentState[session] = nil
+            }
             pushUpdates(to: client, only: session)
         case "unsubscribe":
             if let session = message.session { client.subscriptions.remove(session) }
@@ -181,9 +182,9 @@ struct PYLinkBridge {
                 client.subscriptions.remove(session)
                 continue
             }
-            let items = Self.items(chat.items.suffix(200))
-            let order = items.map(\.id)
             let previous = client.sentItems[session] ?? [:]
+            let items = Self.items(chat.items.suffix(previous.isEmpty ? 40 : 200))
+            let order = items.map(\.id)
             let changed = items.filter { previous[$0.id] != $0 }
             let state = PYLinkSessionState(running: chat.running, busy: chat.busy, status: chat.status, error: chat.lastError, pending: chat.pendingPermissions.filter { !$0.resolved }.map(Self.permission))
             let orderChanged = client.sentOrder[session] != order
