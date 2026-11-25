@@ -184,13 +184,11 @@ struct DetailColumn: View {
                         if let root = app.detailRoot {
                             RouteView(route: root).id(root).transition(.routeSwap)
                         } else {
-                            VStack(spacing: 12) {
-                                IconTile(systemImage: "arrow.triangle.pull", color: .syViolet, size: 56)
-                                    .opacity(0.9)
-                                Text("Select a pull request, issue or project").foregroundStyle(Color.syMuted)
-                                Text("⌘L to open by link · ⌘K for the command palette · ⌘/ for all shortcuts").font(.syCaption).foregroundStyle(Color.syMuted)
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            PYEmptyState(
+                                title: "Nothing open yet",
+                                message: "Select a pull request, issue or project from the list.",
+                                shortcuts: [("⌘L", "Open by link"), ("⌘K", "Command palette"), ("⌘/", "Shortcuts")]
+                            )
                             .transition(.opacity)
                         }
                     }
@@ -277,6 +275,7 @@ struct RouteView: View {
             }
         }
         .environment(\.liveFront, app.frontRoute == route)
+        .environment(\.detailKey, "\(route)")
     }
 }
 

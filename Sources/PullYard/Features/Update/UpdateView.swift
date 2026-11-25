@@ -52,7 +52,7 @@ struct UpdateView: View {
             }
             Spacer(minLength: 0)
             if updater.state == .checking || updater.state == .installing {
-                ProgressView().controlSize(.small)
+                PYLoader(size: 16)
             }
         }
     }

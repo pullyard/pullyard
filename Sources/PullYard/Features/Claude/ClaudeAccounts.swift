@@ -340,7 +340,7 @@ struct AddClaudeProfileSheet: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(editing != nil ? "Save" : kind == nil ? "Create and sign in" : "Create", action: create)
                     .buttonStyle(.borderedProminent)
-                    .tint(.syCoral)
+                    .tint(.syCoralFill)
                     .keyboardShortcut(.defaultAction)
             }
         }

@@ -284,7 +284,7 @@ struct ClaudeProjectsColumn: View {
             }
         }
         if ws.projects.isEmpty, !ws.loadingProjects {
-            Text("No Claude Code sessions yet").font(.syBody).foregroundStyle(Color.syMuted).padding(12)
+            Text("No agent sessions yet").font(.syBody).foregroundStyle(Color.syMuted).padding(12)
         } else {
             Button(showArchived ? "Hide archived sessions" : "Show archived sessions") { withAnimation(Motion.smooth) { showArchived.toggle() } }
                 .buttonStyle(.link)
@@ -535,7 +535,7 @@ struct SessionStateGlyph: View {
     var body: some View {
         Group {
             switch state {
-            case .working: ProgressView().controlSize(.mini)
+            case .working: PYLoader(size: 11, label: "Working")
             case .waiting: Circle().fill(Color.syAmber).frame(width: 7, height: 7)
             case .active: Circle().fill(Color.syMuted).frame(width: 5, height: 5)
             case .sleeping, .stopped: Circle().strokeBorder(Color.syDim, lineWidth: 1).frame(width: 6, height: 6)
@@ -627,7 +627,7 @@ struct ClaudeWorkspaceView: View {
                                                     Text("Session ended" + (tab.exitCode.map { " (\($0))" } ?? "")).foregroundStyle(Color.syMuted)
                                                 }
                                                 HStack {
-                                                    Button("Resume session") { ws.restart(tab) }.buttonStyle(.borderedProminent).tint(.syAgentAccent)
+                                                    Button("Resume session") { ws.restart(tab) }.buttonStyle(.borderedProminent).tint(.syAgentFill)
                                                     Button("Close tab") { ws.close(tab) }
                                                 }
                                             }
@@ -988,7 +988,7 @@ struct ChangesPanel: View {
         let git = tab.git
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                if git.loading { ProgressView().controlSize(.mini) }
+                if git.loading { PYLoader(size: 12) }
                 Text(git.changes.isEmpty ? "No uncommitted changes" : plural(git.changes.count, "file changed", "files changed"))
                     .font(.syCaption).foregroundStyle(Color.syMuted)
                 if !git.changes.isEmpty {
@@ -1186,7 +1186,7 @@ struct BranchPRPanel: View {
                                     app.claude.send(AgentShip.openPRPrompt(branch: b, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead), to: tab)
                                 }
                                 .buttonStyle(.borderedProminent)
-                                .tint(.syAgentAccent)
+                                .tint(.syAgentFill)
                                 .disabled(tab.busy)
                                 Button("Create in Browser") { openInBrowser("https://github.com/\(repo.full)/pull/new/\(b)") }
                             }
@@ -1348,7 +1348,7 @@ struct ForgeBranchPanel: View {
                                 app.claude.send(AgentShip.openPRPrompt(branch: b, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead, kind: kind), to: tab)
                             }
                             .buttonStyle(.borderedProminent)
-                            .tint(.syAgentAccent)
+                            .tint(.syAgentFill)
                             .disabled(tab.busy)
                             Button("Create in Browser") { openInBrowser(remote.newRequestURL(branch: b, kind: kind)) }
                         }
@@ -1553,7 +1553,7 @@ struct InspectorPRDetail: View {
                         Label("Ask Claude to review this PR", systemImage: "text.magnifyingglass")
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .tint(.syAgentAccent)
+                    .tint(.syAgentFill)
                 }
                 .controlSize(.small)
             }

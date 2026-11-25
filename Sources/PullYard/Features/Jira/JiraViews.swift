@@ -70,6 +70,8 @@ struct JiraTab: View {
     @State private var linking = false
     @State private var open: Set<String> = []
     @State private var reload = 0
+    @State private var lastUpdated: Date?
+    @Environment(AppModel.self) private var app
 
     static func keys(for pr: PullRequestDetail) -> [String] {
         let linked = JiraAccount.shared.linkedKeys(for: pr.url)
@@ -114,6 +116,7 @@ struct JiraTab: View {
             .animation(Motion.smooth, value: open)
         }
         .task(id: "\(account.isConfigured)|\(keys.joined(separator: ","))|\(reload)") { await load(keys) }
+        .onChange(of: app.refreshTick) { Task { await load(Self.keys(for: pr), force: true) } }
     }
 
     private func header(count: Int) -> some View {
@@ -124,7 +127,9 @@ struct JiraTab: View {
                 Text(account.baseURL?.host ?? "").font(.syCaption).foregroundStyle(Color.syMuted)
             }
             Spacer()
-            if loading { WakeLoader() }
+            RefreshPill(updated: lastUpdated, refreshing: loading, error: errors.isEmpty ? nil : errors.values.first) {
+                Task { await load(Self.keys(for: pr), force: true) }
+            }
             Button {
                 withAnimation(Motion.smooth) { linking.toggle() }
             } label: {
@@ -236,15 +241,21 @@ struct JiraTab: View {
         open.remove(key)
     }
 
-    private func load(_ keys: [String]) async {
-        guard let client = account.client() else { return }
+    private func load(_ keys: [String], force: Bool = false) async {
+        guard let client = account.client(), !(force && loading) else { return }
         for key in keys where !issues.contains(where: { $0.key == key }) {
             if let hit = account.cachedIssue(key) { issues.append(hit) }
         }
-        let missing = keys.filter { key in !issues.contains(where: { $0.key == key }) && errors[key] == nil }
-        guard !missing.isEmpty else { return }
+        let missing = force ? keys : keys.filter { key in !issues.contains(where: { $0.key == key }) && errors[key] == nil }
+        guard !missing.isEmpty else {
+            if lastUpdated == nil { lastUpdated = Date() }
+            return
+        }
         loading = true
-        defer { loading = false }
+        defer {
+            loading = false
+            lastUpdated = Date()
+        }
         await withTaskGroup(of: (String, Result<JiraIssue, Error>).self) { group in
             for key in missing {
                 group.addTask {
@@ -253,7 +264,10 @@ struct JiraTab: View {
             }
             for await (key, result) in group {
                 switch result {
-                case .success(let issue): issues.append(issue); errors[key] = nil; account.remember(issue)
+                case .success(let issue):
+                    if let i = issues.firstIndex(where: { $0.key == key }) { issues[i] = issue } else { issues.append(issue) }
+                    errors[key] = nil
+                    account.remember(issue)
                 case .failure(let e): errors[key] = e.localizedDescription
                 }
             }

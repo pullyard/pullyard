@@ -57,7 +57,7 @@ struct ProjectsListView: View {
             }
         }
         .liveRefresh(updated: lastUpdated, refreshing: loading, error: projects.isEmpty ? nil : error) { await load() }
-        .navigationTitle("Projects")
+        .columnTitle("Projects")
         .panelToolbar {
             ToolbarItem {
                 Toggle(isOn: $showClosed) { Label("Closed", systemImage: "archivebox") }.help("Show closed")
@@ -231,7 +231,7 @@ struct ProjectBoardView: View {
                 LoadingView()
             }
         }
-        .navigationTitle(project.title)
+        .detailTitle(project.title)
         .task(id: project) {
             guard let api = app.api else { return }
             let m = ProjectBoardModel(ref: project, api: api)

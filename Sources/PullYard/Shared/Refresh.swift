@@ -14,39 +14,72 @@ enum RefreshText {
     }
 }
 
+enum RefreshFailure {
+    case offline, rateLimited(Date?), signIn, other
+
+    init(_ message: String, rateLimitedUntil: Date?) {
+        let m = message.lowercased()
+        if let rateLimitedUntil { self = .rateLimited(rateLimitedUntil) }
+        else if m.contains("rate limit") { self = .rateLimited(nil) }
+        else if m.contains("offline") || m.contains("not connected") || m.contains("network connection was lost") || m.contains("could not be found") { self = .offline }
+        else if m.contains("bad credentials") || m.contains("401") || m.contains("sign in") || m.contains("unauthorized") { self = .signIn }
+        else { self = .other }
+    }
+
+    var short: String {
+        switch self {
+        case .offline: return "Offline"
+        case .rateLimited(let until?): return "Rate-limited until \(until.formatted(date: .omitted, time: .shortened))"
+        case .rateLimited(nil): return "Rate-limited"
+        case .signIn: return "Sign in again"
+        case .other: return "Couldn't refresh"
+        }
+    }
+}
+
 struct RefreshStatus: View {
     let updated: Date?
     let refreshing: Bool
     var error: String?
     var compact = false
     var retry: (() -> Void)?
+    @Environment(AppModel.self) private var app: AppModel?
+
+    private static let staleAfter: TimeInterval = 300
 
     var body: some View {
-        HStack(spacing: 5) {
-            ZStack {
-                if refreshing {
-                    ProgressView().controlSize(.mini)
-                } else if error != nil {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.syAmber).accessibilityLabel("Refresh failed")
-                } else {
-                    Image(systemName: "arrow.clockwise")
+        TimelineView(.periodic(from: .now, by: 5)) { context in
+            let stale = isStale(now: context.date)
+            HStack(spacing: 5) {
+                ZStack {
+                    if refreshing {
+                        PYLoader(size: 12, label: "Refreshing")
+                    } else if error != nil {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.syAmber).accessibilityLabel("Refresh failed")
+                    } else {
+                        Image(systemName: "arrow.clockwise").accessibilityHidden(true)
+                    }
                 }
-            }
-            .frame(width: 12, height: 12)
-            TimelineView(.periodic(from: .now, by: 5)) { context in
+                .frame(width: 12, height: 12)
                 Text(label(now: context.date))
                     .monospacedDigit()
                     .lineLimit(1)
+                if error != nil, !refreshing, let retry {
+                    Button("Retry", action: retry)
+                        .buttonStyle(.link)
+                        .font(.syCaption.weight(.medium))
+                }
             }
-            if error != nil, !refreshing, let retry {
-                Button("Retry", action: retry)
-                    .buttonStyle(.link)
-                    .font(.syCaption.weight(.medium))
-            }
+            .foregroundStyle(stale ? Color.syAmberInk : Color.syMuted)
         }
         .font(.syCaption)
-        .foregroundStyle(Color.syMuted)
-        .help(error.map { "Last refresh failed: \($0)" } ?? "Pull down to refresh (⌘R)")
+        .fixedSize()
+        .help(error.map { "Last refresh failed: \($0)" } ?? "Refresh (⌘R) · ⌘R refreshes everything")
+    }
+
+    private func isStale(now: Date) -> Bool {
+        guard !refreshing, error == nil, let updated else { return false }
+        return now.timeIntervalSince(updated) > Self.staleAfter
     }
 
     private func label(now: Date) -> String {
@@ -54,10 +87,31 @@ struct RefreshStatus: View {
             guard !compact, let updated, now.timeIntervalSince(updated) >= 60 else { return "Updating…" }
             return "Updated \(RefreshText.ago(updated, now: now)) · updating…"
         }
-        if error != nil { return compact ? "Offline" : "Couldn't refresh" }
+        if let error {
+            let failure = RefreshFailure(error, rateLimitedUntil: app?.rateLimitedUntil)
+            return failure.short
+        }
         guard let updated else { return compact ? "" : "Not updated yet" }
         let ago = RefreshText.ago(updated, now: now)
         return compact ? ago : "Updated \(ago)"
+    }
+}
+
+struct RefreshPill: View {
+    let updated: Date?
+    let refreshing: Bool
+    var error: String?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            RefreshStatus(updated: updated, refreshing: refreshing, error: error, compact: true)
+                .padding(.horizontal, 2)
+        }
+        .buttonStyle(.borderless)
+        .disabled(refreshing)
+        .help(error.map { "Last refresh failed: \($0). Click to retry" } ?? "Refresh this view · ⌘R refreshes everything")
+        .accessibilityLabel("Refresh")
     }
 }
 
@@ -109,8 +163,10 @@ private struct LiveRefreshModifier: ViewModifier {
     @State private var revealing = false
     @State private var sawRefreshing = false
     @State private var manual = false
+    @Environment(\.detailKey) private var detailKey
 
     private var held: Bool { phase != .idle }
+    private var showsButton: Bool { button && (detailKey != nil || !app.frontHasRefreshPill) }
 
     func body(content: Content) -> some View {
         VStack(spacing: 0) {
@@ -131,7 +187,7 @@ private struct LiveRefreshModifier: ViewModifier {
             }
         }
         .panelToolbar {
-            if button {
+            if showsButton {
                 ToolbarItem {
                     Button(action: manualRefresh) {
                         Label("Refresh", systemImage: "arrow.clockwise")

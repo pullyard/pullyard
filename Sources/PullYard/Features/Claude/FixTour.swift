@@ -342,9 +342,9 @@ struct FixTourOverlay: View {
                     }
                     Spacer()
                     if tour.index == tour.steps.count - 1 {
-                        Button("Done") { tour.finish() }.buttonStyle(.borderedProminent).tint(.syAgentAccent)
+                        Button("Done") { tour.finish() }.buttonStyle(.borderedProminent).tint(.syAgentFill)
                     } else {
-                        Button("Next") { tour.next() }.buttonStyle(.borderedProminent).tint(.syAgentAccent).keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                        Button("Next") { tour.next() }.buttonStyle(.borderedProminent).tint(.syAgentFill).keyboardShortcut(.rightArrow, modifiers: [.command, .option])
                     }
                 }
                 .controlSize(.small)

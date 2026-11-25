@@ -142,18 +142,18 @@ struct FilesTab: View {
             .buttonStyle(.borderless)
             .help(showList ? "Hide file list" : "Show file list")
             .accessibilityLabel(showList ? "Hide file list" : "Show file list")
-            HStack(spacing: 2) {
+            navGroup("File") {
                 navButton("chevron.up", "Previous file", key: "P") { perform("p") }
                 navButton("chevron.down", "Next file", key: "N") { perform("n") }
             }
-            HStack(spacing: 2) {
-                navButton("arrow.up.to.line", "Previous hunk", key: "[") { perform("[") }
-                navButton("arrow.down.to.line", "Next hunk", key: "]") { perform("]") }
+            navGroup("Change") {
+                navButton("chevron.up", "Previous change", key: "[") { perform("[") }
+                navButton("chevron.down", "Next change", key: "]") { perform("]") }
             }
             if model.pr?.reviewThreads.nodes.contains(where: { !$0.isOutdated }) == true {
-                HStack(spacing: 2) {
-                    navButton("text.bubble", "Previous comment", key: "⇧C") { perform("C") }
-                    navButton("arrow.down.message", "Next comment", key: "C") { perform("c") }
+                navGroup("Comment") {
+                    navButton("chevron.up", "Previous comment", key: "⇧C") { perform("C") }
+                    navButton("chevron.down", "Next comment", key: "C") { perform("c") }
                 }
             }
             if let reviewed = model.lastReviewed {
@@ -186,8 +186,17 @@ struct FilesTab: View {
         .font(.syCaption)
         .controlSize(.small)
         .padding(.horizontal, 12)
-        .padding(.vertical, 5)
+        .frame(minHeight: 28)
         .overlay(alignment: .bottom) { Rectangle().fill(Color.syLine).frame(height: 1) }
+    }
+
+    private func navGroup<Content: View>(_ title: String, @ViewBuilder _ buttons: () -> Content) -> some View {
+        HStack(spacing: 0) {
+            Text(title).foregroundStyle(Color.syMuted).padding(.trailing, 2)
+            buttons()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(title)
     }
 
     private func sinceTitle(_ r: ReviewedCommit) -> String {
@@ -232,7 +241,7 @@ struct FilesTab: View {
 
     private func navButton(_ symbol: String, _ title: String, key: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).frame(width: 22, height: 20).contentShape(Rectangle())
+            Image(systemName: symbol).frame(width: 20, height: 20).contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
         .help("\(title) (\(key))")

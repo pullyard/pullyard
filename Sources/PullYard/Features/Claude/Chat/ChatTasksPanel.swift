@@ -218,12 +218,12 @@ private struct ChatTaskRow: View {
                             .foregroundStyle(Color.syMuted)
                     }
                 }
-                ProgressView().controlSize(.mini)
+                PYLoader(size: 12)
             }
         case .stopping:
             HStack(spacing: 6) {
                 Text("Stopping…").font(.syCaption).foregroundStyle(Color.syMuted)
-                ProgressView().controlSize(.mini)
+                PYLoader(size: 12)
             }
         case .failed:
             Text("Failed").font(.syCaption.weight(.medium)).foregroundStyle(Color.syRed)

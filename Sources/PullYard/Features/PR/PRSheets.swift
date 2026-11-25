@@ -91,19 +91,56 @@ struct ReviewSheet: View {
                     .font(.syCaption)
                     .foregroundStyle(Color.syMuted)
             }
-            if !model.pending.isEmpty {
-                Label("Inline comments to be submitted: \(model.pending.count)", systemImage: "text.bubble")
+            if !pr.viewerDidAuthor {
+                Picker("Verdict", selection: $event) {
+                    Text("Comment").tag("COMMENT")
+                    Text("Approve").tag("APPROVE")
+                    Text("Request changes").tag("REQUEST_CHANGES")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .tint(verdictTint)
+                .accessibilityLabel("Verdict")
+            } else {
+                Text("You opened this pull request, so you can only comment.")
+                    .font(.syCaption)
                     .foregroundStyle(Color.syMuted)
             }
-            ComposerBox(text: $model.summaryDraft, placeholder: "Review summary (optional when approving)", minHeight: 140)
-                .frame(maxHeight: 260)
-            Picker("", selection: $event) {
-                Text("Comment — without approval").tag("COMMENT")
-                Text("Approve").tag("APPROVE").disabled(pr.viewerDidAuthor)
-                Text("Request changes").tag("REQUEST_CHANGES").disabled(pr.viewerDidAuthor)
+            ComposerBox(text: $model.summaryDraft, placeholder: event == "APPROVE" ? "Summary (optional)" : "Review summary", minHeight: 120)
+                .frame(maxHeight: 240)
+            if !model.pending.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(plural(model.pending.count, "pending inline comment", "pending inline comments"))
+                        .font(.sy(size: 10, weight: .semibold))
+                        .textCase(.uppercase)
+                        .foregroundStyle(Color.syMuted)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 3) {
+                            ForEach(model.pending) { c in
+                                HStack(spacing: 6) {
+                                    Text("\((c.path as NSString).lastPathComponent):\(c.line)")
+                                        .font(.syCaption.monospaced())
+                                        .foregroundStyle(Color.syText)
+                                        .lineLimit(1)
+                                        .help(c.path)
+                                    Text(c.body.replacingOccurrences(of: "\n", with: " "))
+                                        .font(.syCaption)
+                                        .foregroundStyle(Color.syMuted)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 90)
+                }
             }
-            .pickerStyle(.radioGroup)
-            .labelsHidden()
+            if let reason = disabledReason {
+                Label(reason, systemImage: "info.circle")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+            }
             HStack {
                 if !model.pending.isEmpty {
                     Button("Discard pending comments", role: .destructive) { confirmDiscard = true }
@@ -116,15 +153,38 @@ struct ReviewSheet: View {
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Submit review") {
+                Button(submitTitle) {
                     let body = text, ev = event
                     Task { if await model.submitReview(event: ev, body: body) { dismiss() } }
                 }
                 .keyboardShortcut(.return, modifiers: .command)
                 .buttonStyle(.borderedProminent)
-                .disabled(model.busy || (event != "APPROVE" && text.trimmingCharacters(in: .whitespaces).isEmpty && model.pending.isEmpty))
+                .tint(verdictTint)
+                .help("Submit (⌘↩)")
+                .disabled(model.busy || disabledReason != nil)
             }
         }
+    }
+
+    private var verdictTint: Color {
+        switch event {
+        case "APPROVE": return .syGreenFill
+        case "REQUEST_CHANGES": return .syRedFill
+        default: return .syAccentFill
+        }
+    }
+
+    private var submitTitle: String {
+        switch event {
+        case "APPROVE": return model.pending.isEmpty ? "Approve" : "Approve with \(plural(model.pending.count, "comment", "comments"))"
+        case "REQUEST_CHANGES": return "Request changes"
+        default: return model.pending.isEmpty ? "Comment" : "Submit \(plural(model.pending.count, "comment", "comments"))"
+        }
+    }
+
+    private var disabledReason: String? {
+        guard event != "APPROVE", text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, model.pending.isEmpty else { return nil }
+        return event == "REQUEST_CHANGES" ? "Explain what needs to change to request changes." : "Write a summary or add inline comments to submit."
     }
 }
 
@@ -190,6 +250,7 @@ struct MergeSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(blocked ? Color.syRedFill : Color.syGreenFill)
+                .keyboardShortcut(blocked ? nil : .defaultAction)
                 .help(blocked ? "GitHub may reject this merge: \(readiness.text)" : "Merge pull request")
                 .disabled(model.busy || allowed.isEmpty)
             }
@@ -403,7 +464,7 @@ struct JobLogSheet: View {
                 if let onFix {
                     Button("Fix with agent") { onFix(log) }
                         .buttonStyle(.borderedProminent)
-                        .tint(Color.syCoral)
+                        .tint(Color.syCoralFill)
                 }
                 Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
             }

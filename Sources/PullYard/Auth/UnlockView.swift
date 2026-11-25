@@ -78,7 +78,7 @@ struct UnlockView: View {
                 }
             }
             .padding(.top, 6)
-            if busy { ProgressView().controlSize(.small) }
+            if busy { PYLoader(size: 16) }
         }
         .padding(32)
         .frame(width: sheet ? 440 : nil)

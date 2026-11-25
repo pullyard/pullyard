@@ -195,7 +195,7 @@ struct FixWithClaudeSheet: View {
                     Text("showing \(failing.count) of \(allFailing.count)").font(.syCaption).foregroundStyle(Color.syDim)
                 }
                 if ciLoading {
-                    ProgressView().controlSize(.mini)
+                    PYLoader(size: 12)
                     Text("Collecting logs…").font(.syCaption).foregroundStyle(Color.syDim)
                 }
                 Spacer()
@@ -238,7 +238,7 @@ struct FixWithClaudeSheet: View {
                 Text(ciDetail(item)).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
             }
         } else if ciLoading {
-            ProgressView().controlSize(.mini)
+            PYLoader(size: 12)
         }
     }
 
@@ -359,7 +359,7 @@ struct ClaudeFixBanner: View {
                 Button("Fix with agent", action: action)
                     .controlSize(.small)
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.syCoral)
+                    .tint(Color.syCoralFill)
             }
             .font(.syCallout)
             .padding(.horizontal, 10)
@@ -413,7 +413,7 @@ struct ReReviewBanner: View {
                     } label: {
                         HStack(spacing: 5) {
                             if sending {
-                                ProgressView().controlSize(.mini)
+                                PYLoader(size: 12)
                             } else {
                                 Image(systemName: "arrow.triangle.2.circlepath")
                             }

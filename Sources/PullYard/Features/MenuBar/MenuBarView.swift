@@ -33,7 +33,7 @@ struct MenuBarView: View {
                 }
                 Spacer()
                 if refreshing {
-                    ProgressView().controlSize(.small).accessibilityLabel("Refreshing")
+                    PYLoader(size: 16).accessibilityLabel("Refreshing")
                 } else {
                     Button {
                         refreshing = true

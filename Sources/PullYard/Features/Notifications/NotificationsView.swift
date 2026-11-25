@@ -79,7 +79,7 @@ struct NotificationsView: View {
                 .overlay(alignment: .top) { Rectangle().fill(Color.syLine).frame(height: 1) }
             }
         }
-        .navigationTitle("Notifications")
+        .columnTitle("Notifications")
         .panelToolbar {
             ToolbarItem {
                 Button { confirmMarkAll = true } label: { Label("Mark all read", systemImage: "checkmark.circle") }

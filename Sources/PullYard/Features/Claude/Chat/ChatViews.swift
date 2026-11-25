@@ -608,7 +608,7 @@ struct ErrorBanner: View {
                     }
                     .controlSize(.small)
                     .buttonStyle(.borderedProminent)
-                    .tint(.syAgentAccent)
+                    .tint(.syAgentFill)
                     .disabled(waiting)
                 }
                 Button("Restart session", action: reconnect ?? retry).controlSize(.small)
@@ -803,7 +803,7 @@ struct UserBubble: View {
                 Button("Cancel") { cancelEditing() }
                 Button("Send") { send() }
                     .buttonStyle(.borderedProminent)
-                    .tint(.syAgentAccent)
+                    .tint(.syAgentFill)
                     .disabled(!canSend)
                     .help("Send the edited message. Later messages are replaced; the original stays in the session history.")
             }

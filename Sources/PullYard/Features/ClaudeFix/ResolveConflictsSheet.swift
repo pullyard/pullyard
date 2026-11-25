@@ -64,7 +64,7 @@ struct ResolveConflictsSheet: View {
                     .font(.syCaption.weight(.semibold))
                     .foregroundStyle(Color.syMuted)
                 Spacer()
-                if model.conflicts == .checking { ProgressView().controlSize(.mini) }
+                if model.conflicts == .checking { PYLoader(size: 12) }
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {

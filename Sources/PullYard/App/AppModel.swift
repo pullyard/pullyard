@@ -627,6 +627,27 @@ final class AppModel {
         section == .claude ? nil : (detailPath.last ?? detailRoot)
     }
 
+    var detailTitle: DetailTitle?
+
+    var frontHasRefreshPill: Bool {
+        guard forge == nil else { return false }
+        switch frontRoute {
+        case .pr?, .issue?: return true
+        default: return false
+        }
+    }
+
+    var frontDetailKey: String? {
+        if section == .claude { return nil }
+        if forge != nil { return forgeSelection.map { "forge:\($0.id)" } }
+        return frontRoute.map { "\($0)" }
+    }
+
+    var frontTitle: DetailTitle? {
+        guard let t = detailTitle, let key = frontDetailKey, t.key == key else { return nil }
+        return t
+    }
+
     private var mainWindowVisible: Bool {
         let windows = NSApp.windows.filter { $0.identifier?.rawValue.hasPrefix("main") == true }
         guard !windows.isEmpty else { return true }

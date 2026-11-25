@@ -149,6 +149,7 @@ struct ForgeListView: View {
                 ForEach(StateFilter.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
+            .tint(Color.syAccentFill)
             .labelsHidden()
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -193,8 +194,7 @@ struct ForgeListView: View {
             }
         }
         .toolbarSearch(text: $text, prompt: "Filter: title, repository, author")
-        .navigationTitle(kind.title(app.provider))
-        .navigationSubtitle(items.isEmpty ? "" : plural(items.count, "result", "results") + (model.items.count >= ForgeLimits.listCap ? " (latest)" : ""))
+        .columnTitle(kind.title(app.provider), subtitle: items.isEmpty ? "" : plural(items.count, "result", "results") + (model.items.count >= ForgeLimits.listCap ? " (latest)" : ""))
         .task(id: "\(stateFilter.rawValue)|\(app.account?.id ?? "")") { await reload() }
         .onChange(of: app.refreshTick) { Task { await reload(silent: !model.items.isEmpty) } }
         .onLiveTick { await reload(silent: true) }
@@ -232,13 +232,10 @@ struct ForgeDetailColumn: View {
     var body: some View {
         if let item = app.forgeSelection {
             ForgeItemDetailView(item: item, provider: app.provider, caps: app.forgeCaps).id(item.id).transition(.routeSwap)
+                .environment(\.detailKey, "forge:\(item.id)")
         } else {
-            VStack(spacing: 12) {
-                IconTile(systemImage: app.provider.icon, color: .syViolet, size: 56).opacity(0.9)
-                Text(placeholder).foregroundStyle(Color.syMuted)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .transition(.opacity)
+            PYEmptyState(title: "Nothing open yet", message: placeholder)
+                .transition(.opacity)
         }
     }
 }
@@ -312,6 +309,7 @@ struct ForgeItemDetailView: View {
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .detailTitle(item.title, subtitle: "\(item.repository.nameWithOwner)\(item.isPR ? provider.numberPrefix : "#")\(item.number)")
     }
 }
 

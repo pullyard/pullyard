@@ -76,6 +76,8 @@ private enum DiffStyle {
     }
 
     private(set) static var gutterAttributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.syGutter]
+    static var commentMarkAttributes: [NSAttributedString.Key: Any] { [.font: NSFont.monospacedSystemFont(ofSize: font.pointSize, weight: .bold), .foregroundColor: NSColor.syCoral] }
+    static let changeBarWidth: CGFloat = 3
 
     static func codeText(_ line: DiffLine) -> String {
         switch line.kind {
@@ -141,7 +143,9 @@ final class DiffRenderState {
 }
 
 final class DiffLineCell: NSView {
-    var line: DiffLine?
+    var line: DiffLine? {
+        didSet { hoverSide = nil }
+    }
     var left: DiffLine?
     var right: DiffLine?
     var isSplit = false
@@ -151,6 +155,54 @@ final class DiffLineCell: NSView {
     var commentable = false
     var onComment: ((DiffLine) -> Void)?
     weak var state: DiffRenderState?
+    private var hoverSide: Int? {
+        didSet { if hoverSide != oldValue { needsDisplay = true } }
+    }
+    private var hoverArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        updateHover(convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        updateHover(convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoverSide = nil
+    }
+
+    private func updateHover(_ p: NSPoint) {
+        guard commentable, commentTarget(at: p) != nil else {
+            hoverSide = nil
+            return
+        }
+        hoverSide = isSplit && p.x >= floor(bounds.width / 2) ? 1 : 0
+    }
+
+    private func drawChangeBar(_ kind: DiffLine.Kind, x: CGFloat, height: CGFloat) {
+        switch kind {
+        case .add: NSColor.syGreen.setFill()
+        case .del: NSColor.syRed.setFill()
+        default: return
+        }
+        NSRect(x: x, y: 0, width: DiffStyle.changeBarWidth, height: height).fill()
+    }
+
+    private func drawGutter(_ numbers: String, at point: NSPoint, mark: Bool) {
+        (numbers as NSString).draw(at: point, withAttributes: DiffStyle.gutterAttributes)
+        guard mark else { return }
+        let width = (numbers as NSString).size(withAttributes: DiffStyle.gutterAttributes).width
+        ("+" as NSString).draw(at: NSPoint(x: point.x + width + DiffStyle.charWidth, y: point.y), withAttributes: DiffStyle.commentMarkAttributes)
+    }
 
     override var isFlipped: Bool { true }
 
@@ -201,10 +253,11 @@ final class DiffLineCell: NSView {
         case .hunk: DiffStyle.hunkBG.setFill(); bounds.fill()
         default: break
         }
+        drawChangeBar(line.kind, x: 0, height: bounds.height)
         let pad: CGFloat = line.kind == .hunk ? 3.5 : DiffStyle.vPad
         if line.kind != .hunk {
-            let gutter = DiffStyle.gutter(line.oldLine) + " " + DiffStyle.gutter(line.newLine) + (commentable && line.commentable ? " +" : "  ")
-            (gutter as NSString).draw(at: NSPoint(x: 4, y: pad), withAttributes: DiffStyle.gutterAttributes)
+            let numbers = DiffStyle.gutter(line.oldLine) + " " + DiffStyle.gutter(line.newLine)
+            drawGutter(numbers, at: NSPoint(x: 4, y: pad), mark: commentable && line.commentable && hoverSide == 0)
         }
         let x = DiffStyle.gutterWidth
         drawCode(text, in: NSRect(x: x, y: pad, width: bounds.width - x - 8, height: bounds.height - pad), scrolls: line.kind != .hunk)
@@ -230,8 +283,9 @@ final class DiffLineCell: NSView {
         case .del: DiffStyle.delBG.setFill(); rect.fill()
         default: break
         }
-        let gutter = DiffStyle.gutter(old ? line.oldLine : line.newLine) + (commentable && line.commentable ? " +" : "  ")
-        (gutter as NSString).draw(at: NSPoint(x: x + 4, y: DiffStyle.vPad), withAttributes: DiffStyle.gutterAttributes)
+        drawChangeBar(line.kind, x: x, height: bounds.height)
+        let numbers = DiffStyle.gutter(old ? line.oldLine : line.newLine)
+        drawGutter(numbers, at: NSPoint(x: x + 4, y: DiffStyle.vPad), mark: commentable && line.commentable && hoverSide == (old ? 0 : 1))
         let codeX = x + DiffStyle.splitGutterWidth
         drawCode(text, in: NSRect(x: codeX, y: DiffStyle.vPad, width: width - DiffStyle.splitGutterWidth - 8, height: bounds.height - DiffStyle.vPad), scrolls: true)
     }

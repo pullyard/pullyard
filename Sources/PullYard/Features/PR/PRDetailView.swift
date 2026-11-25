@@ -76,8 +76,7 @@ struct PRDetailContent: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .navigationTitle(pr.title)
-        .navigationSubtitle("\(model.ref.repo.full) #\(pr.number)")
+        .detailTitle(pr.title, subtitle: "\(model.ref.repo.full) #\(pr.number)")
         .task(id: pr.url) { app.noteCanonical(model.ref, url: pr.url) }
         .background { if front { reviewShortcuts } }
         .panelToolbar(id: "pr-detail") { toolbar }
@@ -179,9 +178,9 @@ struct PRDetailContent: View {
         if checks.isEmpty { return "0" }
         let failed = checks.filter { $0.outcome == .failure }.count
         let pending = checks.filter { $0.outcome == .pending }.count
-        if failed > 0 { return "✕\(failed)" }
-        if pending > 0 { return "…\(pending)" }
-        return "✓\(checks.count)"
+        if failed > 0 { return "\(failed) failing" }
+        if pending > 0 { return "\(pending) running" }
+        return "\(checks.count)"
     }
 
     private var confirmTitle: String {
@@ -223,22 +222,15 @@ struct PRDetailContent: View {
         pr.isOpen && !pr.isDraft && model.canWrite
     }
 
+    private var mergeBlocker: MergeRequirement? {
+        model.requirements.first { $0.state == .missing } ?? model.requirements.first { $0.state == .pending }
+    }
+
     @ToolbarContentBuilder
     private var toolbar: some CustomizableToolbarContent {
         ToolbarItem(id: "pr.status", placement: .primaryAction) {
-            HStack(spacing: 6) {
-                if model.busy {
-                    ProgressView().controlSize(.small)
-                }
-                Button {
-                    Task { await model.load(full: true) }
-                } label: {
-                    RefreshStatus(updated: model.lastUpdated, refreshing: model.loading, error: model.refreshError, compact: true)
-                }
-                .buttonStyle(.borderless)
-                .disabled(model.loading)
-                .help(model.refreshError.map { "Last refresh failed: \($0). Click to retry (⌘R)" } ?? "Refresh (⌘R)")
-                .accessibilityLabel("Refresh")
+            RefreshPill(updated: model.lastUpdated, refreshing: model.loading || model.busy, error: model.refreshError) {
+                Task { await model.load(full: true) }
             }
         }
         if pr.isOpen {
@@ -272,9 +264,7 @@ struct PRDetailContent: View {
         }
         if canMerge {
             ToolbarItem(id: "pr.merge", placement: .primaryAction) {
-                Button { showMerge = true } label: { Label("Merge", systemImage: "arrow.triangle.merge") }
-                    .labelStyle(.titleAndIcon)
-                    .help("Merge pull request (⇧⌘M)")
+                MergeToolbarButton(blocker: mergeBlocker) { showMerge = true }
             }
         }
         ToolbarItem(id: "pr.more", placement: .primaryAction) {
@@ -381,8 +371,7 @@ struct StackPreviewContent: View {
             Divider()
             StackTab(model: model, tree: tree)
         }
-        .navigationTitle(node.title)
-        .navigationSubtitle("\(model.ref.repo.full) #\(node.number)")
+        .detailTitle(node.title, subtitle: "\(model.ref.repo.full) #\(node.number)")
     }
 }
 
@@ -693,12 +682,11 @@ struct MergeStatusBar: View {
             Button {
                 model.tab = .checks
             } label: {
-                HStack(spacing: 6) {
-                    if failed > 0 { Label("\(failed)", systemImage: "xmark.circle.fill").foregroundStyle(Color.ghRed) }
-                    if pending > 0 { Label("\(pending)", systemImage: "clock.fill").foregroundStyle(Color.ghYellow) }
-                    Label("\(ok)", systemImage: "checkmark.circle.fill").foregroundStyle(Color.ghGreen)
+                HStack(spacing: 4) {
+                    if failed > 0 { StatusChip(text: "\(failed) failing", icon: "xmark.circle.fill", color: .ghRed) }
+                    if pending > 0 { StatusChip(text: "\(pending) running", icon: "circle.dashed", color: .syAmberInk) }
+                    if ok > 0 || (failed == 0 && pending == 0) { StatusChip(text: "\(ok) passing", icon: "checkmark.circle.fill", color: .ghGreen) }
                 }
-                .font(.syCaption)
             }
             .buttonStyle(.plain)
             .help("Checks")
@@ -888,7 +876,7 @@ struct ChecksTab: View {
                     if CIFailureCollector.isFixable(c), pr.isOpen {
                         Button("Fix with agent") { onFix(CIFixRequest(focus: c.id)) }
                             .controlSize(.small)
-                            .tint(Color.syCoral)
+                            .tint(Color.syCoralFill)
                     }
                     if c.isActionsJob, c.outcome != .pending, c.outcome != .skipped {
                         Button("Log") { logTarget = c }.controlSize(.small)
@@ -931,5 +919,26 @@ struct ChecksTab: View {
         if let d = c.duration { parts.append(d) }
         if let desc = c.description, !desc.isEmpty { parts.append(desc) }
         return parts.joined(separator: " · ")
+    }
+}
+
+struct MergeToolbarButton: View {
+    let blocker: MergeRequirement?
+    let action: () -> Void
+
+    var body: some View {
+        if let blocker {
+            Button(action: action) { Label("Merge", systemImage: "arrow.triangle.merge") }
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(Color.syMuted)
+                .help(blocker.state == .missing ? "Blocked: \(blocker.title). Open to review merge requirements (⇧⌘M)" : "\(blocker.title) — merge may need to wait (⇧⌘M)")
+                .accessibilityHint(blocker.title)
+        } else {
+            Button(action: action) { Label("Merge", systemImage: "arrow.triangle.merge") }
+                .labelStyle(.titleAndIcon)
+                .buttonStyle(.borderedProminent)
+                .tint(Color.syGreenFill)
+                .help("Ready to merge (⇧⌘M)")
+        }
     }
 }

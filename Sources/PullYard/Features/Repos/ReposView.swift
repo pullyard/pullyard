@@ -57,7 +57,7 @@ struct ReposView: View {
         }
         .liveRefresh(updated: lastUpdated, refreshing: refreshing, error: repos.isEmpty ? nil : error) { await load() }
         .toolbarSearch(text: $text, prompt: "Filter repositories")
-        .navigationTitle("Repositories")
+        .columnTitle("Repositories")
         .panelToolbar {
             ToolbarItem {
                 Toggle(isOn: $hideArchived) { Label("Hide archived", systemImage: "archivebox") }
@@ -225,8 +225,7 @@ struct RepoDetailView: View {
                 itemsList
             }
         }
-        .navigationTitle(repo.name)
-        .navigationSubtitle(repo.owner)
+        .detailTitle(repo.name, subtitle: repo.owner)
         .panelToolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {

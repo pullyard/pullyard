@@ -41,6 +41,7 @@ struct SettingsView: View {
                 .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
                 .tag("advanced")
         }
+        .tint(Color.syAccentFill)
         .task { await ClaudeAccountStore.shared.refresh() }
         .sheet(isPresented: $showAddProfile) { AddClaudeProfileSheet().environment(app) }
         .sheet(isPresented: $showLicenses) { LicensesSheet() }
@@ -197,7 +198,7 @@ struct SettingsView: View {
                         HStack {
                             Button("Sign out of Claude Code", role: .destructive) { confirmClaudeLogout = true }
                             Spacer()
-                            if loggingOut { ProgressView().controlSize(.small) }
+                            if loggingOut { PYLoader(size: 16) }
                         }
                         .disabled(loggingOut)
                     case .notInstalled:
@@ -216,7 +217,7 @@ struct SettingsView: View {
                         .font(.syCaption)
                         .foregroundStyle(Color.syMuted)
                 } header: {
-                    SettingsHeader(title: "Claude Code", icon: "terminal.fill", color: .syCoral)
+                    SettingsHeader(title: "Agents", icon: "terminal.fill", color: .syCoral)
                 }
             }
         }
@@ -271,6 +272,21 @@ struct SettingsView: View {
                 SettingsHeader(title: "Support PullYard", icon: "heart.fill", color: .syCoral)
             }
             Section {
+                HStack(spacing: 14) {
+                    DrawnLogoMark(key: "settings-about", size: 56)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PullYard")
+                            .font(.system(size: TextZoom.shared.size(22), weight: .semibold, design: .serif))
+                            .foregroundStyle(Color.syText)
+                        Text("Version \(Updater.shared.currentVersion)")
+                            .font(.syCaption.monospacedDigit())
+                            .foregroundStyle(Color.syMuted)
+                            .textSelection(.enabled)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+                .accessibilityElement(children: .combine)
                 Text(Legal.disclaimer)
                     .font(.syCaption)
                     .foregroundStyle(Color.syMuted)

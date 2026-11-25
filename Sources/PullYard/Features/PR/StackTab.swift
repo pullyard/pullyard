@@ -799,7 +799,7 @@ private struct StackListRow: View {
                 Text(key).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
             }
             if hasSession {
-                Image(systemName: "terminal").font(.syCaption).foregroundStyle(Color.syMuted).help("Has a Claude Code session").accessibilityLabel("Has a Claude Code session")
+                Image(systemName: "terminal").font(.syCaption).foregroundStyle(Color.syMuted).help("Has an agent session").accessibilityLabel("Has an agent session")
             }
             BranchChip(name: node.headRefName, color: current ? .syViolet : .sySlate)
             Button(action: onNote) {
@@ -814,7 +814,7 @@ private struct StackListRow: View {
             .help(noteCount > 0 ? plural(noteCount, "note", "notes") + " — click to open" : "Add a note")
             .accessibilityLabel(noteCount > 0 ? plural(noteCount, "note", "notes") : "Add a note")
             if opening {
-                ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
+                PYLoader(size: 12).frame(width: 14, height: 14)
             }
             StatusPill(status: node.status)
         }
@@ -888,7 +888,7 @@ private struct StackCard: View, Equatable {
                 .help(noteCount > 0 ? plural(noteCount, "note", "notes") + " — click to open" : "Add a note")
                 .accessibilityLabel(noteCount > 0 ? plural(noteCount, "note", "notes") : "Add a note")
                 if opening {
-                    ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
+                    PYLoader(size: 12).frame(width: 14, height: 14)
                 }
                 StatusPill(status: node.status)
             }
@@ -908,7 +908,7 @@ private struct StackCard: View, Equatable {
                         Text(session.title).lineLimit(1).truncationMode(.tail).foregroundStyle(Color.syAccent)
                     }
                     .buttonStyle(.plain)
-                    .help("Resume Claude Code session")
+                    .help("Resume agent session")
                 }
                 .font(.syCaption)
             }

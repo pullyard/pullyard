@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum StateFilter: String, CaseIterable, Identifiable {
@@ -282,15 +283,95 @@ struct LoadingBar: View {
     var body: some View {
         ZStack {
             if active {
-                ProgressView()
-                    .progressViewStyle(.linear)
-                    .controlSize(.small)
-                    .labelsHidden()
-                    .transition(.opacity)
+                WakeBar().transition(.opacity)
             }
         }
         .frame(height: 4)
         .clipped()
+    }
+}
+
+struct WakeBar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        WakeBarLayer(animated: !reduceMotion)
+            .frame(height: 2)
+            .frame(maxHeight: .infinity, alignment: .center)
+            .accessibilityLabel("Loading")
+    }
+}
+
+private struct WakeBarLayer: NSViewRepresentable {
+    let animated: Bool
+
+    func makeNSView(context: Context) -> WakeBarView { WakeBarView() }
+
+    func updateNSView(_ view: WakeBarView, context: Context) {
+        view.animated = animated
+    }
+}
+
+final class WakeBarView: NSView {
+    private let bar = CAGradientLayer()
+    private var laidOutWidth: CGFloat = -1
+    var animated = true {
+        didSet { if animated != oldValue { laidOutWidth = -1; needsLayout = true } }
+    }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        bar.startPoint = CGPoint(x: 0, y: 0.5)
+        bar.endPoint = CGPoint(x: 1, y: 0.5)
+        bar.cornerRadius = 1
+        layer?.addSublayer(bar)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        laidOutWidth = -1
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        let w = bounds.width
+        guard w > 0, w != laidOutWidth else { return }
+        laidOutWidth = w
+        applyColors()
+        let span = max(60, w * 0.32)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        bar.removeAllAnimations()
+        bar.bounds = CGRect(x: 0, y: 0, width: animated ? span : w, height: bounds.height)
+        bar.position = CGPoint(x: w / 2, y: bounds.midY)
+        CATransaction.commit()
+        guard animated else { return }
+        let move = CABasicAnimation(keyPath: "position.x")
+        move.fromValue = -span / 2
+        move.toValue = w + span / 2
+        move.duration = 1.4
+        move.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        move.repeatCount = .infinity
+        bar.add(move, forKey: "sweep")
+    }
+
+    private func applyColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let wake = NSColor.syWake
+            bar.colors = [wake.withAlphaComponent(0).cgColor, wake.cgColor, NSColor.syViolet.withAlphaComponent(0.6).cgColor, wake.withAlphaComponent(0).cgColor]
+        }
     }
 }
 
@@ -334,6 +415,7 @@ struct SearchListView: View {
                     ForEach(StateFilter.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                .tint(Color.syAccentFill)
                 .labelsHidden()
                 .accessibilityLabel("State")
                 Menu {
@@ -404,8 +486,7 @@ struct SearchListView: View {
             }
         }
         .toolbarSearch(text: $text, prompt: "Filter: text, repo:org/name, label:bug")
-        .navigationTitle(title)
-        .navigationSubtitle(model.total > 0 ? plural(model.total, "result", "results") : "")
+        .columnTitle(title, subtitle: model.total > 0 ? plural(model.total, "result", "results") : "")
         .task(id: "\(query)|\(app.cacheAccount ?? "")|\(app.api != nil)") {
             if !text.isEmpty { try? await Task.sleep(nanoseconds: 350_000_000) }
             guard !Task.isCancelled else { return }
@@ -439,7 +520,7 @@ struct SearchListView: View {
 struct LoadingMoreRow: View {
     var body: some View {
         HStack(spacing: Space.s) {
-            ProgressView().controlSize(.small)
+            PYLoader(size: 16)
             Text("Loading more…").font(.syCaption).foregroundStyle(Color.syMuted)
         }
         .frame(maxWidth: .infinity)
@@ -577,8 +658,8 @@ struct ItemRow: View {
                     Spacer(minLength: 6)
                     HStack(spacing: 8) {
                         if item.isPR {
-                            CIIcon(state: item.ciState)
-                            reviewBadge
+                            ReviewChip(decision: item.reviewDecision)
+                            CIChip(state: item.ciState)
                         }
                         if let comments = item.comments?.totalCount, comments > 0 {
                             Label("\(comments)", systemImage: "bubble.left").labelStyle(.titleAndIcon).monospacedDigit()
@@ -609,15 +690,5 @@ struct ItemRow: View {
         .help(item.title)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spokenLabel)
-    }
-
-    @ViewBuilder
-    private var reviewBadge: some View {
-        switch item.reviewDecision {
-        case "APPROVED": Image(systemName: "checkmark.seal.fill").foregroundStyle(Color.ghGreen).font(.syCaption).help("Approved")
-        case "CHANGES_REQUESTED": Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(Color.ghRed).font(.syCaption).help("Changes requested")
-        case "REVIEW_REQUIRED": Image(systemName: "eye").foregroundStyle(Color.syMuted).font(.syCaption).help("Review required")
-        default: EmptyView()
-        }
     }
 }
