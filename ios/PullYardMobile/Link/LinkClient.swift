@@ -324,6 +324,17 @@ final class LinkClient: ObservableObject {
         return bundle.connections.count
     }
 
+    func diff(_ item: PYLinkItem, in session: String) async throws -> PYLinkDiff {
+        if !isConnected { try await ensureConnected() }
+        var message = PYLinkMessage(type: "diff")
+        message.session = session
+        message.replacesItem = item.id
+        let reply = try await request(message, timeout: 30)
+        if let error = reply.error { throw LinkError.remote(error) }
+        guard let diff = reply.diff else { throw LinkError.remote("Update PullYard on your Mac to see changes.") }
+        return diff
+    }
+
     func stop(_ session: String) {
         var message = PYLinkMessage(type: "stop")
         message.session = session

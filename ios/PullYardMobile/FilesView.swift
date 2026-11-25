@@ -303,7 +303,7 @@ extension FileDiffView {
     }
 }
 
-private struct DiffLineRow: View {
+struct DiffLineRow: View {
     let line: DiffLine
     let wrap: Bool
 

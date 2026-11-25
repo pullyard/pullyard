@@ -89,6 +89,17 @@ struct PYLinkAttachment: Codable, Equatable {
     var data: Data
 }
 
+struct PYLinkEdit: Codable, Equatable {
+    var old: String
+    var new: String
+}
+
+struct PYLinkDiff: Codable, Equatable {
+    var path: String
+    var tool: String
+    var edits: [PYLinkEdit]
+}
+
 struct PYLinkJiraConnection: Codable, Equatable {
     var id: String
     var name: String
@@ -144,6 +155,7 @@ struct PYLinkMessage: Codable {
     var prompt: String?
     var replacesItem: String?
     var jira: PYLinkJira?
+    var diff: PYLinkDiff?
 
     init(type: String) { self.type = type }
 }

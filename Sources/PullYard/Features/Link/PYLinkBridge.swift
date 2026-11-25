@@ -18,6 +18,18 @@ struct PYLinkBridge {
             preview(message, client: client)
         case "edit":
             editMessage(message, client: client)
+        case "diff":
+            var reply = PYLinkMessage(type: "diff")
+            reply.id = message.id
+            if let chat = tab(message.session)?.chat, let itemID = message.replacesItem, itemID.hasPrefix("c") {
+                let callID = String(itemID.dropFirst())
+                for case let .tool(call) in chat.items where call.id == callID {
+                    reply.diff = Self.diff(call)
+                    break
+                }
+            }
+            if reply.diff == nil { reply.error = "This step has no file changes to show." }
+            client.channel.send(json: reply)
         case "jira":
             var reply = PYLinkMessage(type: "jira")
             reply.id = message.id
@@ -402,6 +414,25 @@ struct PYLinkBridge {
             case let .notice(id, text, isError):
                 return PYLinkItem(id: "n" + id, kind: isError ? "error" : "notice", text: text)
             }
+        }
+    }
+
+    private static func diff(_ call: ChatToolCall) -> PYLinkDiff? {
+        let limit = 400_000
+        func clip(_ text: String) -> String { text.count > limit ? String(text.prefix(limit)) : text }
+        let path = call.string("file_path") ?? call.string("notebook_path") ?? ""
+        switch call.name {
+        case "Edit":
+            return PYLinkDiff(path: path, tool: call.name, edits: [PYLinkEdit(old: clip(call.string("old_string") ?? ""), new: clip(call.string("new_string") ?? ""))])
+        case "MultiEdit":
+            let edits = (call.input["edits"] as? [[String: Any]] ?? []).map { PYLinkEdit(old: clip($0["old_string"] as? String ?? ""), new: clip($0["new_string"] as? String ?? "")) }
+            return edits.isEmpty ? nil : PYLinkDiff(path: path, tool: call.name, edits: edits)
+        case "Write":
+            return PYLinkDiff(path: path, tool: call.name, edits: [PYLinkEdit(old: "", new: clip(call.string("content") ?? ""))])
+        case "NotebookEdit":
+            return PYLinkDiff(path: path, tool: call.name, edits: [PYLinkEdit(old: "", new: clip(call.string("new_source") ?? ""))])
+        default:
+            return nil
         }
     }
 

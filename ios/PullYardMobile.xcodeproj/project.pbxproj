@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		03EC4801CE2B757E85EBBA46 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7514C15D3A6E031E05E5E80A /* OnboardingView.swift */; };
 		04237541F503F549B8143488 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 3CF0EA1A483B65C3A656E233 /* Localizable.xcstrings */; };
+		042EA54DFC173892B0F74399 /* AgentDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB4C92BC2581DAE0A5BD419C /* AgentDiff.swift */; };
 		071B5D23C8D5C24E008A2052 /* RepoViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AAB054FDE6EB8D7BD4069E /* RepoViews.swift */; };
 		07E046DB8082D0FE6890525C /* FinishReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE0272495E9EE917571D595 /* FinishReviewView.swift */; };
 		08A3B72B7A75BA0607231756 /* AgentsHome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50FC49B8614CEC06A877D59E /* AgentsHome.swift */; };
@@ -16,6 +17,7 @@
 		0F54810514276B7405122E94 /* PRInsight.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE61529501668AE98B97DC0 /* PRInsight.swift */; };
 		13A24D780DA7B6520F548B19 /* PullYardWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4FEA9E8ED657C416009BF3B6 /* PullYardWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		14FA9E4773D48988B26245D6 /* CredentialVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D18762764859FE93B40155 /* CredentialVault.swift */; };
+		1585D4C476311F322268CA2D /* AgentDiffBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E371F51D2299F6292593D247 /* AgentDiffBuilderTests.swift */; };
 		1FF0948F19859135FE91737B /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F704A55C1B2862A9E81B2369 /* SearchView.swift */; };
 		20B23EC4331D918C39410462 /* InboxAndPullsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EF4EBD49C399A1EBB703665 /* InboxAndPullsView.swift */; };
 		228D58DECC871A8C3AB8E280 /* JiraViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E89E11B5D2A4EE80E9B6378A /* JiraViews.swift */; };
@@ -78,6 +80,7 @@
 		F3685C0831F795EA5528C863 /* CreatePullView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 127360F43A2B43F3766FC2DA /* CreatePullView.swift */; };
 		F3E1B1E8C0E98071559D75A5 /* PYLinkIroh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F9F1FEBE741DDBE8177BA81 /* PYLinkIroh.swift */; };
 		F68C66514A56887F1B265E54 /* CIActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0C66F8D185CD5194B079AE /* CIActivity.swift */; };
+		FA8B1E3E155FB5CA071BEB10 /* SpeechDictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12EA75BC142A779E1B233F7D /* SpeechDictation.swift */; };
 		FE3185933D64017FD5F03977 /* JiraKeyFinderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7ACC95A77417C6758DB98D1 /* JiraKeyFinderTests.swift */; };
 		FE8B3F91653EC44B4BD8D825 /* ProjectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7656F08929BF5CF832079205 /* ProjectsView.swift */; };
 		FF7A2D02F762BA8BCC2827C6 /* AgentAttachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 674809AA8E4123FA4CFAF63B /* AgentAttachments.swift */; };
@@ -128,6 +131,7 @@
 		0D381A401A2B8C7378B7DFA6 /* Logo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logo.swift; sourceTree = "<group>"; };
 		120660E6D50C51E2C99B570E /* Glass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Glass.swift; sourceTree = "<group>"; };
 		127360F43A2B43F3766FC2DA /* CreatePullView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreatePullView.swift; sourceTree = "<group>"; };
+		12EA75BC142A779E1B233F7D /* SpeechDictation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechDictation.swift; sourceTree = "<group>"; };
 		132760422E5715524A7D210F /* Markdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Markdown.swift; sourceTree = "<group>"; };
 		18DD51AC197A1C7E2A36C4BE /* Feedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Feedback.swift; sourceTree = "<group>"; };
 		217D8A69A51C4BD4F78683B0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -178,6 +182,8 @@
 		D7C5751F2F7DBE975941D203 /* LocalCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCache.swift; sourceTree = "<group>"; };
 		D84E1D600AC299AC39B48E39 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		D8AAB054FDE6EB8D7BD4069E /* RepoViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoViews.swift; sourceTree = "<group>"; };
+		DB4C92BC2581DAE0A5BD419C /* AgentDiff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDiff.swift; sourceTree = "<group>"; };
+		E371F51D2299F6292593D247 /* AgentDiffBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDiffBuilderTests.swift; sourceTree = "<group>"; };
 		E7ACC95A77417C6758DB98D1 /* JiraKeyFinderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraKeyFinderTests.swift; sourceTree = "<group>"; };
 		E89E11B5D2A4EE80E9B6378A /* JiraViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraViews.swift; sourceTree = "<group>"; };
 		EBD4F0DC8CF7BE8F81827D8C /* DeviceFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceFlow.swift; sourceTree = "<group>"; };
@@ -245,11 +251,13 @@
 			children = (
 				39385B92FCC46C6EA680341E /* AgentActivities.swift */,
 				674809AA8E4123FA4CFAF63B /* AgentAttachments.swift */,
+				DB4C92BC2581DAE0A5BD419C /* AgentDiff.swift */,
 				50FC49B8614CEC06A877D59E /* AgentsHome.swift */,
 				8699E5CDC258955E31456B7A /* AgentViews.swift */,
 				492802CE69238D7B67870B90 /* LinkClient.swift */,
 				9F9F1FEBE741DDBE8177BA81 /* PYLinkIroh.swift */,
 				94231697E07DA3DAFF6139C2 /* PYLinkProtocol.swift */,
+				12EA75BC142A779E1B233F7D /* SpeechDictation.swift */,
 			);
 			path = Link;
 			sourceTree = "<group>";
@@ -305,6 +313,7 @@
 		A8419B5A223F5069A318F0A6 /* PullYardMobileTests */ = {
 			isa = PBXGroup;
 			children = (
+				E371F51D2299F6292593D247 /* AgentDiffBuilderTests.swift */,
 				6D854E33B7127DD7D9C8A882 /* AgentTurnSummaryTests.swift */,
 				E7ACC95A77417C6758DB98D1 /* JiraKeyFinderTests.swift */,
 				825268025F1A9721844AE423 /* PullYardMobileTests.swift */,
@@ -484,6 +493,7 @@
 				499F195ABE538B364E01A5E0 /* AgentActivities.swift in Sources */,
 				2D62B9013668D115E229ED24 /* AgentActivity.swift in Sources */,
 				FF7A2D02F762BA8BCC2827C6 /* AgentAttachments.swift in Sources */,
+				042EA54DFC173892B0F74399 /* AgentDiff.swift in Sources */,
 				CAA9A496F59DC926C60CD187 /* AgentViews.swift in Sources */,
 				08A3B72B7A75BA0607231756 /* AgentsHome.swift in Sources */,
 				C9DFE06D59FC7922691A5941 /* AppModel.swift in Sources */,
@@ -527,6 +537,7 @@
 				568B3FF6AD57088C3560CEA7 /* SettingsView.swift in Sources */,
 				B1413CDBEF43100087FE0FC5 /* SignInView.swift in Sources */,
 				6BF8DA74F5AFD7D499A42E08 /* Snooze.swift in Sources */,
+				FA8B1E3E155FB5CA071BEB10 /* SpeechDictation.swift in Sources */,
 				B264EBAC9931CC0836F01300 /* SplashView.swift in Sources */,
 				2D77D08C6D1AA225C27D51FD /* Templates.swift in Sources */,
 				CFDC447B91E3011E6E4FA655 /* WidgetFetcher.swift in Sources */,
@@ -552,6 +563,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1585D4C476311F322268CA2D /* AgentDiffBuilderTests.swift in Sources */,
 				9C9A41575FD72EDC4E015021 /* AgentTurnSummaryTests.swift in Sources */,
 				FE3185933D64017FD5F03977 /* JiraKeyFinderTests.swift in Sources */,
 				BB2F3FACC07E463B7D375E51 /* PullYardMobileTests.swift in Sources */,

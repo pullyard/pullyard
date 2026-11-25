@@ -894,6 +894,9 @@ struct AgentChatView: View {
     @State private var lastCount = 0
     @State private var confirmClose = false
     @State private var editingItem: PYLinkItem?
+    @State private var diffItem: PYLinkItem?
+    @StateObject private var dictation = SpeechDictation()
+    @State private var dictationBase = ""
     @State private var outgoingID = "local-\(UUID().uuidString)"
     @State private var chatProxy: ScrollViewProxy?
     @State private var sentAt = Date.distantPast
@@ -921,7 +924,7 @@ struct AgentChatView: View {
                     }
                     if let chat {
                         ForEach(chat.items) { item in
-                            AgentItemView(item: item, flight: flight, pending: isPending(item, in: chat), onEdit: editAction(item, in: chat))
+                            AgentItemView(item: item, flight: flight, pending: isPending(item, in: chat), onEdit: editAction(item, in: chat), onDiff: item.kind == "tool" ? { diffItem = item } : nil)
                                 .id(item.id)
                                 .transition(.asymmetric(insertion: item.kind == "user" ? (item.id.hasPrefix("local-") ? .identity : .scale(scale: 0.9, anchor: .bottomTrailing).combined(with: .opacity)) : .opacity.combined(with: .offset(y: 16)), removal: .opacity))
                         }
@@ -1037,6 +1040,20 @@ struct AgentChatView: View {
                 }
                 .disabled(!link.isConnected)
             }
+        }
+        .onChange(of: dictation.isRecording) { _, recording in
+            if recording { dictationBase = draft.trimmingCharacters(in: .whitespaces) }
+        }
+        .onChange(of: dictation.transcript) { _, text in
+            guard dictation.isRecording || !text.isEmpty else { return }
+            draft = dictationBase.isEmpty ? text : dictationBase + " " + text
+        }
+        .onChange(of: dictation.error) { _, message in
+            if let message { feedback.info(message); dictation.error = nil }
+        }
+        .onDisappear { if dictation.isRecording { dictation.stop() } }
+        .sheet(item: $diffItem) { item in
+            AgentDiffSheet(item: item, session: session).pySheetStyle()
         }
         .confirmationDialog("Close this session?", isPresented: $confirmClose, titleVisibility: .visible) {
             Button("Close session", role: .destructive) { closeSession() }
@@ -1205,8 +1222,10 @@ struct AgentChatView: View {
                     .background(alignment: .bottomTrailing) {
                         Color.clear.frame(width: 1, height: 1).modifier(Flight(id: outgoingID, namespace: flight))
                     }
-                    .padding(.trailing, showSend ? 0 : 12)
-                if showSend {
+                if dictation.isRecording || (!showSend && editingItem == nil) {
+                    DictationButton(dictation: dictation)
+                        .transition(.scale(scale: 0.4).combined(with: .opacity))
+                } else if showSend {
                     Button(action: sendDraft) {
                         Image(systemName: editingItem == nil ? "arrow.up" : "checkmark")
                             .font(.system(size: 15, weight: .bold))
@@ -1225,6 +1244,7 @@ struct AgentChatView: View {
             }
             .padding(.horizontal, 4)
             .animation(.spring(response: 0.32, dampingFraction: 0.72), value: showSend)
+            .animation(.spring(response: 0.32, dampingFraction: 0.72), value: dictation.isRecording)
         }
         .pyGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous), fallback: MobileTheme.card)
         .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(focused ? MobileTheme.accent.opacity(0.35) : MobileTheme.line))
@@ -1242,6 +1262,7 @@ struct AgentChatView: View {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
         if let editingItem { submitEdit(editingItem); return }
+        if dictation.isRecording { dictation.stop() }
         let id = outgoingID
         sentAt = Date()
         followUntil = Date().addingTimeInterval(0.6)
@@ -1473,7 +1494,10 @@ private struct AgentItemView: View {
     var flight: Namespace.ID? = nil
     var pending = false
     var onEdit: (() -> Void)? = nil
+    var onDiff: (() -> Void)? = nil
     @State private var expanded = false
+
+    static let editTools: Set<String> = ["Edit", "MultiEdit", "Write", "NotebookEdit"]
 
     var body: some View {
         switch item.kind {
@@ -1522,7 +1546,9 @@ private struct AgentItemView: View {
             }
             .buttonStyle(.pyPlain)
         case "tool":
-            Button { withAnimation(.snappy) { expanded.toggle() } } label: {
+            Button {
+                if let onDiff, item.status != "running", Self.editTools.contains(item.tool ?? "") { onDiff() } else { withAnimation(.snappy) { expanded.toggle() } }
+            } label: {
                 HStack(alignment: .top, spacing: 8) {
                     Group {
                         if item.status == "running" {
@@ -1539,6 +1565,10 @@ private struct AgentItemView: View {
                         }
                     }
                     Spacer(minLength: 0)
+                    if onDiff != nil, item.status != "running", Self.editTools.contains(item.tool ?? "") {
+                        Image(systemName: "plusminus").font(.system(size: 12, weight: .semibold)).foregroundStyle(MobileTheme.accent)
+                            .padding(.top, 2)
+                    }
                 }
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(MobileTheme.sunken, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

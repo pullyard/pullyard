@@ -22,6 +22,10 @@
 		<string>en</string>
 		<string>ru</string>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>PullYard listens while you dictate a message to the agent on your Mac.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>PullYard turns your dictation into text for the agent. Speech is recognized on this iPhone when possible.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>PullYard uses the camera to scan the pairing code shown by PullYard on your Mac.</string>
 	<key>NSLocalNetworkUsageDescription</key>

@@ -6310,6 +6310,106 @@
           }
         }
       }
+    },
+    "Allow microphone and speech recognition for PullYard in Settings to dictate." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Разрешите PullYard микрофон и распознавание речи в Настройках, чтобы диктовать."
+          }
+        }
+      }
+    },
+    "Dictation isn't available right now." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Диктовка сейчас недоступна."
+          }
+        }
+      }
+    },
+    "Stop dictation" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Остановить диктовку"
+          }
+        }
+      }
+    },
+    "Dictate" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Диктовать"
+          }
+        }
+      }
+    },
+    "Change %d of %d" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Правка %d из %d"
+          }
+        }
+      }
+    },
+    "Couldn't load the change" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось загрузить изменения"
+          }
+        }
+      }
+    },
+    "Loading the change…" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загружаю изменения…"
+          }
+        }
+      }
+    },
+    "Don't wrap lines" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не переносить строки"
+          }
+        }
+      }
+    },
+    "Wrap lines" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Переносить строки"
+          }
+        }
+      }
+    },
+    "This step has no file changes to show." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "В этом шаге нет изменений файлов."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
