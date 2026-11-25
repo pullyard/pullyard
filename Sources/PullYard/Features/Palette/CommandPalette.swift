@@ -495,14 +495,14 @@ struct CommandPalette: View {
         let n = "#\(pr.number)"
         if pr.isOpen {
             if pr.canReview {
-                out.append(PaletteCommand(id: "pr-approve", section: .thisPR, icon: "checkmark.seal", tint: .syGreen, title: "Approve", detail: n, shortcut: "⇧⌘A", keywords: "review lgtm", run: pr.approve))
+                out.append(PaletteCommand(id: "pr-approve", section: .thisPR, icon: "checkmark.seal", tint: .syGreen, title: "Approve", detail: n, shortcut: AppCommand.approve.glyph, keywords: "review lgtm", run: pr.approve))
                 out.append(PaletteCommand(id: "pr-request-changes", section: .thisPR, icon: "exclamationmark.bubble", tint: .syRed, title: "Request Changes…", detail: n, keywords: "review reject", run: pr.requestChanges))
             }
-            out.append(PaletteCommand(id: "pr-review", section: .thisPR, icon: "text.bubble", tint: .sySky, title: "Write Review…", detail: n, shortcut: "⇧⌘R", keywords: "comment summary", run: pr.writeReview))
+            out.append(PaletteCommand(id: "pr-review", section: .thisPR, icon: "text.bubble", tint: .sySky, title: "Write Review…", detail: n, shortcut: AppCommand.writeReview.glyph, keywords: "comment summary", run: pr.writeReview))
             if pr.canMerge {
-                out.append(PaletteCommand(id: "pr-merge", section: .thisPR, icon: "arrow.triangle.merge", tint: .syGreen, title: "Merge…", detail: n, shortcut: "⇧⌘M", keywords: "squash rebase", run: pr.merge))
+                out.append(PaletteCommand(id: "pr-merge", section: .thisPR, icon: "arrow.triangle.merge", tint: .syGreen, title: "Merge…", detail: n, shortcut: AppCommand.merge.glyph, keywords: "squash rebase", run: pr.merge))
             }
-            out.append(PaletteCommand(id: "pr-fix", section: .thisPR, icon: "wrench.and.screwdriver", tint: .syCoral, title: "Fix Review Comments with Agent…", detail: n, shortcut: "⇧⌘F", keywords: "agent fix comments", run: pr.fixWithAgent))
+            out.append(PaletteCommand(id: "pr-fix", section: .thisPR, icon: "wrench.and.screwdriver", tint: .syCoral, title: "Fix Review Comments with Agent…", detail: n, shortcut: AppCommand.fixComments.glyph, keywords: "agent fix comments", run: pr.fixWithAgent))
             if pr.hasFailing {
                 out.append(PaletteCommand(id: "pr-fix-checks", section: .thisPR, icon: "wrench.and.screwdriver", tint: .syCoral, title: "Fix Failing Checks with Agent…", detail: n, keywords: "agent ci checks", run: pr.fixChecks))
                 out.append(PaletteCommand(id: "pr-rerun", section: .thisPR, icon: "arrow.clockwise.circle", tint: .syAmber, title: "Re-run Failed Checks", detail: n, keywords: "ci rerun", run: pr.rerunFailed))
@@ -513,25 +513,25 @@ struct CommandPalette: View {
         }
         out.append(PaletteCommand(id: "pr-checkout", section: .thisPR, icon: "terminal", tint: .syMuted, title: "Copy Checkout Command", detail: "gh pr checkout \(pr.number)", keywords: "branch gh", run: pr.copyCheckout))
         if !app.reviewRequests.isEmpty {
-            out.append(PaletteCommand(id: "pr-next", section: .thisPR, icon: "arrow.down.circle", tint: .sySky, title: "Next in Queue", detail: "Review requests", shortcut: "⌥⌘↓", keywords: "next review queue") { app.openQueue(step: 1) })
+            out.append(PaletteCommand(id: "pr-next", section: .thisPR, icon: "arrow.down.circle", tint: .sySky, title: "Next in Queue", detail: "Review requests", shortcut: AppCommand.nextInQueue.glyph, keywords: "next review queue") { app.openQueue(step: 1) })
         }
         return out
     }
 
     private var actionCommands: [PaletteCommand] {
         var out: [PaletteCommand] = [
-            PaletteCommand(id: "refresh", section: .actions, icon: "arrow.clockwise", tint: .sySky, title: "Refresh", shortcut: "⌘R", keywords: "reload sync") { app.refresh() },
-            PaletteCommand(id: "quick-open", section: .actions, icon: "terminal", tint: .syCoral, title: "Go to Session…", detail: "Agents", shortcut: "⇧⌘K", keywords: "agent session") { app.showQuickOpen = true },
-            PaletteCommand(id: "new-agent", section: .actions, icon: "plus.bubble", tint: .syCoral, title: "New Agent Session", detail: "Agents", shortcut: "⌘N", keywords: "agent session new") { app.newAgentSession() },
+            PaletteCommand(id: "refresh", section: .actions, icon: "arrow.clockwise", tint: .sySky, title: "Refresh", shortcut: AppCommand.refresh.glyph, keywords: "reload sync") { app.refresh() },
+            PaletteCommand(id: "quick-open", section: .actions, icon: "terminal", tint: .syCoral, title: "Go to Session…", detail: "Agents", shortcut: AppCommand.goToSession.glyph, keywords: "agent session") { app.showQuickOpen = true },
+            PaletteCommand(id: "new-agent", section: .actions, icon: "plus.bubble", tint: .syCoral, title: "New Agent Session", detail: "Agents", shortcut: AppCommand.newSession.glyph, keywords: "agent session new") { app.newAgentSession() },
             PaletteCommand(id: "sidebar", section: .actions, icon: "sidebar.left", tint: .syMuted, title: sidebarHidden ? "Show Sidebar" : "Hide Sidebar", keywords: "toggle sidebar") {
                 sidebarHidden.toggle()
             },
         ]
         if app.forge == nil {
-            out.insert(PaletteCommand(id: "open-link", section: .actions, icon: "link", tint: .sySky, title: "Open by Link…", shortcut: "⌘L", keywords: "url paste") { app.showOpenLink = true }, at: 1)
+            out.insert(PaletteCommand(id: "open-link", section: .actions, icon: "link", tint: .sySky, title: "Open by Link…", shortcut: AppCommand.openLink.glyph, keywords: "url paste") { app.showOpenLink = true }, at: 1)
         }
         if !app.detailPath.isEmpty {
-            out.append(PaletteCommand(id: "back", section: .actions, icon: "chevron.left", tint: .syMuted, title: "Back", shortcut: "⌘[") {
+            out.append(PaletteCommand(id: "back", section: .actions, icon: "chevron.left", tint: .syMuted, title: "Back", shortcut: AppCommand.back.glyph) {
                 if !app.detailPath.isEmpty { app.detailPath.removeLast() }
             })
         }
@@ -545,7 +545,7 @@ struct CommandPalette: View {
             })
         }
         if let ref = app.frontItem {
-            out.append(PaletteCommand(id: "short-link", section: .actions, icon: "link", tint: .syMuted, title: "Copy Short Link", detail: ShortLink.make(ref), shortcut: "⇧⌘C", keywords: "clipboard") {
+            out.append(PaletteCommand(id: "short-link", section: .actions, icon: "link", tint: .syMuted, title: "Copy Short Link", detail: ShortLink.make(ref), shortcut: AppCommand.copyShortLink.glyph, keywords: "clipboard") {
                 app.copyShortLink(ref)
             })
         }
@@ -570,13 +570,13 @@ struct CommandPalette: View {
         }
         let zoom = TextZoom.shared
         if zoom.canZoomIn {
-            out.append(PaletteCommand(id: "zoom-in", section: .actions, icon: "plus.magnifyingglass", tint: .syMuted, title: "Zoom In", shortcut: "⌘+", keywords: "text size bigger") { zoom.zoomIn() })
+            out.append(PaletteCommand(id: "zoom-in", section: .actions, icon: "plus.magnifyingglass", tint: .syMuted, title: "Zoom In", shortcut: AppCommand.zoomIn.glyph, keywords: "text size bigger") { zoom.zoomIn() })
         }
         if zoom.canZoomOut {
-            out.append(PaletteCommand(id: "zoom-out", section: .actions, icon: "minus.magnifyingglass", tint: .syMuted, title: "Zoom Out", shortcut: "⌘-", keywords: "text size smaller") { zoom.zoomOut() })
+            out.append(PaletteCommand(id: "zoom-out", section: .actions, icon: "minus.magnifyingglass", tint: .syMuted, title: "Zoom Out", shortcut: AppCommand.zoomOut.glyph, keywords: "text size smaller") { zoom.zoomOut() })
         }
         if !zoom.isDefault {
-            out.append(PaletteCommand(id: "zoom-reset", section: .actions, icon: "1.magnifyingglass", tint: .syMuted, title: "Actual Size", shortcut: "⌘0", keywords: "text size zoom reset") { zoom.reset() })
+            out.append(PaletteCommand(id: "zoom-reset", section: .actions, icon: "1.magnifyingglass", tint: .syMuted, title: "Actual Size", shortcut: AppCommand.actualSize.glyph, keywords: "text size zoom reset") { zoom.reset() })
         }
         out.append(PaletteCommand(id: "updates", section: .actions, icon: "arrow.down.circle", tint: .sySky, title: "Check for Updates…", keywords: "version upgrade") {
             openWindow(id: "update")

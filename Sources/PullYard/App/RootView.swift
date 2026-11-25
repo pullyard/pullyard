@@ -219,7 +219,7 @@ struct SidebarToggleButton: View {
         Button { withAnimation(Motion.smooth) { hidden.toggle() } } label: {
             Label(hidden ? "Show sidebar" : "Hide sidebar", systemImage: "sidebar.left")
         }
-        .keyboardShortcut("s", modifiers: [.control, .command])
+        .keyboardShortcut(AppCommand.toggleSidebar)
         .help(hidden ? "Show sidebar (⌃⌘S)" : "Hide sidebar (⌃⌘S)")
     }
 }

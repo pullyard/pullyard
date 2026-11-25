@@ -31,20 +31,20 @@ struct PullRequestCommands: View {
 
     var body: some View {
         Button("Write Review…") { pr?.writeReview() }
-            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .keyboardShortcut(AppCommand.writeReview)
             .disabled(pr?.isOpen != true)
         Button("Approve") { pr?.approve() }
-            .keyboardShortcut("a", modifiers: [.command, .shift])
+            .keyboardShortcut(AppCommand.approve)
             .disabled(pr?.isOpen != true || pr?.canReview != true)
         Button("Request Changes…") { pr?.requestChanges() }
             .disabled(pr?.isOpen != true || pr?.canReview != true)
         Button("Merge…") { pr?.merge() }
-            .keyboardShortcut("m", modifiers: [.command, .shift])
+            .keyboardShortcut(AppCommand.merge)
             .disabled(pr?.canMerge != true)
         Divider()
         Menu("Fix with Agent") {
             Button("Review Comments…") { pr?.fixWithAgent() }
-                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .keyboardShortcut(AppCommand.fixComments)
             Button("Failing Checks…") { pr?.fixChecks() }
                 .disabled(pr?.hasFailing != true)
         }
@@ -55,7 +55,7 @@ struct PullRequestCommands: View {
             .disabled((pr?.unviewed ?? 0) == 0)
         Divider()
         Button("Open in Browser") { pr?.openInBrowser() }
-            .keyboardShortcut("o", modifiers: [.command, .shift])
+            .keyboardShortcut(AppCommand.openInBrowser)
             .disabled(pr == nil)
         Button("Copy Link") { pr?.copyLink() }
             .disabled(pr == nil)
@@ -63,10 +63,10 @@ struct PullRequestCommands: View {
             .disabled(pr == nil)
         Divider()
         Button("Next in Queue") { app.openQueue(step: 1) }
-            .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+            .keyboardShortcut(AppCommand.nextInQueue)
             .disabled(app.reviewRequests.isEmpty || app.phase != .loggedIn)
         Button("Previous in Queue") { app.openQueue(step: -1) }
-            .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+            .keyboardShortcut(AppCommand.previousInQueue)
             .disabled(app.reviewRequests.isEmpty || app.phase != .loggedIn)
     }
 }

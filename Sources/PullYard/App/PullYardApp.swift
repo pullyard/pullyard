@@ -66,12 +66,12 @@ struct PullYardApp: App {
             CommandGroup(after: .pasteboard) {
                 Divider()
                 Button("Copy Short Link") { if let ref = app.frontItem { app.copyShortLink(ref) } }
-                    .keyboardShortcut("c", modifiers: [.command, .shift])
+                    .keyboardShortcut(AppCommand.copyShortLink)
                     .disabled(app.frontItem == nil)
             }
             CommandGroup(after: .toolbar) {
                 Button("Refresh") { app.refresh() }
-                    .keyboardShortcut("r")
+                    .keyboardShortcut(AppCommand.refresh)
                     .disabled(app.phase != .loggedIn)
                 BlameCommand()
                 Divider()
@@ -80,38 +80,38 @@ struct PullYardApp: App {
             }
             CommandMenu("Go") {
                 Button("Command Palette…") { app.showCommandPalette.toggle() }
-                    .keyboardShortcut("k")
+                    .keyboardShortcut(AppCommand.palette)
                     .disabled(app.phase != .loggedIn)
                 Button("Open by Link…") { app.showOpenLink = true }
-                    .keyboardShortcut("l")
+                    .keyboardShortcut(AppCommand.openLink)
                     .disabled(app.phase != .loggedIn || app.forge != nil)
                 Button("Back") { app.goBack() }
-                    .keyboardShortcut("[")
+                    .keyboardShortcut(AppCommand.back)
                     .disabled(app.detailPath.isEmpty || app.section == .claude)
                 Button("Forward") { app.goForward() }
-                    .keyboardShortcut("]")
+                    .keyboardShortcut(AppCommand.forward)
                     .disabled(app.forwardRoutes.isEmpty || app.section == .claude)
                 Divider()
                 GoSectionCommands(app: app)
                 Divider()
                 Button("Go to Session…") { app.showQuickOpen = true }
-                    .keyboardShortcut("k", modifiers: [.command, .shift])
+                    .keyboardShortcut(AppCommand.goToSession)
                     .disabled(app.phase != .loggedIn)
                 Button("New Agent Session") { app.newAgentSession() }
-                    .keyboardShortcut("n")
+                    .keyboardShortcut(AppCommand.newSession)
                     .disabled(app.phase != .loggedIn)
                 Button("Close Session") { if let tab = app.claude.selectedTab { app.claude.requestClose(tab) } }
-                    .keyboardShortcut("w", modifiers: [.command, .option])
+                    .keyboardShortcut(AppCommand.closeSession)
                     .disabled(app.section != .claude || app.claude.selectedTab == nil)
                 Button("Next Session") { app.claude.cycleTab(1) }
-                    .keyboardShortcut("]", modifiers: [.command, .shift])
+                    .keyboardShortcut(AppCommand.nextSession)
                     .disabled(app.phase != .loggedIn || app.section != .claude)
                 Button("Previous Session") { app.claude.cycleTab(-1) }
-                    .keyboardShortcut("[", modifiers: [.command, .shift])
+                    .keyboardShortcut(AppCommand.previousSession)
                     .disabled(app.phase != .loggedIn || app.section != .claude)
                 Divider()
                 Button("Lock Now") { app.lockNow() }
-                    .keyboardShortcut("l", modifiers: [.command, .control])
+                    .keyboardShortcut(AppCommand.lock)
                     .disabled(!app.canLock)
             }
             CommandGroup(replacing: .help) {
@@ -156,7 +156,7 @@ struct GoSectionCommands: View {
         let forge = app.forge != nil
         Group {
         if !forge {
-            Button("Overview") { app.section = .overview }.keyboardShortcut("0", modifiers: [.command, .option])
+            Button("Overview") { app.section = .overview }.keyboardShortcut(AppCommand.overview)
         }
         Button("Review Requests") { app.section = .prs(.reviewRequested) }
             .keyboardShortcut("1")
@@ -187,64 +187,26 @@ struct HelpCommands: View {
         Button("Welcome Tour") { withAnimation(Motion.smooth) { app.showOnboarding = true } }
             .disabled(app.phase != .loggedIn)
         Button("Keyboard Shortcuts") { openWindow(id: "shortcuts") }
-            .keyboardShortcut("/", modifiers: .command)
+            .keyboardShortcut(AppCommand.shortcuts)
         Button("PullYard Website") { openInBrowser("https://pullyard.app") }
         Button("Report an Issue…") { openInBrowser("https://github.com/pullyard/pullyard/issues") }
     }
 }
 
 struct ShortcutsView: View {
-    private static let groups: [(title: String, rows: [(keys: String, action: String)])] = [
-        ("Navigation", [
-            ("⌘K", "Command palette"),
-            ("⌘L", "Open by link"),
-            ("⌘1 – ⌘6", "Review requests, mine, notifications, repositories, projects, agents"),
-            ("⌘[  ⌘]", "Back and forward"),
-            ("⌃⌘S", "Show or hide the sidebar"),
-            ("⌘R", "Refresh"),
-            ("⌃⌘L", "Lock now")
-        ]),
-        ("Pull request", [
-            ("⌥⌘1 – ⌥⌘9", "Switch tab"),
-            ("⇧⌘R", "Write review"),
-            ("⇧⌘A", "Approve"),
-            ("⇧⌘M", "Merge"),
-            ("⇧⌘C", "Copy short link"),
-            ("⌘↩", "Send comment")
-        ]),
-        ("Files changed", [
-            ("N  P", "Next and previous file"),
-            ("]  [", "Next and previous hunk"),
-            ("C  ⇧C", "Next and previous comment"),
-            ("V", "Mark file as viewed"),
-            ("W", "Wrap lines"),
-            ("S", "Split view")
-        ]),
-        ("Agents", [
-            ("⌘N", "New agent session"),
-            ("⇧⌘K", "Go to session"),
-            ("⇧⌘]  ⇧⌘[", "Next and previous session"),
-            ("⌥⌘W", "Close session")
-        ]),
-        ("View", [
-            ("⌘+  ⌘−  ⌘0", "Text size"),
-            ("⌥⌘B", "Blame")
-        ])
-    ]
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                ForEach(Self.groups, id: \.title) { group in
+                ForEach(CommandGroupKind.allCases, id: \.self) { group in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(group.title).font(.syHeadline).foregroundStyle(Color.syText)
-                        ForEach(group.rows, id: \.keys) { row in
+                        Text(group.rawValue).font(.syHeadline).foregroundStyle(Color.syText)
+                        ForEach(AppCommand.listed(in: group)) { command in
                             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                Text(row.keys)
+                                Text(command.listGlyph)
                                     .font(.syCallout.monospaced())
                                     .foregroundStyle(Color.syText)
                                     .frame(width: 130, alignment: .leading)
-                                Text(row.action).font(.syCallout).foregroundStyle(Color.syMuted)
+                                Text(command.listTitle).font(.syCallout).foregroundStyle(Color.syMuted)
                                 Spacer(minLength: 0)
                             }
                             .accessibilityElement(children: .combine)
@@ -254,7 +216,7 @@ struct ShortcutsView: View {
             }
             .padding(20)
         }
-        .frame(width: 520, height: 560)
+        .frame(width: 520, height: 600)
         .surface(.panel)
     }
 }
@@ -264,13 +226,13 @@ struct TextZoomCommands: View {
 
     var body: some View {
         Button("Actual Size") { zoom.reset() }
-            .keyboardShortcut("0")
+            .keyboardShortcut(AppCommand.actualSize)
             .disabled(zoom.isDefault)
         Button("Zoom In") { zoom.zoomIn() }
-            .keyboardShortcut("+")
+            .keyboardShortcut(AppCommand.zoomIn)
             .disabled(!zoom.canZoomIn)
         Button("Zoom Out") { zoom.zoomOut() }
-            .keyboardShortcut("-")
+            .keyboardShortcut(AppCommand.zoomOut)
             .disabled(!zoom.canZoomOut)
     }
 }
@@ -291,7 +253,7 @@ struct BlameCommand: View {
 
     var body: some View {
         Toggle("Blame", isOn: Binding(get: { blame ?? false }, set: { blame = $0 }))
-            .keyboardShortcut("b", modifiers: [.command, .option])
+            .keyboardShortcut(AppCommand.blame)
             .disabled(blame == nil)
     }
 }
