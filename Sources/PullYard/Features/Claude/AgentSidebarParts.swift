@@ -319,3 +319,64 @@ struct AgentNewSessionRow: View {
         .help("Start a new session in a project")
     }
 }
+
+/// One tab per Claude account (plus All) so switching is a single click.
+/// Picking an account narrows the list and makes it the default for new sessions.
+struct AgentAccountTabs: View {
+    @Environment(AppModel.self) private var app
+    @Namespace private var selection
+
+    private var profiles: ClaudeProfiles { ClaudeProfiles.shared }
+
+    var body: some View {
+        let current = app.claude.accountFilter
+        HStack(spacing: 2) {
+            tab(id: nil, title: "All", selected: current == nil) {
+                Image(systemName: "person.2.fill").font(.system(size: 9, weight: .semibold))
+            }
+            ForEach(profiles.visible) { p in
+                tab(id: p.id, title: AgentAccountFilter.name(p), selected: current == p.id) {
+                    ProfileBadge(profile: p, size: 16)
+                }
+                .help(p.email.map { "\(p.label) · \($0)" } ?? p.label)
+            }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.syText.opacity(0.05)))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Color.syLine))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Claude accounts")
+    }
+
+    private func tab<Icon: View>(id: String?, title: String, selected: Bool, @ViewBuilder icon: () -> Icon) -> some View {
+        Button {
+            withAnimation(Motion.smooth) {
+                if let id { app.switchClaudeProfile(to: id) }
+                app.claude.accountFilter = id
+            }
+        } label: {
+            HStack(spacing: 5) {
+                icon()
+                Text(title)
+                    .font(.syCaption.weight(selected ? .semibold : .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .foregroundStyle(selected ? Color.syText : Color.syMuted)
+            .padding(.horizontal, 6)
+            .frame(maxWidth: id == nil ? nil : .infinity)
+            .frame(height: 24)
+            .background {
+                if selected {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.syRaised)
+                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Color.syLineStrong))
+                        .matchedGeometryEffect(id: "selected", in: selection)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+}

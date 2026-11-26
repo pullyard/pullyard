@@ -183,6 +183,10 @@ struct ClaudeProjectsColumn: View {
             .onChange(of: cursor) { _, key in
                 if let key { withAnimation(Motion.fade) { proxy.scrollTo(key) } }
             }
+            .onChange(of: ws.selectedTabID) { _, id in
+                guard let id, let tab = ws.tabs.first(where: { $0.id == id }) else { return }
+                reveal(tab, proxy: proxy)
+            }
             }
         }
         .focusable()
@@ -258,6 +262,11 @@ struct ClaudeProjectsColumn: View {
                 if ClaudeProfiles.shared.hasSeveral {
                     AgentAccountSwitcher(info: nil) { pickerFor = $0 }.padding(.horizontal, 4)
                 }
+            }
+            if ClaudeProfiles.shared.hasSeveral {
+                AgentAccountTabs()
+                    .padding(.horizontal, 4)
+                    .padding(.top, 4)
             }
             if ClaudeAccountStore.shared.isLoggedIn || ClaudeProfiles.shared.hasSeveral {
                 AgentNewSessionRow { pickerFor = pickerProfile }
@@ -408,6 +417,12 @@ struct ClaudeProjectsColumn: View {
                     }
                     .padding(.bottom, 4)
                 }
+                if !open {
+                    ForEach(activeSessions(group)) { s in
+                        sessionRow(s, indent: group.headerless ? 0 : 8)
+                            .transition(.opacity)
+                    }
+                }
             }
         }
         if ws.projects.isEmpty, !ws.loadingProjects {
@@ -419,6 +434,29 @@ struct ClaudeProjectsColumn: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 12)
         }
+    }
+
+    /// Selecting a session shows it in the list: the list switches to the session's
+    /// account when it is filtered to another one, then scrolls to its row.
+    private func reveal(_ tab: ClaudeTab, proxy: ScrollViewProxy) {
+        guard !tab.sessionId.isEmpty else { return }
+        let owner = tab.profile?.id ?? ws.sessionsByID[tab.sessionId]?.profileID ?? ClaudeProfiles.defaultID
+        if let filter = ws.accountFilter, filter != owner, ClaudeProfiles.shared.hasSeveral,
+           ClaudeProfiles.shared.visible.contains(where: { $0.id == owner }) {
+            withAnimation(Motion.smooth) {
+                app.switchClaudeProfile(to: owner)
+                ws.accountFilter = owner
+            }
+        }
+        let target = tab.sessionId
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            withAnimation(Motion.smooth) { proxy.scrollTo(target) }
+        }
+    }
+
+    /// Sessions open in a tab stay listed even when their group is collapsed.
+    private func activeSessions(_ group: SidebarGroup) -> [ClaudeSessionInfo] {
+        group.sessions.filter { ws.tab(forSession: $0.id) != nil }
     }
 
     private func toggle(_ group: SidebarGroup) {
