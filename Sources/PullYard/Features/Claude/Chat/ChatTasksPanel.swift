@@ -33,6 +33,14 @@ enum ChatTaskState {
 extension ChatSession {
     static let taskTools: Set<String> = ["Bash", "Agent", "Task"]
 
+    /// A command or sub-agent is still running in the background after the turn ended.
+    var hasRunningTasks: Bool {
+        items.contains { item in
+            guard case .tool(let call) = item, Self.taskTools.contains(call.name) else { return false }
+            return ChatTaskState(call).isActive
+        }
+    }
+
     var taskCalls: [ChatToolCall] {
         items.compactMap { item in
             guard case .tool(let call) = item, Self.taskTools.contains(call.name) else { return nil }
@@ -43,7 +51,7 @@ extension ChatSession {
 
 struct ChatTasksPanel: View {
     let chat: ChatSession
-    @State private var showFinished = true
+    @AppStorage("agents.tasks.showFinished") private var showFinished = true
     @State private var expanded: Set<String> = []
 
     var body: some View {

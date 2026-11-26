@@ -158,6 +158,7 @@ final class ClaudeTab: Identifiable {
         if let chat {
             if chat.pendingCount > 0 { return .waiting }
             if chat.busy { return .working }
+            if chat.running, chat.hasRunningTasks { return .working }
             if chat.running { return .active }
             return chat.sleeping ? .sleeping : .stopped
         }
