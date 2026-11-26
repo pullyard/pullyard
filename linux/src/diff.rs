@@ -156,6 +156,7 @@ pub fn parse(patch: &str) -> Vec<DiffLine> {
 }
 
 const INTRALINE_MAX: usize = 400;
+const INTRALINE_MIN_COMMON: f64 = 0.4;
 
 pub fn changed_span(a: &str, b: &str) -> Option<((usize, usize), (usize, usize))> {
     if a == b || a.len() > INTRALINE_MAX || b.len() > INTRALINE_MAX {
@@ -176,6 +177,9 @@ pub fn changed_span(a: &str, b: &str) -> Option<((usize, usize), (usize, usize))
         suffix += ca.len_utf8();
     }
     if prefix + suffix == 0 || a[prefix..].trim().is_empty() && b[prefix..].trim().is_empty() {
+        return None;
+    }
+    if ((prefix + suffix) as f64) < INTRALINE_MIN_COMMON * a.len().max(b.len()) as f64 {
         return None;
     }
     let (ae, be) = (a.len() - suffix, b.len() - suffix);
