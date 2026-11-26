@@ -33,6 +33,9 @@ targets:
       - package: IrohLib
     entitlements:
       path: Support/PullYardMobile.entitlements
+      properties:
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.pullyard.mobile
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.pullyard.mobile

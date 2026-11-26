@@ -13,6 +13,7 @@
 		071B5D23C8D5C24E008A2052 /* RepoViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AAB054FDE6EB8D7BD4069E /* RepoViews.swift */; };
 		07E046DB8082D0FE6890525C /* FinishReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE0272495E9EE917571D595 /* FinishReviewView.swift */; };
 		08A3B72B7A75BA0607231756 /* AgentsHome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50FC49B8614CEC06A877D59E /* AgentsHome.swift */; };
+		08D8FAA4A62D10093A242074 /* CredentialVaultTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74E2AA9BE3CE7453E864C018 /* CredentialVaultTests.swift */; };
 		0A62DCA41480F5AA074C2324 /* PullYardWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BB50A4F4681389BE4534A7C /* PullYardWidget.swift */; };
 		0F54810514276B7405122E94 /* PRInsight.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE61529501668AE98B97DC0 /* PRInsight.swift */; };
 		13A24D780DA7B6520F548B19 /* PullYardWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4FEA9E8ED657C416009BF3B6 /* PullYardWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -155,6 +156,7 @@
 		665A39E542BD09746979B213 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		674809AA8E4123FA4CFAF63B /* AgentAttachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentAttachments.swift; sourceTree = "<group>"; };
 		6D854E33B7127DD7D9C8A882 /* AgentTurnSummaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTurnSummaryTests.swift; sourceTree = "<group>"; };
+		74E2AA9BE3CE7453E864C018 /* CredentialVaultTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialVaultTests.swift; sourceTree = "<group>"; };
 		7514C15D3A6E031E05E5E80A /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		7656F08929BF5CF832079205 /* ProjectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsView.swift; sourceTree = "<group>"; };
 		7A695F8DF43A5AF140D29255 /* AppShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcuts.swift; sourceTree = "<group>"; };
@@ -322,6 +324,7 @@
 			children = (
 				E371F51D2299F6292593D247 /* AgentDiffBuilderTests.swift */,
 				6D854E33B7127DD7D9C8A882 /* AgentTurnSummaryTests.swift */,
+				74E2AA9BE3CE7453E864C018 /* CredentialVaultTests.swift */,
 				BEFCC7B897348C70330D0FFB /* IslandGeometryTests.swift */,
 				E7ACC95A77417C6758DB98D1 /* JiraKeyFinderTests.swift */,
 				825268025F1A9721844AE423 /* PullYardMobileTests.swift */,
@@ -575,6 +578,7 @@
 			files = (
 				1585D4C476311F322268CA2D /* AgentDiffBuilderTests.swift in Sources */,
 				9C9A41575FD72EDC4E015021 /* AgentTurnSummaryTests.swift in Sources */,
+				08D8FAA4A62D10093A242074 /* CredentialVaultTests.swift in Sources */,
 				FF93A406DFD81A05E7E44E4C /* IslandGeometryTests.swift in Sources */,
 				FE3185933D64017FD5F03977 /* JiraKeyFinderTests.swift in Sources */,
 				BB2F3FACC07E463B7D375E51 /* PullYardMobileTests.swift in Sources */,

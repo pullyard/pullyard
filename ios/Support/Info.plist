@@ -13,6 +13,8 @@
 			</array>
 		</dict>
 	</array>
+	<key>PYKeychainAccessGroup</key>
+	<string>$(AppIdentifierPrefix)com.pullyard.mobile</string>
 	<key>PYGitHubOAuthClientID</key>
 	<string>$(PY_GITHUB_CLIENT_ID)</string>
 	<key>CFBundleDevelopmentRegion</key>
