@@ -788,9 +788,13 @@ struct ChatItemView: View {
             UserBubble(
                 text: text,
                 images: images,
+                folder: folder,
                 queued: chat.queuedIDs.contains(id),
                 onCancelQueued: {
-                    if let prompt = chat.cancelQueued(id), chat.draftText.isEmpty { chat.draftText = prompt }
+                    guard let prompt = chat.cancelQueued(id), chat.draftText.isEmpty else { return }
+                    let split = ChatFileMention.split(prompt, folder: folder)
+                    chat.draftText = split.text
+                    for url in split.files where !chat.draftFiles.contains(url) { chat.draftFiles.append(url) }
                 },
                 onSendNow: { chat.sendNow(id) },
                 onEdit: canEdit ? { edit(id: id, text: text, replacement: $0) } : nil,
@@ -831,6 +835,7 @@ struct ChatItemView: View {
 struct UserBubble: View {
     let text: String
     let images: [ChatImage]
+    var folder = ""
     var queued = false
     var onCancelQueued: (() -> Void)?
     var onSendNow: (() -> Void)?
@@ -892,25 +897,34 @@ struct UserBubble: View {
     }
 
     private var bubble: some View {
-        HStack {
+        let split = ChatFileMention.split(text, folder: folder)
+        let shown = split.text
+        return HStack {
             Spacer(minLength: 80)
             VStack(alignment: .leading, spacing: 8) {
                 if !images.isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(images) { img in
+                    FlowLayout(spacing: 6, lineSpacing: 6) {
+                        ForEach(Array(images.enumerated()), id: \.element.id) { index, img in
                             if let ns = img.image {
-                                Image(nsImage: ns).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 8))
+                                BubbleImage(image: ns) { ChatPreviewItem.open(images.map(ChatPreviewItem.init(image:)), at: index) }
                             }
                         }
                     }
                 }
-                if !text.isEmpty {
-                    Text(text)
+                if !split.files.isEmpty {
+                    FlowLayout(spacing: 6, lineSpacing: 6) {
+                        ForEach(Array(split.files.enumerated()), id: \.offset) { index, url in
+                            ChatFileChip(url: url, onOpen: { ChatQuickLook.shared.show(split.files, at: index) })
+                        }
+                    }
+                }
+                if !shown.isEmpty {
+                    Text(shown)
                         .foregroundStyle(Color.syText)
                         .textSelection(.enabled)
                         .lineLimit(expanded ? nil : 12)
                         .fixedSize(horizontal: false, vertical: true)
-                    if text.split(separator: "\n").count > 12 {
+                    if shown.split(separator: "\n").count > 12 {
                         Button(expanded ? "Collapse" : "Show all") { withAnimation(Motion.quick) { expanded.toggle() } }
                             .buttonStyle(.link)
                             .font(.syCaption)
@@ -1006,6 +1020,26 @@ struct MessageActions<Content: View>: View {
             .opacity(visible ? 1 : 0)
             .offset(y: visible || Motion.reduced ? 0 : -3)
             .frame(height: 20)
+    }
+}
+
+private struct BubbleImage: View {
+    let image: NSImage
+    let onOpen: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: onOpen) {
+            Image(nsImage: image).resizable().scaledToFill().frame(width: 64, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: Radius.m))
+                .overlay(RoundedRectangle(cornerRadius: Radius.m).strokeBorder(Color.syLineStrong.opacity(hover ? 1 : 0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .animation(Motion.quick, value: hover)
+        .help("Open preview")
+        .accessibilityLabel("Open attached image")
     }
 }
 

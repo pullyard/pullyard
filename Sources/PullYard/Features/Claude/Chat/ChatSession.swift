@@ -50,6 +50,8 @@ final class ChatToolCall: Identifiable {
     var partialInput = ""
     var status: Status = .running
     var resultText: String?
+    var resultImages: [ChatImage] = []
+    var imageFiles: [ChatPreviewItem] = []
     var structured: [String: Any]?
     var permission: PermissionRequest?
     var parentToolUseId: String?
@@ -229,6 +231,7 @@ final class ChatSession {
     var draftRequest: String?
     var draftText = ""
     var draftImages: [ChatImage] = []
+    var draftFiles: [URL] = []
     var droppedItems: [ChatDropItem] = []
     var dropTargeted = false
     @ObservationIgnored private var dropExit: DispatchWorkItem?
@@ -327,6 +330,9 @@ final class ChatSession {
         return nil
     }
 
+    @ObservationIgnored var extraEnv: [String: String] = [:]
+    @ObservationIgnored var extraDirs: [String] = []
+
     init(folder: String, configDir: String?) {
         self.folder = folder
         self.configDir = configDir
@@ -390,6 +396,7 @@ final class ChatSession {
             if fork { args.append("--fork-session") } else { sessionId = resume }
         }
         args += StackNotesMCP.args
+        for dir in extraDirs { args += ["--add-dir", dir] }
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: bin)
@@ -400,6 +407,7 @@ final class ChatSession {
         ClaudeProfiles.apply(configDir, to: &env)
         env["PATH"] = [(bin as NSString).deletingLastPathComponent, "/opt/homebrew/bin", "/usr/local/bin", env["PATH"] ?? "/usr/bin:/bin"].joined(separator: ":")
         if let browser = LinkBrowser.helperScript() { env["BROWSER"] = browser }
+        env.merge(extraEnv) { _, new in new }
         p.environment = env
 
         let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
@@ -820,7 +828,9 @@ final class ChatSession {
             guard let id = block["tool_use_id"] as? String, let tool = tools[id] else { continue }
             if tool.status != .denied { tool.status = (block["is_error"] as? Bool == true) ? .error : .done }
             tool.resultText = ChatSession.resultText(block["content"])
+            tool.resultImages = ChatSession.resultImages(block["content"])
             tool.structured = ChatSession.trimmed(o["tool_use_result"] as? [String: Any])
+            scanImageFiles([tool])
             if let bg = tool.structured?["backgroundTaskId"] as? String {
                 tool.taskId = bg
                 tool.backgrounded = true
@@ -1097,7 +1107,32 @@ final class ChatSession {
             head.append(.notice(id: "resumed", text: "Session resumed", isError: false))
         }
         items = head + items
+        scanImageFiles(history.items.compactMap { if case .tool(let c) = $0 { return c } else { return nil } })
         DispatchQueue.global(qos: .utility).async { MemoryRelief.release() }
+    }
+
+    func scanImageFiles(_ calls: [ChatToolCall]) {
+        let jobs = calls.compactMap { ToolImageScan($0, folder: folder) }
+        guard !jobs.isEmpty else { return }
+        let byId = Dictionary(calls.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        Task {
+            let found = await Task.detached(priority: .utility) {
+                jobs.compactMap { job -> (String, [ChatPreviewItem])? in
+                    let items = job.run()
+                    return items.isEmpty ? nil : (job.id, items)
+                }
+            }.value
+            for (id, items) in found { byId[id]?.imageFiles = items }
+        }
+    }
+
+    nonisolated static func resultImages(_ content: Any?) -> [ChatImage] {
+        guard let blocks = content as? [[String: Any]] else { return [] }
+        return blocks.prefix(24).compactMap { block -> ChatImage? in
+            guard block["type"] as? String == "image", let source = block["source"] as? [String: Any], source["type"] as? String == "base64",
+                  let encoded = source["data"] as? String, let bytes = Data(base64Encoded: encoded) else { return nil }
+            return ChatImage(data: bytes, mediaType: source["media_type"] as? String ?? "image/png")
+        }
     }
 
     nonisolated static func parseHistory(_ file: URL, limit: Int = 600) -> ChatHistory? {
@@ -1125,6 +1160,7 @@ final class ChatSession {
                         if b["type"] as? String == "tool_result", let id = b["tool_use_id"] as? String, let tool = map[id] {
                             tool.status = (b["is_error"] as? Bool == true) ? .error : .done
                             tool.resultText = ChatSession.resultText(b["content"])
+                            tool.resultImages = ChatSession.resultImages(b["content"])
                             tool.structured = ChatSession.trimmed(o["toolUseResult"] as? [String: Any])
                         } else if b["type"] as? String == "text", let s = b["text"] as? String, !s.hasPrefix("<") {
                             texts.append(s)

@@ -153,6 +153,10 @@ struct ChatComposer: View {
         get { chat.draftImages }
         nonmutating set { chat.draftImages = newValue }
     }
+    private var attachedFiles: [URL] {
+        get { chat.draftFiles }
+        nonmutating set { chat.draftFiles = newValue }
+    }
     @State private var height: CGFloat = 34
     @State private var caret = 0
     @State private var completion: CompletionKind?
@@ -188,12 +192,16 @@ struct ChatComposer: View {
                 if completion != nil, !completionItems.isEmpty {
                     completionList
                 }
-                if !images.isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(images) { img in
+                if !images.isEmpty || !attachedFiles.isEmpty {
+                    FlowLayout(spacing: 6, lineSpacing: 6) {
+                        ForEach(Array(images.enumerated()), id: \.element.id) { index, img in
                             ZStack(alignment: .topTrailing) {
                                 if let ns = img.image {
-                                    Image(nsImage: ns).resizable().scaledToFill().frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 6))
+                                    Button { ChatPreviewItem.open(images.map(ChatPreviewItem.init(image:)), at: index) } label: {
+                                        Image(nsImage: ns).resizable().scaledToFill().frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 6))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Open preview")
                                 }
                                 Button { images.removeAll { $0.id == img.id } } label: {
                                     Image(systemName: "xmark.circle.fill").foregroundStyle(.white, .black.opacity(0.6))
@@ -203,6 +211,11 @@ struct ChatComposer: View {
                                 .accessibilityLabel("Remove image")
                                 .offset(x: 4, y: -4)
                             }
+                        }
+                        ForEach(attachedFiles, id: \.self) { url in
+                            ChatFileChip(url: url, onOpen: { ChatQuickLook.shared.show(attachedFiles, at: attachedFiles.firstIndex(of: url) ?? 0) }, onRemove: {
+                                attachedFiles.removeAll { $0 == url }
+                            })
                         }
                     }
                 }
@@ -341,7 +354,7 @@ struct ChatComposer: View {
                 ComposerRoundButton(icon: "stop.fill", style: .stop, help: "Stop (Esc)") { chat.interrupt() }
                     .transition(.opacity.combined(with: .offset(x: 6)))
             }
-            let hasContent = !(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty)
+            let hasContent = !(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty && attachedFiles.isEmpty)
             if !chat.busy || hasContent {
                 ComposerRoundButton(icon: "arrow.up", style: .send, enabled: hasContent, help: chat.busy ? "Queue message (↩)" : "Send (↩)") { submit() }
                     .transition(.opacity)
@@ -442,13 +455,14 @@ struct ChatComposer: View {
             accept(item)
             return
         }
-        let message = text
+        let message = ChatFileMention.compose(text, files: attachedFiles, folder: chat.folder)
         guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty else { return }
         if !tab.chatRunning { tab.ensureChatRunning() }
         chat.send(message, images: images)
         text = ""
         caret = 0
         images = []
+        attachedFiles = []
         completion = nil
     }
 
@@ -626,11 +640,8 @@ struct ChatComposer: View {
             }
             return
         }
-        let path = url.path.hasPrefix(chat.folder + "/") ? String(url.path.dropFirst(chat.folder.count + 1)) : url.path
-        let mention = "@" + (path.contains(" ") ? "\"\(path)\"" : path) + " "
-        let separator = text.isEmpty || text.hasSuffix(" ") || text.hasSuffix("\n") ? "" : " "
-        text += separator + mention
-        caret = (text as NSString).length
+        let file = url.standardizedFileURL
+        if !attachedFiles.contains(file) { attachedFiles.append(file) }
         focusToken += 1
     }
 

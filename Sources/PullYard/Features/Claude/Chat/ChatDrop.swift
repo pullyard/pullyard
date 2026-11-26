@@ -60,7 +60,7 @@ struct ChatDropOverlay: View {
                     .fill(Color.syAccent.opacity(0.07))
                 RoundedRectangle(cornerRadius: 14)
                     .strokeBorder(LinearGradient(colors: [BrandMark.violet, BrandMark.sky], startPoint: .leading, endPoint: .trailing), style: StrokeStyle(lineWidth: 2, dash: [7, 5]))
-                Label("Drop images to attach, files to mention", systemImage: "arrow.down.doc")
+                Label("Drop images or files to attach", systemImage: "arrow.down.doc")
                     .font(.syBody.weight(.medium))
                     .foregroundStyle(Color.syText)
                     .padding(.horizontal, 16)

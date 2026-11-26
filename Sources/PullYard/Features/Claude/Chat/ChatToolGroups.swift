@@ -173,7 +173,10 @@ struct ToolGroupView: View {
 
     var body: some View {
         if steps.count == 1, let call = steps.first?.call {
-            ToolRowView(call: call, chat: chat, folder: folder, framed: false)
+            VStack(alignment: .leading, spacing: 8) {
+                ToolRowView(call: call, chat: chat, folder: folder, framed: false)
+                ToolImageStrip(calls: [call])
+            }
         } else {
             let calls = self.calls
             VStack(alignment: .leading, spacing: 6) {
@@ -206,6 +209,7 @@ struct ToolGroupView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityValue(open ? "Expanded" : "Collapsed")
+                ToolImageStrip(calls: calls)
                 if open {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
