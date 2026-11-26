@@ -167,57 +167,23 @@ struct ClaudeProjectsColumn: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                switch ClaudeAccountStore.shared.status {
-                case .loggedIn(let info):
-                    AgentAccountSwitcher(info: info) { pickerFor = $0 }
-                        .padding(.horizontal, 4)
-                        .padding(.top, 2)
-                case .loggedOut:
-                    Label("Not signed in to Claude — sign in on the right", systemImage: "person.crop.circle.badge.exclamationmark")
-                        .font(.syCallout)
-                        .foregroundStyle(Color.syAmber)
-                        .padding(8)
-                    if ClaudeProfiles.shared.visible.count > 1 {
-                        AgentAccountSwitcher(info: nil) { pickerFor = $0 }.padding(.horizontal, 4)
-                    }
-                case .notInstalled:
-                    Label("claude CLI not found — see the right side", systemImage: "exclamationmark.triangle")
-                        .font(.syCallout)
-                        .foregroundStyle(Color.syAmber)
-                        .padding(8)
-                default:
-                    if ClaudeProfiles.shared.hasSeveral {
-                        AgentAccountSwitcher(info: nil) { pickerFor = $0 }.padding(.horizontal, 4)
-                    }
+        VStack(spacing: 0) {
+            pinnedHeader
+                .padding(.horizontal, 6)
+                .padding(.top, 6)
+                .padding(.bottom, 2)
+            ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    listContent
                 }
-                if ClaudeAccountStore.shared.isLoggedIn || ClaudeProfiles.shared.hasSeveral {
-                    AgentNewSessionRow { pickerFor = pickerProfile }
-                        .padding(.horizontal, 4)
-                        .padding(.top, 4)
-                    if ready { historyContent }
-                } else if case .checking = ClaudeAccountStore.shared.status {
-                    HStack { Spacer(); PullYardLoader(size: 32); Spacer() }.padding(.top, 20)
-                } else if case .unknown = ClaudeAccountStore.shared.status {
-                    HStack { Spacer(); PullYardLoader(size: 32); Spacer() }.padding(.top, 20)
-                } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Image(systemName: "lock.fill").font(.syTitle3).foregroundStyle(Color.syDim)
-                        Text("Session history and projects appear after you sign in to Claude.")
-                            .font(.syCallout)
-                            .foregroundStyle(Color.syMuted)
-                    }
-                    .padding(12)
-                }
+                .padding(.horizontal, 6)
+                .padding(.bottom, 6)
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 6)
-        }
-        .onChange(of: cursor) { _, key in
-            if let key { withAnimation(Motion.fade) { proxy.scrollTo(key) } }
-        }
+            .onChange(of: cursor) { _, key in
+                if let key { withAnimation(Motion.fade) { proxy.scrollTo(key) } }
+            }
+            }
         }
         .focusable()
         .focused($listFocused)
@@ -263,6 +229,60 @@ struct ClaudeProjectsColumn: View {
         .onChange(of: app.refreshTick) { Task { await ws.reloadProjects(force: false) } }
         .onChange(of: prefs.grouping) { _, _ in
             if let first = groups.first { expanded.insert(first.id) }
+        }
+    }
+
+    /// Account switcher and New session stay put while the history scrolls.
+    @ViewBuilder
+    private var pinnedHeader: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            switch ClaudeAccountStore.shared.status {
+            case .loggedIn(let info):
+                AgentAccountSwitcher(info: info) { pickerFor = $0 }
+                    .padding(.horizontal, 4)
+                    .padding(.top, 2)
+            case .loggedOut:
+                Label("Not signed in to Claude — sign in on the right", systemImage: "person.crop.circle.badge.exclamationmark")
+                    .font(.syCallout)
+                    .foregroundStyle(Color.syAmber)
+                    .padding(8)
+                if ClaudeProfiles.shared.visible.count > 1 {
+                    AgentAccountSwitcher(info: nil) { pickerFor = $0 }.padding(.horizontal, 4)
+                }
+            case .notInstalled:
+                Label("claude CLI not found — see the right side", systemImage: "exclamationmark.triangle")
+                    .font(.syCallout)
+                    .foregroundStyle(Color.syAmber)
+                    .padding(8)
+            default:
+                if ClaudeProfiles.shared.hasSeveral {
+                    AgentAccountSwitcher(info: nil) { pickerFor = $0 }.padding(.horizontal, 4)
+                }
+            }
+            if ClaudeAccountStore.shared.isLoggedIn || ClaudeProfiles.shared.hasSeveral {
+                AgentNewSessionRow { pickerFor = pickerProfile }
+                    .padding(.horizontal, 4)
+                    .padding(.top, 4)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var listContent: some View {
+        if ClaudeAccountStore.shared.isLoggedIn || ClaudeProfiles.shared.hasSeveral {
+            if ready { historyContent }
+        } else if case .checking = ClaudeAccountStore.shared.status {
+            HStack { Spacer(); PullYardLoader(size: 32); Spacer() }.padding(.top, 20)
+        } else if case .unknown = ClaudeAccountStore.shared.status {
+            HStack { Spacer(); PullYardLoader(size: 32); Spacer() }.padding(.top, 20)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Image(systemName: "lock.fill").font(.syTitle3).foregroundStyle(Color.syDim)
+                Text("Session history and projects appear after you sign in to Claude.")
+                    .font(.syCallout)
+                    .foregroundStyle(Color.syMuted)
+            }
+            .padding(12)
         }
     }
 
