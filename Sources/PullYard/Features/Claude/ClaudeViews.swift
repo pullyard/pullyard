@@ -1457,6 +1457,7 @@ struct ClaudeControlBar: View {
         HStack(spacing: 6) {
             HStack(spacing: 8) {
                 Text(tab.projectName).fontWeight(.semibold).foregroundStyle(Color.syText).lineLimit(1)
+                    .layoutPriority(2)
                 AgentAccountChip(profile: tab.profile)
                 if let env = tab.environment {
                     Label(env.name, systemImage: env.icon)
@@ -1468,7 +1469,12 @@ struct ClaudeControlBar: View {
                         .background(Capsule().fill(Color.syAgentAccent.opacity(0.12)))
                         .help("Environment: " + env.name)
                 }
-                AgentBranchMenu(tab: tab, pr: ws.pullRequest(for: tab))
+                let pr = ws.pullRequest(for: tab)
+                ViewThatFits(in: .horizontal) {
+                    AgentBranchMenu(tab: tab, pr: pr, style: .full)
+                    AgentBranchMenu(tab: tab, pr: pr, style: .compact)
+                    AgentBranchMenu(tab: tab, pr: pr, style: .minimal)
+                }
                 TabStateBadge(state: tab.state, memory: tab.memoryBytes)
             }
             .lineLimit(1)
@@ -1562,6 +1568,8 @@ struct ClaudeControlBar: View {
         .font(.syCallout)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+        .clipped()
         .modifier(ClaudeBarBackground())
     }
 
@@ -2282,8 +2290,13 @@ struct InspectorPRDetail: View {
 }
 
 struct AgentBranchMenu: View {
+    /// How much of the label to show; the control bar falls back to a
+    /// shorter one when the full label doesn't fit its column.
+    enum Style { case full, compact, minimal }
+
     let tab: ClaudeTab
     let pr: (number: Int, url: String)?
+    var style: Style = .full
     @Environment(AppModel.self) private var app
     @State private var hover = false
 
@@ -2325,13 +2338,17 @@ struct AgentBranchMenu: View {
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "arrow.triangle.branch").imageScale(.small)
-                    Text(branch == "HEAD" ? "Detached HEAD" : branch).lineLimit(1).truncationMode(.middle).frame(maxWidth: 240, alignment: .leading).fixedSize(horizontal: false, vertical: true)
-                    if let worktree = git.worktree {
-                        Text("·").foregroundStyle(Color.syDim)
-                        Image(systemName: "square.stack.3d.up").imageScale(.small)
-                        Text(worktree).lineLimit(1)
+                    if style != .minimal {
+                        Text(branch == "HEAD" ? "Detached HEAD" : branch).lineLimit(1).truncationMode(.middle).frame(maxWidth: style == .full ? 240 : 150, alignment: .leading).fixedSize(horizontal: false, vertical: true)
                     }
-                    if let pr {
+                    if let worktree = git.worktree {
+                        if style != .minimal { Text("·").foregroundStyle(Color.syDim) }
+                        Image(systemName: "square.stack.3d.up").imageScale(.small)
+                        if style == .full {
+                            Text(worktree).lineLimit(1).truncationMode(.middle).frame(maxWidth: 180, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    if let pr, style != .minimal {
                         Text("·").foregroundStyle(Color.syDim)
                         Text("#\(pr.number)")
                     }
@@ -2348,7 +2365,7 @@ struct AgentBranchMenu: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .onHover { hover = $0 }
-            .help(git.worktree == nil ? "Branch" : "Branch and worktree")
+            .help(branch + (git.worktree.map { " · worktree " + $0 } ?? "") + (pr.map { " · #\($0.number)" } ?? ""))
         }
     }
 
