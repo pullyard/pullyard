@@ -23,6 +23,7 @@ struct SettingsView: View {
     @AppStorage("settings.tab") private var tab = "general"
     @AppStorage(SessionCost.budgetKey) private var sessionBudget = 0.0
     @AppStorage(Updater.autoCheckKey) private var autoCheckUpdates = true
+    @AppStorage(Updater.devChannelKey) private var devUpdates = false
     @AppStorage(Diagnostics.enabledKey) private var diagnosticsEnabled = false
     @Environment(\.openWindow) private var openWindow
 
@@ -121,8 +122,19 @@ struct SettingsView: View {
             NotificationSettingsSection()
             Section {
                 Toggle("Check for updates automatically", isOn: $autoCheckUpdates)
+                Toggle(isOn: $devUpdates) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Dev updates")
+                        Text("For developers: every push to the dev branch is built on GitHub, downloaded in the background and announced with a notification. Dev builds can be unstable.")
+                            .font(.syCaption)
+                            .foregroundStyle(Color.syMuted)
+                    }
+                }
+                .onChange(of: devUpdates) { _, _ in
+                    Task { await Updater.shared.check(userInitiated: false) }
+                }
                 HStack {
-                    Text("Current version \(Updater.shared.currentVersion)")
+                    Text("Current version \(Updater.shared.currentDisplayVersion)")
                         .foregroundStyle(Color.syMuted)
                     Spacer()
                     Button("Check Now") {

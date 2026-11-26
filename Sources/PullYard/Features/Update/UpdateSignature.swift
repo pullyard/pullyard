@@ -4,10 +4,15 @@ import Foundation
 enum UpdateSignature {
     static let publicKey = "m0UbLdp60TGrr4oQs1p3pqNTXQQOqOZM2oRtf3jnJlM="
 
+    static let devPublicKey = ""
+
     static var isConfigured: Bool { !publicKey.isEmpty }
 
-    static func verify(dmg: URL, signatureURL: URL?) async throws {
-        guard isConfigured else { return }
+    static func verify(dmg: URL, signatureURL: URL?, publicKey: String = publicKey) async throws {
+        guard !publicKey.isEmpty else {
+            if publicKey == devPublicKey { throw UpdateError.unsigned }
+            return
+        }
         guard let signatureURL, signatureURL.scheme == "https" else { throw UpdateError.unsigned }
         var req = URLRequest(url: signatureURL)
         req.timeoutInterval = 20

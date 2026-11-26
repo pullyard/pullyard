@@ -1,0 +1,106 @@
+name: macOS dev build
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'Sources/**'
+      - 'Resources/**'
+      - 'Package.swift'
+      - 'Package.resolved'
+      - 'scripts/**'
+      - '.github/workflows/macos-dev.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: macos-dev
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Use the newest Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$xcode" ]; then sudo xcode-select -s "$xcode"; fi
+          xcodebuild -version
+      - name: Check the dev signing key
+        env:
+          PULLYARD_DEV_SIGNING_KEY: ${{ secrets.PULLYARD_DEV_SIGNING_KEY }}
+        run: |
+          if [ -z "$PULLYARD_DEV_SIGNING_KEY" ]; then
+            echo "::error::PULLYARD_DEV_SIGNING_KEY is not set. Run: swift scripts/update_signing.swift dev-keygen"
+            exit 1
+          fi
+          if grep -q 'static let devPublicKey = ""' Sources/PullYard/Features/Update/UpdateSignature.swift; then
+            echo "::error::devPublicKey is empty in UpdateSignature.swift. Run: swift scripts/update_signing.swift dev-keygen and push the change"
+            exit 1
+          fi
+      - name: Stamp the dev build
+        run: |
+          version=$(plutil -extract CFBundleShortVersionString raw Resources/Info.plist)
+          short=${GITHUB_SHA::7}
+          plutil -replace PYDevBuild -integer "$GITHUB_RUN_NUMBER" Resources/Info.plist
+          plutil -replace PYDevCommit -string "$short" Resources/Info.plist
+          plutil -replace CFBundleVersion -string "$version.$GITHUB_RUN_NUMBER" Resources/Info.plist
+          echo "DEV_VERSION=$version" >> "$GITHUB_ENV"
+          echo "DEV_COMMIT=$short" >> "$GITHUB_ENV"
+      - name: Import the signing certificate
+        env:
+          CERT_P12: ${{ secrets.PULLYARD_DEV_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.PULLYARD_DEV_CERT_PASSWORD }}
+        run: |
+          if [ -z "$CERT_P12" ]; then
+            echo "SIGN_ID=-" >> "$GITHUB_ENV"
+            echo "::warning::No PULLYARD_DEV_CERT_P12 secret, so the dev build is signed ad hoc. macOS may ask again for Keychain access after each dev update."
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(uuidgen)
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          identity=$(security find-identity -v -p codesigning "$keychain" | awk -F'"' 'NR==1 {print $2}')
+          echo "SIGN_ID=$identity" >> "$GITHUB_ENV"
+      - name: Build universal app
+        env:
+          UNIVERSAL: '1'
+        run: ./scripts/build.sh
+      - name: Make the disk image
+        run: |
+          root="$RUNNER_TEMP/dmg"
+          mkdir -p "$root"
+          ditto build/PullYard.app "$root/PullYard.app"
+          ln -s /Applications "$root/Applications"
+          hdiutil create -volname PullYard -srcfolder "$root" -format UDZO -ov build/PullYard.dmg
+      - name: Sign the update
+        env:
+          PULLYARD_DEV_SIGNING_KEY: ${{ secrets.PULLYARD_DEV_SIGNING_KEY }}
+        run: swift scripts/update_signing.swift sign-env build/PullYard.dmg
+      - name: Publish the dev release
+        run: |
+          message=$(git log -1 --format=%s "$GITHUB_SHA" | tr -d '\r' | head -c 200)
+          notes="build: $GITHUB_RUN_NUMBER
+          version: $DEV_VERSION
+          commit: $DEV_COMMIT
+          message: $message"
+          gh release delete dev-build --yes --cleanup-tag || true
+          gh release create dev-build build/PullYard.dmg build/PullYard.dmg.sig \
+            --prerelease \
+            --latest=false \
+            --target "$GITHUB_SHA" \
+            --title "PullYard $DEV_VERSION dev $GITHUB_RUN_NUMBER" \
+            --notes "$notes"
