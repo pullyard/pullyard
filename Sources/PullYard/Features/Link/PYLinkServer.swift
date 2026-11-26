@@ -1,6 +1,8 @@
 import CryptoKit
 import Foundation
+#if canImport(IrohLib)
 import IrohLib
+#endif
 import Network
 import Observation
 import Security
@@ -52,7 +54,9 @@ final class PYLinkServer {
     @ObservationIgnored private var clients: [ObjectIdentifier: PYLinkClient] = [:]
     @ObservationIgnored private let queue = DispatchQueue(label: "pullyard.link")
     @ObservationIgnored private var pump: Task<Void, Never>?
+    #if canImport(IrohLib)
     @ObservationIgnored private var irohEndpoint: Endpoint?
+    #endif
     @ObservationIgnored private var irohTask: Task<Void, Never>?
     @ObservationIgnored private var activity: NSObjectProtocol?
     @ObservationIgnored lazy var identity: Curve25519.KeyAgreement.PrivateKey = PYLinkServer.loadIdentity()
@@ -126,6 +130,7 @@ final class PYLinkServer {
     private func startIroh() {
         guard irohTask == nil else { return }
         irohError = nil
+        #if canImport(IrohLib)
         let secret = PYLinkIrohKeys.secret(service: "dev.pullyard.link")
         irohTask = Task { @MainActor [weak self] in
             do {
@@ -156,13 +161,18 @@ final class PYLinkServer {
                 self?.irohTask = nil
             }
         }
+        #else
+        irohError = "Connecting from anywhere needs a Mac with Apple silicon."
+        #endif
     }
 
     private func stopIroh() {
         irohTask?.cancel()
         irohTask = nil
+        #if canImport(IrohLib)
         if let endpoint = irohEndpoint { Task { try? await endpoint.close() } }
         irohEndpoint = nil
+        #endif
         irohID = nil
         irohOnline = false
     }

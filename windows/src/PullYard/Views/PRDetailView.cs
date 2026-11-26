@@ -450,7 +450,7 @@ public sealed class PRContent : Grid, IShortcutHost
         var key = $"{pr.Url}|{pr.Merged}";
         if (jiraFollowUp is not { } cached || cached.Key != key)
         {
-            cached = (key, new JiraMergeFollowUp(pr));
+            cached = (key, new JiraMergeFollowUp(pr, model.Ref.Repo));
             jiraFollowUp = cached;
         }
         if (cached.View.Parent is Panel old) old.Children.Remove(cached.View);

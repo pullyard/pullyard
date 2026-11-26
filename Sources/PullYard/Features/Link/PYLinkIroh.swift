@@ -1,3 +1,4 @@
+#if canImport(IrohLib)
 import Foundation
 import IrohLib
 import Security
@@ -63,3 +64,4 @@ enum PYLinkIrohKeys {
         return data
     }
 }
+#endif

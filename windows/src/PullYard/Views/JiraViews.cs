@@ -924,7 +924,8 @@ public sealed class JiraIssueCard : Grid
 public sealed class JiraMergeFollowUp : Grid
 {
     private readonly PullRequestDetail pr;
-    private readonly JiraAccount account = JiraService.Account;
+    private readonly RepoRef repo;
+    private readonly JiraConnections account = JiraService.Connections;
     private readonly StackPanel body = Ui.V(6);
     private List<JiraIssue> issues = new();
     private readonly Dictionary<string, JiraTransition> moves = new();
@@ -932,9 +933,10 @@ public sealed class JiraMergeFollowUp : Grid
     private string? error;
     private bool dismissed;
 
-    public JiraMergeFollowUp(PullRequestDetail pr)
+    public JiraMergeFollowUp(PullRequestDetail pr, RepoRef repo)
     {
         this.pr = pr;
+        this.repo = repo;
         Children.Add(new Border
         {
             Background = Palette.Brush("sky", 0.07),
@@ -949,20 +951,13 @@ public sealed class JiraMergeFollowUp : Grid
     private async Task Load()
     {
         dismissed = JiraFollowUp.IsDismissed(Settings.Shared, pr.Url);
-        if (!pr.Merged || dismissed || !account.IsConfigured || account.Client() is not { } client) return;
+        if (!pr.Merged || dismissed || !account.IsConfigured) return;
         var found = new List<JiraIssue>();
         foreach (var key in account.Keys(pr).Take(5))
         {
-            if (account.CachedIssue(key) is { } hit)
-            {
-                found.Add(hit);
-                continue;
-            }
             try
             {
-                var fresh = await client.Issue(key);
-                account.Remember(fresh);
-                found.Add(fresh);
+                found.Add(await account.FetchIssue(key, repo));
             }
             catch (Exception)
             {
@@ -970,6 +965,7 @@ public sealed class JiraMergeFollowUp : Grid
         }
         foreach (var issue in JiraFollowUp.Open(found))
         {
+            if (account.Client(issue.ConnectionId) is not { } client) continue;
             try
             {
                 if (JiraFollowUp.DoneTransition(await client.Transitions(issue.Key)) is { } t) moves[issue.Key] = t;
@@ -1022,7 +1018,7 @@ public sealed class JiraMergeFollowUp : Grid
 
     private async Task Move(JiraIssue issue, JiraTransition t)
     {
-        if (working is not null || account.Client() is not { } client) return;
+        if (working is not null || account.Client(issue.ConnectionId) is not { } client) return;
         working = issue.Key;
         error = null;
         Render();
@@ -1031,7 +1027,7 @@ public sealed class JiraMergeFollowUp : Grid
             await client.Transition(issue.Key, t.Id);
             try
             {
-                var fresh = await client.Issue(issue.Key);
+                var fresh = (await client.Issue(issue.Key)) with { ConnectionId = issue.ConnectionId };
                 account.Remember(fresh);
                 issues = issues.Select(i => i.Key == fresh.Key ? fresh : i).ToList();
             }

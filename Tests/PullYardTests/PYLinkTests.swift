@@ -1,5 +1,7 @@
 import CryptoKit
+#if canImport(IrohLib)
 import IrohLib
+#endif
 import Network
 import XCTest
 @testable import PullYard
@@ -141,6 +143,7 @@ final class PYLinkTests: XCTestCase {
         listener.cancel()
     }
 
+#if canImport(IrohLib)
     func testEncryptedFramesOverIroh() async throws {
         let key = SymmetricKey(size: .bits256)
         let server = try await Endpoint.bind(options: EndpointOptions(preset: presetN0(), alpns: [PYLink.irohALPN], relayMode: RelayMode.disabled()))
@@ -179,6 +182,7 @@ final class PYLinkTests: XCTestCase {
         try? await client.close()
         try? await server.close()
     }
+    #endif
 }
 
 private final class FrameBox: @unchecked Sendable {
