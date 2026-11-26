@@ -14,6 +14,14 @@ struct PYLinkBridge {
             client.channel.send(json: reply)
         case "fix":
             startFix(message, client: client)
+        case "options":
+            sendOptions(message, client: client)
+        case "new":
+            startNew(message, client: client)
+        case "pin":
+            setPinned(message, client: client)
+        case "rename":
+            rename(message, client: client)
         case "preview":
             preview(message, client: client)
         case "edit":
@@ -73,6 +81,10 @@ struct PYLinkBridge {
                 } else if let url = Self.store(attachment) {
                     paths.append(url.path)
                 }
+            }
+            if let requestID = message.requestID, let request = chat.pendingPermissions.first(where: { $0.id == requestID && !$0.resolved }), !text.isEmpty {
+                chat.respond(request, allow: false, message: text)
+                return
             }
             var prompt = text
             if !paths.isEmpty {
@@ -144,8 +156,123 @@ struct PYLinkBridge {
         guard let app else { return [] }
         return app.claude.tabs.filter { $0.chat != nil }.map { tab in
             let pr = app.claude.pullRequest(for: tab)
-            return PYLinkSession(id: tab.id.uuidString, title: tab.title, folder: tab.folder, state: Self.state(tab.state), repo: pr.flatMap { Self.repo(fromURL: $0.url) }, number: pr?.number)
+            let pending = tab.chat?.pendingPermissions.first { !$0.resolved }.map(Self.permission)
+            return PYLinkSession(id: tab.id.uuidString, title: tab.title, folder: tab.folder, state: Self.state(tab.state), repo: pr.flatMap { Self.repo(fromURL: $0.url) }, number: pr?.number, sessionID: tab.sessionId, account: tab.profile?.id ?? ClaudeProfiles.defaultID, environment: tab.environmentID, pending: pending)
         }
+    }
+
+    static func prefs() -> PYLinkPrefs {
+        let prefs = AgentSessionPrefs.shared
+        return PYLinkPrefs(pinned: prefs.pinned, titles: prefs.titles)
+    }
+
+    private func reply(_ message: PYLinkMessage, error: String, client: PYLinkClient) {
+        var reply = PYLinkMessage(type: "error")
+        reply.id = message.id
+        reply.error = error
+        client.channel.send(json: reply)
+    }
+
+    private func sendOptions(_ message: PYLinkMessage, client: PYLinkClient) {
+        guard let app else { return }
+        let profiles = ClaudeProfiles.shared
+        var reply = PYLinkMessage(type: "options")
+        reply.id = message.id
+        let recent = app.claude.projects.filter(\.exists).sorted { $0.lastActivity > $1.lastActivity }.prefix(80)
+        reply.options = PYLinkOptions(
+            accounts: profiles.visible.map { PYLinkAccount(id: $0.id, label: $0.label, email: $0.email, plan: $0.plan) },
+            active: profiles.visible.contains { $0.id == profiles.activeID } ? profiles.activeID : profiles.visible.first?.id,
+            environments: AgentEnvironments.shared.items.map { PYLinkEnvironment(id: $0.id, name: $0.name, icon: $0.icon, folders: $0.folders, variables: $0.variableNames) },
+            projects: recent.map { PYLinkProject(path: $0.path, name: $0.name) }
+        )
+        reply.prefs = Self.prefs()
+        client.sentPrefs = reply.prefs
+        client.channel.send(json: reply)
+    }
+
+    private func launchChoice(_ message: PYLinkMessage) throws -> (profile: String?, environment: AgentEnvironment?) {
+        var profile: String?
+        if let id = message.account {
+            guard ClaudeProfiles.shared.visible.contains(where: { $0.id == id }) else { throw FixFailure.message("That Claude account isn't on \(server.desktopName) anymore.") }
+            profile = id
+        }
+        var environment: AgentEnvironment?
+        if let id = message.environment {
+            guard let found = AgentEnvironments.shared.environment(id: id) else { throw FixFailure.message("That environment isn't on \(server.desktopName) anymore.") }
+            environment = found
+        }
+        return (profile, environment)
+    }
+
+    private func startNew(_ message: PYLinkMessage, client: PYLinkClient) {
+        guard let app else { return }
+        do {
+            let choice = try launchChoice(message)
+            let requested = message.folder?.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let folder = (requested?.isEmpty == false ? requested : nil) ?? choice.environment?.startFolder else {
+                return reply(message, error: "Pick a project folder for the new session.", client: client)
+            }
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory), isDirectory.boolValue else {
+                return reply(message, error: "\((folder as NSString).lastPathComponent) doesn't exist on \(server.desktopName).", client: client)
+            }
+            let prompt = message.text?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let tab = app.claude.newSession(folder: folder, prompt: prompt?.isEmpty == false ? prompt : nil, kind: .chat, profileID: choice.profile, environmentID: choice.environment?.id)
+            var started = PYLinkMessage(type: "started")
+            started.id = message.id
+            started.session = tab.id.uuidString
+            started.sessions = sessions()
+            client.channel.send(json: started)
+            client.subscriptions.insert(tab.id.uuidString)
+            pushUpdates(to: client, only: tab.id.uuidString)
+        } catch {
+            reply(message, error: error.localizedDescription, client: client)
+        }
+    }
+
+    private func sessionKey(_ id: String?) -> (key: String, tab: ClaudeTab?)? {
+        guard let id, !id.isEmpty else { return nil }
+        if let tab = tab(id) { return (tab.sessionId, tab) }
+        return (id, app?.claude.tab(forSession: id))
+    }
+
+    private func sendPrefs(_ message: PYLinkMessage, client: PYLinkClient) {
+        var reply = PYLinkMessage(type: "prefs")
+        reply.id = message.id
+        reply.prefs = Self.prefs()
+        reply.sessions = sessions()
+        client.sentPrefs = reply.prefs
+        client.channel.send(json: reply)
+    }
+
+    private func setPinned(_ message: PYLinkMessage, client: PYLinkClient) {
+        guard let found = sessionKey(message.session), !found.key.isEmpty else {
+            return reply(message, error: "This session can't be pinned until the agent has started.", client: client)
+        }
+        AgentSessionPrefs.shared.setPinned(found.key, message.pinned ?? true)
+        sendPrefs(message, client: client)
+    }
+
+    private func rename(_ message: PYLinkMessage, client: PYLinkClient) {
+        guard let app, let found = sessionKey(message.session) else { return reply(message, error: "Missing session.", client: client) }
+        let title = message.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let tab = found.tab, !title.isEmpty {
+            app.claude.rename(tab, to: title)
+        } else if !found.key.isEmpty {
+            AgentSessionPrefs.shared.rename(found.key, to: title)
+        } else {
+            return reply(message, error: "This session can't be renamed yet.", client: client)
+        }
+        sendPrefs(message, client: client)
+    }
+
+    func pushPrefs(to client: PYLinkClient) {
+        let current = Self.prefs()
+        guard client.sentPrefs != current else { return }
+        client.sentPrefs = current
+        var message = PYLinkMessage(type: "prefs")
+        message.prefs = current
+        client.channel.send(json: message)
     }
 
     private static func state(_ state: ClaudeTabState) -> String {
@@ -169,12 +296,18 @@ struct PYLinkBridge {
         Task { @MainActor in
             await app.claude.reloadProjects(force: false)
             let open = Dictionary(app.claude.tabs.filter { $0.chat != nil && !$0.sessionId.isEmpty }.map { ($0.sessionId, $0) }, uniquingKeysWith: { a, _ in a })
-            let recent = app.claude.projects.flatMap(\.sessions).filter { !$0.archived }.sorted { $0.modified > $1.modified }.prefix(60)
+            let prefs = AgentSessionPrefs.shared
+            let recent = app.claude.projects.flatMap(\.sessions).filter { !prefs.isArchived($0) }.sorted { a, b in
+                let pa = prefs.isPinned(a.id), pb = prefs.isPinned(b.id)
+                return pa != pb ? pa : a.modified > b.modified
+            }.prefix(60)
             var reply = PYLinkMessage(type: "history")
             reply.id = message.id
             reply.sessions = recent.map { info in
-                PYLinkSession(id: info.id, title: info.title, folder: info.cwd, state: open[info.id].map { Self.state($0.state) } ?? "closed", repo: info.prURL.flatMap(Self.repo(fromURL:)), number: info.prNumber, updated: info.modified)
+                PYLinkSession(id: info.id, title: prefs.title(info), folder: info.cwd, state: open[info.id].map { Self.state($0.state) } ?? "closed", repo: info.prURL.flatMap(Self.repo(fromURL:)), number: info.prNumber, updated: info.modified, sessionID: info.id, account: info.profileID ?? ClaudeProfiles.defaultID)
             }
+            reply.prefs = Self.prefs()
+            client.sentPrefs = reply.prefs
             client.channel.send(json: reply)
         }
     }
@@ -328,9 +461,10 @@ struct PYLinkBridge {
         Task { @MainActor in
             do {
                 let plan = try await plan(message)
+                let choice = try launchChoice(message)
                 let isolate = UserDefaults.standard.object(forKey: "agentFix.isolatedWorktree") as? Bool ?? true
                 let mode = ClaudePermissionMode(rawValue: UserDefaults.standard.string(forKey: "claudeMode") ?? "") ?? .standard
-                guard let tab = try await ClaudeLauncher.startForPR(app: app, prompt: plan.prompt, folder: plan.folder, isolate: isolate, pr: plan.pr, repo: plan.repo, target: .app, mode: mode, name: plan.name) else {
+                guard let tab = try await ClaudeLauncher.startForPR(app: app, prompt: plan.prompt, folder: plan.folder, isolate: isolate, pr: plan.pr, repo: plan.repo, target: .app, mode: mode, name: plan.name, profileID: choice.profile, environmentID: choice.environment?.id) else {
                     return fail("The agent didn't start on \(server.desktopName).")
                 }
                 if plan.kind == "conflicts" || plan.kind == "comments" {

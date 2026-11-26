@@ -309,6 +309,7 @@ final class PYLinkServer {
                 let bridge = PYLinkBridge(server: self, app: self.app)
                 for client in self.clients.values where client.authenticated {
                     bridge.pushSessions(to: client)
+                    bridge.pushPrefs(to: client)
                     if !client.subscriptions.isEmpty { bridge.pushUpdates(to: client) }
                 }
             }
@@ -388,6 +389,7 @@ final class PYLinkClient {
     var sentOrder: [String: [String]] = [:]
     var sentState: [String: PYLinkSessionState] = [:]
     var sentSessions: [PYLinkSession]?
+    var sentPrefs: PYLinkPrefs?
 
     init(channel: PYLinkChannel) { self.channel = channel }
 }

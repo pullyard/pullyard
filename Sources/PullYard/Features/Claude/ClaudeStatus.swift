@@ -463,6 +463,11 @@ final class AgentSessionPrefs {
 
     func isPinned(_ id: String) -> Bool { pinned.contains(id) }
 
+    func setPinned(_ id: String, _ value: Bool) {
+        guard !id.isEmpty, isPinned(id) != value else { return }
+        togglePin(id)
+    }
+
     func togglePin(_ id: String) {
         if let i = pinned.firstIndex(of: id) { pinned.remove(at: i) } else { pinned.insert(id, at: 0) }
         UserDefaults.standard.set(pinned, forKey: "agents.pinned")

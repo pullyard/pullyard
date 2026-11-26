@@ -131,6 +131,54 @@ struct PYLinkSession: Codable, Equatable, Identifiable {
     var repo: String?
     var number: Int?
     var updated: Date?
+    var sessionID: String?
+    var account: String?
+    var environment: String?
+    var pending: PYLinkPermission?
+}
+
+struct PYLinkAccount: Codable, Equatable, Hashable, Identifiable {
+    let id: String
+    var label: String
+    var email: String?
+    var plan: String?
+}
+
+struct PYLinkEnvironment: Codable, Equatable, Hashable, Identifiable {
+    let id: String
+    var name: String
+    var icon: String
+    var folders: [String]
+    var variables: [String]
+}
+
+struct PYLinkProject: Codable, Equatable, Hashable, Identifiable {
+    var id: String { path }
+    let path: String
+    var name: String
+}
+
+struct PYLinkOptions: Codable, Equatable {
+    var accounts: [PYLinkAccount]
+    var active: String?
+    var environments: [PYLinkEnvironment]
+    var projects: [PYLinkProject]
+}
+
+struct PYLinkPrefs: Codable, Equatable {
+    var pinned: [String]
+    var titles: [String: String]
+
+    func title(for session: PYLinkSession) -> String {
+        let key = session.sessionID ?? session.id
+        guard !key.isEmpty, let title = titles[key], !title.isEmpty else { return session.title }
+        return title
+    }
+
+    func isPinned(_ session: PYLinkSession) -> Bool {
+        let key = session.sessionID ?? session.id
+        return !key.isEmpty && pinned.contains(key)
+    }
 }
 
 struct PYLinkMessage: Codable {
@@ -156,6 +204,12 @@ struct PYLinkMessage: Codable {
     var replacesItem: String?
     var jira: PYLinkJira?
     var diff: PYLinkDiff?
+    var account: String?
+    var environment: String?
+    var folder: String?
+    var pinned: Bool?
+    var options: PYLinkOptions?
+    var prefs: PYLinkPrefs?
 
     init(type: String) { self.type = type }
 }
