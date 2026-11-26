@@ -41,6 +41,8 @@ struct ClaudeProjectsColumn: View {
     @State private var showArchived = false
     @State private var pickerFor: ClaudeProfile?
     @State private var envDraft: AgentEnvironmentDraft?
+    @State private var dropTarget: String?
+    @AppStorage("agents.openCollapsed") private var openCollapsed = false
     private var prefs: AgentSessionPrefs { AgentSessionPrefs.shared }
     @State private var ready = false
     @State private var cursor: String?
@@ -102,7 +104,7 @@ struct ClaudeProjectsColumn: View {
     }
 
     private var navTargets: [NavTarget] {
-        var out = ws.orderedTabs.map { tab in NavTarget(key: "tab:\(tab.id.uuidString)") { ws.selectedTabID = tab.id } }
+        var out = (openCollapsed ? [] : ws.listedTabs).map { tab in NavTarget(key: "tab:\(tab.id.uuidString)") { ws.selectedTabID = tab.id } }
         out += pinnedSessions.map { s in NavTarget(key: s.id) { ws.resume(s) } }
         for group in groups where isOpen(group) {
             for node in nodes(group) {
@@ -170,29 +172,31 @@ struct ClaudeProjectsColumn: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 switch ClaudeAccountStore.shared.status {
                 case .loggedIn(let info):
-                    ClaudeAccountCard(info: info, compact: true)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
+                    AgentAccountSwitcher(info: info) { pickerFor = $0 }
+                        .padding(.horizontal, 4)
+                        .padding(.top, 2)
                 case .loggedOut:
                     Label("Not signed in to Claude — sign in on the right", systemImage: "person.crop.circle.badge.exclamationmark")
+                        .font(.syCallout)
                         .foregroundStyle(Color.syAmber)
                         .padding(8)
                     if ClaudeProfiles.shared.visible.count > 1 {
-                        ClaudeProfileSwitcher().padding(.horizontal, 8)
+                        AgentAccountSwitcher(info: nil) { pickerFor = $0 }.padding(.horizontal, 4)
                     }
                 case .notInstalled:
                     Label("claude CLI not found — see the right side", systemImage: "exclamationmark.triangle")
+                        .font(.syCallout)
                         .foregroundStyle(Color.syAmber)
                         .padding(8)
                 default:
-                    EmptyView()
-                }
-                if ClaudeProfiles.shared.hasSeveral {
-                    AgentAccountFilter { pickerFor = $0 }
-                        .padding(.horizontal, 8)
-                        .padding(.bottom, 4)
+                    if ClaudeProfiles.shared.hasSeveral {
+                        AgentAccountSwitcher(info: nil) { pickerFor = $0 }.padding(.horizontal, 4)
+                    }
                 }
                 if ClaudeAccountStore.shared.isLoggedIn || ClaudeProfiles.shared.hasSeveral {
+                    AgentNewSessionRow { pickerFor = pickerProfile }
+                        .padding(.horizontal, 4)
+                        .padding(.top, 4)
                     if ready { historyContent }
                 } else if case .checking = ClaudeAccountStore.shared.status {
                     HStack { Spacer(); PullYardLoader(size: 32); Spacer() }.padding(.top, 20)
@@ -270,30 +274,27 @@ struct ClaudeProjectsColumn: View {
 
     @ViewBuilder
     private var historyContent: some View {
-        if !ws.tabs.isEmpty {
-            HStack(spacing: 6) {
-                Text("Open").font(.sySubheadline.weight(.semibold))
-                Spacer()
-                Image(systemName: "memorychip").imageScale(.small)
-                Text(ws.totalMemory > 0 ? ProcessMemory.format(ws.totalMemory) : "0 " + "MB").font(.sySubheadline.weight(.semibold))
-                    .monospacedDigit()
+        let listedTabs = ws.listedTabs
+        if !listedTabs.isEmpty {
+            AgentSectionHeader(title: "Open", collapsed: $openCollapsed, count: listedTabs.count) {
+                Text(ws.totalMemory > 0 ? ProcessMemory.format(ws.totalMemory) : "0 MB")
+                    .font(.syCaption2.monospacedDigit())
+                    .foregroundStyle(Color.syDim)
+                    .help("Memory used by running Claude processes")
                 if ws.awakeCount > 0 {
-                    Button("Sleep all") { ws.sleepAll() }
-                        .buttonStyle(.link)
-                        .help("Stop idle processes and free memory")
+                    Button { ws.sleepAll() } label: { Image(systemName: "moon.zzz") }
+                        .buttonStyle(.borderless)
+                        .font(.syCaption)
+                        .foregroundStyle(Color.syMuted)
+                        .help("Sleep all idle sessions and free memory")
+                        .accessibilityLabel("Sleep all idle sessions")
                 }
             }
-            .font(.syCaption)
-            .foregroundStyle(Color.syMuted)
-            .padding(.horizontal, 8)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
-            .help("Memory used by running Claude processes")
-            ForEach(ws.orderedTabs) { tab in
+            ForEach(openCollapsed ? [] : listedTabs) { tab in
                 OpenTabRow(tab: tab, selected: ws.selectedTabID == tab.id, pinned: prefs.isPinned(tab.sessionId))
                     .padding(.horizontal, 8)
-                    .background(ClaudeRowHighlight(selected: ws.selectedTabID == tab.id || (listFocused && cursor == "tab:\(tab.id.uuidString)")))
-                    .modifier(HoverHighlight(radius: 6))
+                    .background(AgentRowBackground(selected: ws.selectedTabID == tab.id, focused: listFocused && cursor == "tab:\(tab.id.uuidString)"))
+                    .modifier(HoverHighlight(radius: 7))
                     .contentShape(Rectangle())
                     .id("tab:\(tab.id.uuidString)")
                     .onTapGesture {
@@ -307,29 +308,39 @@ struct ClaudeProjectsColumn: View {
                     .contextMenu { AgentTabMenu(tab: tab, ws: ws) }
                     .transition(.opacity)
             }
-            Rectangle().fill(Color.syLine).frame(height: 1).padding(.horizontal, 8).padding(.vertical, 8)
         }
         let pinnedSessions = pinnedSessions
         if !pinnedSessions.isEmpty {
-            HStack(spacing: 5) {
-                Image(systemName: "pin.fill").imageScale(.small)
-                Text("Pinned").font(.sySubheadline.weight(.semibold))
-            }
-            .font(.syCaption)
-            .foregroundStyle(Color.syMuted)
-            .padding(.horizontal, 8)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
+            AgentSectionHeader(title: "Pinned")
             ForEach(pinnedSessions) { s in
                 sessionRow(s)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            Rectangle().fill(Color.syLine).frame(height: 1).padding(.horizontal, 8).padding(.vertical, 8)
         }
         if ws.accountFilter != nil, ClaudeProfiles.shared.hasSeveral, query.isEmpty, accountScoped.isEmpty, !ws.loadingProjects {
             AgentAccountEmpty(profile: pickerProfile) { pickerFor = pickerProfile }
                 .padding(.horizontal, 8)
                 .padding(.top, 6)
+        }
+        if !groups.isEmpty, !(groups.count == 1 && groups[0].headerless && groups[0].sessions.isEmpty) {
+            AgentSectionHeader(title: prefs.grouping == .none ? "Recent" : prefs.grouping == .account ? "Accounts" : "Projects") {
+                Menu {
+                    groupMenu
+                    if prefs.grouping == .folder {
+                        Button("Sort A to Z") { withAnimation(Motion.smooth) { prefs.sortAlphabetically(accountScoped) } }
+                    }
+                    Divider()
+                    Button(showArchived ? "Hide archived sessions" : "Show archived sessions") { withAnimation(Motion.smooth) { showArchived.toggle() } }
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .foregroundStyle(Color.syMuted)
+                .help("Group, sort and filter")
+                .accessibilityLabel("Group, sort and filter")
+            }
         }
         ForEach(groups) { group in
             let open = isOpen(group)
@@ -340,22 +351,35 @@ struct ClaudeProjectsColumn: View {
                     } onNew: {
                         ws.newSession(folder: project.path, profileID: ws.accountFilter)
                     }
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 4)
                     .contextMenu { projectMenu(project) }
+                    .draggable(project.id)
+                    .dropDestination(for: String.self) { items, _ in
+                        guard let id = items.first, id != project.id else { return false }
+                        withAnimation(Motion.smooth) { prefs.place(id, before: project.id, in: accountScoped) }
+                        return true
+                    } isTargeted: { on in
+                        if on { dropTarget = project.id } else if dropTarget == project.id { dropTarget = nil }
+                    }
+                    .overlay(alignment: .top) {
+                        if dropTarget == project.id {
+                            Capsule().fill(Color.syAgentAccent).frame(height: 2).padding(.horizontal, 10)
+                        }
+                    }
                 } else if let profile = group.profile {
                     AgentAccountGroupHeader(profile: profile, count: group.count, expanded: open) { toggle(group) } onNew: { pickerFor = profile }
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, 4)
                         .contextMenu { groupMenu }
                 }
                 Collapsible(open: open) {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(nodes(group)) { node in
-                            sessionRow(node.session, children: node.children.count)
+                            sessionRow(node.session, children: node.children.count, indent: group.headerless ? 0 : 8)
                             if !node.children.isEmpty {
                                 Collapsible(open: !collapsedParents.contains(node.id)) {
                                     VStack(alignment: .leading, spacing: 0) {
                                         ForEach(Array(node.children.enumerated()), id: \.element.id) { index, child in
-                                            sessionRow(child, depth: 1, last: index == node.children.count - 1)
+                                            sessionRow(child, depth: 1, last: index == node.children.count - 1, indent: group.headerless ? 0 : 8)
                                         }
                                     }
                                 }
@@ -429,7 +453,7 @@ struct ClaudeProjectsColumn: View {
         Button("Delete all sessions (\(project.sessions.count))", role: .destructive) { ws.trashAll(project.sessions, in: project.name) }
     }
 
-    private func sessionRow(_ s: ClaudeSessionInfo, children: Int = 0, depth: Int = 0, last: Bool = false) -> some View {
+    private func sessionRow(_ s: ClaudeSessionInfo, children: Int = 0, depth: Int = 0, last: Bool = false, indent: CGFloat = 0) -> some View {
         SessionRow(
             session: prefs.titles[s.id] == nil ? s : s.retitled(prefs.title(s)),
             open: ws.tab(forSession: s.id) != nil,
@@ -437,15 +461,18 @@ struct ClaudeProjectsColumn: View {
             childCount: children,
             collapsed: collapsedParents.contains(s.id),
             depth: depth,
-            last: last
-        ) {
-            withAnimation(Motion.smooth) {
-                if collapsedParents.contains(s.id) { collapsedParents.remove(s.id) } else { collapsedParents.insert(s.id) }
+            last: last,
+            showAccount: prefs.grouping != .account && ws.accountFilter == nil && ClaudeProfiles.shared.hasSeveral,
+            onToggle: {
+                withAnimation(Motion.smooth) {
+                    if collapsedParents.contains(s.id) { collapsedParents.remove(s.id) } else { collapsedParents.insert(s.id) }
+                }
             }
-        }
+        )
+        .padding(.leading, indent)
         .padding(.horizontal, 8)
-        .background(ClaudeRowHighlight(selected: listFocused && cursor == s.id))
-        .modifier(HoverHighlight(radius: 6))
+        .background(AgentRowBackground(selected: ws.selectedTab.map { !$0.sessionId.isEmpty && $0.sessionId == s.id } ?? false, focused: listFocused && cursor == s.id))
+        .modifier(HoverHighlight(radius: 7))
         .rowAppear(s.id, ws.sessionRows)
         .contentShape(Rectangle())
         .id(s.id)
@@ -580,34 +607,37 @@ struct AgentAccountGroupHeader: View {
     @State private var hover = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             Image(systemName: "chevron.right")
-                .font(.syCaption2.weight(.semibold))
+                .font(.syCaption2.weight(.bold))
                 .foregroundStyle(Color.syDim)
                 .rotationEffect(.degrees(expanded ? 90 : 0))
                 .frame(width: 10)
-            ProfileBadge(profile: profile, size: 20)
-            Text(profile.label).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
-            Text("\(count)")
-                .font(.syCaption2.monospacedDigit().weight(.medium))
-                .foregroundStyle(Color.syMuted)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
-                .background(Capsule().fill(Color.syText.opacity(0.06)))
-            Spacer()
-            Button(action: onNew) { Image(systemName: "plus") }
-                .buttonStyle(.borderless)
-                .foregroundStyle(Color.syMuted)
-                .opacity(hover ? 1 : 0.5)
-                .help("New session as \(profile.label)")
-                .accessibilityLabel("New session as \(profile.label)")
+            ProfileBadge(profile: profile, size: 18)
+            Text(profile.label).font(.syBody.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
+            Text(verbatim: "\(count)").font(.syCaption2.monospacedDigit()).foregroundStyle(Color.syDim)
+            Spacer(minLength: 4)
+            Button(action: onNew) {
+                Image(systemName: "plus")
+                    .font(.syCaption.weight(.semibold))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(Color.syMuted)
+            .opacity(hover ? 1 : 0)
+            .help("New session as \(profile.label)")
+            .accessibilityLabel("New session as \(profile.label)")
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .frame(minHeight: 28)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(hover ? Color.syText.opacity(0.05) : Color.clear))
         .contentShape(Rectangle())
         .onTapGesture(perform: onToggle)
-        .onHover { hover = $0 }
+        .onHover { h in withAnimation(.easeOut(duration: Motion.Dur.micro)) { hover = h } }
         .help(profile.email ?? profile.label)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
+        .padding(.top, 4)
     }
 }
 
@@ -671,10 +701,18 @@ struct AgentProjectPicker: View {
                         .lineLimit(1)
                 }
             }
-            TextField("Search projects", text: $query)
-                .textFieldStyle(.roundedBorder)
-                .focused($searchFocused)
-                .onSubmit { if let first = projects.first { open(first.path) } }
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(Color.syDim)
+                TextField("Search projects", text: $query)
+                    .textFieldStyle(.plain)
+                    .focused($searchFocused)
+                    .onSubmit { if let first = projects.first { open(first.path) } }
+            }
+            .font(.syBody)
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.sySunken))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(searchFocused ? Color.syLineStrong : Color.syLine))
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     if !environments.isEmpty {
@@ -700,10 +738,15 @@ struct AgentProjectPicker: View {
             .frame(height: 300)
             .card(radius: 10, fill: .sySunken)
             HStack {
-                Button { chooseFolder() } label: { Label("Choose folder…", systemImage: "folder") }
-                Button { envDraft = AgentEnvironmentDraft() } label: { Label("New environment…", systemImage: "square.stack.3d.up") }
+                Group {
+                    Button { chooseFolder() } label: { Label("Choose folder…", systemImage: "folder") }
+                    Button { envDraft = AgentEnvironmentDraft() } label: { Label("New environment…", systemImage: "square.stack.3d.up") }
+                }
+                .tint(Color.syText)
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Cancel") { dismiss() }
+                    .tint(Color.syText)
+                    .keyboardShortcut(.cancelAction)
                 Button("Open") {
                     guard let selection else { return }
                     if selection.hasPrefix("env:"), let env = AgentEnvironments.shared.environment(id: String(selection.dropFirst(4))) { start(env) } else { open(selection) }
@@ -716,6 +759,8 @@ struct AgentProjectPicker: View {
         }
         .padding(20)
         .frame(width: 560)
+        .surface(.panel)
+        .tint(Color.syAgentAccent)
         .onAppear { searchFocused = true }
         .sheet(item: $envDraft) { d in AgentEnvironmentSheet(editing: d.editing, draftName: d.name, draftFolders: d.folders) }
     }
@@ -746,7 +791,7 @@ struct AgentProjectPicker: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.syAgentAccent.opacity(0.14) : Color.clear))
+        .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.syText.opacity(0.1) : Color.clear))
         .modifier(HoverHighlight(radius: 8))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { start(env) }
@@ -774,12 +819,13 @@ struct AgentProjectPicker: View {
 
     private func row(_ p: ClaudeProject) -> some View {
         let selected = selection == p.path
+        let tint = ProjectPalette.color(for: p.path)
         return HStack(spacing: 10) {
             Image(systemName: "folder.fill")
                 .font(.syIcon(11))
-                .foregroundStyle(Color.syCoral)
+                .foregroundStyle(tint)
                 .frame(width: 26, height: 26)
-                .background(RoundedRectangle(cornerRadius: 7).fill(Color.syCoral.opacity(0.12)))
+                .background(RoundedRectangle(cornerRadius: 7).fill(tint.opacity(0.14)))
             VStack(alignment: .leading, spacing: 1) {
                 Text(p.name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
                 Text(p.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
@@ -793,7 +839,7 @@ struct AgentProjectPicker: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.syAgentAccent.opacity(0.14) : Color.clear))
+        .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.syText.opacity(0.1) : Color.clear))
         .modifier(HoverHighlight(radius: 8))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { open(p.path) }
@@ -823,40 +869,50 @@ struct ProjectHeader: View {
     @State private var hover = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        let tint = project.exists ? ProjectPalette.color(for: project.path) : Color.syDim
+        HStack(spacing: 7) {
             Image(systemName: "chevron.right")
-                .font(.syCaption2.weight(.semibold))
+                .font(.syCaption2.weight(.bold))
                 .foregroundStyle(Color.syDim)
                 .rotationEffect(.degrees(expanded ? 90 : 0))
                 .frame(width: 10)
-            Image(systemName: "folder.fill")
-                .font(.syIcon(10))
-                .foregroundStyle(project.exists ? Color.syCoral : Color.syDim)
-                .frame(width: 20, height: 20)
-                .background(RoundedRectangle(cornerRadius: 6).fill((project.exists ? Color.syCoral : Color.syDim).opacity(0.12)))
-            Text(project.name).font(.syCallout.weight(.semibold)).foregroundStyle(project.exists ? Color.syText : Color.syMuted).lineLimit(1)
-            Text("\(project.sessions.count)")
-                .font(.syCaption2.monospacedDigit().weight(.medium))
-                .foregroundStyle(Color.syMuted)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
-                .background(Capsule().fill(Color.syText.opacity(0.06)))
-            Spacer()
-            Button(action: onNew) { Image(systemName: "plus") }
-                .buttonStyle(.borderless)
-                .foregroundStyle(Color.syMuted)
-                .opacity(hover ? 1 : 0.5)
-                .help("New session")
-                .accessibilityLabel("New session")
-                .disabled(!project.exists)
+            Image(systemName: expanded ? "folder.fill" : "folder")
+                .font(.syCallout)
+                .foregroundStyle(tint)
+                .frame(width: 16)
+            Text(project.name)
+                .font(.syBody.weight(.semibold))
+                .foregroundStyle(project.exists ? Color.syText : Color.syMuted)
+                .lineLimit(1)
+            Text(verbatim: "\(project.sessions.count)")
+                .font(.syCaption2.monospacedDigit())
+                .foregroundStyle(Color.syDim)
+            Spacer(minLength: 4)
+            Button(action: onNew) {
+                Image(systemName: "plus")
+                    .font(.syCaption.weight(.semibold))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(Color.syMuted)
+            .opacity(hover ? 1 : 0)
+            .help("New session in \(project.name)")
+            .accessibilityLabel("New session in \(project.name)")
+            .disabled(!project.exists)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .frame(minHeight: 28)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(hover ? Color.syText.opacity(0.05) : Color.clear))
         .contentShape(Rectangle())
         .onTapGesture(perform: onToggle)
-        .onHover { hover = $0 }
+        .onHover { h in withAnimation(.easeOut(duration: Motion.Dur.micro)) { hover = h } }
         .help(project.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
         .textCase(nil)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
+        .padding(.top, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(project.name), \(project.sessions.count) sessions, \(expanded ? "expanded" : "collapsed")")
     }
 }
 
@@ -914,50 +970,14 @@ struct SessionRow: View {
     var collapsed = false
     var depth = 0
     var last = false
+    var showAccount = false
     var onToggle: () -> Void = {}
     @State private var expired = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             if depth > 0 {
-                SessionTreeGuide(last: last).padding(.leading, 10)
-            }
-            Text(session.title)
-                .font(.syBody)
-                .fontWeight(open ? .semibold : .regular)
-                .foregroundStyle(depth > 0 ? Color.syMuted : Color.syText)
-                .lineLimit(1)
-            if childCount > 0 {
-                Button(action: onToggle) {
-                    Image(systemName: "chevron.down")
-                        .font(.syCaption2.weight(.semibold))
-                        .rotationEffect(.degrees(collapsed ? -90 : 0))
-                        .foregroundStyle(Color.syDim)
-                        .padding(2)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(collapsed ? "Expand" : "Collapse")
-                .accessibilityLabel(collapsed ? "Expand" : "Collapse")
-            }
-            Spacer(minLength: 8)
-            if let n = session.prNumber {
-                Text("#\(n)")
-                    .font(.syCaption2.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(Color.syViolet)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(Color.syViolet.opacity(0.12)))
-                    .accessibilityLabel("Pull request \(n)")
-            }
-            if childCount > 0 {
-                Text("\(childCount)").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
-            }
-            AgentAccountChip(profile: ClaudeProfiles.shared.profile(id: session.profileID), compact: true)
-            if depth == 0, indicator == .none {
-                Text(Self.age(session.modified))
-                    .font(.syCaption2.monospacedDigit())
-                    .foregroundStyle(Color.syDim)
+                SessionTreeGuide(last: last).padding(.leading, 6)
             }
             SessionIndicatorDot(indicator: expired ? SessionIndicator(closed: session) : indicator)
                 .task(id: indicator == .working && !open) {
@@ -966,10 +986,56 @@ struct SessionRow: View {
                     if left > 0 { try? await Task.sleep(for: .seconds(left + 0.2)) }
                     expired = true
                 }
+            Text(session.title)
+                .font(.syBody)
+                .fontWeight(open ? .medium : .regular)
+                .foregroundStyle(depth > 0 ? Color.syMuted : Color.syText)
+                .lineLimit(1)
+            if childCount > 0 {
+                Button(action: onToggle) {
+                    HStack(spacing: 2) {
+                        Image(systemName: "chevron.down")
+                            .font(.syCaption2.weight(.semibold))
+                            .rotationEffect(.degrees(collapsed ? -90 : 0))
+                        Text(verbatim: "\(childCount)").font(.syCaption2.monospacedDigit())
+                    }
+                    .foregroundStyle(Color.syDim)
+                    .padding(.horizontal, 3)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(collapsed ? "Show nested sessions" : "Hide nested sessions")
+                .accessibilityLabel(collapsed ? "Show nested sessions" : "Hide nested sessions")
+            }
+            Spacer(minLength: 6)
+            if let worktree = session.worktreeName {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.syCaption2)
+                    .foregroundStyle(Color.syDim)
+                    .help("Worktree " + worktree)
+                    .accessibilityLabel("Worktree " + worktree)
+            }
+            if let n = session.prNumber {
+                Text(verbatim: "#\(n)")
+                    .font(.syCaption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(Color.syViolet)
+                    .accessibilityLabel("Pull request \(n)")
+            }
+            if showAccount, let profile = ClaudeProfiles.shared.profile(id: session.profileID) {
+                Circle()
+                    .fill(AgentAccountChip.color(for: profile.id))
+                    .frame(width: 6, height: 6)
+                    .help(profile.label)
+                    .accessibilityLabel("Account \(profile.label)")
+            }
+            Text(Self.age(session.modified))
+                .font(.syCaption2.monospacedDigit())
+                .foregroundStyle(Color.syDim)
+                .frame(minWidth: 22, alignment: .trailing)
         }
-        .padding(.vertical, 7)
-        .padding(.leading, 4)
-        .frame(minHeight: 32)
+        .padding(.vertical, 5)
+        .padding(.leading, 2)
+        .frame(minHeight: 28)
         .help(details)
     }
 
@@ -1000,17 +1066,29 @@ struct OpenTabRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            if tab.unread && tab.state != .working && tab.state != .waiting {
+                SessionIndicatorDot(indicator: .done)
+            } else {
+                SessionStateGlyph(state: tab.state).frame(width: 14, height: 14)
+            }
+            Text(tab.title)
+                .font(.syBody)
+                .fontWeight(selected ? .semibold : .regular)
+                .foregroundStyle(Color.syText)
+                .lineLimit(1)
+            Spacer(minLength: 6)
             if pinned {
                 Image(systemName: "pin.fill").font(.syCaption2).foregroundStyle(Color.syDim)
             }
-            Text(tab.title).font(.syBody).lineLimit(1).fontWeight(selected ? .semibold : .regular).foregroundStyle(Color.syText)
-            Spacer(minLength: 6)
-            Text(tab.projectName).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
-            SessionIndicatorDot(indicator: SessionIndicator(tab: tab))
+            Text(tab.projectName)
+                .font(.syCaption)
+                .foregroundStyle(Color.syDim)
+                .lineLimit(1)
+                .frame(maxWidth: 110, alignment: .trailing)
         }
-        .padding(.vertical, 7)
-        .padding(.leading, 4)
-        .frame(minHeight: 32)
+        .padding(.vertical, 5)
+        .padding(.leading, 2)
+        .frame(minHeight: 28)
         .help(tab.state.help)
     }
 }

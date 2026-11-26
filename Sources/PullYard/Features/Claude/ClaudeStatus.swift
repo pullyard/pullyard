@@ -225,7 +225,7 @@ struct SessionIndicatorDot: View {
         Group {
             switch indicator {
             case .none:
-                EmptyView()
+                Color.clear
             case .working:
                 IndicatorLayerView(kind: .spinner).frame(width: 10, height: 10)
             case .done:
@@ -434,6 +434,24 @@ final class AgentSessionPrefs {
         let fresh = projects.filter { rank[$0.id] == nil }
         let known = projects.filter { rank[$0.id] != nil }.sorted { rank[$0.id]! < rank[$1.id]! }
         return fresh + known
+    }
+
+    func adopt(_ ids: [String]) {
+        let known = Set(projectOrder)
+        let fresh = ids.filter { !known.contains($0) }
+        guard !fresh.isEmpty else { return }
+        projectOrder = fresh + projectOrder
+        UserDefaults.standard.set(projectOrder, forKey: "agents.projectOrder")
+    }
+
+    func place(_ id: String, before target: String, in visible: [ClaudeProject]) {
+        guard id != target else { return }
+        var order = ordered(visible).map(\.id)
+        guard let from = order.firstIndex(of: id), let original = order.firstIndex(of: target) else { return }
+        order.remove(at: from)
+        guard let to = order.firstIndex(of: target) else { return }
+        order.insert(id, at: from < original ? to + 1 : to)
+        saveOrder(order)
     }
 
     func move(_ id: String, by delta: Int, in visible: [ClaudeProject]) {

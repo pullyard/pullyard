@@ -145,6 +145,7 @@ struct AgentEnvironmentSheet: View {
                     Spacer()
                     Button { addFolder() } label: { Label("Add", systemImage: "plus") }
                         .controlSize(.small)
+                        .tint(Color.syText)
                 }
                 if folders.isEmpty {
                     Text("Choose the folder the session starts in. More folders are added to the session too.")
@@ -170,6 +171,7 @@ struct AgentEnvironmentSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
+                    .tint(Color.syText)
                 Button(editing == nil ? "Create environment" : "Save", action: save)
                     .buttonStyle(.borderedProminent)
                     .tint(.syAgentFill)
@@ -179,6 +181,8 @@ struct AgentEnvironmentSheet: View {
         }
         .padding(22)
         .frame(width: 560)
+        .surface(.panel)
+        .tint(Color.syAgentAccent)
         .onAppear(perform: load)
     }
 
@@ -228,8 +232,9 @@ struct AgentEnvironmentSheet: View {
                         folders.insert(folder, at: 0)
                     }
                 }
-                .buttonStyle(.link)
-                .font(.syCaption)
+                .buttonStyle(.plain)
+                .font(.syCaption.weight(.medium))
+                .foregroundStyle(Color.syAgentAccent)
             }
             Button { withAnimation(Motion.smooth) { folders.removeAll { $0 == folder } } } label: { Image(systemName: "xmark") }
                 .buttonStyle(.borderless)
@@ -286,8 +291,9 @@ struct AgentEnvironmentSheet: View {
                     }
                     HStack {
                         Button { variables.append(Variable()) } label: { Label("Add variable", systemImage: "plus") }
-                            .buttonStyle(.link)
-                            .font(.syCaption)
+                            .buttonStyle(.plain)
+                            .font(.syCaption.weight(.medium))
+                            .foregroundStyle(Color.syAgentAccent)
                         Spacer()
                         if let badKey {
                             Text("“\(badKey)” is not a valid name").font(.syCaption).foregroundStyle(Color.syRed)

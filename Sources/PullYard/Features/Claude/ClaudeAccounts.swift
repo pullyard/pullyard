@@ -394,6 +394,7 @@ struct AddClaudeProfileSheet: View {
         }
         .padding(20)
         .frame(width: 500)
+        .surface(.panel)
         .onAppear {
             guard let endpoint = editing?.endpoint else { return }
             access = .endpoint(endpoint.kind)

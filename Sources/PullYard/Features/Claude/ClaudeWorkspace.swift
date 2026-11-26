@@ -130,6 +130,11 @@ final class ClaudeTab: Identifiable {
 
     var environment: AgentEnvironment? { AgentEnvironments.shared.environment(id: environmentID) }
 
+    var isDraft: Bool {
+        guard kind == .chat, sessionId.isEmpty, let chat else { return false }
+        return chat.items.isEmpty && !chat.busy
+    }
+
     func applyEnvironment(_ id: String?) {
         environmentID = id
         guard let id, let env = AgentEnvironments.shared.environment(id: id) else { return }
@@ -342,7 +347,7 @@ final class ClaudeWorkspace {
                 for project in ClaudeSessionParser.loadAll(root: root) {
                     for var s in project.sessions where seenIDs.insert(s.id).inserted {
                         s.profileID = id
-                        byPath[project.path, default: []].append(s)
+                        byPath[ProjectRoot.of(project.path), default: []].append(s)
                     }
                 }
             }
@@ -358,6 +363,7 @@ final class ClaudeWorkspace {
         guard next != projects else { return }
         sessionRows.ingest(next.flatMap { $0.sessions.map(\.id) }, mode: .refresh)
         projects = next
+        AgentSessionPrefs.shared.adopt(next.map(\.id))
         sessionsByID = Dictionary(next.flatMap { $0.sessions.map { ($0.id, $0) } }, uniquingKeysWith: { a, _ in a })
         guard indexTask == nil, !indexWarmed else { return }
         indexWarmed = true
@@ -415,6 +421,11 @@ final class ClaudeWorkspace {
         let kind = kind ?? preferredKind
         let title = name ?? prompt.map { String($0.prefix(48)) } ?? "New session"
         let configDir = ClaudeProfiles.shared.profile(id: profileID)?.configDir ?? (profileID == nil ? ClaudeProfiles.shared.activeOverride : nil)
+        if kind == .chat, prompt == nil, name == nil,
+           let blank = tabs.first(where: { $0.kind == .chat && $0.folder == folder && $0.configDir == configDir && $0.environmentID == environmentID && $0.sessionId.isEmpty && ($0.chat?.items.isEmpty ?? false) }) {
+            selectedTabID = blank.id
+            return blank
+        }
         if kind == .chat {
             let tab = makeTab(folder: folder, kind: .chat, title: title, sessionId: "", configDir: configDir, environmentID: environmentID)
             startChat(tab, resume: nil, prompt: prompt, mode: mode)
@@ -639,6 +650,8 @@ final class ClaudeWorkspace {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         newSession(folder: url.path, kind: kind, profileID: profileID, environmentID: env.id)
     }
+
+    var listedTabs: [ClaudeTab] { orderedTabs.filter { !$0.isDraft } }
 
     var orderedTabs: [ClaudeTab] {
         let prefs = AgentSessionPrefs.shared
