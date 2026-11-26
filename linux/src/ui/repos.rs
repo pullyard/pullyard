@@ -54,6 +54,9 @@ fn repo_row(r: &RepoSummary) -> gtk::Box {
     if r.is_fork {
         top.append(&tooltip(colored_icon("sy-branch-symbolic", 11, "dim"), "Fork"));
     }
+    if let Some(badge) = super::jira::repo_badge(&r.name_with_owner) {
+        top.append(&badge);
+    }
     col.append(&top);
     if let Some(d) = r.description.as_deref().filter(|d| !d.is_empty()) {
         let l = wrap_label(d, &["sy-muted", "sy-small"]);
@@ -1797,6 +1800,7 @@ impl RepoDetail {
             if let Some(b) = &i.default_branch_ref {
                 chips.append(&chip(&b.name, "teal", Some("sy-branch-symbolic"), true));
             }
+            chips.append(&super::jira::repo_chip(&self.repo));
             col.append(&chips);
             self.tabs.set_badge("pr", Some(&i.pull_requests.total_count.to_string()), None);
             self.tabs.set_badge("issue", Some(&i.issues.total_count.to_string()), None);
@@ -2011,7 +2015,7 @@ pub fn detail_page(repo: &RepoRef) -> adw::NavigationPage {
     let browser_btn = icon_button("sy-external-symbolic", "Open in browser");
     let cm = me.code_model.clone();
     browser_btn.connect_clicked(move |_| util::open_url(&cm.web_url()));
-    hb.pack_end(&me.status.header_button());
+    hb.pack_end(&me.status.detail_pill());
     hb.pack_end(&browser_btn);
     hb.pack_end(&clone_btn);
     me.render_header();

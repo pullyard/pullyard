@@ -46,6 +46,33 @@ pub fn is_visible(id: &str) -> bool {
     visible().iter().any(|p| p.id == id)
 }
 
+pub fn has_several() -> bool {
+    visible().len() > 1
+}
+
+pub fn by_id(id: Option<&str>) -> Option<ClaudeProfile> {
+    let id = id?;
+    profiles().into_iter().find(|p| p.id == id)
+}
+
+pub fn by_config_dir(dir: Option<&str>) -> Option<ClaudeProfile> {
+    profiles().into_iter().find(|p| p.config_dir.as_deref() == dir)
+}
+
+pub fn tab_config_dir(id: Option<&str>) -> Option<String> {
+    match by_id(id) {
+        Some(p) => p.config_dir,
+        None => active_override(),
+    }
+}
+
+pub fn display_name(p: &ClaudeProfile) -> String {
+    match &p.email {
+        Some(e) => format!("{} · {e}", p.label),
+        None => p.label.clone(),
+    }
+}
+
 pub fn owns_main() -> bool {
     visible().iter().any(|p| p.is_default())
 }

@@ -23,6 +23,8 @@ pub struct Sidebar {
     update_row: gtk::Button,
     update_label: gtk::Label,
     footer: gtk::Box,
+    today: gtk::Button,
+    today_lines: gtk::Box,
 }
 
 fn sidebar_icon(icon_name: &str) -> gtk::Box {
@@ -56,7 +58,20 @@ impl Sidebar {
         let footer = hbox(8);
         footer.add_css_class("user-footer");
 
+        let today = gtk::Button::new();
+        today.add_css_class("next-card");
+        today.add_css_class("sy-today");
+        let tb = vbox(4);
+        tb.append(&label_with("TODAY", &["sy-eyebrow"]));
+        let today_lines = vbox(2);
+        tb.append(&today_lines);
+        today.set_child(Some(&tb));
+        margins(&today, 0, 8, 8, 8);
+        today.set_tooltip_text(Some("Open Overview (Ctrl+Alt+0)"));
+        today.connect_clicked(|_| app::set_section(Section::Overview));
+
         let bottom = vbox(0);
+        bottom.append(&today);
         bottom.append(&update_row);
         bottom.append(&footer);
 
@@ -75,6 +90,7 @@ impl Sidebar {
         menu.section(None);
         menu.item("Preferences", || ui_activate("preferences"));
         menu.item("Keyboard Shortcuts", || ui_activate("show-shortcuts"));
+        menu.item("Welcome Tour", super::welcome::show);
         menu.item("Check for Updates…", || ui_activate("check-updates"));
         menu.item("Buy Me a Pizza…", || ui_activate("donate"));
         menu.item(&format!("About {}", brand::APP_NAME), || ui_activate("about"));
@@ -89,7 +105,7 @@ impl Sidebar {
         tv.add_bottom_bar(&bottom);
         tv.add_css_class("sy-sidebar-pane");
 
-        let me = Rc::new(Sidebar { widget: tv.upcast(), rows: RefCell::new(vec![]), column, update_row, update_label, footer });
+        let me = Rc::new(Sidebar { widget: tv.upcast(), rows: RefCell::new(vec![]), column, update_row, update_label, footer, today, today_lines });
         me.rebuild();
         let weak = Rc::downgrade(&me);
         app::get().section_changed.connect(move |s| match weak.upgrade() {
@@ -127,6 +143,7 @@ impl Sidebar {
         app::get().phase_changed.connect(move |_| match weak.upgrade() {
             Some(me) => {
                 me.build_footer();
+                me.update_counts();
                 true
             }
             None => false,
@@ -151,10 +168,37 @@ impl Sidebar {
         clear(&self.column);
         let mut rows = vec![];
         for (group, items) in groups() {
-            self.column.append(&label_with(&group, &["sy-section-title"]));
             let list = gtk::ListBox::new();
             list.add_css_class("sy-sidebar-list");
             list.set_selection_mode(gtk::SelectionMode::Single);
+            if group == "Issues" {
+                let collapsed = crate::settings::read(|s| s.issues_collapsed);
+                let head = gtk::Button::new();
+                head.add_css_class("flat");
+                head.add_css_class("sy-section-toggle");
+                let hb = hbox(4);
+                hb.append(&label_with(&group, &["sy-section-title"]));
+                let chevron = icon(if collapsed { "pan-end-symbolic" } else { "pan-down-symbolic" }, 10);
+                chevron.add_css_class("sy-dim");
+                hb.append(&chevron);
+                head.set_child(Some(&hb));
+                set_expanded(&head, !collapsed);
+                set_label(&head, "Issues");
+                list.set_visible(!collapsed);
+                let l = list.clone();
+                head.connect_clicked(move |b| {
+                    let show = !l.is_visible();
+                    l.set_visible(show);
+                    chevron.set_icon_name(Some(if show { "pan-down-symbolic" } else { "pan-end-symbolic" }));
+                    set_expanded(b, show);
+                    crate::settings::update(|s| s.issues_collapsed = !show);
+                });
+                self.column.append(&head);
+            } else if group.is_empty() {
+                list.set_margin_top(6);
+            } else {
+                self.column.append(&label_with(&group, &["sy-section-title"]));
+            }
             for (section, title, icon_name, _tint) in items {
                 let b = hbox(8);
                 b.append(&sidebar_icon(icon_name));
@@ -174,7 +218,7 @@ impl Sidebar {
                         app::set_section(section);
                     }
                 });
-                let spoken = if matches!(section, Section::Prs(_) | Section::Issues(_)) { format!("{group}: {title}") } else { title.clone() };
+                let spoken = if matches!(section, Section::Prs(_) | Section::Issues(_)) && !group.is_empty() { format!("{group}: {title}") } else { title.clone() };
                 set_label(&row, &spoken);
                 row.set_tooltip_text(Some(&spoken));
                 rows.push(Row { section, title: spoken, list: list.clone(), row, count });
@@ -204,6 +248,7 @@ impl Sidebar {
         };
         let attention = a.claude.attention_count();
         let running = a.claude.running_count();
+        self.render_today(rr, running, attention, unread);
         for r in self.rows.borrow().iter() {
             let (n, urgent, noun): (i64, bool, &str) = match r.section {
                 Section::Notifications => (unread as i64, false, "unread"),
@@ -229,6 +274,37 @@ impl Sidebar {
             set_label(&r.row, &if n > 0 { format!("{}, {shown} {noun}", r.title) } else { r.title.clone() });
             r.row.set_tooltip_text(Some(&if n > 0 { format!("{} ({shown})", r.title) } else { r.title.clone() }));
         }
+    }
+
+    fn render_today(&self, reviews: i64, running: usize, attention: usize, unread: usize) {
+        clear(&self.today_lines);
+        let github = app::provider().is_github();
+        self.today.set_visible(github && app::get().state.borrow().phase == app::Phase::LoggedIn);
+        let line = |glyph: &str, color: &str, text: String| {
+            let b = hbox(6);
+            b.append(&colored_icon(glyph, 11, color));
+            b.append(&ellipsized(&text, &["sy-text", "sy-small", "sy-meta-num"]));
+            b
+        };
+        let mut spoken = vec![];
+        let reviews_text = if reviews == 0 { "No reviews waiting".to_string() } else { crate::util::plural(reviews, "review waiting", "reviews waiting") };
+        spoken.push(reviews_text.clone());
+        self.today_lines.append(&line("sy-eye-symbolic", if reviews > 0 { "sky" } else { "muted" }, reviews_text));
+        if attention > 0 {
+            let t = crate::util::plural(attention as i64, "agent needs you", "agents need you");
+            spoken.push(t.clone());
+            self.today_lines.append(&line("sy-sparkles-symbolic", "coral", t));
+        } else if running > 0 {
+            let t = crate::util::plural(running as i64, "agent running", "agents running");
+            spoken.push(t.clone());
+            self.today_lines.append(&line("sy-sparkles-symbolic", "coral", t));
+        }
+        if unread > 0 {
+            let t = format!("{unread} unread");
+            spoken.push(t.clone());
+            self.today_lines.append(&line("sy-bell-symbolic", "amber", t));
+        }
+        set_label(&self.today, &format!("Today: {}. Open Overview", spoken.join(", ")));
     }
 
     fn update_update_row(&self) {
@@ -264,10 +340,17 @@ pub type Group = (String, Vec<(Section, String, &'static str, &'static str)>);
 
 pub fn groups() -> Vec<Group> {
     let provider = app::provider();
-    let claude = ("AI".to_string(), vec![(Section::Claude, "Agents".to_string(), "sy-sparkles-symbolic", "coral")]);
+    let agents = (Section::Claude, "Agents".to_string(), "sy-sparkles-symbolic", "coral");
     if provider.is_github() {
         return vec![
-            ("Inbox".into(), vec![(Section::Notifications, "Notifications".into(), "sy-bell-symbolic", "amber")]),
+            (
+                String::new(),
+                vec![
+                    (Section::Overview, "Overview".into(), "sy-gauge-symbolic", "sky"),
+                    (Section::Notifications, "Notifications".into(), "sy-bell-symbolic", "amber"),
+                    agents,
+                ],
+            ),
             (
                 "Pull requests".into(),
                 PrFilter::ALL
@@ -282,14 +365,15 @@ pub fn groups() -> Vec<Group> {
                 "Code".into(),
                 vec![(Section::Repos, "Repositories".into(), "sy-repo-symbolic", "teal"), (Section::Projects, "Projects".into(), "sy-project-symbolic", "indigo")],
             ),
-            claude,
         ];
     }
     let caps = app::forge_caps();
-    let mut out: Vec<Group> = vec![];
+    let mut top = vec![];
     if let Some(inbox) = caps.inbox_title {
-        out.push(("Inbox".into(), vec![(Section::Notifications, inbox.to_string(), "sy-bell-symbolic", "amber")]));
+        top.push((Section::Notifications, inbox.to_string(), "sy-bell-symbolic", "amber"));
     }
+    top.push(agents);
+    let mut out: Vec<Group> = vec![(String::new(), top)];
     let mut pulls: Vec<(Section, String, &'static str, &'static str)> = caps.pull_filters.iter().map(|f| (Section::Prs(*f), f.title().to_string(), f.icon(), f.tint())).collect();
     if caps.pull_filters.contains(&PrFilter::Mine) {
         pulls.push((Section::MyPrsByRepo, format!("My {}s by project", provider.request_short()), "sy-folder-symbolic", "coral"));
@@ -301,7 +385,6 @@ pub fn groups() -> Vec<Group> {
     if caps.repositories {
         out.push(("Code".into(), vec![(Section::Repos, provider.repositories_title().to_string(), "sy-repo-symbolic", "teal")]));
     }
-    out.push(claude);
     out
 }
 

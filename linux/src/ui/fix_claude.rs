@@ -75,51 +75,6 @@ pub fn ci_session(r: &ItemRef) -> Option<(Rc<Tab>, TabState)> {
     matches!(state, TabState::Working | TabState::Waiting | TabState::Active).then_some((tab, state))
 }
 
-pub fn ci_banner(pr: &PullRequestDetail, r: &ItemRef, action: impl Fn() + 'static) -> Option<gtk::Box> {
-    if !pr.is_open() {
-        return None;
-    }
-    let failing = ci_fix::failing(pr).len();
-    if failing == 0 {
-        return None;
-    }
-    let b = hbox(8);
-    b.add_css_class("banner-box");
-    b.add_css_class("red");
-    b.set_vexpand(false);
-    b.set_valign(gtk::Align::Start);
-    margins(&b, 6, 16, 0, 16);
-    b.append(&icon_tile("sy-x-circle-symbolic", "red", 18));
-    b.append(&label_with(&util::plural(failing as i64, "check failing", "checks failing"), &["sy-text"]));
-    if let Some((tab, state)) = ci_session(r) {
-        b.append(&label_with("·", &["sy-dim"]));
-        let (text, class) = match state {
-            TabState::Working => ("Fix running", "sy-muted"),
-            TabState::Waiting => ("Fix needs your input", "fg-amber"),
-            _ => ("Fix session open", "sy-muted"),
-        };
-        if state == TabState::Working {
-            b.append(&spinner(12));
-        }
-        b.append(&label_with(text, &[class]));
-        let show = link_button("Show");
-        let id = tab.id;
-        show.connect_clicked(move |_| {
-            app::set_section(app::Section::Claude);
-            app::get().claude.select(id);
-        });
-        b.append(&show);
-    }
-    b.append(&spacer());
-    let btn = tinted("Fix with agent", "coral");
-    btn.add_css_class("banner-button");
-    btn.set_valign(gtk::Align::Center);
-    btn.set_vexpand(false);
-    btn.connect_clicked(move |_| action());
-    b.append(&btn);
-    Some(b)
-}
-
 struct CiFix {
     failures: RefCell<Vec<Failure>>,
     selected: RefCell<HashSet<String>>,
@@ -189,6 +144,7 @@ struct State {
     worktree_existing: RefCell<Option<String>>,
     worktree_removing: Cell<bool>,
     worktree_error: RefCell<Option<String>>,
+    tickets: RefCell<Vec<crate::jira::JiraIssue>>,
 }
 
 impl State {
@@ -212,7 +168,7 @@ impl State {
         let threads = self.threads();
         let selected = self.selected.borrow();
         let chosen: Vec<&ReviewThread> = threads.iter().filter(|t| selected.contains(&t.id)).collect();
-        fix_prompt::build(&self.pr, &self.model.r.repo, &chosen, &fix_prompt::general_feedback(&self.pr), &options)
+        fix_prompt::build(&self.pr, &self.model.r.repo, &chosen, &fix_prompt::general_feedback(&self.pr), &options) + &fix_prompt::tickets(&self.tickets.borrow())
     }
 
     fn prompt(&self) -> String {
@@ -644,7 +600,29 @@ fn present(model: Rc<PrModel>, ci: Option<Rc<CiFix>>) -> Option<Rc<State>> {
         worktree_existing: RefCell::new(None),
         worktree_removing: Cell::new(false),
         worktree_error: RefCell::new(None),
+        tickets: RefCell::new(vec![]),
     });
+    if ci.is_none() && crate::jira::is_configured() {
+        let keys: Vec<String> = super::jira::keys(&model).into_iter().take(3).collect();
+        let repo = model.r.repo.clone();
+        let weak = Rc::downgrade(&state);
+        crate::rt::spawn_local(async move {
+            let mut found = vec![];
+            for key in keys {
+                if let Ok(issue) = crate::jira::fetch_issue(&key, Some(&repo)).await {
+                    found.push(issue);
+                }
+            }
+            let Some(st) = weak.upgrade() else { return };
+            if found.is_empty() {
+                return;
+            }
+            *st.tickets.borrow_mut() = found;
+            if st.custom.borrow().is_none() {
+                st.refresh_prompt();
+            }
+        });
+    }
 
     let composed_box = vbox(4);
     match &found {

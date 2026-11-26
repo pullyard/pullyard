@@ -6,13 +6,15 @@ use std::time::{Duration, Instant};
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::api::models::RepoRef;
 use crate::api::{http_client, probed_get, ApiError, ApiResult};
 use crate::signal::Signal;
 use crate::{secret, settings};
 
-pub const TOKEN_KEY: &str = "jira-token";
+pub const LEGACY_TOKEN_KEY: &str = "jira-token";
 pub const TOKEN_URL: &str = "https://id.atlassian.com/manage-profile/security/api-tokens";
 const CACHE_TTL: Duration = Duration::from_secs(60);
 
@@ -32,6 +34,94 @@ pub struct JiraIssue {
     pub updated: Option<DateTime<Utc>>,
     pub parent_key: Option<String>,
     pub parent_summary: Option<String>,
+    pub connection_id: Option<String>,
+}
+
+impl JiraIssue {
+    pub fn site_base(&self) -> String {
+        match self.url.find("/browse/") {
+            Some(i) => self.url[..i].to_string(),
+            None => self.url.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct JiraConnection {
+    pub id: String,
+    pub name: String,
+    pub site: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub project_keys: Vec<String>,
+    pub projects_updated: Option<i64>,
+}
+
+impl JiraConnection {
+    pub fn base(&self) -> Option<String> {
+        base_url(&self.site)
+    }
+
+    pub fn host(&self) -> String {
+        self.base().and_then(|b| url::Url::parse(&b).ok()).and_then(|u| u.host_str().map(str::to_string)).unwrap_or_else(|| self.site.clone())
+    }
+
+    pub fn subtitle(&self) -> String {
+        let mut parts = vec![self.host()];
+        if !self.project_keys.is_empty() {
+            let shown = self.project_keys.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+            parts.push(if self.project_keys.len() > 5 { format!("{shown} +{}", self.project_keys.len() - 5) } else { shown });
+        }
+        parts.join(" · ")
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RouteSource {
+    RepoOverride,
+    OrgOverride,
+    Project,
+    Learned,
+    Only,
+}
+
+pub fn token_account(id: &str) -> String {
+    format!("jira-token.{id}")
+}
+
+pub fn short_name(host: &str) -> String {
+    let first = host.split('.').next().unwrap_or(host);
+    let mut c = first.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_else(|| "Jira".into())
+}
+
+pub fn project_key(issue_key: &str) -> String {
+    issue_key.split('-').next().unwrap_or(issue_key).to_uppercase()
+}
+
+pub fn route(issue_key: &str, repo: Option<&RepoRef>, connections: &[JiraConnection], org: &HashMap<String, String>, repos: &HashMap<String, String>, learned: &HashMap<String, String>) -> Option<(String, RouteSource)> {
+    let exists = |id: &String| connections.iter().any(|c| c.id == *id);
+    if let Some(repo) = repo {
+        if let Some(id) = repos.get(&repo.full().to_lowercase()).filter(|id| exists(id)) {
+            return Some((id.clone(), RouteSource::RepoOverride));
+        }
+        if let Some(id) = org.get(&repo.owner.to_lowercase()).filter(|id| exists(id)) {
+            return Some((id.clone(), RouteSource::OrgOverride));
+        }
+    }
+    let project = project_key(issue_key);
+    let owners: Vec<&JiraConnection> = connections.iter().filter(|c| c.project_keys.contains(&project)).collect();
+    if owners.len() == 1 {
+        return Some((owners[0].id.clone(), RouteSource::Project));
+    }
+    if let Some(id) = learned.get(&project).filter(|id| exists(id) && (owners.is_empty() || owners.iter().any(|o| o.id == **id))) {
+        return Some((id.clone(), RouteSource::Learned));
+    }
+    if connections.len() == 1 {
+        return Some((connections[0].id.clone(), RouteSource::Only));
+    }
+    None
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -215,6 +305,7 @@ pub fn parse_issue(o: &Value, base: &str) -> JiraIssue {
         updated: s(&f, &["updated"]).and_then(|u| parse_date(&u)),
         parent_key: s(&f, &["parent", "key"]),
         parent_summary: s(&f, &["parent", "fields", "summary"]),
+        connection_id: None,
         key,
     }
 }
@@ -285,6 +376,30 @@ impl Client {
         serde_json::from_slice::<Value>(&bytes).ok().filter(|v| v.is_object()).ok_or_else(|| ApiError::new("Jira sent a web page instead of data. Check the address: it should be just your site, like acme.atlassian.net."))
     }
 
+    pub async fn project_keys(&self) -> ApiResult<Vec<String>> {
+        let mut keys: Vec<String> = vec![];
+        let mut start = 0usize;
+        loop {
+            let o = match self.json(&format!("/rest/api/3/project/search?startAt={start}&maxResults=50")).await {
+                Ok(o) => o,
+                Err(e) if e.status == 404 => {
+                    let bytes = self.request("/rest/api/2/project", reqwest::Method::GET, None).await?;
+                    let list: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                    return Ok(list.as_array().map(|a| a.iter().filter_map(|p| s(p, &["key"])).collect()).unwrap_or_default());
+                }
+                Err(e) => return Err(e),
+            };
+            let values = o.get("values").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            keys.extend(values.iter().filter_map(|p| s(p, &["key"])));
+            start += values.len();
+            let total = o.get("total").and_then(|t| t.as_u64()).map(|t| t as usize).unwrap_or(keys.len());
+            if values.is_empty() || o.get("isLast").and_then(|l| l.as_bool()) == Some(true) || start >= total || start > 5000 {
+                break;
+            }
+        }
+        Ok(keys)
+    }
+
     pub async fn myself(&self) -> ApiResult<String> {
         let o = self.json("/rest/api/2/myself").await?;
         Ok(s(&o, &["displayName"]).or_else(|| s(&o, &["name"])).unwrap_or_else(|| "Jira".into()))
@@ -306,8 +421,8 @@ impl Client {
 }
 
 thread_local! {
-    static TOKEN: RefCell<Option<String>> = const { RefCell::new(None) };
-    static CACHE: RefCell<HashMap<String, (JiraIssue, Instant)>> = RefCell::new(HashMap::new());
+    static TOKENS: RefCell<HashMap<String, Option<String>>> = RefCell::new(HashMap::new());
+    static CACHE: RefCell<HashMap<String, HashMap<String, (JiraIssue, Instant)>>> = RefCell::new(HashMap::new());
     static CHANGED: Signal<()> = const { Signal::new() };
 }
 
@@ -319,91 +434,285 @@ pub fn changed() {
     CHANGED.with(|s| s.emit(&()));
 }
 
-pub fn site() -> String {
-    settings::read(|s| s.jira_site.clone())
+pub fn connections() -> Vec<JiraConnection> {
+    settings::read(|s| s.jira_connections.clone())
 }
 
-pub fn email() -> String {
-    settings::read(|s| s.jira_email.clone())
-}
-
-pub fn display_name() -> Option<String> {
-    settings::read(|s| s.jira_name.clone())
+pub fn connection(id: Option<&str>) -> Option<JiraConnection> {
+    let id = id?;
+    connections().into_iter().find(|c| c.id == id)
 }
 
 pub fn is_configured() -> bool {
-    settings::read(|s| s.jira_has_token) && base_url(&site()).is_some()
+    settings::read(|s| !s.jira_connections.is_empty())
 }
 
-pub fn host() -> String {
-    base_url(&site()).and_then(|b| url::Url::parse(&b).ok()).and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default()
+pub fn has_several() -> bool {
+    settings::read(|s| s.jira_connections.len() > 1)
 }
 
-pub async fn connect(site: String, email: String, token: String) -> ApiResult<()> {
-    let email = email.trim().to_string();
-    let token = token.trim().to_string();
-    let site = site.trim().to_string();
-    settings::update(|s| {
-        s.jira_site = site.clone();
-        s.jira_email = email.clone();
-    });
-    let Some(base) = base_url(&site) else { return Err(ApiError::new("Enter your Jira address, for example acme.atlassian.net")) };
-    let client = Client::new(base, authorization(&email, &token));
-    let name = crate::rt::run(async move { client.myself().await }).await?;
-    if crate::rt::run(secret::save(settings::config_dir(), TOKEN_KEY.into(), token.clone())).await == secret::Saved::Failed {
-        return Err(ApiError::new("Couldn't store the Jira token"));
-    }
-    TOKEN.with(|t| *t.borrow_mut() = Some(token));
-    CACHE.with(|c| c.borrow_mut().clear());
-    settings::update(|s| {
-        s.jira_has_token = true;
-        s.jira_name = Some(name);
+pub fn org_overrides() -> HashMap<String, String> {
+    settings::read(|s| s.jira_overrides_org.clone())
+}
+
+pub fn repo_overrides() -> HashMap<String, String> {
+    settings::read(|s| s.jira_overrides_repo.clone())
+}
+
+pub fn resolve(issue_key: &str, repo: Option<&RepoRef>) -> Option<String> {
+    settings::read(|s| route(issue_key, repo, &s.jira_connections, &s.jira_overrides_org, &s.jira_overrides_repo, &s.jira_learned)).map(|(id, _)| id)
+}
+
+pub fn override_for(repo: &RepoRef) -> (Option<String>, Option<String>) {
+    settings::read(|s| (s.jira_overrides_repo.get(&repo.full().to_lowercase()).cloned(), s.jira_overrides_org.get(&repo.owner.to_lowercase()).cloned()))
+}
+
+pub fn set_repo_override(id: Option<String>, repo: &RepoRef) {
+    let key = repo.full().to_lowercase();
+    settings::update(|s| match id {
+        Some(id) => {
+            s.jira_overrides_repo.insert(key, id);
+        }
+        None => {
+            s.jira_overrides_repo.remove(&key);
+        }
     });
     changed();
+}
+
+pub fn set_org_override(id: Option<String>, org: &str) {
+    let key = org.to_lowercase();
+    settings::update(|s| match id {
+        Some(id) => {
+            s.jira_overrides_org.insert(key, id);
+        }
+        None => {
+            s.jira_overrides_org.remove(&key);
+        }
+    });
+    changed();
+}
+
+pub fn connection_for_repo(repo: &RepoRef) -> Option<String> {
+    let (by_repo, by_org) = override_for(repo);
+    by_repo.or(by_org).or_else(|| {
+        let list = connections();
+        if list.len() == 1 {
+            list.first().map(|c| c.id.clone())
+        } else {
+            None
+        }
+    })
+}
+
+pub fn known_token(id: &str) -> Option<bool> {
+    TOKENS.with(|t| t.borrow().get(id).map(|v| v.is_some()))
+}
+
+pub async fn token(id: &str) -> Option<String> {
+    if let Some(hit) = TOKENS.with(|t| t.borrow().get(id).cloned()) {
+        return hit;
+    }
+    let value = crate::rt::run(secret::load(settings::config_dir(), token_account(id))).await;
+    TOKENS.with(|t| t.borrow_mut().insert(id.to_string(), value.clone()));
+    value
+}
+
+pub async fn client(id: Option<&str>) -> Option<Client> {
+    let c = connection(id)?;
+    let base = c.base()?;
+    let token = token(&c.id).await?;
+    Some(Client::new(base, authorization(&c.email, &token)))
+}
+
+async fn validated(id: &str, name: &str, site: &str, email: &str, token: &str) -> ApiResult<JiraConnection> {
+    let site = site.trim().to_string();
+    let email = email.trim().to_string();
+    let secret_value = token.trim().to_string();
+    let Some(base) = base_url(&site) else { return Err(ApiError::new("Enter your Jira address, for example acme.atlassian.net")) };
+    if secret_value.is_empty() {
+        return Err(ApiError::new("Enter an API token"));
+    }
+    let client = Client::new(base.clone(), authorization(&email, &secret_value));
+    let me = crate::rt::run(async move { client.myself().await }).await?;
+    if crate::rt::run(secret::save(settings::config_dir(), token_account(id), secret_value.clone())).await == secret::Saved::Failed {
+        return Err(ApiError::new("Couldn't store the Jira token"));
+    }
+    TOKENS.with(|t| t.borrow_mut().insert(id.to_string(), Some(secret_value)));
+    let label = name.trim();
+    let host = url::Url::parse(&base).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_else(|| "Jira".into());
+    Ok(JiraConnection { id: id.to_string(), name: if label.is_empty() { short_name(&host) } else { label.to_string() }, site: base, email, display_name: Some(me), project_keys: vec![], projects_updated: None })
+}
+
+fn save_connections(list: Vec<JiraConnection>) {
+    settings::update(|s| {
+        s.jira_connections = list;
+        s.jira_connections_saved = true;
+    });
+}
+
+pub async fn add(name: &str, site: &str, email: &str, token: &str) -> ApiResult<JiraConnection> {
+    let id = uuid::Uuid::new_v4().to_string().to_lowercase();
+    let c = validated(&id, name, site, email, token).await?;
+    let mut list = connections();
+    list.push(c.clone());
+    save_connections(list);
+    changed();
+    refresh_projects(&id).await;
+    Ok(connection(Some(&id)).unwrap_or(c))
+}
+
+pub async fn update(id: &str, name: &str, site: &str, email: &str, new_token: Option<String>) -> ApiResult<()> {
+    let Some(old) = connection(Some(id)) else { return Ok(()) };
+    let fresh = new_token.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let secret_value = match fresh {
+        Some(t) => t,
+        None => token(id).await.unwrap_or_default(),
+    };
+    let mut c = validated(id, name, site, email, &secret_value).await?;
+    c.project_keys = old.project_keys;
+    c.projects_updated = old.projects_updated;
+    let list = connections().into_iter().map(|x| if x.id == id { c.clone() } else { x }).collect();
+    save_connections(list);
+    CACHE.with(|cache| cache.borrow_mut().remove(id));
+    changed();
+    refresh_projects(id).await;
     Ok(())
 }
 
-pub fn disconnect() {
-    TOKEN.with(|t| t.borrow_mut().take());
-    CACHE.with(|c| c.borrow_mut().clear());
+pub fn remove(id: &str) {
+    TOKENS.with(|t| t.borrow_mut().remove(id));
+    CACHE.with(|c| c.borrow_mut().remove(id));
+    let list = connections().into_iter().filter(|c| c.id != id).collect();
+    save_connections(list);
     settings::update(|s| {
-        s.jira_has_token = false;
-        s.jira_name = None;
+        s.jira_overrides_org.retain(|_, v| v != id);
+        s.jira_overrides_repo.retain(|_, v| v != id);
+        s.jira_learned.retain(|_, v| v != id);
     });
-    crate::rt::spawn_local(async { crate::rt::run(secret::delete(settings::config_dir(), TOKEN_KEY.into())).await });
+    let account = token_account(id);
+    crate::rt::spawn_local(async move { crate::rt::run(secret::delete(settings::config_dir(), account)).await });
     changed();
 }
 
-pub async fn client() -> Option<Client> {
-    if !settings::read(|s| s.jira_has_token) {
-        return None;
-    }
-    let base = base_url(&site())?;
-    let token = match TOKEN.with(|t| t.borrow().clone()) {
-        Some(t) => t,
-        None => {
-            let t = crate::rt::run(secret::load(settings::config_dir(), TOKEN_KEY.into())).await?;
-            TOKEN.with(|c| *c.borrow_mut() = Some(t.clone()));
-            t
-        }
-    };
-    Some(Client::new(base, authorization(&email(), &token)))
+pub async fn refresh_projects(id: &str) {
+    let Some(client) = client(Some(id)).await else { return };
+    let Ok(mut keys) = crate::rt::run(async move { client.project_keys().await }).await else { return };
+    keys.sort();
+    keys.dedup();
+    let now = Utc::now().timestamp();
+    let mut list = connections();
+    let Some(c) = list.iter_mut().find(|c| c.id == id) else { return };
+    c.project_keys = keys;
+    c.projects_updated = Some(now);
+    save_connections(list);
+    changed();
 }
 
-pub fn cached(key: &str) -> Option<JiraIssue> {
-    CACHE.with(|c| c.borrow().get(key).filter(|(_, at)| at.elapsed() < CACHE_TTL).map(|(i, _)| i.clone()))
+pub async fn refresh_all(older_than_secs: i64) {
+    let now = Utc::now().timestamp();
+    for c in connections() {
+        if now - c.projects_updated.unwrap_or(0) >= older_than_secs {
+            refresh_projects(&c.id).await;
+        }
+    }
+}
+
+pub async fn fetch_issue(key: &str, repo: Option<&RepoRef>) -> ApiResult<JiraIssue> {
+    if let Some(id) = resolve(key, repo) {
+        if let Some(client) = client(Some(&id)).await {
+            let k = key.to_string();
+            let mut issue = crate::rt::run(async move { client.issue(&k).await }).await?;
+            issue.connection_id = Some(id);
+            remember(&issue);
+            return Ok(issue);
+        }
+    }
+    let mut last = ApiError::new(format!("No Jira connection has {key}"));
+    for c in connections() {
+        let Some(client) = client(Some(&c.id)).await else { continue };
+        let k = key.to_string();
+        match crate::rt::run(async move { client.issue(&k).await }).await {
+            Ok(mut issue) => {
+                issue.connection_id = Some(c.id.clone());
+                let project = project_key(key);
+                settings::update(|s| {
+                    s.jira_learned.insert(project, c.id.clone());
+                });
+                remember(&issue);
+                return Ok(issue);
+            }
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
+pub fn cached(key: &str, repo: Option<&RepoRef>) -> Option<JiraIssue> {
+    let ids = match resolve(key, repo) {
+        Some(id) => vec![id],
+        None => connections().into_iter().map(|c| c.id).collect(),
+    };
+    CACHE.with(|c| {
+        let c = c.borrow();
+        ids.iter().find_map(|id| c.get(id).and_then(|m| m.get(key)).filter(|(_, at)| at.elapsed() < CACHE_TTL).map(|(i, _)| i.clone()))
+    })
 }
 
 pub fn clear_cache() {
     CACHE.with(|c| c.borrow_mut().clear());
 }
 
-pub fn browse_url(key: &str) -> Option<String> {
-    base_url(&site()).map(|b| format!("{b}/browse/{key}"))
+pub fn remember(issue: &JiraIssue) {
+    let Some(id) = issue.connection_id.clone() else { return };
+    CACHE.with(|c| c.borrow_mut().entry(id).or_default().insert(issue.key.clone(), (issue.clone(), Instant::now())));
 }
 
-pub fn remember(issue: &JiraIssue) {
-    CACHE.with(|c| c.borrow_mut().insert(issue.key.clone(), (issue.clone(), Instant::now())));
+pub fn header_subtitle(issues: &[JiraIssue]) -> String {
+    let mut names: Vec<String> = vec![];
+    for i in issues {
+        if let Some(c) = connection(i.connection_id.as_deref()) {
+            if !names.contains(&c.name) {
+                names.push(c.name);
+            }
+        }
+    }
+    let list = connections();
+    if names.is_empty() && list.len() == 1 {
+        return list[0].host();
+    }
+    names.join(" · ")
+}
+
+async fn migrate_legacy() {
+    let (site, email, name, empty, saved) = settings::read(|s| (s.jira_site.clone(), s.jira_email.clone(), s.jira_name.clone(), s.jira_connections.is_empty(), s.jira_connections_saved));
+    if !empty || saved || site.trim().is_empty() {
+        return;
+    }
+    let Some(token) = crate::rt::run(secret::load(settings::config_dir(), LEGACY_TOKEN_KEY.into())).await else { return };
+    let id = uuid::Uuid::new_v4().to_string().to_lowercase();
+    if crate::rt::run(secret::save(settings::config_dir(), token_account(&id), token.clone())).await == secret::Saved::Failed {
+        return;
+    }
+    TOKENS.with(|t| t.borrow_mut().insert(id.clone(), Some(token)));
+    let host = base_url(&site).and_then(|b| url::Url::parse(&b).ok()).and_then(|u| u.host_str().map(str::to_string));
+    let c = JiraConnection { id: id.clone(), name: host.as_deref().map(short_name).unwrap_or_else(|| "Jira".into()), site, email, display_name: name, project_keys: vec![], projects_updated: None };
+    save_connections(vec![c]);
+    settings::update(|s| s.jira_has_token = false);
+    crate::rt::run(secret::delete(settings::config_dir(), LEGACY_TOKEN_KEY.into())).await;
+    changed();
+    refresh_projects(&id).await;
+}
+
+pub fn start() {
+    crate::rt::spawn_local(async {
+        migrate_legacy().await;
+        refresh_all(600).await;
+    });
+    crate::app::on_refresh(|_| {
+        crate::rt::spawn_local(async { refresh_all(600).await });
+        true
+    });
 }
 
 pub fn linked(pr_url: &str) -> Vec<String> {
@@ -532,6 +841,7 @@ mod tests {
             updated: None,
             parent_key: None,
             parent_summary: None,
+            connection_id: None,
         }
     }
 
@@ -661,6 +971,37 @@ mod tests {
         assert_eq!(t[0].title(), "Done");
         assert_eq!(t[1].title(), "Start → In Progress");
         assert_eq!(t[0].to_category, "done");
+    }
+
+    #[test]
+    fn routes_by_override_then_project_key_then_learned() {
+        let conn = |id: &str, name: &str, keys: &[&str]| JiraConnection { id: id.into(), name: name.into(), site: format!("{id}.atlassian.net"), email: String::new(), display_name: None, project_keys: keys.iter().map(|k| k.to_string()).collect(), projects_updated: None };
+        let a = conn("a", "Work A", &["COM", "PAY"]);
+        let b = conn("b", "Work B", &["OPS", "PAY"]);
+        let both = vec![a.clone(), b];
+        let repo = RepoRef::new("Mabrook", "App");
+        let map = |pairs: &[(&str, &str)]| pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<HashMap<String, String>>();
+        let route_in = |key: &str, repo: Option<&RepoRef>, org: &[(&str, &str)], repos: &[(&str, &str)], learned: &[(&str, &str)], list: &[JiraConnection]| route(key, repo, list, &map(org), &map(repos), &map(learned)).map(|(id, _)| id);
+        let r = |key: &str, repo: Option<&RepoRef>, org: &[(&str, &str)], repos: &[(&str, &str)], learned: &[(&str, &str)]| route_in(key, repo, org, repos, learned, &both);
+        assert_eq!(r("COM-1", None, &[], &[], &[]).as_deref(), Some("a"));
+        assert_eq!(r("OPS-12", None, &[], &[], &[]).as_deref(), Some("b"));
+        assert_eq!(r("PAY-3", None, &[], &[], &[]), None);
+        assert_eq!(r("PAY-3", None, &[], &[], &[("PAY", "b")]).as_deref(), Some("b"));
+        assert_eq!(r("NEW-1", None, &[], &[], &[]), None);
+        assert_eq!(r("NEW-1", None, &[], &[], &[("NEW", "a")]).as_deref(), Some("a"));
+        assert_eq!(r("OPS-1", Some(&repo), &[("mabrook", "a")], &[], &[]).as_deref(), Some("a"));
+        assert_eq!(r("OPS-1", Some(&repo), &[("mabrook", "a")], &[("mabrook/app", "b")], &[]).as_deref(), Some("b"));
+        assert_eq!(r("OPS-1", Some(&repo), &[("mabrook", "gone")], &[], &[]).as_deref(), Some("b"));
+        assert_eq!(route_in("XYZ-9", None, &[], &[], &[], &[a]).as_deref(), Some("a"));
+        assert_eq!(project_key("com-12"), "COM");
+    }
+
+    #[test]
+    fn connection_names_and_subtitles() {
+        assert_eq!(short_name("acme.atlassian.net"), "Acme");
+        let c = JiraConnection { id: "x".into(), name: "Acme".into(), site: "https://acme.atlassian.net".into(), project_keys: ["A", "B", "C", "D", "E", "F", "G"].iter().map(|k| k.to_string()).collect(), ..Default::default() };
+        assert_eq!(c.subtitle(), "acme.atlassian.net · A, B, C, D, E +2");
+        assert_eq!(token_account("x"), "jira-token.x");
     }
 
     #[test]

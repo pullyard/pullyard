@@ -80,15 +80,15 @@ fn diff_lines(c: &ToolCall) -> Vec<DiffLine> {
                 let body: String = l.chars().skip(1).collect();
                 match l.chars().next() {
                     Some('+') => {
-                        out.push(DiffLine { id: idx, kind: LineKind::Add, text: body, old_line: None, new_line: Some(new) });
+                        out.push(DiffLine { id: idx, kind: LineKind::Add, text: body, old_line: None, new_line: Some(new), word: None, outside: false });
                         new += 1;
                     }
                     Some('-') => {
-                        out.push(DiffLine { id: idx, kind: LineKind::Del, text: body, old_line: Some(old), new_line: None });
+                        out.push(DiffLine { id: idx, kind: LineKind::Del, text: body, old_line: Some(old), new_line: None, word: None, outside: false });
                         old += 1;
                     }
                     _ => {
-                        out.push(DiffLine { id: idx, kind: LineKind::Context, text: body, old_line: Some(old), new_line: Some(new) });
+                        out.push(DiffLine { id: idx, kind: LineKind::Context, text: body, old_line: Some(old), new_line: Some(new), word: None, outside: false });
                         old += 1;
                         new += 1;
                     }
@@ -100,7 +100,7 @@ fn diff_lines(c: &ToolCall) -> Vec<DiffLine> {
     }
     if c.name == "Write" {
         for (n, l) in c.string("content").unwrap_or_default().split('\n').enumerate() {
-            out.push(DiffLine { id: idx, kind: LineKind::Add, text: l.to_string(), old_line: None, new_line: Some(n as i64 + 1) });
+            out.push(DiffLine { id: idx, kind: LineKind::Add, text: l.to_string(), old_line: None, new_line: Some(n as i64 + 1), word: None, outside: false });
             idx += 1;
         }
         return out;
@@ -113,11 +113,11 @@ fn diff_lines(c: &ToolCall) -> Vec<DiffLine> {
     };
     for e in edits {
         for l in e.get("old_string").and_then(|v| v.as_str()).unwrap_or("").split('\n') {
-            out.push(DiffLine { id: idx, kind: LineKind::Del, text: l.to_string(), old_line: None, new_line: None });
+            out.push(DiffLine { id: idx, kind: LineKind::Del, text: l.to_string(), old_line: None, new_line: None, word: None, outside: false });
             idx += 1;
         }
         for l in e.get("new_string").and_then(|v| v.as_str()).unwrap_or("").split('\n') {
-            out.push(DiffLine { id: idx, kind: LineKind::Add, text: l.to_string(), old_line: None, new_line: None });
+            out.push(DiffLine { id: idx, kind: LineKind::Add, text: l.to_string(), old_line: None, new_line: None, word: None, outside: false });
             idx += 1;
         }
     }
@@ -326,7 +326,7 @@ fn linger_hover(target: &impl IsA<gtk::Widget>, actions: &gtk::Box, enabled: imp
 fn status_glyph(c: &ToolCall, pending_permission: bool) -> Option<gtk::Widget> {
     match c.status.get() {
         ToolStatus::Running if pending_permission => Some(colored_icon("sy-attention-symbolic", 14, "amber").upcast()),
-        ToolStatus::Running => Some(spinner(12).upcast()),
+        ToolStatus::Running => Some(wake_spinner(12).upcast()),
         ToolStatus::Done => None,
         ToolStatus::Error => Some(colored_icon("sy-x-symbolic", 14, "red").upcast()),
         ToolStatus::Denied => Some(colored_icon("sy-issue-skip-symbolic", 14, "amber").upcast()),
@@ -361,7 +361,7 @@ impl ChatView {
         column.append(&pr_card);
 
         let working = hbox(8);
-        working.append(&spinner(14));
+        working.append(&wake_spinner(14));
         let working_label = label_with("Working…", &["sy-muted"]);
         working.append(&working_label);
         let working_time = label_with("", &["sy-dim", "sy-small", "sy-mono"]);
@@ -1596,7 +1596,7 @@ impl ChatView {
         let hb = hbox(6);
         let (title, running) = tool_groups::group_header(&calls, &folder);
         if running {
-            hb.append(&spinner(12));
+            hb.append(&wake_spinner(12));
         }
         let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
         for (icon_name, tint) in tool_groups::kind_icons(&names) {
@@ -2749,14 +2749,15 @@ impl ChatComposer {
         compact.set_sensitive(c.running.get() && !c.busy.get());
         b.append(&compact);
         b.append(&line());
-        let (windows, sub, note) = chat::USAGE.with(|u| {
-            let u = u.borrow();
-            (u.windows.clone(), u.subscription.clone(), u.overage_note.clone())
-        });
+        let usage = chat::usage_for(c.config_dir.as_deref());
+        let (windows, sub, note) = (usage.windows, usage.subscription, usage.overage_note);
         let head = hbox(6);
         head.append(&label_with("Plan usage", &["heading"]));
         if let Some(s) = sub {
             head.append(&chip(&s, "coral", None, false));
+        }
+        if let Some(a) = super::auth_view::account_chip(accounts::by_config_dir(c.config_dir.as_deref()).as_ref(), false) {
+            head.append(&a);
         }
         b.append(&head);
         if windows.is_empty() {

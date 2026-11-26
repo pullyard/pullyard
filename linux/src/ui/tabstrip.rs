@@ -94,14 +94,16 @@ impl TabStrip {
         for (i, _, badge) in &self.buttons {
             if *i == id {
                 for c in crate::theme::ACCENTS {
-                    badge.remove_css_class(&format!("fg-{c}"));
+                    badge.remove_css_class(&format!("ink-{c}"));
+                    badge.remove_css_class(&format!("bg-{c}"));
                 }
                 match text {
                     Some(t) => {
                         badge.set_text(t);
                         badge.set_visible(true);
                         if let Some(c) = color {
-                            badge.add_css_class(&format!("fg-{c}"));
+                            badge.add_css_class(&format!("ink-{c}"));
+                            badge.add_css_class(&format!("bg-{c}"));
                         }
                     }
                     None => badge.set_visible(false),

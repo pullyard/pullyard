@@ -92,6 +92,9 @@ fn session_row(s: &SessionInfo, opts: RowOpts, dot: &Dot, on_toggle: Option<Box<
     if opts.children > 0 {
         b.append(&label_with(&opts.children.to_string(), &["sy-dim", "sy-small"]));
     }
+    if let Some(c) = auth_view::account_chip(accounts::by_id(s.profile_id.as_deref()).as_ref(), true) {
+        b.append(&c);
+    }
     b.append(&dot.area);
     b.set_tooltip_text(Some(&session_details(s)));
     b
@@ -112,6 +115,9 @@ fn tab_row(t: &Tab, selected: bool, dot: &Dot) -> gtk::Box {
     project.set_hexpand(false);
     project.set_max_width_chars(16);
     b.append(&project);
+    if let Some(c) = auth_view::account_chip(t.profile().as_ref(), true) {
+        b.append(&c);
+    }
     b.append(&dot.area);
     let mut tip = t.state().help().to_string();
     let mem = t.memory_bytes();
@@ -287,8 +293,20 @@ impl Column {
             }
             _ => {}
         }
+        let several = accounts::has_several();
+        if several {
+            let w = app::get().claude.clone();
+            if let Some(f) = auth_view::account_filter(ws.account_filter(), move |id| {
+                let w = w.clone();
+                gtk::glib::idle_add_local_once(move || w.set_account_filter(id));
+            }) {
+                margins(&f, 2, 8, 6, 8);
+                self.list.append(&f);
+            }
+        }
         match status {
             Status::LoggedIn(_) => {}
+            _ if several => {}
             Status::Unknown | Status::Checking => {
                 let s = spinner(16);
                 s.set_halign(gtk::Align::Center);
@@ -314,7 +332,7 @@ impl Column {
         clear(&self.tabs_box);
         self.tab_dots.borrow_mut().clear();
         *self.memory.borrow_mut() = None;
-        if !accounts::store().is_logged_in() {
+        if !accounts::store().is_logged_in() && !accounts::has_several() {
             return;
         }
         let ws = app::get().claude.clone();
@@ -392,7 +410,7 @@ impl Column {
     }
 
     fn refresh_live(self: &Rc<Self>) {
-        if !accounts::store().is_logged_in() {
+        if !accounts::store().is_logged_in() && !accounts::has_several() {
             return;
         }
         let ws = app::get().claude.clone();
@@ -481,9 +499,16 @@ impl Column {
             let title = titles.get(&s.id).unwrap_or(&s.title).to_lowercase();
             title.contains(&query) || s.branch.as_deref().unwrap_or("").to_lowercase().contains(&query)
         };
-        let projects: Vec<Project> = ws
+        let scoped: Vec<Project> = ws
             .projects
             .borrow()
+            .iter()
+            .filter_map(|p| {
+                let sessions = ws.visible_sessions(&p.sessions);
+                (!sessions.is_empty()).then(|| Project { id: p.id.clone(), path: p.path.clone(), sessions })
+            })
+            .collect();
+        let projects: Vec<Project> = scoped
             .iter()
             .filter_map(|p| {
                 if query.is_empty() || p.name().to_lowercase().contains(&query) {
@@ -519,7 +544,8 @@ impl Column {
             let w = Rc::downgrade(self);
             let id = p.id.clone();
             let path = p.path.clone();
-            self.list.append(&project_header(
+            let header_path = p.path.clone();
+            let header = project_header(
                 &p,
                 expanded,
                 move || {
@@ -534,9 +560,24 @@ impl Column {
                     }
                 },
                 move || {
-                    app::get().claude.new_session(&path, None, None, None, None);
+                    let ws = app::get().claude.clone();
+                    let filter = ws.account_filter().filter(|_| accounts::has_several());
+                    ws.new_session_as(&path, None, None, None, None, filter.as_deref());
                 },
-            ));
+            );
+            if accounts::has_several() && p.exists() {
+                context_menu(&header, move || {
+                    let m = Menu::ctx();
+                    for profile in accounts::visible() {
+                        let (f, id) = (header_path.clone(), profile.id.clone());
+                        m.item(&format!("New session as {}", profile.label), move || {
+                            app::get().claude.new_session_as(&f, None, None, None, None, Some(&id));
+                        });
+                    }
+                    m
+                });
+            }
+            self.list.append(&header);
             if expanded {
                 let limit = if query.is_empty() { 40 } else { 200 };
                 let visible: Vec<SessionInfo> = p.sessions.iter().filter(|s| (show_archived || !(s.archived || archived_ids.contains(&s.id))) && !pinned_ids.contains(&s.id)).take(limit).cloned().collect();
@@ -549,7 +590,7 @@ impl Column {
             }
         }
         if ws.projects.borrow().is_empty() && ws.tabs.borrow().is_empty() && !ws.loading_projects.get() {
-            let l = label_with("No Claude Code sessions yet", &["sy-muted"]);
+            let l = label_with("No agent sessions yet", &["sy-muted"]);
             margins(&l, 10, 12, 10, 12);
             self.list.append(&l);
         } else if archived_count > 0 || show_archived {

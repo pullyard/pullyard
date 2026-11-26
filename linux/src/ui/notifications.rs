@@ -180,7 +180,19 @@ impl View {
     fn build_rows(self: &Rc<Self>, items: Vec<NotificationThread>) {
         for n in items {
             let r = gtk::ListBoxRow::new();
-            r.set_child(Some(&row(&n)));
+            let content = row(&n);
+            let done = icon_button("sy-check-symbolic", "Done (E)");
+            done.add_css_class("notif-done");
+            done.set_valign(gtk::Align::Center);
+            let weak = Rc::downgrade(self);
+            let nd = n.clone();
+            done.connect_clicked(move |_| {
+                if let Some(me) = weak.upgrade() {
+                    me.mark_done(nd.clone());
+                }
+            });
+            content.append(&done);
+            r.set_child(Some(&content));
             r.set_tooltip_text(Some(&n.subject.title));
             r.update_property(&[gtk::accessible::Property::Label(&spoken(&n))]);
             let weak = Rc::downgrade(self);
@@ -288,18 +300,41 @@ impl View {
 
     fn mark_done(self: &Rc<Self>, n: NotificationThread) {
         let Some(api) = app::api() else { return };
+        let position = self.items.borrow().iter().position(|i| i.id == n.id);
+        let Some(position) = position else { return };
+        let removed = self.items.borrow_mut().remove(position);
+        if removed.unread {
+            let a = app::get();
+            let u = a.state.borrow().unread_count.saturating_sub(1);
+            a.set_unread(u);
+        }
+        self.render();
         let me = self.clone();
-        crate::rt::spawn_local(async move {
-            let id = n.id.clone();
-            let _ = crate::rt::run(async move { api.mark_notification_done(&id).await }).await;
-            me.items.borrow_mut().retain(|i| i.id != n.id);
-            if n.unread {
-                let a = app::get();
-                let u = a.state.borrow().unread_count.saturating_sub(1);
-                a.set_unread(u);
-            }
-            me.render();
-        });
+        let restore = removed.clone();
+        let title = removed.subject.title.clone();
+        let short: String = if title.chars().count() > 40 { format!("{}…", title.chars().take(40).collect::<String>()) } else { title };
+        app::toast_undoable(
+            &format!("Done: {short}"),
+            move || {
+                let id = n.id.clone();
+                crate::rt::spawn_local(async move {
+                    let _ = crate::rt::run(async move { api.mark_notification_done(&id).await }).await;
+                });
+            },
+            move || {
+                {
+                    let mut items = me.items.borrow_mut();
+                    let at = position.min(items.len());
+                    items.insert(at, restore.clone());
+                }
+                if restore.unread {
+                    let a = app::get();
+                    let u = a.state.borrow().unread_count + 1;
+                    a.set_unread(u);
+                }
+                me.render();
+            },
+        );
     }
 
     fn mark_all(self: &Rc<Self>) {
@@ -392,22 +427,40 @@ pub fn build() -> gtk::Widget {
         let n = row.and_then(|r| v.items.borrow().get(r.index().max(0) as usize).cloned());
         let route = n.as_ref().and_then(|n| n.route());
         v.open_bar.set_visible(n.is_some() && route.is_none());
-        let (Some(n), Some(route)) = (n, route) else { return };
-        gtk::glib::idle_add_local_once(move || {
-            app::select(Some(route));
-            if n.unread {
-                v.mark_read(n);
-            }
-        });
+        let (Some(_), Some(route)) = (n, route) else { return };
+        gtk::glib::idle_add_local_once(move || app::select(Some(route)));
     });
     let v = Rc::downgrade(&view);
     list.connect_row_activated(move |_, row| {
         let Some(v) = v.upgrade() else { return };
         let n = v.items.borrow().get(row.index().max(0) as usize).cloned();
-        if let Some(n) = n.filter(|n| n.route().is_none()) {
-            v.open_external(n);
+        let Some(n) = n else { return };
+        match n.route() {
+            None => v.open_external(n),
+            Some(route) => {
+                app::select(Some(route));
+                if n.unread {
+                    v.mark_read(n);
+                }
+            }
         }
     });
+    let keys = gtk::EventControllerKey::new();
+    let v = Rc::downgrade(&view);
+    keys.connect_key_pressed(move |_, key, _, state| {
+        if key != gtk::gdk::Key::e || state.intersects(gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::ALT_MASK | gtk::gdk::ModifierType::SUPER_MASK) {
+            return gtk::glib::Propagation::Proceed;
+        }
+        let Some(v) = v.upgrade() else { return gtk::glib::Propagation::Proceed };
+        match v.selected() {
+            Some(n) => {
+                v.mark_done(n);
+                gtk::glib::Propagation::Stop
+            }
+            None => gtk::glib::Propagation::Proceed,
+        }
+    });
+    list.add_controller(keys);
     let v = Rc::downgrade(&view);
     open_button.connect_clicked(move |_| {
         let Some(v) = v.upgrade() else { return };

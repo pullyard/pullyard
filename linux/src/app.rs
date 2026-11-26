@@ -144,6 +144,7 @@ impl IssueFilter {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Section {
+    Overview,
     Notifications,
     Prs(PrFilter),
     MyPrsByRepo,
@@ -157,6 +158,7 @@ pub enum Section {
 impl Section {
     pub fn key(&self) -> String {
         match self {
+            Section::Overview => "overview".into(),
             Section::Notifications => "notifications".into(),
             Section::Prs(f) => format!("prs/{}", f.key()),
             Section::MyPrsByRepo => "prs/byProject".into(),
@@ -171,6 +173,7 @@ impl Section {
     pub fn from_key(key: &str) -> Option<Self> {
         let mut parts = key.split('/');
         match (parts.next(), parts.next()) {
+            (Some("overview"), _) => Some(Section::Overview),
             (Some("notifications"), _) => Some(Section::Notifications),
             (Some("prs"), Some("byProject")) => Some(Section::MyPrsByRepo),
             (Some("prs"), Some(f)) => Some(Section::Prs(PrFilter::from_key(f).unwrap_or(PrFilter::ReviewRequested))),
@@ -185,6 +188,7 @@ impl Section {
 
     pub fn title(&self) -> String {
         match self {
+            Section::Overview => "Overview".into(),
             Section::Notifications => "Notifications".into(),
             Section::Prs(f) => f.title().into(),
             Section::MyPrsByRepo => "My PRs by project".into(),
@@ -253,7 +257,9 @@ pub struct App {
     pub claude: Rc<Workspace>,
 }
 
-const PHASE_ACTIONS: [&str; 17] = [
+const PHASE_ACTIONS: [&str; 19] = [
+    "pr-review-panel",
+    "section-overview",
     "refresh",
     "back",
     "command-palette",
@@ -342,7 +348,7 @@ pub fn caps_allow(caps: &ForgeCapabilities, s: Section) -> bool {
         Section::Notifications => caps.has_inbox(),
         Section::Repos => caps.repositories,
         Section::Claude => true,
-        Section::Projects | Section::Stacks => false,
+        Section::Overview | Section::Projects | Section::Stacks => false,
     }
 }
 
@@ -418,6 +424,57 @@ pub fn toast_with(msg: &str, button: &str, f: impl Fn() + 'static) {
     }
 }
 
+pub fn toast_action(msg: &str, button: &str, f: impl Fn() + 'static) {
+    if let Some(t) = try_get().and_then(|a| a.toasts.borrow().clone()) {
+        let toast = adw::Toast::new(msg);
+        toast.set_timeout(5);
+        toast.set_button_label(Some(button));
+        toast.connect_button_clicked(move |_| f());
+        t.add_toast(toast);
+    }
+}
+
+pub fn toast_undoable(msg: &str, commit: impl FnOnce() + 'static, undo: impl FnOnce() + 'static) {
+    let Some(t) = try_get().and_then(|a| a.toasts.borrow().clone()) else {
+        commit();
+        return;
+    };
+    let toast = adw::Toast::new(msg);
+    toast.set_timeout(5);
+    toast.set_button_label(Some("Undo"));
+    let undone = Rc::new(Cell::new(false));
+    let u = undone.clone();
+    let undo = RefCell::new(Some(undo));
+    toast.connect_button_clicked(move |_| {
+        u.set(true);
+        if let Some(f) = undo.borrow_mut().take() {
+            f();
+        }
+    });
+    let commit = RefCell::new(Some(commit));
+    toast.connect_dismissed(move |_| {
+        if !undone.get() {
+            if let Some(f) = commit.borrow_mut().take() {
+                f();
+            }
+        }
+    });
+    t.add_toast(toast);
+}
+
+pub fn next_review(current: Option<&ItemRef>) -> Option<Route> {
+    let a = try_get()?;
+    let s = a.state.borrow();
+    s.review_requests.iter().map(|i| i.route()).find(|r| !matches!((r, current), (Route::Pr(x), Some(c)) if x == c))
+}
+
+pub fn open_next_review(current: Option<&ItemRef>) {
+    match next_review(current) {
+        Some(r) => open(r, false),
+        None => toast("No more reviews waiting"),
+    }
+}
+
 pub fn quit() {
     if let Some(a) = try_get() {
         a.flush_drafts();
@@ -458,7 +515,7 @@ pub fn set_section(s: Section) {
     }
     {
         let mut st = a.state.borrow_mut();
-        if old != Section::Claude {
+        if old != Section::Claude && old != Section::Overview {
             st.last_list_section = Some(old);
         }
         st.section = s;
@@ -486,9 +543,9 @@ pub fn open(route: Route, push: bool) {
         return;
     }
     let section = a.state.borrow().section;
-    if section == Section::Claude {
+    if section == Section::Claude || section == Section::Overview {
         let last = a.state.borrow().last_list_section;
-        let target = match last.filter(|s| *s != Section::Claude && section_allowed(*s)) {
+        let target = match last.filter(|s| *s != Section::Claude && *s != Section::Overview && section_allowed(*s)) {
             Some(s) => s,
             None if section_allowed(Section::Prs(PrFilter::Mine)) => Section::Prs(PrFilter::Mine),
             None => first_section(&forge_caps()),
@@ -513,7 +570,7 @@ pub fn open(route: Route, push: bool) {
 
 pub fn visible_route() -> Option<Route> {
     let a = try_get()?;
-    if a.state.try_borrow().ok()?.section == Section::Claude {
+    if matches!(a.state.try_borrow().ok()?.section, Section::Claude | Section::Overview) {
         return None;
     }
     let main = a.main.try_borrow().ok()?.clone()?;
@@ -541,6 +598,26 @@ pub fn forward() {
     if let Some(m) = try_get().and_then(|a| a.main.borrow().clone()) {
         m.forward();
     }
+}
+
+pub fn remember_recent(route: &Route) {
+    if let Route::Pr(r) | Route::Issue(r) = route {
+        crate::queue::mark_seen(&r.title(), chrono::Utc::now());
+    }
+    let Some(stored) = crate::nav_memory::encode(route, &cache_account()) else { return };
+    if matches!(route, Route::Repo(_)) || settings::read(|s| s.recent_routes.first() == Some(&stored)) {
+        return;
+    }
+    settings::update(|s| {
+        s.recent_routes.retain(|r| r != &stored);
+        s.recent_routes.insert(0, stored);
+        s.recent_routes.truncate(12);
+    });
+}
+
+pub fn recent_routes() -> Vec<Route> {
+    let account = cache_account();
+    settings::read(|s| s.recent_routes.clone()).iter().filter_map(|r| crate::nav_memory::decode(r, &account)).collect()
 }
 
 pub fn on_refresh(f: impl Fn(&()) -> bool + 'static) {
@@ -756,7 +833,7 @@ impl App {
         let Some(stored) = settings::read(|st| st.nav_route.clone()) else { return };
         let account = cache_account();
         let mut s = self.state.borrow_mut();
-        if s.api.is_none() || s.route.is_some() || s.section == Section::Claude {
+        if s.api.is_none() || s.route.is_some() || matches!(s.section, Section::Claude | Section::Overview) {
             return;
         }
         s.route = crate::nav_memory::decode(&stored, &account);
@@ -890,6 +967,9 @@ impl App {
                 root.set_visible_child_name("main");
                 if let Some(old) = root.child_by_name("login") {
                     root.remove(&old);
+                }
+                if !self.smoke.get() {
+                    ui::welcome::maybe_show();
                 }
             }
             Phase::Checking => {}
@@ -1603,6 +1683,7 @@ impl App {
         let query = |name: &str| url.query_pairs().find(|(k, _)| k == name).map(|(_, v)| v.to_string());
         if host == "section" {
             let section = match (parts.first().map(|s| s.as_str()), parts.get(1).map(|s| s.as_str())) {
+                (Some("overview"), _) => Some(Section::Overview),
                 (Some("notifications"), _) => Some(Section::Notifications),
                 (Some("repos"), _) => Some(Section::Repos),
                 (Some("projects"), _) => Some(Section::Projects),
@@ -1679,6 +1760,7 @@ impl App {
         add("pr-review", &["<Control><Shift>r"], Box::new(|| ui::pr::shortcut(ui::pr::Shortcut::Review)));
         add("pr-approve", &["<Control><Shift>a"], Box::new(|| ui::pr::shortcut(ui::pr::Shortcut::Approve)));
         add("pr-merge", &["<Control><Shift>m"], Box::new(|| ui::pr::shortcut(ui::pr::Shortcut::Merge)));
+        add("pr-review-panel", &["<Control><Alt>i"], Box::new(|| ui::pr::shortcut(ui::pr::Shortcut::ReviewPanel)));
         add("preferences", &["<Control>comma"], Box::new(|| ui::settings::show()));
         add("check-updates", &[], Box::new(|| ui::update::show(true)));
         add("show-update", &[], Box::new(|| ui::update::show(false)));
@@ -1719,6 +1801,7 @@ impl App {
         for (i, (name, s)) in sections.into_iter().enumerate() {
             add(name, &[&format!("<Control>{}", i + 1)], Box::new(move || set_section(s)));
         }
+        add("section-overview", &["<Control><Alt>0"], Box::new(|| set_section(Section::Overview)));
         let claude_ready = || try_get().is_some_and(|a| a.state.borrow().phase == Phase::LoggedIn && section_allowed(Section::Claude));
         add(
             "agents-quick-open",
@@ -1865,7 +1948,11 @@ fn initial_section(smoke: bool) -> Section {
     if smoke || demo::is_on() || crate::tour::active() {
         return fallback;
     }
-    Section::from_key(&settings::read(|s| s.nav_section.clone())).unwrap_or(fallback)
+    let stored = settings::read(|s| s.nav_section.clone());
+    if stored.is_empty() {
+        return Section::Overview;
+    }
+    Section::from_key(&stored).unwrap_or(fallback)
 }
 
 pub fn run(smoke: bool) -> glib::ExitCode {
@@ -1944,6 +2031,7 @@ pub fn run(smoke: bool) -> glib::ExitCode {
             me.render_phase();
         });
         crate::rt::spawn_local(a.clone().restore());
+        crate::jira::start();
         glib::timeout_add_local_once(Duration::from_secs(3), crate::stack::notes::watch_inbox);
         if crate::tour::active() {
             crate::tour::run(a.clone());

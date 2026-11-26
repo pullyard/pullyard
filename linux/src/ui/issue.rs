@@ -30,7 +30,6 @@ struct IssuePage {
     title: adw::WindowTitle,
     actions: gtk::Box,
     status: Rc<RefreshStatus>,
-    busy_spinner: Loader,
     page: gtk::glib::WeakRef<adw::Bin>,
 }
 
@@ -72,8 +71,7 @@ impl IssuePage {
     }
 
     fn render_status(&self) {
-        self.status.update(self.updated.get(), self.loading.get(), self.refresh_error.borrow().clone());
-        self.busy_spinner.set_visible(self.busy.get());
+        self.status.update(self.updated.get(), self.loading.get() || self.busy.get(), self.refresh_error.borrow().clone());
     }
 
     fn render(self: &Rc<Self>) {
@@ -259,8 +257,6 @@ pub fn page_child(r: &ItemRef) -> gtk::Widget {
     hb.set_title_widget(Some(&title));
     tv.add_css_class("sy-panel-pane");
     let actions = hbox(4);
-    let busy_spinner = spinner(14);
-    busy_spinner.set_visible(false);
     let holder: Rc<RefCell<Option<std::rc::Weak<IssuePage>>>> = Rc::new(RefCell::new(None));
     let h = holder.clone();
     let status = RefreshStatus::new(true, move || {
@@ -268,10 +264,8 @@ pub fn page_child(r: &ItemRef) -> gtk::Widget {
             me.load();
         }
     });
-    hb.pack_end(&status.header_button());
+    hb.pack_end(&status.detail_pill());
     hb.pack_end(&actions);
-    hb.pack_end(&status.widget);
-    hb.pack_end(&busy_spinner);
     let bin = adw::Bin::new();
     bin.set_child(Some(&tv));
     let me = Rc::new(IssuePage {
@@ -290,7 +284,6 @@ pub fn page_child(r: &ItemRef) -> gtk::Widget {
         title,
         actions,
         status,
-        busy_spinner,
         page: bin.downgrade(),
     });
     *holder.borrow_mut() = Some(Rc::downgrade(&me));

@@ -14,7 +14,11 @@ fn prefix(item: &SearchItem) -> &'static str {
 }
 
 pub fn spoken_label(item: &SearchItem) -> String {
-    let mut parts = vec![item.title.clone(), format!("{}{}{}", item.repository.name_with_owner, prefix(item), item.number)];
+    let mut parts = vec![];
+    if crate::queue::has_news(crate::queue::seen(&item.item_ref().title()), item.updated_at) {
+        parts.push("New activity".to_string());
+    }
+    parts.extend([item.title.clone(), format!("{}{}{}", item.repository.name_with_owner, prefix(item), item.number)]);
     if let Some(login) = item.author.as_ref().map(|a| a.login.as_str()).filter(|l| !l.is_empty()) {
         parts.push(format!("by {login}"));
     }
@@ -47,9 +51,25 @@ pub fn describe_row(row: &gtk::ListBoxRow, item: &SearchItem) {
 }
 
 pub fn item_row(item: &SearchItem, show_repo: bool) -> gtk::Box {
+    item_row_with(item, show_repo, false)
+}
+
+pub fn item_row_with(item: &SearchItem, show_repo: bool, news: bool) -> gtk::Box {
     let row = hbox(10);
     margins(&row, 4, 0, 4, 0);
-    row.append(&state_badge(item.visual_state(), true));
+    let lead = gtk::Overlay::new();
+    lead.set_child(Some(&state_badge(item.visual_state(), true)));
+    lead.set_valign(gtk::Align::Start);
+    if news {
+        let dot = fixed_box(&["news-dot"], 6, 6);
+        dot.set_halign(gtk::Align::Start);
+        dot.set_valign(gtk::Align::Start);
+        dot.set_margin_start(0);
+        dot.set_tooltip_text(Some("New activity since you looked"));
+        lead.add_overlay(&dot);
+        lead.set_tooltip_text(Some("New activity since you looked"));
+    }
+    row.append(&lead);
     let col = vbox(4);
     col.set_hexpand(true);
     let title = wrap_label(&item.title, &["sy-row-title"]);
@@ -80,14 +100,11 @@ pub fn item_row(item: &SearchItem, show_repo: bool) -> gtk::Box {
     info.append(&spacer());
     let status = hbox(8);
     if item.is_pr() {
-        if let Some(ci) = ci_icon(item.ci_state().as_deref()) {
-            status.append(&ci);
+        if let Some(review) = review_chip(item.review_decision.as_deref()) {
+            status.append(&review);
         }
-        match item.review_decision.as_deref() {
-            Some("APPROVED") => status.append(&status_icon("sy-check-symbolic", 12, "green", "Approved")),
-            Some("CHANGES_REQUESTED") => status.append(&status_icon("sy-plusminus-symbolic", 12, "red", "Changes requested")),
-            Some("REVIEW_REQUIRED") => status.append(&status_icon("sy-eye-symbolic", 12, "muted", "Review required")),
-            _ => {}
+        if let Some(ci) = ci_chip(item.ci_state().as_deref()) {
+            status.append(&ci);
         }
     }
     if item.comments.total_count > 0 {

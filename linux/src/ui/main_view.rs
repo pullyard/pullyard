@@ -22,6 +22,7 @@ pub struct MainView {
     nav: adw::NavigationView,
     cache: RefCell<HashMap<String, gtk::Widget>>,
     claude_view: RefCell<Option<gtk::Widget>>,
+    overview_view: RefCell<Option<gtk::Widget>>,
     routes: RefCell<Vec<(gtk::glib::WeakRef<adw::NavigationPage>, Route)>>,
     forward: RefCell<ForwardStack>,
 }
@@ -83,24 +84,25 @@ fn install_sidebar_resize(split: &adw::OverlaySplitView) {
     split.add_controller(motion);
 }
 
-fn empty_page() -> adw::NavigationPage {
-    let b = vbox(12);
-    b.set_valign(gtk::Align::Center);
-    b.set_halign(gtk::Align::Center);
-    b.set_vexpand(true);
-    let tile = icon_tile("sy-pr-symbolic", "violet", 56);
-    tile.set_opacity(0.9);
-    b.append(&tile);
+fn empty_content() -> gtk::Widget {
     let provider = app::provider();
-    let prompt = if provider.is_github() { "Select a pull request, issue or project".to_string() } else { format!("Select a {}", provider.request_title()) };
-    let t = label_with(&prompt, &["sy-muted"]);
-    t.set_xalign(0.5);
-    b.append(&t);
-    let hint = if provider.is_github() { "Ctrl+L to open by link · Ctrl+K for the command palette · Ctrl+? for all shortcuts" } else { "Ctrl+K for the command palette · Ctrl+? for all shortcuts" };
-    let s = label_with(hint, &["sy-dim", "sy-small"]);
-    s.set_xalign(0.5);
-    b.append(&s);
-    let (tv, _, _) = toolbar_page("", "", &b);
+    let shortcuts: &[(&str, &str)] = if provider.is_github() { &[("Ctrl+L", "Open by link"), ("Ctrl+K", "Commands"), ("Ctrl+?", "Shortcuts")] } else { &[("Ctrl+K", "Commands"), ("Ctrl+?", "Shortcuts")] };
+    let message = if provider.is_github() { "Pick a pull request, issue or project from the list, or jump straight to one.".to_string() } else { format!("Pick a {} from the list, or jump straight to one.", provider.request_title()) };
+    super::empty_state::build(super::empty_state::EmptyState { key: "detail-empty", title: "Nothing open yet", message: &message, shortcuts, aurora: true, next_up: provider.is_github() })
+}
+
+fn empty_page() -> adw::NavigationPage {
+    let bin = adw::Bin::new();
+    bin.set_child(Some(&empty_content()));
+    let weak = bin.downgrade();
+    app::on_badges(move |_| match weak.upgrade() {
+        Some(bin) => {
+            bin.set_child(Some(&empty_content()));
+            true
+        }
+        None => false,
+    });
+    let (tv, _, _) = toolbar_page("", "", &bin);
     tv.add_css_class("sy-panel-pane");
     let page = adw::NavigationPage::new(&tv, brand::APP_NAME);
     page.set_tag(Some("empty"));
@@ -137,7 +139,7 @@ impl MainView {
         paned.set_wide_handle(false);
         split.set_content(Some(&paned));
 
-        let me = Rc::new(MainView { widget: split.upcast(), content, detail, nav, cache: RefCell::new(HashMap::new()), claude_view: RefCell::new(None), routes: RefCell::new(vec![]), forward: RefCell::new(ForwardStack::default()) });
+        let me = Rc::new(MainView { widget: split.upcast(), content, detail, nav, cache: RefCell::new(HashMap::new()), claude_view: RefCell::new(None), overview_view: RefCell::new(None), routes: RefCell::new(vec![]), forward: RefCell::new(ForwardStack::default()) });
         me.nav.connect_visible_page_notify(|_| {
             gtk::glib::idle_add_local_once(app::sync_actions);
         });
@@ -178,7 +180,20 @@ impl MainView {
             }
         };
         self.content.set_child(Some(&w));
-        if s == Section::Claude {
+        self.content.set_visible(s != Section::Overview);
+        if s == Section::Overview {
+            let existing = self.overview_view.borrow().clone();
+            let ov = match existing {
+                Some(v) => v,
+                None => {
+                    let v = super::overview::build();
+                    self.detail.add_named(&v, Some("overview"));
+                    *self.overview_view.borrow_mut() = Some(v.clone());
+                    v
+                }
+            };
+            self.detail.set_visible_child(&ov);
+        } else if s == Section::Claude {
             let existing = self.claude_view.borrow().clone();
             let cv = match existing {
                 Some(v) => v,
@@ -202,6 +217,7 @@ impl MainView {
                 self.forward.borrow_mut().clear();
             }
             Some(r) => {
+                app::remember_recent(&r);
                 let page = super::route_page(&r);
                 if push {
                     self.forward.borrow_mut().pushed(&r);

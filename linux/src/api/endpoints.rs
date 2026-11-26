@@ -397,6 +397,10 @@ impl GitHubApi {
         self.send(Method::POST, &format!("/repos/{}/pulls/{}/requested_reviewers", r.repo.full(), r.number), Some(Value::Object(body))).await
     }
 
+    pub async fn create_branch(&self, repo: &str, branch: &str, sha: &str) -> ApiResult<()> {
+        self.send(Method::POST, &format!("/repos/{repo}/git/refs"), Some(json!({ "ref": format!("refs/heads/{branch}"), "sha": sha }))).await
+    }
+
     pub async fn delete_branch(&self, repo: &str, branch: &str) -> ApiResult<()> {
         self.send(Method::DELETE, &format!("/repos/{repo}/git/refs/heads/{}", encode_path(branch)), None).await
     }

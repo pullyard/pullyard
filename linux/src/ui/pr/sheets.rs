@@ -52,6 +52,93 @@ fn close_on_success(sheet: &Sheet) -> impl Fn(bool) + Clone {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Verdict {
+    Comment,
+    Approve,
+    RequestChanges,
+}
+
+impl Verdict {
+    pub fn event(&self) -> &'static str {
+        match self {
+            Verdict::Comment => "COMMENT",
+            Verdict::Approve => "APPROVE",
+            Verdict::RequestChanges => "REQUEST_CHANGES",
+        }
+    }
+
+    pub fn submit_label(&self) -> &'static str {
+        match self {
+            Verdict::Comment => "Comment",
+            Verdict::Approve => "Approve",
+            Verdict::RequestChanges => "Request changes",
+        }
+    }
+
+    pub fn tint(&self) -> &'static str {
+        match self {
+            Verdict::Comment => "accent",
+            Verdict::Approve => "green",
+            Verdict::RequestChanges => "red",
+        }
+    }
+
+    pub fn blocked_reason(&self, blank: bool, pending: usize) -> Option<&'static str> {
+        if !blank || pending > 0 {
+            return None;
+        }
+        match self {
+            Verdict::Approve => None,
+            Verdict::Comment => Some("Write a summary or add inline comments to send a comment."),
+            Verdict::RequestChanges => Some("Explain what needs to change, or add inline comments."),
+        }
+    }
+
+    pub fn done_message(&self, prefix: &str, number: i64) -> String {
+        match self {
+            Verdict::Comment => format!("Review sent on {prefix}{number}"),
+            Verdict::Approve => format!("Approved {prefix}{number}"),
+            Verdict::RequestChanges => format!("Requested changes on {prefix}{number}"),
+        }
+    }
+}
+
+pub fn after_review(model: &Rc<PrModel>, verdict: Verdict, number: i64) {
+    let msg = verdict.done_message(model.features.number_prefix(), number);
+    if verdict == Verdict::Approve && crate::app::next_review(Some(&model.r)).is_some() {
+        let r = model.r.clone();
+        crate::app::toast_action(&format!("✓ {msg}"), "Next review →", move || crate::app::open_next_review(Some(&r)));
+    } else {
+        crate::app::toast(&msg);
+    }
+}
+
+fn pending_list(model: &Rc<PrModel>) -> Option<gtk::Box> {
+    let pending = model.pending.borrow().clone();
+    if pending.is_empty() {
+        return None;
+    }
+    let b = vbox(4);
+    b.add_css_class("sy-sunken");
+    pad(&b, 10);
+    b.append(&label_with(&format!("PENDING INLINE COMMENTS · {}", pending.len()), &["sy-eyebrow"]));
+    for c in pending.iter().take(8) {
+        let row = hbox(8);
+        let loc = label_with(&format!("{}:{}", c.path.rsplit('/').next().unwrap_or(&c.path), c.line), &["sy-mono", "sy-small", "sy-link"]);
+        loc.set_tooltip_text(Some(&format!("{}:{}", c.path, c.line)));
+        row.append(&loc);
+        let text = ellipsized(c.body.lines().next().unwrap_or(""), &["sy-muted", "sy-small"]);
+        text.set_hexpand(true);
+        row.append(&text);
+        b.append(&row);
+    }
+    if pending.len() > 8 {
+        b.append(&label_with(&format!("and {} more", pending.len() - 8), &["sy-dim", "sy-small"]));
+    }
+    Some(b)
+}
+
 pub fn review(model: Rc<PrModel>) {
     let Some(pr) = model.pr.borrow().clone() else { return };
     let f = model.features;
@@ -63,11 +150,37 @@ pub fn review(model: Rc<PrModel>) {
         l.append(&label_with("Restored from your last session", &["sy-muted", "sy-small"]));
         sheet.body.append(&l);
     }
-    if pending > 0 {
-        let l = hbox(6);
-        l.append(&icon("sy-comment-symbolic", 13));
-        l.append(&label_with(&format!("Inline comments to be submitted: {pending}"), &["sy-muted"]));
-        sheet.body.append(&l);
+    let own = pr.viewer_did_author;
+    let verdict = Rc::new(std::cell::Cell::new(Verdict::Comment));
+    let segments = hbox(0);
+    segments.add_css_class("linked");
+    segments.set_halign(gtk::Align::Start);
+    let mut toggles: Vec<(Verdict, gtk::ToggleButton)> = vec![];
+    for v in [Verdict::Comment, Verdict::Approve, Verdict::RequestChanges] {
+        let t = gtk::ToggleButton::with_label(v.submit_label());
+        if let Some((_, first)) = toggles.first() {
+            t.set_group(Some(first));
+        }
+        segments.append(&t);
+        toggles.push((v, t));
+    }
+    toggles[0].1.set_active(true);
+    segments.update_property(&[gtk::accessible::Property::Label("Verdict")]);
+    let can_approve = pr.viewer_can_approve.unwrap_or(!own) && pr.viewer_approved != Some(true);
+    for (v, t) in &toggles {
+        match v {
+            Verdict::Approve => t.set_sensitive(can_approve),
+            Verdict::RequestChanges => {
+                t.set_sensitive(!own);
+                t.set_visible(f.request_changes);
+            }
+            Verdict::Comment => {}
+        }
+    }
+    if own && !can_approve {
+        sheet.body.append(&label_with(&format!("This is your {}, so you can leave a comment but not approve it or request changes.", f.request_title()), &["sy-muted", "sy-small"]));
+    } else {
+        sheet.body.append(&segments);
     }
     let composer = Composer::new("Review summary (optional when approving)", 140);
     composer.set_text(&model.summary_draft.borrow());
@@ -80,18 +193,13 @@ pub fn review(model: Rc<PrModel>) {
         }
     });
     sheet.body.append(&composer.widget);
-    let comment = gtk::CheckButton::with_label("Comment — without approval");
-    comment.set_active(true);
-    let approve = gtk::CheckButton::with_label("Approve");
-    approve.set_group(Some(&comment));
-    let changes = gtk::CheckButton::with_label("Request changes");
-    changes.set_group(Some(&comment));
-    approve.set_sensitive(pr.viewer_can_approve.unwrap_or(!pr.viewer_did_author) && pr.viewer_approved != Some(true));
-    changes.set_sensitive(!pr.viewer_did_author);
-    changes.set_visible(f.request_changes);
-    sheet.body.append(&comment);
-    sheet.body.append(&approve);
-    sheet.body.append(&changes);
+    let reason = label_with("", &["ink-amber", "sy-small"]);
+    reason.set_wrap(true);
+    reason.set_visible(false);
+    sheet.body.append(&reason);
+    if let Some(list) = pending_list(&model) {
+        sheet.body.append(&list);
+    }
     if pending > 0 {
         let discard = destructive("Discard pending comments");
         let m = model.clone();
@@ -114,26 +222,60 @@ pub fn review(model: Rc<PrModel>) {
     }
     sheet.add_footer_spacer();
     sheet.cancel_button();
-    let submit = suggested("Submit review");
+    let submit = gtk::Button::with_label("Comment");
     sheet.footer.append(&submit);
+    let sync: Rc<dyn Fn()> = {
+        let submit = submit.clone();
+        let reason = reason.clone();
+        let comp = composer.clone();
+        let m = model.clone();
+        let verdict = verdict.clone();
+        Rc::new(move || {
+            let v = verdict.get();
+            for x in [Verdict::Comment, Verdict::Approve, Verdict::RequestChanges] {
+                submit.remove_css_class(&format!("tint-{}", x.tint()));
+            }
+            submit.add_css_class(&format!("tint-{}", v.tint()));
+            submit.set_label(v.submit_label());
+            let why = v.blocked_reason(comp.is_blank(), m.pending.borrow().len());
+            submit.set_sensitive(why.is_none());
+            reason.set_text(why.unwrap_or(""));
+            reason.set_visible(why.is_some());
+        })
+    };
+    for (v, t) in &toggles {
+        let v = *v;
+        let verdict = verdict.clone();
+        let sync = sync.clone();
+        t.connect_toggled(move |t| {
+            if t.is_active() {
+                verdict.set(v);
+                sync();
+            }
+        });
+    }
+    let s = sync.clone();
+    composer.on_changed(move || s());
+    sync();
     let done = close_on_success(&sheet);
     let m = model.clone();
     let comp = composer.clone();
+    let number = pr.number;
     let go = Rc::new(move || {
-        let event = if approve.is_active() {
-            "APPROVE"
-        } else if changes.is_active() {
-            "REQUEST_CHANGES"
-        } else {
-            "COMMENT"
-        };
-        if m.busy.get() || (event != "APPROVE" && comp.is_blank() && m.pending.borrow().is_empty()) {
+        let v = verdict.get();
+        if m.busy.get() || v.blocked_reason(comp.is_blank(), m.pending.borrow().len()).is_some() {
             return;
         }
         let body = comp.text();
         let m = m.clone();
         let done = done.clone();
-        crate::rt::spawn_local(async move { done(m.submit_review(event.to_string(), body).await) });
+        crate::rt::spawn_local(async move {
+            let ok = m.clone().submit_review(v.event().to_string(), body).await;
+            if ok {
+                after_review(&m, v, number);
+            }
+            done(ok)
+        });
     });
     let g = go.clone();
     submit.connect_clicked(move |_| g());
@@ -141,6 +283,74 @@ pub fn review(model: Rc<PrModel>) {
     composer.on_submit(move || g());
     sheet.present();
     composer.grab_focus();
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MergePrimary {
+    Merge,
+    MergeWhenReady,
+    ViewConflicts,
+    UpdateBranch,
+    MergeAnyway,
+}
+
+impl MergePrimary {
+    pub fn title(&self) -> &'static str {
+        match self {
+            MergePrimary::Merge => "Merge",
+            MergePrimary::MergeWhenReady => "Merge when ready",
+            MergePrimary::ViewConflicts => "View conflicts",
+            MergePrimary::UpdateBranch => "Update branch",
+            MergePrimary::MergeAnyway => "Merge anyway",
+        }
+    }
+}
+
+pub fn merge_buttons(ready: bool, conflicts: bool, behind: bool, waiting: bool, auto_available: bool) -> (MergePrimary, Option<MergePrimary>) {
+    if ready {
+        return (MergePrimary::Merge, auto_available.then_some(MergePrimary::MergeWhenReady));
+    }
+    if conflicts {
+        return (MergePrimary::ViewConflicts, Some(MergePrimary::MergeAnyway));
+    }
+    if behind {
+        return (MergePrimary::UpdateBranch, Some(MergePrimary::MergeAnyway));
+    }
+    if waiting && auto_available {
+        return (MergePrimary::MergeWhenReady, Some(MergePrimary::MergeAnyway));
+    }
+    (MergePrimary::MergeAnyway, auto_available.then_some(MergePrimary::MergeWhenReady))
+}
+
+fn merge_glyph(m: MergeMethod) -> &'static str {
+    match m {
+        MergeMethod::Merge => "sy-merge-symbolic",
+        MergeMethod::Squash => "sy-commit-symbolic",
+        MergeMethod::Rebase => "sy-branch-symbolic",
+    }
+}
+
+fn after_merge(model: &Rc<PrModel>, number: i64, base: String, restore: Option<(String, String, String)>) {
+    let msg = format!("Merged {}{number} into {base}", model.features.number_prefix());
+    match restore {
+        Some((repo, branch, sha)) => {
+            let m = model.clone();
+            crate::app::toast_action(&msg, "Restore branch", move || {
+                let m = m.clone();
+                let (repo, branch, sha) = (repo.clone(), branch.clone(), sha.clone());
+                crate::rt::spawn_local(async move {
+                    if m.restore_branch(repo, branch.clone(), sha).await {
+                        crate::app::toast(&format!("Restored {branch}"));
+                    }
+                });
+            });
+        }
+        None if crate::app::next_review(Some(&model.r)).is_some() => {
+            let r = model.r.clone();
+            crate::app::toast_action(&msg, "Next review →", move || crate::app::open_next_review(Some(&r)));
+        }
+        None => crate::app::toast(&msg),
+    }
 }
 
 pub fn merge(model: Rc<PrModel>) {
@@ -158,12 +368,47 @@ pub fn merge(model: Rc<PrModel>) {
             .collect(),
     };
     let f = model.features;
-    let sheet = Sheet::new(&format!("Merge {}{} into {}", f.number_prefix(), pr.number, pr.base_ref_name), 560, -1);
-    let names: Vec<&str> = allowed.iter().map(|m| if *m == MergeMethod::Merge && f.is_gitlab() { "Merge" } else { m.title() }).collect();
-    let method = gtk::DropDown::from_strings(&names);
+    let prefix = f.number_prefix();
+    let method_title = move |m: MergeMethod| if m == MergeMethod::Merge && f.is_gitlab() { "Merge" } else { m.title() };
+    let sheet = Sheet::new(&format!("Merge {prefix}{} into {}", pr.number, pr.base_ref_name), 580, -1);
+    let checklist = vbox(0);
+    sheet.body.append(&checklist);
+    let render_list: Rc<dyn Fn()> = {
+        let checklist = checklist.downgrade();
+        let m = model.clone();
+        Rc::new(move || {
+            let Some(c) = checklist.upgrade() else { return };
+            let Some(pr) = m.pr.borrow().clone() else { return };
+            clear(&c);
+            let reqs = m.requirements();
+            let st = super::merge_status(&pr, &reqs);
+            let head = hbox(8);
+            head.append(&colored_icon(st.icon, 16, st.color));
+            head.append(&wrap_label(&st.text, &["sy-text", "sy-heading"]));
+            c.append(&head);
+            if !reqs.is_empty() {
+                let list = super::requirements_list(&m, &pr, &reqs, None);
+                list.set_margin_top(8);
+                list.set_margin_start(4);
+                c.append(&list);
+            }
+        })
+    };
+    render_list();
+    let weak_list = checklist.downgrade();
+    let r = render_list.clone();
+    model.changed.connect(move |c| {
+        if weak_list.upgrade().is_none() {
+            return false;
+        }
+        if matches!(c, Change::Pr | Change::Rules) {
+            r();
+        }
+        true
+    });
     let default = MergeMethod::from_key(repo.as_ref().map(|r| r.viewer_default_merge_method.as_str()).unwrap_or("MERGE")).unwrap_or(MergeMethod::Merge);
     let initial = allowed.iter().position(|m| *m == default).unwrap_or(0);
-    method.set_selected(initial as u32);
+    let selected = Rc::new(std::cell::Cell::new(allowed.get(initial).copied().unwrap_or(MergeMethod::Merge)));
     let uses_queue = f.merge_queue && pr.is_merge_queue_enabled == Some(true) && pr.merge_queue_entry.is_none() && pr.is_in_merge_queue != Some(true);
     if uses_queue {
         let note = hbox(6);
@@ -177,59 +422,173 @@ pub fn merge(model: Rc<PrModel>) {
         note.append(&text);
         sheet.body.append(&note);
     }
-    let row = hbox(8);
-    row.append(&label_with("Method", &["sy-muted"]));
-    row.append(&method);
-    sheet.body.append(&row);
     let title = gtk::Entry::new();
     title.set_placeholder_text(Some(&format!("Commit title ({} default)", f.service_title())));
     let message = Composer::new("Commit description (optional)", 80);
     let commit_box = vbox(8);
     commit_box.append(&title);
     commit_box.append(&message.widget);
+    let prefill = {
+        let title = title.clone();
+        let commit_box = commit_box.clone();
+        let pr_title = pr.title.clone();
+        let number = pr.number;
+        let github = f.provider.is_github();
+        Rc::new(move |m: MergeMethod| {
+            commit_box.set_visible(m != MergeMethod::Rebase);
+            let squashed = if github { format!("{pr_title} (#{number})") } else { pr_title.clone() };
+            title.set_text(&if m == MergeMethod::Squash { squashed } else { String::new() });
+        })
+    };
+    if allowed.len() > 1 {
+        let seg = hbox(0);
+        seg.add_css_class("linked");
+        seg.set_halign(gtk::Align::Start);
+        seg.update_property(&[gtk::accessible::Property::Label("Merge method")]);
+        let mut first: Option<gtk::ToggleButton> = None;
+        for m in &allowed {
+            let t = gtk::ToggleButton::new();
+            t.set_child(Some(&icon_label_content(merge_glyph(*m), method_title(*m))));
+            if let Some(f) = &first {
+                t.set_group(Some(f));
+            } else {
+                first = Some(t.clone());
+            }
+            t.set_active(*m == selected.get());
+            let m = *m;
+            let sel = selected.clone();
+            let p = prefill.clone();
+            t.connect_toggled(move |t| {
+                if t.is_active() {
+                    sel.set(m);
+                    p(m);
+                }
+            });
+            seg.append(&t);
+        }
+        sheet.body.append(&seg);
+    }
     sheet.body.append(&commit_box);
+    prefill(selected.get());
     let delete_on_merge = repo.as_ref().map(|r| r.delete_branch_on_merge).unwrap_or(false);
     let same_repo = pr.head_repository.as_ref().map(|h| h.name_with_owner == model.r.repo.full()).unwrap_or(false);
     let delete = gtk::CheckButton::with_label(&format!("Delete branch {} after merge", pr.head_ref_name));
     delete.set_active(true);
     delete.set_visible(!delete_on_merge && same_repo);
     sheet.body.append(&delete);
-    let prefill = {
+    let done = close_on_success(&sheet);
+    let reqs = model.requirements();
+    let st = super::merge_status(&pr, &reqs);
+    let conflicts = pr.mergeable == "CONFLICTING" || pr.merge_state_status.as_deref() == Some("DIRTY");
+    let behind = pr.merge_state_status.as_deref() == Some("BEHIND");
+    let failed = pr.checks().iter().any(|c| c.outcome() == crate::api::models::CheckOutcome::Failure);
+    let waiting = !failed && (reqs.iter().any(|r| r.state == crate::api::merge_readiness::RequirementState::Pending) || pr.review_decision.as_deref() == Some("REVIEW_REQUIRED"));
+    let auto_available = repo.as_ref().map(|r| r.auto_merge_allowed).unwrap_or(false) && pr.auto_merge_request.is_none() && !st.ready;
+    let (primary, secondary) = merge_buttons(st.ready, conflicts, behind, waiting, auto_available);
+    let merge_now = {
+        let m = model.clone();
+        let sel = selected.clone();
         let title = title.clone();
-        let commit_box = commit_box.clone();
-        let pr_title = pr.title.clone();
+        let message = message.clone();
+        let delete = delete.clone();
+        let done = done.clone();
+        let blocked = !st.ready;
+        let reason = st.text.clone();
         let number = pr.number;
-        let allowed = allowed.clone();
-        let github = f.provider.is_github();
-        Rc::new(move |idx: u32| {
-            let m = allowed.get(idx as usize).copied().unwrap_or(MergeMethod::Merge);
-            commit_box.set_visible(m != MergeMethod::Rebase);
-            let squashed = if github { format!("{pr_title} (#{number})") } else { pr_title.clone() };
-            title.set_text(&if m == MergeMethod::Squash { squashed } else { String::new() });
+        let base = pr.base_ref_name.clone();
+        let head = pr.head_ref_name.clone();
+        let head_repo = pr.head_repository.as_ref().map(|h| h.name_with_owner.clone());
+        let sha = pr.head_ref_oid.clone();
+        Rc::new(move || {
+            if m.busy.get() {
+                return;
+            }
+            let method = sel.get();
+            let del = delete.is_active() && !delete_on_merge && same_repo;
+            let mut body = format!("{} · {}", method_title(method), if del { format!("deletes {head}") } else { format!("keeps {head}") });
+            if blocked {
+                body = format!("{body}\n\nNot everything is ready: {reason}.");
+            }
+            let d = adw::AlertDialog::new(Some(&format!("Merge {prefix}{number} into {base}?")), Some(&body));
+            d.add_response("cancel", "Cancel");
+            d.add_response("merge", if blocked { "Merge anyway" } else { "Merge" });
+            d.set_response_appearance("merge", if blocked { adw::ResponseAppearance::Destructive } else { adw::ResponseAppearance::Suggested });
+            d.set_default_response(Some(if blocked { "cancel" } else { "merge" }));
+            d.set_close_response("cancel");
+            let (m, title, message, done, base, head, head_repo, sha) = (m.clone(), title.clone(), message.clone(), done.clone(), base.clone(), head.clone(), head_repo.clone(), sha.clone());
+            d.connect_response(None, move |_, r| {
+                if r != "merge" {
+                    return;
+                }
+                let key = method.key().to_string();
+                let t = title.text().trim().to_string();
+                let b = message.text().trim().to_string();
+                let (m, done, base) = (m.clone(), done.clone(), base.clone());
+                let restore = if del && m.api.is_some() { head_repo.clone().map(|repo| (repo, head.clone(), sha.clone())) } else { None };
+                crate::rt::spawn_local(async move {
+                    let ok = m.clone().merge(key, if t.is_empty() { None } else { Some(t) }, if b.is_empty() { None } else { Some(b) }, del).await;
+                    if ok {
+                        after_merge(&m, number, base, restore);
+                    }
+                    done(ok)
+                });
+            });
+            let w = crate::app::main_window();
+            d.present(w.as_ref());
         })
     };
-    prefill(initial as u32);
-    let p = prefill.clone();
-    method.connect_selected_notify(move |d| p(d.selected()));
-    let done = close_on_success(&sheet);
-    if repo.as_ref().map(|r| r.auto_merge_allowed).unwrap_or(false) && pr.auto_merge_request.is_none() && pr.merge_state_status.as_deref() != Some("CLEAN") {
-        let auto = button("Enable auto-merge");
-        auto.set_tooltip_text(Some(if f.is_gitlab() { "Merge automatically when the pipeline succeeds" } else { "Merge automatically when checks and reviews pass" }));
+    let run: Rc<dyn Fn(MergePrimary)> = {
         let m = model.clone();
-        let method = method.clone();
-        let allowed = allowed.clone();
+        let sel = selected.clone();
         let done = done.clone();
-        auto.connect_clicked(move |_| {
-            let key = allowed.get(method.selected() as usize).copied().unwrap_or(MergeMethod::Merge).key().to_string();
-            let m = m.clone();
-            let done = done.clone();
-            crate::rt::spawn_local(async move { done(m.enable_auto_merge(key).await) });
-        });
-        sheet.footer.append(&auto);
-    }
+        let merge_now = merge_now.clone();
+        let d = sheet.dialog.clone();
+        Rc::new(move |p: MergePrimary| match p {
+            MergePrimary::Merge | MergePrimary::MergeAnyway => merge_now(),
+            MergePrimary::MergeWhenReady => {
+                let key = sel.get().key().to_string();
+                let m = m.clone();
+                let done = done.clone();
+                crate::rt::spawn_local(async move {
+                    let ok = m.enable_auto_merge(key).await;
+                    if ok {
+                        crate::app::toast("Auto-merge enabled");
+                    }
+                    done(ok)
+                });
+            }
+            MergePrimary::UpdateBranch => {
+                let m = m.clone();
+                crate::rt::spawn_local(async move {
+                    if m.simple(PrAction::UpdateBranch).await {
+                        crate::app::toast("Updating branch");
+                    }
+                });
+            }
+            MergePrimary::ViewConflicts => {
+                d.close();
+                m.set_tab(super::model::PrTab::Conversation);
+                m.emit(Change::ScrollBottom);
+            }
+        })
+    };
+    let auto_tooltip = if f.is_gitlab() { "Merge automatically when the pipeline succeeds" } else { "Merge automatically when checks and reviews pass" };
     sheet.add_footer_spacer();
     sheet.cancel_button();
-    if uses_queue {
+    if let Some(sec) = secondary {
+        let b = button(sec.title());
+        if sec == MergePrimary::MergeAnyway {
+            b.add_css_class("merge-anyway");
+            b.set_sensitive(!conflicts && !allowed.is_empty());
+        }
+        if sec == MergePrimary::MergeWhenReady {
+            b.set_tooltip_text(Some(auto_tooltip));
+        }
+        let r = run.clone();
+        b.connect_clicked(move |_| r(sec));
+        sheet.footer.append(&b);
+    }
+    let enqueue = uses_queue.then(|| {
         let enqueue = tinted(&format!("Add to {}", f.queue_title()), "green");
         let m = model.clone();
         let d = sheet.dialog.clone();
@@ -247,25 +606,40 @@ pub fn merge(model: Rc<PrModel>) {
                 }
             });
         });
-        sheet.footer.append(&enqueue);
-    }
-    let go = if uses_queue { button("Merge directly") } else { tinted("Merge", "green") };
-    go.set_sensitive(!allowed.is_empty());
-    sheet.footer.append(&go);
-    let m = model.clone();
-    go.connect_clicked(move |_| {
-        if m.busy.get() {
-            return;
-        }
-        let key = allowed.get(method.selected() as usize).copied().unwrap_or(MergeMethod::Merge).key().to_string();
-        let t = title.text().trim().to_string();
-        let b = message.text().trim().to_string();
-        let del = delete.is_active() && !delete_on_merge && same_repo;
-        let m = m.clone();
-        let done = done.clone();
-        crate::rt::spawn_local(async move { done(m.merge(key, if t.is_empty() { None } else { Some(t) }, if b.is_empty() { None } else { Some(b) }, del).await) });
+        enqueue
     });
+    let go = gtk::Button::with_label(if uses_queue && primary == MergePrimary::Merge { "Merge directly" } else { primary.title() });
+    match primary {
+        MergePrimary::Merge if uses_queue => {}
+        MergePrimary::Merge => go.add_css_class("tint-green"),
+        MergePrimary::MergeAnyway => go.add_css_class("merge-anyway"),
+        MergePrimary::MergeWhenReady => {
+            go.add_css_class("suggested-action");
+            go.set_tooltip_text(Some(auto_tooltip));
+        }
+        _ => go.add_css_class("suggested-action"),
+    }
+    if matches!(primary, MergePrimary::Merge | MergePrimary::MergeAnyway) {
+        go.set_sensitive(!allowed.is_empty());
+    }
+    let r = run.clone();
+    go.connect_clicked(move |_| r(primary));
+    sheet.footer.append(&go);
+    if let Some(enqueue) = &enqueue {
+        sheet.footer.append(enqueue);
+    }
+    let focus = match (&enqueue, primary) {
+        (Some(e), _) => Some(e.clone()),
+        (None, MergePrimary::Merge) => Some(go.clone()),
+        _ => None,
+    };
+    if let Some(b) = &focus {
+        sheet.dialog.set_default_widget(Some(b));
+    }
     sheet.present();
+    if let Some(b) = focus {
+        b.grab_focus();
+    }
 }
 
 pub fn edit(model: Rc<PrModel>) {
@@ -1215,5 +1589,32 @@ impl DraftsSheet {
         self.model.emit(Change::Diff);
         crate::app::toast(&format!("Added {} to your pending review", util::plural(n as i64, "comment", "comments")));
         self.dialog.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verdict_drives_label_colour_and_reason() {
+        assert_eq!(Verdict::Approve.submit_label(), "Approve");
+        assert_eq!(Verdict::Approve.tint(), "green");
+        assert_eq!(Verdict::RequestChanges.tint(), "red");
+        assert_eq!(Verdict::Comment.tint(), "accent");
+        assert!(Verdict::Approve.blocked_reason(true, 0).is_none());
+        assert!(Verdict::Comment.blocked_reason(true, 0).is_some());
+        assert!(Verdict::Comment.blocked_reason(true, 2).is_none());
+        assert!(Verdict::RequestChanges.blocked_reason(false, 0).is_none());
+    }
+
+    #[test]
+    fn merge_primary_follows_state() {
+        assert_eq!(merge_buttons(true, false, false, false, false), (MergePrimary::Merge, None));
+        assert_eq!(merge_buttons(false, false, false, true, true), (MergePrimary::MergeWhenReady, Some(MergePrimary::MergeAnyway)));
+        assert_eq!(merge_buttons(false, true, false, false, true), (MergePrimary::ViewConflicts, Some(MergePrimary::MergeAnyway)));
+        assert_eq!(merge_buttons(false, false, true, true, true), (MergePrimary::UpdateBranch, Some(MergePrimary::MergeAnyway)));
+        assert_eq!(merge_buttons(false, false, false, false, true), (MergePrimary::MergeAnyway, Some(MergePrimary::MergeWhenReady)));
+        assert_eq!(merge_buttons(false, false, false, true, false), (MergePrimary::MergeAnyway, None));
     }
 }
