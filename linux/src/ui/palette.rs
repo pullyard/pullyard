@@ -207,6 +207,7 @@ fn section_shortcut(s: Section) -> Option<&'static str> {
         Section::Repos => Some("Ctrl+4"),
         Section::Projects => Some("Ctrl+5"),
         Section::Claude => Some("Ctrl+6"),
+        Section::Overview => Some("Ctrl+Alt+0"),
         _ => None,
     }
 }

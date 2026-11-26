@@ -153,7 +153,7 @@ pub fn flat(label: &str) -> gtk::Button {
 pub fn link_button(label: &str) -> gtk::Button {
     let b = gtk::Button::with_label(label);
     b.add_css_class("flat");
-    b.add_css_class("fg-accent");
+    b.add_css_class("sy-link");
     b
 }
 
@@ -236,7 +236,7 @@ pub fn state_badge(state: VisualState, compact: bool) -> gtk::Widget {
     if compact {
         let b = fixed_box(&["state-dot", state.css()], 22, 22);
         b.set_valign(gtk::Align::Start);
-        centered_in(&b, &icon(state.icon(), 12), 22, 22);
+        centered_in(&b, &icon(state.compact_icon(), 12), 22, 22);
         b.set_tooltip_text(Some(state.title()));
         b.set_accessible_role(gtk::AccessibleRole::Img);
         set_label(&b, state.title());
@@ -260,6 +260,61 @@ pub fn diff_stat(additions: i64, deletions: i64) -> gtk::Box {
     b.append(&d);
     b.set_valign(gtk::Align::Center);
     b
+}
+
+pub fn status_chip(text: &str, color: &str, icon_name: Option<&str>) -> gtk::Box {
+    let b = hbox(3);
+    b.add_css_class("status-chip");
+    b.add_css_class(color);
+    if let Some(i) = icon_name {
+        let img = icon(i, 10);
+        decorative(&img);
+        b.append(&img);
+    }
+    let l = gtk::Label::new(Some(text));
+    l.add_css_class("sy-meta-num");
+    l.set_single_line_mode(true);
+    b.append(&l);
+    b.set_valign(gtk::Align::Center);
+    b.set_halign(gtk::Align::Start);
+    b.set_hexpand(false);
+    b
+}
+
+pub fn ci_chip(state: Option<&str>) -> Option<gtk::Box> {
+    let (text, color, glyph, tip) = match state? {
+        "SUCCESS" => ("Passing", "green", "sy-check-circle-symbolic", "All checks passed"),
+        "FAILURE" | "ERROR" => ("Failing", "red", "sy-x-circle-symbolic", "Some checks failed"),
+        "PENDING" | "EXPECTED" => ("Running", "amber", "sy-clock-symbolic", "Checks are running"),
+        _ => return None,
+    };
+    let c = status_chip(text, color, Some(glyph));
+    c.set_tooltip_text(Some(tip));
+    set_label(&c, tip);
+    Some(c)
+}
+
+pub fn review_chip(decision: Option<&str>) -> Option<gtk::Widget> {
+    match decision? {
+        "APPROVED" => Some(tooltip(status_chip("Approved", "green", Some("sy-check-symbolic")), "Approved").upcast()),
+        "CHANGES_REQUESTED" => Some(tooltip(status_chip("Changes requested", "red", Some("sy-plusminus-symbolic")), "Changes requested").upcast()),
+        "REVIEW_REQUIRED" => Some(status_icon("sy-eye-symbolic", 12, "muted", "Review required").upcast()),
+        _ => None,
+    }
+}
+
+pub fn checks_summary(failed: usize, pending: usize, passed: usize) -> String {
+    let mut parts = vec![];
+    if failed > 0 {
+        parts.push(format!("{failed} failing"));
+    }
+    if pending > 0 {
+        parts.push(format!("{pending} running"));
+    }
+    if passed > 0 || parts.is_empty() {
+        parts.push(format!("{passed} passing"));
+    }
+    parts.join(" · ")
 }
 
 pub fn ci_icon(state: Option<&str>) -> Option<gtk::Image> {
@@ -360,6 +415,12 @@ pub fn after_next_paint<W: IsA<gtk::Widget>>(w: &W, f: impl FnOnce() + 'static) 
 }
 
 pub fn spinner(size: i32) -> Loader {
+    let s = Loader::inline(size);
+    s.set_valign(gtk::Align::Center);
+    s
+}
+
+pub fn wake_spinner(size: i32) -> Loader {
     let s = Loader::wake(size);
     s.set_valign(gtk::Align::Center);
     s
@@ -536,6 +597,73 @@ pub fn load_avatar(a: &adw::Avatar, url: &str, size: i32) {
     });
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RefreshFailure {
+    Offline,
+    RateLimited(Option<String>),
+    SignIn,
+    Other,
+}
+
+impl RefreshFailure {
+    pub fn classify(message: &str, rate_limited_until: Option<String>, online: bool) -> Self {
+        let m = message.to_lowercase();
+        if rate_limited_until.is_some() {
+            return RefreshFailure::RateLimited(rate_limited_until);
+        }
+        if m.contains("rate limit") {
+            return RefreshFailure::RateLimited(None);
+        }
+        if !online || m.contains("offline") || m.contains("not connected") || m.contains("network is unreachable") || m.contains("error sending request") || m.contains("dns error") || m.contains("connection refused") || m.contains("timed out") {
+            return RefreshFailure::Offline;
+        }
+        if m.contains("bad credentials") || m.contains("401") || m.contains("sign in") || m.contains("unauthorized") {
+            return RefreshFailure::SignIn;
+        }
+        RefreshFailure::Other
+    }
+
+    pub fn short(&self) -> String {
+        match self {
+            RefreshFailure::Offline => "Offline".into(),
+            RefreshFailure::RateLimited(Some(at)) => format!("Rate-limited until {at}"),
+            RefreshFailure::RateLimited(None) => "Rate-limited".into(),
+            RefreshFailure::SignIn => "Sign in again".into(),
+            RefreshFailure::Other => "Couldn't refresh".into(),
+        }
+    }
+}
+
+pub const STALE_AFTER_SECONDS: i64 = 300;
+
+pub fn is_stale(updated: Option<chrono::DateTime<chrono::Utc>>, refreshing: bool, failed: bool, now: chrono::DateTime<chrono::Utc>) -> bool {
+    !refreshing && !failed && updated.is_some_and(|u| (now - u).num_seconds() > STALE_AFTER_SECONDS)
+}
+
+fn network_available() -> bool {
+    gtk::gio::NetworkMonitor::default().is_network_available()
+}
+
+thread_local! {
+    static DETAIL_PILLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static DETAIL_PILLS_CHANGED: crate::signal::Signal<usize> = const { crate::signal::Signal::new() };
+}
+
+fn set_detail_pills(delta: isize) {
+    let n = DETAIL_PILLS.with(|c| {
+        let n = (c.get() as isize + delta).max(0) as usize;
+        c.set(n);
+        n
+    });
+    DETAIL_PILLS_CHANGED.with(|s| s.emit(&n));
+}
+
+struct Pill {
+    button: glib::WeakRef<gtk::Button>,
+    icon: gtk::Stack,
+    text: gtk::Label,
+}
+
 pub struct RefreshStatus {
     pub widget: gtk::Box,
     icon: gtk::Stack,
@@ -543,7 +671,17 @@ pub struct RefreshStatus {
     retry: gtk::Button,
     state: Rc<RefCell<(Option<chrono::DateTime<chrono::Utc>>, bool, Option<String>)>>,
     compact: bool,
-    buttons: RefCell<Vec<glib::WeakRef<gtk::Button>>>,
+    pills: RefCell<Vec<Pill>>,
+    on_refresh: Rc<dyn Fn()>,
+}
+
+fn refresh_icon_stack(size: i32) -> gtk::Stack {
+    let icon_stack = gtk::Stack::new();
+    icon_stack.add_named(&spinner(size), Some("spin"));
+    icon_stack.add_named(&status_icon("sy-attention-symbolic", size, "amber", "Refresh failed"), Some("warn"));
+    icon_stack.add_named(&icon("view-refresh-symbolic", size), Some("idle"));
+    icon_stack.set_visible_child_name("idle");
+    icon_stack
 }
 
 impl RefreshStatus {
@@ -551,20 +689,20 @@ impl RefreshStatus {
         let widget = hbox(5);
         widget.add_css_class("sy-muted");
         widget.add_css_class("sy-small");
+        widget.add_css_class("refresh-status");
         widget.set_valign(gtk::Align::Center);
-        let icon_stack = gtk::Stack::new();
-        icon_stack.add_named(&spinner(12), Some("spin"));
-        icon_stack.add_named(&status_icon("sy-attention-symbolic", 12, "amber", "Refresh failed"), Some("warn"));
-        icon_stack.add_named(&icon("view-refresh-symbolic", 12), Some("idle"));
-        icon_stack.set_visible_child_name("idle");
+        let icon_stack = refresh_icon_stack(12);
         let text = label("");
+        text.add_css_class("sy-meta-num");
         let retry = link_button("Retry");
         retry.set_visible(false);
-        retry.connect_clicked(move |_| on_retry());
+        let on_refresh: Rc<dyn Fn()> = Rc::new(on_retry);
+        let r = on_refresh.clone();
+        retry.connect_clicked(move |_| r());
         widget.append(&icon_stack);
         widget.append(&text);
         widget.append(&retry);
-        let me = Rc::new(RefreshStatus { widget, icon: icon_stack, text, retry, state: Rc::new(RefCell::new((None, false, None))), compact, buttons: RefCell::new(Vec::new()) });
+        let me = Rc::new(RefreshStatus { widget, icon: icon_stack, text, retry, state: Rc::new(RefCell::new((None, false, None))), compact, pills: RefCell::new(Vec::new()), on_refresh });
         let weak = Rc::downgrade(&me);
         glib::timeout_add_seconds_local(5, move || match weak.upgrade() {
             Some(me) => {
@@ -582,58 +720,128 @@ impl RefreshStatus {
         self.render();
     }
 
-    pub fn header_button(&self) -> gtk::Button {
-        let b = refresh_button();
-        b.set_sensitive(!self.state.borrow().1);
-        self.buttons.borrow_mut().push(b.downgrade());
+    fn pill(&self) -> gtk::Button {
+        let b = gtk::Button::new();
+        b.add_css_class("refresh-pill");
+        b.set_valign(gtk::Align::Center);
+        let content = hbox(5);
+        let icon_stack = refresh_icon_stack(12);
+        let text = label("");
+        content.append(&icon_stack);
+        content.append(&text);
+        b.set_child(Some(&content));
+        set_label(&b, "Refresh");
+        let r = self.on_refresh.clone();
+        b.connect_clicked(move |_| r());
+        self.pills.borrow_mut().push(Pill { button: b.downgrade(), icon: icon_stack, text });
+        self.render();
         b
+    }
+
+    pub fn header_button(&self) -> gtk::Button {
+        let b = self.pill();
+        b.set_visible(DETAIL_PILLS.with(|c| c.get()) == 0);
+        let weak = b.downgrade();
+        DETAIL_PILLS_CHANGED.with(|s| {
+            s.connect(move |n| match weak.upgrade() {
+                Some(b) => {
+                    b.set_visible(*n == 0);
+                    true
+                }
+                None => false,
+            })
+        });
+        b
+    }
+
+    pub fn detail_pill(&self) -> gtk::Button {
+        let b = self.pill();
+        b.connect_map(|_| set_detail_pills(1));
+        b.connect_unmap(|_| set_detail_pills(-1));
+        b
+    }
+
+    fn failure(&self, error: &Option<String>) -> Option<RefreshFailure> {
+        let paused = crate::api::rate_limited_until().map(|t| t.with_timezone(&chrono::Local).format("%H:%M").to_string());
+        match error {
+            Some(e) => Some(RefreshFailure::classify(e, paused, network_available())),
+            None => paused.map(|at| RefreshFailure::RateLimited(Some(at))),
+        }
     }
 
     fn render(&self) {
         let (updated, refreshing, error) = self.state.borrow().clone();
-        self.buttons.borrow_mut().retain(|w| match w.upgrade() {
-            Some(b) => {
-                b.set_sensitive(!refreshing);
-                true
-            }
-            None => false,
-        });
-        let paused = crate::api::rate_limited_until().filter(|_| !refreshing);
-        self.icon.set_visible_child_name(if refreshing { "spin" } else if error.is_some() || paused.is_some() { "warn" } else { "idle" });
-        let resume = paused.map(|t| t.with_timezone(&chrono::Local).format("%H:%M").to_string());
+        let failure = if refreshing { None } else { self.failure(&error) };
+        let now = chrono::Utc::now();
+        let stale = is_stale(updated, refreshing, failure.is_some(), now);
+        let icon_name = if refreshing {
+            "spin"
+        } else if failure.is_some() {
+            "warn"
+        } else {
+            "idle"
+        };
+        self.icon.set_visible_child_name(icon_name);
+        let compact_text = if refreshing {
+            "Updating…".to_string()
+        } else if let Some(f) = &failure {
+            f.short()
+        } else {
+            updated.map(util::refresh_ago).unwrap_or_default()
+        };
         let text = if refreshing {
-            match updated.filter(|u| !self.compact && (chrono::Utc::now() - *u).num_seconds() >= 60) {
+            match updated.filter(|u| !self.compact && (now - *u).num_seconds() >= 60) {
                 Some(u) => format!("Updated {} · updating…", util::refresh_ago(u)),
                 None => "Updating…".to_string(),
             }
-        } else if let Some(at) = &resume {
-            if self.compact { "Paused".into() } else { format!("Paused until {at}") }
-        } else if error.is_some() {
-            if self.compact { "Offline".into() } else { "Couldn't refresh".into() }
+        } else if let Some(f) = &failure {
+            f.short()
         } else if let Some(u) = updated {
             let ago = util::refresh_ago(u);
-            if self.compact { ago } else { format!("Updated {ago}") }
+            if self.compact {
+                ago
+            } else {
+                format!("Updated {ago}")
+            }
         } else if self.compact {
             String::new()
         } else {
             "Not updated yet".into()
         };
         self.text.set_text(&text);
-        self.retry.set_visible(error.is_some() && !refreshing && resume.is_none());
-        self.widget.set_tooltip_text(Some(&match (&resume, &error) {
-            (Some(at), _) => format!("{} rate limit reached. Live updates and loading resume at {at}; your changes still go through.", crate::app::provider().title()),
-            (None, Some(e)) => format!("Last refresh failed: {e}"),
-            (None, None) => "Refresh (Ctrl+R)".to_string(),
-        }));
+        let rate_limited = matches!(failure, Some(RefreshFailure::RateLimited(_)));
+        self.retry.set_visible(failure.is_some() && !rate_limited);
+        if stale {
+            self.widget.add_css_class("stale");
+        } else {
+            self.widget.remove_css_class("stale");
+        }
+        let tooltip = match (&failure, &error) {
+            (Some(RefreshFailure::RateLimited(Some(at))), _) => format!("{} rate limit reached. Live updates and loading resume at {at}; your changes still go through.", crate::app::provider().title()),
+            (Some(RefreshFailure::SignIn), _) => "Your session expired. Sign in again from the account menu.".to_string(),
+            (Some(_), Some(e)) => format!("Last refresh failed: {e}. Click to retry"),
+            _ => "Refresh this view · Ctrl+R refreshes everything".to_string(),
+        };
+        self.widget.set_tooltip_text(Some(&tooltip));
+        self.pills.borrow_mut().retain(|p| match p.button.upgrade() {
+            Some(b) => {
+                b.set_sensitive(!refreshing);
+                p.icon.set_visible_child_name(icon_name);
+                p.text.set_text(&compact_text);
+                p.text.set_visible(!compact_text.is_empty());
+                b.set_tooltip_text(Some(&tooltip));
+                for (class, on) in [("stale", stale), ("failed", failure.is_some())] {
+                    if on {
+                        b.add_css_class(class);
+                    } else {
+                        b.remove_css_class(class);
+                    }
+                }
+                true
+            }
+            None => false,
+        });
     }
-}
-
-pub fn refresh_button() -> gtk::Button {
-    let b = gtk::Button::from_icon_name("view-refresh-symbolic");
-    b.set_tooltip_text(Some("Refresh (Ctrl+R)"));
-    b.set_action_name(Some("app.refresh"));
-    b.update_property(&[gtk::accessible::Property::Label("Refresh")]);
-    b
 }
 
 pub fn footer(status: &RefreshStatus) -> gtk::Box {
@@ -710,4 +918,28 @@ pub fn keep_alive<W: IsA<gtk::Widget>, T: 'static>(widget: &W, value: T) {
     widget.connect_destroy(move |_| {
         holder.borrow_mut().take();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refresh_failures_are_typed() {
+        assert_eq!(RefreshFailure::classify("API rate limit exceeded", None, true), RefreshFailure::RateLimited(None));
+        assert_eq!(RefreshFailure::classify("x", Some("14:02".into()), true).short(), "Rate-limited until 14:02");
+        assert_eq!(RefreshFailure::classify("Bad credentials", None, true), RefreshFailure::SignIn);
+        assert_eq!(RefreshFailure::classify("error sending request for url", None, true), RefreshFailure::Offline);
+        assert_eq!(RefreshFailure::classify("boom", None, false), RefreshFailure::Offline);
+        assert_eq!(RefreshFailure::classify("HTTP 502", None, true).short(), "Couldn't refresh");
+    }
+
+    #[test]
+    fn stale_after_five_minutes() {
+        let now = chrono::Utc::now();
+        assert!(!is_stale(Some(now - chrono::Duration::seconds(299)), false, false, now));
+        assert!(is_stale(Some(now - chrono::Duration::seconds(301)), false, false, now));
+        assert!(!is_stale(Some(now - chrono::Duration::seconds(900)), true, false, now));
+        assert!(!is_stale(None, false, false, now));
+    }
 }

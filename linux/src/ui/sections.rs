@@ -1,3 +1,5 @@
+use gtk::prelude::*;
+
 use crate::app::{PrFilter, Section};
 
 pub fn build(section: Section) -> gtk::Widget {
@@ -5,6 +7,7 @@ pub fn build(section: Section) -> gtk::Widget {
         return forge(section);
     }
     match section {
+        Section::Overview => gtk::Box::new(gtk::Orientation::Vertical, 0).upcast(),
         Section::Notifications => super::notifications::build(),
         Section::Prs(f) => super::lists::SearchList::build(f.title(), "pr", f.query(), false),
         Section::MyPrsByRepo => super::lists::SearchList::build("My PRs by project", "pr", PrFilter::Mine.query(), true),
@@ -25,6 +28,6 @@ fn forge(section: Section) -> gtk::Widget {
         Section::Notifications => super::forge_inbox::inbox(),
         Section::Repos => super::forge_inbox::repos(),
         Section::Claude => super::claude::column::build(),
-        Section::Projects | Section::Stacks => super::forge_inbox::unavailable(),
+        Section::Overview | Section::Projects | Section::Stacks => super::forge_inbox::unavailable(),
     }
 }

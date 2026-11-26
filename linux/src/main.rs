@@ -26,6 +26,7 @@ mod list_sort;
 mod local_repo;
 mod markdown_html;
 mod nav_memory;
+mod queue;
 mod notify;
 mod review_drafts;
 mod rt;

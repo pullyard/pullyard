@@ -50,7 +50,7 @@ pub enum Saved {
 pub async fn save(config_dir: PathBuf, key: String, token: String) -> Saved {
     let label = match key.as_str() {
         DEFAULT_KEY => format!("{} GitHub token", brand::APP_NAME),
-        "jira-token" => format!("{} Jira API token", brand::APP_NAME),
+        k if k == "jira-token" || k.starts_with("jira-token.") => format!("{} Jira API token", brand::APP_NAME),
         k if k.starts_with("agent-endpoint-") => format!("{} agent endpoint API key", brand::APP_NAME),
         _ => format!("{} Git account token", brand::APP_NAME),
     };

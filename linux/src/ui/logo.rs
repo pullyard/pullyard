@@ -8,6 +8,8 @@ pub enum Mode {
     Loop,
     Once,
     Wake,
+    Inline,
+    Hero,
 }
 
 const BOX_X: f32 = 150.0;
@@ -15,10 +17,17 @@ const BOX_Y: f32 = 370.0;
 const BOX_W: f32 = 750.0;
 const BOX_H: f32 = 500.0;
 
-const DRAW: f64 = 1.7;
-const HOLD: f64 = 0.5;
-const FADE: f64 = 0.55;
+const DRAW: f64 = 1.1;
+const HOLD: f64 = 0.3;
+const FADE: f64 = 0.4;
+const LOOP_START: f64 = 0.3;
 pub const ONCE: f64 = 0.9;
+const INLINE_CYCLE: f64 = 0.9;
+const APPEAR_DELAY: f64 = 0.18;
+const HERO_DRAW: f64 = 1.4;
+const BOB_PERIOD: f64 = 4.6;
+const BOB_CYCLES: f64 = 2.0;
+const BOB_LIFT: f32 = 4.0;
 
 fn rgba(r: f32, g: f32, b: f32, a: f32) -> gdk::RGBA {
     gdk::RGBA::new(r, g, b, a)
@@ -167,17 +176,18 @@ fn stage(progress: f64, from: f64, to: f64) -> f64 {
     }
 }
 
-fn ease_in_out(t: f64) -> f64 {
+pub fn ease_in_out(t: f64) -> f64 {
+    let t = clamp01(t);
     if t < 0.5 {
-        2.0 * t * t
+        4.0 * t * t * t
     } else {
-        1.0 - (-2.0 * t + 2.0).powi(2) / 2.0
+        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
     }
 }
 
 pub fn loop_frame(elapsed: f64) -> (f64, f64) {
     let cycle = DRAW + HOLD + FADE;
-    let t = elapsed.rem_euclid(cycle);
+    let t = (elapsed + LOOP_START * DRAW).rem_euclid(cycle);
     let progress = (t / DRAW).min(1.0);
     let erase = if t > DRAW + HOLD { (t - DRAW - HOLD) / FADE } else { 0.0 };
     (progress, ease_in_out(clamp01(erase)))
@@ -271,6 +281,53 @@ pub fn draw_mark(snapshot: &gtk::Snapshot, width: f32, height: f32, progress: f6
     snapshot.restore();
 }
 
+pub fn inline_frame(elapsed: f64) -> (f64, f64) {
+    let t = (elapsed / INLINE_CYCLE).rem_euclid(2.0);
+    if t < 1.0 {
+        (ease_in_out(t), 0.0)
+    } else {
+        (1.0, ease_in_out(t - 1.0))
+    }
+}
+
+pub fn hero_lift(elapsed: f64) -> f32 {
+    let t = elapsed - HERO_DRAW;
+    if t <= 0.0 || t >= BOB_PERIOD * BOB_CYCLES {
+        return 0.0;
+    }
+    -(BOB_LIFT * (t / BOB_PERIOD * std::f64::consts::TAU).sin() as f32)
+}
+
+const BRANCH_X: f32 = 160.0;
+const BRANCH_Y: f32 = 455.0;
+const BRANCH_W: f32 = 372.0;
+const BRANCH_H: f32 = 362.0;
+
+pub fn draw_branches(snapshot: &gtk::Snapshot, width: f32, height: f32, progress: f64, erase: f64, color: &gdk::RGBA) {
+    let scale = (width / BRANCH_W).min(height / BRANCH_H);
+    let dx = width / 2.0 - (BRANCH_X + BRANCH_W / 2.0) * scale;
+    let dy = height / 2.0 - (BRANCH_Y + BRANCH_H / 2.0) * scale;
+    let stroke = (1.7 / scale).max(24.0);
+    snapshot.save();
+    snapshot.translate(&pt(dx, dy));
+    snapshot.scale(scale, scale);
+    let nodes = stage(progress, 0.0, 0.35);
+    let curves = stage(progress, 0.2, 1.0);
+    let tail = clamp01(erase);
+    GEOMETRY.with(|g| {
+        stroke_part(snapshot, &g.node_a, tail, nodes, stroke * 0.75, color);
+        stroke_part(snapshot, &g.node_b, tail, nodes, stroke * 0.75, color);
+        stroke_part(snapshot, &g.curve_a, tail, curves, stroke, color);
+        stroke_part(snapshot, &g.curve_b, tail, curves, stroke, color);
+    });
+    snapshot.restore();
+}
+
+fn accent_color() -> gdk::RGBA {
+    let hex = crate::theme::token_hex("accent").unwrap_or(crate::brand::SKY.0);
+    brand(hex)
+}
+
 pub fn wake_phase(elapsed: f64, i: usize) -> f64 {
     (elapsed * 1.6 - i as f64 * 0.22).rem_euclid(1.0)
 }
@@ -347,7 +404,11 @@ mod imp {
         }
 
         pub fn finished(&self) -> bool {
-            self.mode.get() == Mode::Once && self.elapsed.get() >= self.span()
+            match self.mode.get() {
+                Mode::Once => self.elapsed.get() >= self.span(),
+                Mode::Hero => self.elapsed.get() >= HERO_DRAW + BOB_PERIOD * BOB_CYCLES,
+                _ => false,
+            }
         }
 
         pub fn start(&self) {
@@ -359,8 +420,10 @@ mod imp {
                 return;
             }
             if !animations_enabled() {
-                if self.mode.get() == Mode::Once {
-                    self.elapsed.set(self.span());
+                match self.mode.get() {
+                    Mode::Once => self.elapsed.set(self.span()),
+                    Mode::Hero => self.elapsed.set(HERO_DRAW + BOB_PERIOD * BOB_CYCLES),
+                    _ => {}
                 }
                 obj.queue_draw();
                 return;
@@ -377,7 +440,7 @@ mod imp {
                     }
                 };
                 imp.elapsed.set((now - start) as f64 / 1_000_000.0);
-                let interval = if imp.mode.get() == Mode::Once { 0 } else { 30_000 };
+                let interval = if matches!(imp.mode.get(), Mode::Once | Mode::Hero) { 0 } else { 30_000 };
                 if now - imp.last_draw.get() >= interval {
                     imp.last_draw.set(now);
                     w.queue_draw();
@@ -424,7 +487,30 @@ mod imp {
                 return;
             }
             let still = !self.spinning.get() || !animations_enabled();
-            match self.mode.get() {
+            let mode = self.mode.get();
+            if mode == Mode::Inline && !still && self.elapsed.get() < APPEAR_DELAY {
+                return;
+            }
+            match mode {
+                Mode::Inline => {
+                    let color = accent_color();
+                    if still {
+                        draw_branches(snapshot, w, h, 1.0, 0.0, &color);
+                    } else {
+                        let (p, e) = inline_frame(self.elapsed.get() - APPEAR_DELAY);
+                        draw_branches(snapshot, w, h, p, e, &color);
+                    }
+                }
+                Mode::Hero => {
+                    let e = self.elapsed.get();
+                    let p = if still { 1.0 } else { ease_in_out((e / HERO_DRAW).min(1.0)) };
+                    let lift = if still { 0.0 } else { hero_lift(e) };
+                    let inset = BOB_LIFT;
+                    snapshot.save();
+                    snapshot.translate(&pt(0.0, inset + lift));
+                    draw_mark(snapshot, w, h - inset * 2.0, p, 0.0);
+                    snapshot.restore();
+                }
                 Mode::Wake => draw_wake(snapshot, w, h, self.elapsed.get(), still),
                 Mode::Once => {
                     let p = if still { 1.0 } else { ease_in_out((self.elapsed.get() / self.span()).min(1.0)) };
@@ -458,6 +544,20 @@ impl Loader {
         imp.height.set(height.max(1));
         imp.spinning.set(true);
         l.update_property(&[gtk::accessible::Property::Label(if mode == Mode::Wake { "Running" } else { "Loading" })]);
+        l
+    }
+
+    pub fn inline(size: i32) -> Self {
+        Self::new(Mode::Inline, size, size)
+    }
+
+    pub fn hero(size: i32, key: &str) -> Self {
+        let l = Self::new(Mode::Hero, size, (size as f32 * BOX_H / BOX_W).round() as i32 + (BOB_LIFT * 2.0) as i32);
+        let first = DRAWN.with(|d| d.borrow_mut().insert(key.to_string()));
+        if !first || !animations_enabled() {
+            l.imp().elapsed.set(HERO_DRAW + BOB_PERIOD * BOB_CYCLES);
+        }
+        l.update_state(&[gtk::accessible::State::Hidden(true)]);
         l
     }
 
@@ -527,17 +627,43 @@ mod tests {
     }
 
     #[test]
-    fn loop_draws_holds_then_erases() {
-        let (p, e) = loop_frame(0.85);
-        assert!((p - 0.5).abs() < 1e-9);
+    fn loop_starts_partly_drawn_holds_then_erases() {
+        let (p, e) = loop_frame(0.0);
+        assert!((p - LOOP_START).abs() < 1e-9);
         assert_eq!(e, 0.0);
-        let (p, e) = loop_frame(DRAW + 0.2);
+        let start = DRAW * (1.0 - LOOP_START);
+        let (p, e) = loop_frame(start + 0.1);
         assert_eq!((p, e), (1.0, 0.0));
-        let (p, e) = loop_frame(DRAW + HOLD + FADE - 0.001);
+        let (p, e) = loop_frame(start + HOLD + FADE - 0.001);
         assert_eq!(p, 1.0);
         assert!(e > 0.99);
-        let (p, _) = loop_frame(DRAW + HOLD + FADE + 0.1);
+        let (p, _) = loop_frame(start + HOLD + FADE + 0.05);
         assert!(p < 0.1);
+    }
+
+    #[test]
+    fn one_cubic_curve_for_draw_and_erase() {
+        assert_eq!(ease_in_out(0.0), 0.0);
+        assert_eq!(ease_in_out(1.0), 1.0);
+        assert!((ease_in_out(0.5) - 0.5).abs() < 1e-9);
+        assert!((ease_in_out(0.25) - stage(0.25, 0.0, 1.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn inline_draws_then_erases() {
+        let (p, e) = inline_frame(INLINE_CYCLE * 0.5);
+        assert!((p - 0.5).abs() < 1e-9);
+        assert_eq!(e, 0.0);
+        let (p, e) = inline_frame(INLINE_CYCLE * 1.5);
+        assert_eq!(p, 1.0);
+        assert!((e - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn hero_bobs_twice_then_rests() {
+        assert_eq!(hero_lift(0.5), 0.0);
+        assert!(hero_lift(HERO_DRAW + BOB_PERIOD / 4.0) < -3.9);
+        assert_eq!(hero_lift(HERO_DRAW + BOB_PERIOD * BOB_CYCLES + 0.1), 0.0);
     }
 
     #[test]

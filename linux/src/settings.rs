@@ -91,6 +91,11 @@ pub struct Settings {
     pub jira_has_token: bool,
     pub jira_links: HashMap<String, Vec<String>>,
     pub jira_hidden: HashMap<String, Vec<String>>,
+    pub jira_connections: Vec<crate::jira::JiraConnection>,
+    pub jira_connections_saved: bool,
+    pub jira_overrides_org: HashMap<String, String>,
+    pub jira_overrides_repo: HashMap<String, String>,
+    pub jira_learned: HashMap<String, String>,
     pub jira_follow_up_dismissed: Vec<String>,
     pub agents_notify: bool,
     pub agents_open_in: String,
@@ -109,6 +114,13 @@ pub struct Settings {
     pub files_show_list: bool,
     pub sidebar_width: i32,
     pub clipboard_watch: bool,
+    pub recent_routes: Vec<String>,
+    pub welcome_tour_seen: bool,
+    pub checklist_dismissed: bool,
+    pub issues_collapsed: bool,
+    pub queue_seen: HashMap<String, i64>,
+    pub queue_snoozed: HashMap<String, i64>,
+    pub agents_account_filter: Option<String>,
 }
 
 impl Default for Settings {
@@ -157,6 +169,11 @@ impl Default for Settings {
             jira_has_token: false,
             jira_links: HashMap::new(),
             jira_hidden: HashMap::new(),
+            jira_connections: Vec::new(),
+            jira_connections_saved: false,
+            jira_overrides_org: HashMap::new(),
+            jira_overrides_repo: HashMap::new(),
+            jira_learned: HashMap::new(),
             jira_follow_up_dismissed: Vec::new(),
             agents_notify: true,
             agents_open_in: String::new(),
@@ -175,6 +192,13 @@ impl Default for Settings {
             files_show_list: true,
             sidebar_width: 0,
             clipboard_watch: true,
+            recent_routes: Vec::new(),
+            welcome_tour_seen: false,
+            checklist_dismissed: false,
+            issues_collapsed: false,
+            queue_seen: HashMap::new(),
+            queue_snoozed: HashMap::new(),
+            agents_account_filter: None,
         }
     }
 }
