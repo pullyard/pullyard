@@ -38,6 +38,8 @@ struct PYLinkBridge {
             }
             if reply.diff == nil { reply.error = "This step has no file changes to show." }
             client.channel.send(json: reply)
+        case "transcribe":
+            transcribe(message, client: client)
         case "jira":
             var reply = PYLinkMessage(type: "jira")
             reply.id = message.id
@@ -144,6 +146,29 @@ struct PYLinkBridge {
         for folder in folders {
             let modified = (try? folder.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             if modified < cutoff { try? fm.removeItem(at: folder) }
+        }
+    }
+
+    private func transcribe(_ message: PYLinkMessage, client: PYLinkClient) {
+        var reply = PYLinkMessage(type: "transcription")
+        reply.id = message.id
+        guard let audio = message.audio, !audio.data.isEmpty, audio.data.count <= 20 * 1024 * 1024 else {
+            reply.error = "The recording is empty or too long."
+            client.channel.send(json: reply)
+            return
+        }
+        let ext = audio.mediaType.contains("wav") ? "wav" : (audio.mediaType.contains("caf") ? "caf" : "m4a")
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("pullyard-dictation-\(UUID().uuidString).\(ext)")
+        let language = message.language.flatMap(DictationLanguage.init(rawValue:))
+        Task { @MainActor in
+            defer { try? FileManager.default.removeItem(at: file) }
+            do {
+                try audio.data.write(to: file, options: .atomic)
+                reply.text = try await WhisperEngine.shared.transcribe(file: file, language: language)
+            } catch {
+                reply.error = error.localizedDescription
+            }
+            client.channel.send(json: reply)
         }
     }
 

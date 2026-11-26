@@ -36,6 +36,10 @@
 	<string>public.app-category.developer-tools</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_pullyard._tcp</string>
+	</array>
 	<key>NSDesktopFolderUsageDescription</key>
 	<string>PullYard runs git and Claude Code inside your project folders to show changes and start sessions.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
@@ -44,15 +48,13 @@
 	<string>PullYard runs git and Claude Code inside your project folders to show changes and start sessions.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>PullYard lets your paired iPhone connect to this Mac to start and follow agent fixes.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>PullYard listens while you dictate a prompt, and turns dictation from your paired iPhone into text. Speech is recognized on this Mac.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>PullYard lets your paired iPhone connect to this Mac to start and follow agent fixes.</string>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_pullyard._tcp</string>
-	</array>
 </dict>
 </plist>

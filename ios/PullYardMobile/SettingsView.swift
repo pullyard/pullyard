@@ -115,9 +115,28 @@ private struct SettingsPage<Content: View>: View {
 }
 
 private struct MacAgentsSettings: View {
+    @AppStorage(DictationPrefs.engine) private var engine: DictationPrefs.Engine = .apple
+    @AppStorage(DictationPrefs.language) private var language: DictationPrefs.Language = .auto
+
     var body: some View {
         SettingsPage(title: "Mac & agents") {
             MacLinkSection()
+            Section {
+                Picker(selection: $engine) {
+                    ForEach(DictationPrefs.Engine.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    Label("Dictation", systemImage: "mic")
+                }
+                Picker(selection: $language) {
+                    ForEach(DictationPrefs.Language.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    Label("Language", systemImage: "globe")
+                }
+            } footer: {
+                Text(engine == .mac
+                     ? "Your voice is recorded on the iPhone and turned into text by Whisper on your Mac, which understands Armenian, Russian and English. Download the Whisper model in PullYard on the Mac first. Without the Mac, dictation uses the iPhone."
+                     : "Dictation runs on the iPhone. Armenian needs Whisper on your Mac.")
+            }
         }
     }
 }

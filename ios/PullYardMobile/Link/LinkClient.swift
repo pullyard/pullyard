@@ -442,6 +442,17 @@ final class LinkClient: ObservableObject {
         return diff
     }
 
+    func transcribe(_ audio: Data, mediaType: String, language: String?) async throws -> String {
+        if !isConnected { try await ensureConnected() }
+        var message = PYLinkMessage(type: "transcribe")
+        message.audio = PYLinkAttachment(name: "dictation.m4a", mediaType: mediaType, data: audio)
+        message.language = language
+        let reply = try await request(message, timeout: 120)
+        if let error = reply.error { throw LinkError.remote(error) }
+        guard let text = reply.text, !text.isEmpty else { throw LinkError.remote(L("Update PullYard on your Mac to dictate with Whisper.")) }
+        return text
+    }
+
     func stop(_ session: String) {
         var message = PYLinkMessage(type: "stop")
         message.session = session

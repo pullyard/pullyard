@@ -210,6 +210,8 @@ struct PYLinkMessage: Codable {
     var pinned: Bool?
     var options: PYLinkOptions?
     var prefs: PYLinkPrefs?
+    var audio: PYLinkAttachment?
+    var language: String?
 
     init(type: String) { self.type = type }
 }

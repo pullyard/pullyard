@@ -1416,7 +1416,7 @@ struct AgentChatView: View {
                     .background(alignment: .bottomTrailing) {
                         Color.clear.frame(width: 1, height: 1).modifier(Flight(id: outgoingID, namespace: flight))
                     }
-                if dictation.isRecording || (!showSend && editingItem == nil) {
+                if dictation.isRecording || dictation.isTranscribing || (!showSend && editingItem == nil) {
                     DictationButton(dictation: dictation)
                         .transition(.scale(scale: 0.4).combined(with: .opacity))
                 } else if showSend {

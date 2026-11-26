@@ -120,6 +120,7 @@ struct SettingsView: View {
                 SettingsHeader(title: "Refresh", icon: "arrow.clockwise", color: .syGreen)
             }
             NotificationSettingsSection()
+            DictationSettingsSection()
             Section {
                 Toggle("Check for updates automatically", isOn: $autoCheckUpdates)
                 Toggle(isOn: $devUpdates) {

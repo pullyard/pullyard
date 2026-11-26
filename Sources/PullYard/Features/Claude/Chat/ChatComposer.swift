@@ -164,6 +164,8 @@ struct ChatComposer: View {
     @State private var selected = 0
     @State private var files: [String] = []
     @State private var focusToken = 0
+    @State private var recorder = WhisperRecorder()
+    @State private var dictationError: String?
     @State private var completionMemo = CompletionMemo()
 
     var body: some View {
@@ -358,11 +360,20 @@ struct ChatComposer: View {
                 .foregroundStyle(Color.syMuted)
                 .help("Attach image")
                 .accessibilityLabel("Attach image")
-            Button { dictate() } label: { Image(systemName: "mic") }
+            Button { dictate() } label: { dictationIcon }
                 .buttonStyle(.borderless)
-                .foregroundStyle(Color.syMuted)
-                .help("Dictate a prompt (macOS dictation)")
-                .accessibilityLabel("Dictate a prompt")
+                .foregroundStyle(recorder.phase == .recording ? Color.syRed : Color.syMuted)
+                .disabled(recorder.phase == .transcribing)
+                .help(dictationHelp)
+                .accessibilityLabel(recorder.phase == .recording ? "Stop dictation" : "Dictate a prompt")
+                .alert("Dictation", isPresented: Binding(get: { dictationError != nil }, set: { if !$0 { dictationError = nil } })) {
+                    if !WhisperEngine.shared.isReady, WhisperEngine.shared.engine == .whisper {
+                        Button("Open Settings") { openSettings() }
+                    }
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(dictationError ?? "")
+                }
             Spacer()
             UsageRingButton(chat: chat)
             if chat.busy {
@@ -386,10 +397,64 @@ struct ChatComposer: View {
         focusToken += 1
     }
 
+    @ViewBuilder
+    private var dictationIcon: some View {
+        switch recorder.phase {
+        case .idle:
+            Image(systemName: "mic")
+        case .recording:
+            Image(systemName: "stop.circle.fill")
+                .scaleEffect(1 + recorder.level * 0.25)
+                .animation(.easeOut(duration: 0.1), value: recorder.level)
+        case .transcribing:
+            PYLoader(size: 12, label: "Transcribing")
+        }
+    }
+
+    private var dictationHelp: String {
+        let whisper = WhisperEngine.shared
+        guard whisper.engine == .whisper else { return "Dictate a prompt (macOS dictation)" }
+        switch recorder.phase {
+        case .idle: return "Dictate with Whisper (" + whisper.language.title + ")"
+        case .recording: return "Stop and transcribe"
+        case .transcribing: return "Transcribing…"
+        }
+    }
+
     private func dictate() {
-        focusToken += 1
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil)
+        let whisper = WhisperEngine.shared
+        guard whisper.engine == .whisper else {
+            focusToken += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil)
+            }
+            return
+        }
+        guard whisper.isReady else {
+            dictationError = WhisperError.notDownloaded.localizedDescription
+            return
+        }
+        switch recorder.phase {
+        case .idle:
+            whisper.prewarm()
+            Task {
+                do { try await recorder.start() } catch { dictationError = error.localizedDescription }
+            }
+        case .recording:
+            let samples = recorder.stop()
+            Task {
+                do {
+                    let spoken = try await recorder.transcribe(samples)
+                    let current = text
+                    text = current.isEmpty ? spoken : current + (current.hasSuffix(" ") || current.hasSuffix("\n") ? "" : " ") + spoken
+                    focusToken += 1
+                } catch WhisperError.empty {
+                } catch {
+                    dictationError = error.localizedDescription
+                }
+            }
+        case .transcribing:
+            break
         }
     }
 

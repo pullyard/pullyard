@@ -39,7 +39,7 @@ cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/THIRD-PARTY-NOTICES.txt LICENSE "$APP/Contents/Resources/"
 
 codesign --force --options runtime --sign "${SIGN_ID:--}" "$APP/Contents/Helpers/pullyard-mcp"
-codesign --force --options runtime --sign "${SIGN_ID:--}" "$APP"
+codesign --force --options runtime --entitlements Resources/PullYard.entitlements --sign "${SIGN_ID:--}" "$APP"
 echo "Built: $APP (signed with: ${SIGN_ID:-ad-hoc})"
 
 if [ "${1:-}" = "--install" ]; then
