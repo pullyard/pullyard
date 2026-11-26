@@ -229,6 +229,18 @@ final class ChatSession {
     var memoryBytes = 0
     var expandedTools: Set<String> = []
     var draftRequest: String?
+    /// The project is a git checkout this new session could branch off into its own worktree.
+    var worktreeAvailable = false
+    /// The user wants the first message to start the session in a fresh worktree.
+    var useWorktree = UserDefaults.standard.object(forKey: "agents.useWorktree") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(useWorktree, forKey: "agents.useWorktree") }
+    }
+    var preparingWorktree = false
+    /// Called with the first message of a new session, before it is sent.
+    @ObservationIgnored var onFirstPrompt: ((String) -> Void)?
+    /// Takes over the first message when the session should move into a worktree.
+    @ObservationIgnored var onWorktreeSend: ((String, [ChatImage]) -> Void)?
+    @ObservationIgnored private var firstPromptSeen = false
     var draftText = ""
     var draftImages: [ChatImage] = []
     var draftFiles: [URL] = []
@@ -514,6 +526,14 @@ final class ChatSession {
     func send(_ text: String, images: [ChatImage] = []) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !images.isEmpty else { return }
+        if items.isEmpty, !firstPromptSeen {
+            if worktreeAvailable, useWorktree, let move = onWorktreeSend {
+                move(trimmed, images)
+                return
+            }
+            firstPromptSeen = true
+            onFirstPrompt?(trimmed)
+        }
         lastActivity = Date()
         let id = UUID().uuidString
         items.append(.user(id: id, text: trimmed, images: images))

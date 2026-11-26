@@ -543,7 +543,7 @@ struct ChatWelcome: View {
             HStack(alignment: .center, spacing: 16) {
                 DrawnLogoMark(key: "chat-welcome-\(folder)", size: 64)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text((folder as NSString).lastPathComponent)
+                    Text((ProjectRoot.of(folder) as NSString).lastPathComponent)
                         .font(.system(size: TextZoom.shared.size(24), weight: .semibold, design: .serif))
                         .foregroundStyle(Color.syText)
                     HStack(spacing: 6) {

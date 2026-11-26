@@ -298,6 +298,21 @@ struct ChatComposer: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
             }
+            if chat.preparingWorktree {
+                HStack(spacing: 5) {
+                    ProgressView().controlSize(.mini)
+                    Text("Creating worktree…")
+                }
+                .foregroundStyle(Color.syMuted)
+            } else if chat.worktreeAvailable, chat.items.isEmpty {
+                Toggle(isOn: Binding(get: { chat.useWorktree }, set: { chat.useWorktree = $0 })) {
+                    Label("Worktree", systemImage: "arrow.triangle.branch")
+                }
+                .toggleStyle(.checkbox)
+                .foregroundStyle(Color.syMuted)
+                .fixedSize()
+                .help("Start this session in its own git worktree on a new claude/… branch, under .claude/worktrees")
+            }
             if !chat.mcpServers.isEmpty {
                 let broken = chat.mcpServers.filter { !$0.healthy && !$0.pending }
                 Menu {

@@ -167,8 +167,7 @@ enum ClaudeSessionParser {
     }
 
     static func projectRoot(for cwd: String) -> String {
-        if let r = cwd.range(of: "/.claude/worktrees/") { return String(cwd[..<r.lowerBound]) }
-        return cwd
+        ProjectRoot.of(cwd)
     }
 
     static func loadAll(root: URL = root) -> [ClaudeProject] {

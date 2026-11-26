@@ -193,7 +193,13 @@ final class ClaudeTab: Identifiable {
     }
     func newChatInSameFolder() { openNewChat?() }
 
-    var projectName: String { (folder as NSString).lastPathComponent }
+    /// The repository the session belongs to: a worktree under
+    /// `.claude/worktrees/` reports its parent project, not its own folder.
+    var projectName: String { (ProjectRoot.of(folder) as NSString).lastPathComponent }
+    /// Set once the session has (or is getting) a generated title.
+    @ObservationIgnored var titled = false
+    /// A generated title waiting for the session id so it can be saved.
+    @ObservationIgnored var pendingTitle: String?
 }
 
 @Observable
@@ -631,6 +637,60 @@ final class ClaudeWorkspace {
         saveOpenTabs()
     }
 
+    /// Replaces the placeholder title of a new session with a short topical one.
+    private func autoTitle(_ tab: ClaudeTab, from prompt: String) {
+        guard !tab.titled, tab.sessionId.isEmpty else { return }
+        tab.titled = true
+        let placeholder = tab.title
+        let configDir = tab.configDir
+        Task { [weak self, weak tab] in
+            guard let title = await SessionTitler.title(for: prompt, configDir: configDir),
+                  let self, let tab, tab.title == placeholder else { return }
+            self.applyGeneratedTitle(title, to: tab)
+        }
+    }
+
+    private func applyGeneratedTitle(_ title: String, to tab: ClaudeTab) {
+        tab.title = title
+        if tab.sessionId.isEmpty { tab.pendingTitle = title } else { AgentSessionPrefs.shared.rename(tab.sessionId, to: title) }
+        saveOpenTabs()
+    }
+
+    /// First message of a session with "Worktree" ticked: name it, create
+    /// `.claude/worktrees/<topic>-<hex>`, then start the session there and send the message.
+    private func startInWorktree(from tab: ClaudeTab, text: String, images: [ChatImage]) {
+        guard let chat = tab.chat, !chat.preparingWorktree else { return }
+        chat.preparingWorktree = true
+        chat.lastError = nil
+        tab.titled = true
+        let folder = tab.folder
+        let configDir = tab.configDir
+        Task { [weak self, weak tab] in
+            let generated = await SessionTitler.title(for: text, configDir: configDir)
+            let title = generated ?? SessionTitler.fallback(text)
+            let created = await SessionWorktree.create(from: folder, title: title)
+            guard let self, let tab, let chat = tab.chat else { return }
+            chat.preparingWorktree = false
+            switch created {
+            case .failure(let error):
+                chat.lastError = "Couldn't create a worktree: " + error.localizedDescription
+                chat.useWorktree = false
+                chat.draftRequest = text
+            case .success(let path):
+                let moved = self.makeTab(folder: path, kind: .chat, title: title, sessionId: "", configDir: configDir, environmentID: tab.environmentID)
+                moved.titled = true
+                moved.pendingTitle = title
+                let model = chat.modelValue.isEmpty || chat.modelValue == "default" ? self.defaults.modelArgument : chat.modelValue
+                let effort = chat.effort.isEmpty ? self.defaults.effortArgument : chat.effort
+                let mode = chat.permissionMode.isEmpty || chat.permissionMode == "default" ? nil : chat.permissionMode
+                moved.chat?.start(model: model, effort: effort, mode: mode)
+                moved.chat?.send(text, images: images)
+                self.close(tab)
+                Task { await self.reloadProjects() }
+            }
+        }
+    }
+
     func markUnread(_ tab: ClaudeTab) {
         if selectedTabID == tab.id { selectedTabID = tabs.first { $0.id != tab.id }?.id }
         tab.unread = true
@@ -743,7 +803,26 @@ final class ClaudeWorkspace {
         guard let chat = tab.chat else { return }
         chat.onSessionId = { [weak self, weak tab] sid in
             tab?.sessionId = sid
+            if let title = tab?.pendingTitle {
+                AgentSessionPrefs.shared.rename(sid, to: title)
+                tab?.pendingTitle = nil
+            }
             self?.saveOpenTabs()
+        }
+        chat.onFirstPrompt = { [weak self, weak tab] text in
+            guard let self, let tab else { return }
+            self.autoTitle(tab, from: text)
+        }
+        chat.onWorktreeSend = { [weak self, weak tab] text, images in
+            guard let self, let tab else { return }
+            self.startInWorktree(from: tab, text: text, images: images)
+        }
+        if tab.sessionId.isEmpty, !SessionWorktree.isWorktree(tab.folder) {
+            let folder = tab.folder
+            Task { [weak chat] in
+                let ok = await SessionWorktree.canCreate(in: folder)
+                chat?.worktreeAvailable = ok
+            }
         }
         chat.onTurnFinished = { [weak self, weak tab] in
             guard let tab else { return }
