@@ -637,6 +637,42 @@ final class ClaudeWorkspace {
         saveOpenTabs()
     }
 
+    /// All sessions of the project, across accounts and regardless of the sidebar
+    /// filter, that are not already in `profile`'s account.
+    func sessionsToMove(_ project: ClaudeProject, to profile: ClaudeProfile) -> [ClaudeSessionInfo] {
+        let full = projects.first { $0.id == project.id } ?? project
+        return full.sessions.filter { ($0.profileID ?? ClaudeProfiles.defaultID) != profile.id }
+    }
+
+    /// Moves every session of `project` that belongs to another account into
+    /// `profile`'s Claude config folder, so it lists and resumes under that account.
+    func moveProject(_ project: ClaudeProject, to profile: ClaudeProfile) {
+        let sessions = sessionsToMove(project, to: profile)
+        guard !sessions.isEmpty else { return }
+        let alert = NSAlert()
+        alert.messageText = "Move \(sessions.count) \(sessions.count == 1 ? "session" : "sessions") of “\(project.name)” to \(profile.label)?"
+        alert.informativeText = "Their history moves to the \(profile.label) Claude account and resumes there. The other account, including the Claude app and CLI signed in to it, will no longer list them. Open tabs for these sessions close first. Project files are not touched."
+        alert.addButton(withTitle: "Move")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        for s in sessions { if let open = tab(forSession: s.id) { close(open) } }
+        let files = sessions.map(\.file)
+        let target = URL(fileURLWithPath: ClaudeProfiles.shared.configDir(for: profile), isDirectory: true)
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            let outcome = await Task.detached(priority: .userInitiated) {
+                Swift.Result { try ClaudeSessionMover.move(sessionFiles: files, to: target) }
+            }.value
+            if case .failure(let error) = outcome {
+                let failed = NSAlert()
+                failed.messageText = "Couldn't move all sessions"
+                failed.informativeText = error.localizedDescription
+                failed.runModal()
+            }
+            await self?.reloadProjects()
+        }
+    }
+
     /// Replaces the placeholder title of a new session with a short topical one.
     private func autoTitle(_ tab: ClaudeTab, from prompt: String) {
         guard !tab.titled, tab.sessionId.isEmpty else { return }

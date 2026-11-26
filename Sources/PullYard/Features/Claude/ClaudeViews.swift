@@ -430,6 +430,13 @@ struct ClaudeProjectsColumn: View {
                 }
             }
             .disabled(!project.exists)
+            Menu("Move to account") {
+                ForEach(ClaudeProfiles.shared.visible) { p in
+                    let movable = ws.sessionsToMove(project, to: p).count
+                    Button(movable == 0 ? p.label : "\(p.label) (\(movable))") { ws.moveProject(project, to: p) }
+                        .disabled(movable == 0)
+                }
+            }
         }
         Divider()
         let order = prefs.ordered(accountScoped).map(\.id)
