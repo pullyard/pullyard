@@ -669,13 +669,57 @@ struct AgentAccountEmpty: View {
 }
 
 struct AgentProjectPicker: View {
-    let profile: ClaudeProfile
+    private let initialProfile: ClaudeProfile
+    @State private var profileID: String
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var selection: String?
     @State private var envDraft: AgentEnvironmentDraft?
     @FocusState private var searchFocused: Bool
+
+    init(profile: ClaudeProfile) {
+        initialProfile = profile
+        _profileID = State(initialValue: profile.id)
+    }
+
+    /// The account the new session starts as. Starts at the one the sheet was
+    /// opened for and can be changed from the header before opening.
+    private var profile: ClaudeProfile {
+        ClaudeProfiles.shared.profile(id: profileID) ?? initialProfile
+    }
+
+    @ViewBuilder
+    private var accountLine: some View {
+        let text = Text("New session as \(profile.label)" + (profile.email.map { " · \($0)" } ?? ""))
+            .font(.syCaption)
+            .lineLimit(1)
+        let others = ClaudeProfiles.shared.visible
+        if others.count > 1 {
+            Menu {
+                Picker("Account", selection: $profileID) {
+                    ForEach(others) { p in
+                        Text(p.label + (p.email.map { " — \($0)" } ?? "")).tag(p.id)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } label: {
+                HStack(spacing: 4) {
+                    text
+                    Image(systemName: "chevron.up.chevron.down").font(.syCaption2.weight(.semibold))
+                }
+                .foregroundStyle(Color.syMuted)
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Choose which Claude account this session uses")
+        } else {
+            text.foregroundStyle(Color.syMuted)
+        }
+    }
 
     private var environments: [AgentEnvironment] {
         let all = AgentEnvironments.shared.items
@@ -695,10 +739,7 @@ struct AgentProjectPicker: View {
                 ProfileBadge(profile: profile, size: 28)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Open a project").font(.syHeadline).foregroundStyle(Color.syText)
-                    Text("New session as \(profile.label)" + (profile.email.map { " · \($0)" } ?? ""))
-                        .font(.syCaption)
-                        .foregroundStyle(Color.syMuted)
-                        .lineLimit(1)
+                    accountLine
                 }
             }
             HStack(spacing: 8) {
