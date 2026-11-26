@@ -4,7 +4,7 @@ import Foundation
 enum UpdateSignature {
     static let publicKey = "m0UbLdp60TGrr4oQs1p3pqNTXQQOqOZM2oRtf3jnJlM="
 
-    static let devPublicKey = ""
+    static let devPublicKey = "A7T1rjXuZne9RD6QyLXyETjw6X46qwj5CQrgIH3HGc4="
 
     static var isConfigured: Bool { !publicKey.isEmpty }
 
