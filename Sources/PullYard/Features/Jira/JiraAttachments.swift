@@ -114,6 +114,81 @@ enum JiraAttachmentStore {
     static func size(_ bytes: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
+
+    /// Bytes on disk taken by downloaded attachments, summed off the main thread.
+    static func diskUsage() async -> Int {
+        let dir = root
+        return await Task.detached(priority: .utility) {
+            let keys: Set<URLResourceKey> = [.isRegularFileKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey]
+            guard let files = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: Array(keys)) else { return 0 }
+            var total = 0
+            for case let url as URL in files {
+                guard let values = try? url.resourceValues(forKeys: keys), values.isRegularFile == true else { continue }
+                total += values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0
+            }
+            return total
+        }.value
+    }
+
+    /// Deletes every downloaded attachment and drops in-memory thumbnails.
+    /// Files come back on demand the next time an attachment is opened.
+    static func clearAll() async {
+        for task in downloads.values { task.cancel() }
+        downloads.removeAll()
+        thumbs.removeAllObjects()
+        let dir = root
+        await Task.detached(priority: .utility) {
+            try? FileManager.default.removeItem(at: dir)
+        }.value
+    }
+}
+
+struct JiraAttachmentCacheSection: View {
+    @State private var bytes: Int?
+    @State private var clearing = false
+    @State private var confirmClear = false
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Downloaded attachments").foregroundStyle(Color.syText)
+                Text("Images, videos and files opened from Jira issues are kept on this Mac so they open instantly next time.")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+            }
+            Spacer()
+            Group {
+                if let bytes {
+                    Text(JiraAttachmentStore.size(bytes))
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .font(.syCallout)
+            .foregroundStyle(Color.syMuted)
+            .monospacedDigit()
+            Button(clearing ? "Clearing…" : "Clear All…") { confirmClear = true }
+                .disabled(clearing || (bytes ?? 0) == 0)
+        }
+        .task { await refresh() }
+        .confirmationDialog("Delete all downloaded Jira attachments?", isPresented: $confirmClear) {
+            Button("Clear All", role: .destructive) {
+                Task {
+                    clearing = true
+                    await JiraAttachmentStore.clearAll()
+                    clearing = false
+                    await refresh()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This frees \(JiraAttachmentStore.size(bytes ?? 0)). Attachments download again when you open them.")
+        }
+    }
+
+    private func refresh() async {
+        bytes = await JiraAttachmentStore.diskUsage()
+    }
 }
 
 struct JiraAttachmentsSection: View {

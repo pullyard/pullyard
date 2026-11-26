@@ -251,6 +251,11 @@ struct SettingsView: View {
             } header: {
                 SettingsHeader(title: "Jira", icon: "ticket", color: .sySky)
             }
+            Section {
+                JiraAttachmentCacheSection()
+            } header: {
+                SettingsHeader(title: "Jira attachments", icon: "paperclip", color: .syViolet)
+            }
         }
         .formStyle(.grouped)
         .surface(.panel)
