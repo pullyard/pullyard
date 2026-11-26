@@ -300,7 +300,7 @@ struct JiraMediaViewer: View {
             }
             .padding(40)
         } else if let player, current?.kind == .video {
-            VideoPlayer(player: player)
+            AttachmentPlayerView(player: player)
         } else if let image {
             Image(nsImage: image).resizable().interpolation(.high).scaledToFit().padding(12)
         } else if loading {
@@ -375,5 +375,29 @@ struct JiraMediaViewer: View {
             guard current?.id == a.id else { return }
             self.error = error.localizedDescription
         }
+    }
+}
+
+/// AppKit-backed player. SwiftUI's `VideoPlayer` lives in the `_AVKit_SwiftUI`
+/// overlay, which subclasses AVKit types; a SwiftPM build can end up without
+/// AVKit itself linked and abort when that metadata is first instantiated.
+/// Using `AVPlayerView` directly keeps a hard reference to AVKit.
+private struct AttachmentPlayerView: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.controlsStyle = .floating
+        view.showsFullScreenToggleButton = true
+        view.player = player
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {
+        if view.player !== player { view.player = player }
+    }
+
+    static func dismantleNSView(_ view: AVPlayerView, coordinator: ()) {
+        view.player = nil
     }
 }
