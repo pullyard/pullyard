@@ -29,6 +29,44 @@ final class PYLinkTests: XCTestCase {
         XCTAssertThrowsError(try PYLinkCrypto.open(sealed, key: c, direction: "c2s", counter: 0))
     }
 
+    func testPrefsResolveOpenAndClosedSessions() {
+        let prefs = PYLinkPrefs(pinned: ["s1"], titles: ["s1": "Renamed", "s2": ""])
+        let open = PYLinkSession(id: "tab-uuid", title: "Tab title", folder: "/r", state: "active", sessionID: "s1")
+        let starting = PYLinkSession(id: "tab-2", title: "Starting", folder: "/r", state: "active", sessionID: "")
+        let closed = PYLinkSession(id: "s2", title: "Original", folder: "/r", state: "closed")
+        XCTAssertEqual(prefs.title(for: open), "Renamed")
+        XCTAssertTrue(prefs.isPinned(open))
+        XCTAssertEqual(prefs.title(for: starting), "Starting")
+        XCTAssertFalse(prefs.isPinned(starting))
+        XCTAssertEqual(prefs.title(for: closed), "Original")
+        XCTAssertFalse(prefs.isPinned(closed))
+    }
+
+    func testLaunchFieldsRoundTripAndOldMessagesStillDecode() throws {
+        var message = PYLinkMessage(type: "new")
+        message.account = "acc"
+        message.environment = "env"
+        message.folder = "/Users/me/repo"
+        message.pinned = true
+        message.options = PYLinkOptions(accounts: [PYLinkAccount(id: "default", label: "Main", email: "a@b.c")], active: "default", environments: [PYLinkEnvironment(id: "env", name: "Staging", icon: "server.rack", folders: ["/a"], variables: ["API_URL"])], projects: [PYLinkProject(path: "/a", name: "a")])
+        let decoded = try JSONDecoder().decode(PYLinkMessage.self, from: JSONEncoder().encode(message))
+        XCTAssertEqual(decoded.account, "acc")
+        XCTAssertEqual(decoded.environment, "env")
+        XCTAssertEqual(decoded.folder, "/Users/me/repo")
+        XCTAssertEqual(decoded.pinned, true)
+        XCTAssertEqual(decoded.options, message.options)
+        let old = try JSONDecoder().decode(PYLinkSession.self, from: Data(#"{"id":"x","title":"t","folder":"/f","state":"active"}"#.utf8))
+        XCTAssertNil(old.sessionID)
+        XCTAssertNil(old.pending)
+    }
+
+    func testOptionsNeverCarryEnvironmentValues() throws {
+        let env = PYLinkEnvironment(id: "e", name: "Prod", icon: "bolt", folders: [], variables: ["TOKEN"])
+        let json = String(decoding: try JSONEncoder().encode(env), as: UTF8.self)
+        XCTAssertFalse(json.contains("value"))
+        XCTAssertTrue(json.contains("TOKEN"))
+    }
+
     func testDirectionsNeverShareANonce() {
         XCTAssertNotEqual(Data(PYLinkCrypto.frameNonce(direction: "c2s", counter: 7)), Data(PYLinkCrypto.frameNonce(direction: "s2c", counter: 7)))
     }

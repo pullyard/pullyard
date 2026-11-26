@@ -119,7 +119,7 @@ struct ResolveConflictsSheet: View {
         Task {
             defer { launching = false }
             do {
-                try await ClaudeLauncher.startForPR(app: app, prompt: prompt, folder: folder, isolate: isolate, pr: pr, repo: model.ref.repo, target: target, mode: mode, profileID: ClaudeProfiles.shared.profile(id: profileID).flatMap { ClaudeProfiles.shared.visible.contains($0) ? $0.id : nil }, name: "Resolve conflicts PR #\(pr.number): \(pr.title)")
+                try await ClaudeLauncher.startForPR(app: app, prompt: prompt, folder: folder, isolate: isolate, pr: pr, repo: model.ref.repo, target: target, mode: mode, name: "Resolve conflicts PR #\(pr.number): \(pr.title)", profileID: ClaudeProfiles.shared.profile(id: profileID).flatMap { ClaudeProfiles.shared.visible.contains($0) ? $0.id : nil })
                 dismiss()
             } catch {
                 self.error = error.localizedDescription

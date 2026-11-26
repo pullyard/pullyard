@@ -75,6 +75,7 @@ enum BackgroundSync {
         UNUserNotificationCenter.current().setNotificationCategories([
             UNNotificationCategory(identifier: category, actions: [reply, open, markRead], intentIdentifiers: []),
             UNNotificationCategory(identifier: reviewCategory, actions: [approve, reply, open], intentIdentifiers: []),
+            AgentNotifier.notificationCategory,
         ])
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
     }
@@ -200,6 +201,10 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
+        if response.notification.request.content.categoryIdentifier == AgentNotifier.category {
+            await AgentNotifier.handle(response)
+            return
+        }
         if response.actionIdentifier == BackgroundSync.replyAction || response.actionIdentifier == BackgroundSync.approveAction {
             guard let repo = info["repo"] as? String, let number = (info["number"] as? String).flatMap(Int.init), case let .found(token) = CredentialVault().read() else { return }
             let key = PRKey(repo: repo, number: number)

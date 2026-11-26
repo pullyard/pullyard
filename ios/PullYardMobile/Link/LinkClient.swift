@@ -53,11 +53,15 @@ final class LinkClient: ObservableObject {
         didSet {
             let waiting = sessions.filter { $0.state == "waiting" }.count
             if AgentBadge.shared.count != waiting { AgentBadge.shared.count = waiting }
+            AgentNotifier.update(sessions, titles: prefs, viewing: viewing, mac: macName)
         }
     }
     @Published private(set) var chats: [String: AgentChat] = [:]
     @Published private(set) var viaInternet = false
     @Published private(set) var history: [PYLinkSession] = []
+    @Published private(set) var options: PYLinkOptions?
+    @Published private(set) var prefs = PYLinkPrefs(pinned: [], titles: [:])
+    var viewing: String?
 
     private var channel: PYLinkChannel?
     private var browser: NWBrowser?
@@ -103,6 +107,8 @@ final class LinkClient: ObservableObject {
         sessions = []
         history = []
         chats = [:]
+        options = nil
+        prefs = PYLinkPrefs(pinned: [], titles: [:])
         UserDefaults.standard.removeObject(forKey: "link.mac")
         status = .unpaired
         if let endpoint = irohEndpoint { Task { try? await endpoint.close() } }
@@ -182,7 +188,104 @@ final class LinkClient: ObservableObject {
     func loadHistory() async {
         if !isConnected { try? await ensureConnected() }
         guard let reply = try? await request(PYLinkMessage(type: "history"), timeout: 30) else { return }
+        if let next = reply.prefs { prefs = next }
         history = reply.sessions ?? history
+    }
+
+    func loadOptions() async {
+        if !isConnected { try? await ensureConnected() }
+        guard let reply = try? await request(PYLinkMessage(type: "options"), timeout: 20), reply.error == nil, let next = reply.options else { return }
+        options = next
+        if let next = reply.prefs { prefs = next }
+    }
+
+    func title(_ session: PYLinkSession) -> String { prefs.title(for: session) }
+
+    func isPinned(_ session: PYLinkSession) -> Bool { prefs.isPinned(session) }
+
+    func canPin(_ session: PYLinkSession) -> Bool { !(session.sessionID ?? session.id).isEmpty }
+
+    func account(_ id: String?) -> PYLinkAccount? {
+        options?.accounts.first { $0.id == (id ?? "default") }
+    }
+
+    func setPinned(_ session: PYLinkSession, _ pinned: Bool) async throws {
+        if !isConnected { try await ensureConnected() }
+        let key = session.sessionID ?? session.id
+        let previous = prefs
+        if pinned, !prefs.pinned.contains(key) { prefs.pinned.insert(key, at: 0) }
+        if !pinned { prefs.pinned.removeAll { $0 == key } }
+        var message = PYLinkMessage(type: "pin")
+        message.session = session.id
+        message.pinned = pinned
+        do {
+            let reply = try await request(message, timeout: 20)
+            if let error = reply.error { throw LinkError.remote(error) }
+            apply(reply)
+        } catch {
+            prefs = previous
+            throw error
+        }
+    }
+
+    func rename(_ session: PYLinkSession, to title: String) async throws {
+        if !isConnected { try await ensureConnected() }
+        let key = session.sessionID ?? session.id
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let previous = prefs
+        if !key.isEmpty { prefs.titles[key] = trimmed.isEmpty ? nil : trimmed }
+        var message = PYLinkMessage(type: "rename")
+        message.session = session.id
+        message.text = trimmed
+        do {
+            let reply = try await request(message, timeout: 20)
+            if let error = reply.error { throw LinkError.remote(error) }
+            apply(reply)
+        } catch {
+            prefs = previous
+            throw error
+        }
+    }
+
+    private func apply(_ reply: PYLinkMessage) {
+        if let next = reply.prefs { prefs = next }
+        if let next = reply.sessions { sessions = next }
+    }
+
+    func startSession(folder: String?, account: String?, environment: String?, prompt: String?) async throws -> String {
+        if !isConnected { try await ensureConnected() }
+        var message = PYLinkMessage(type: "new")
+        message.folder = folder
+        message.account = account
+        message.environment = environment
+        message.text = prompt
+        let reply = try await request(message, timeout: 60)
+        if let error = reply.error { throw LinkError.remote(error) }
+        guard let session = reply.session else { throw LinkError.remote("Update PullYard on your Mac to start sessions from the iPhone.") }
+        sessions = reply.sessions ?? sessions
+        subscriptions.insert(session)
+        AgentActivities.track(session)
+        AgentNotifier.prepare()
+        let name = prompt.map { String($0.prefix(48)) } ?? "New session"
+        if chats[session] == nil { chats[session] = AgentChat(id: session, title: sessions.first { $0.id == session }?.title ?? name) }
+        return session
+    }
+
+    func reply(_ text: String, to session: String, requestID: String?) async throws {
+        if !isConnected { try await ensureConnected() }
+        guard let channel else { throw LinkError.disconnected }
+        var message = PYLinkMessage(type: "send")
+        message.session = session
+        message.text = text
+        message.requestID = requestID
+        channel.send(json: message)
+        AgentActivities.track(session)
+        if let requestID {
+            chats[session]?.state.pending.removeAll { $0.id == requestID }
+            AgentActivities.answered(session)
+        } else {
+            chats[session]?.items.append(PYLinkItem(id: "local-\(UUID().uuidString)", kind: "user", text: text))
+        }
     }
 
     func resume(_ id: String) async throws -> String {
@@ -195,6 +298,7 @@ final class LinkClient: ObservableObject {
         sessions = reply.sessions ?? sessions
         subscriptions.insert(session)
         AgentActivities.track(session)
+        AgentNotifier.prepare()
         if chats[session] == nil { chats[session] = AgentChat(id: session, title: history.first { $0.id == id }?.title ?? "Agent") }
         return session
     }
@@ -212,7 +316,7 @@ final class LinkClient: ObservableObject {
         return (reply.text ?? "", prompt)
     }
 
-    func startFix(repo: String, number: Int, kind: String, text: String?, prompt: String? = nil) async throws -> String {
+    func startFix(repo: String, number: Int, kind: String, text: String?, prompt: String? = nil, account: String? = nil, environment: String? = nil) async throws -> String {
         if !isConnected { try await ensureConnected() }
         var message = PYLinkMessage(type: "fix")
         message.repo = repo
@@ -220,12 +324,15 @@ final class LinkClient: ObservableObject {
         message.kind = kind
         message.text = text
         message.prompt = prompt
+        message.account = account
+        message.environment = environment
         let reply = try await request(message, timeout: 90)
         if let error = reply.error { throw LinkError.remote(error) }
         guard let session = reply.session else { throw LinkError.remote("The Mac didn't return a session.") }
         sessions = reply.sessions ?? sessions
         subscriptions.insert(session)
         AgentActivities.track(session)
+        AgentNotifier.prepare()
         if chats[session] == nil { chats[session] = AgentChat(id: session, title: "Agent") }
         return session
     }
@@ -368,6 +475,7 @@ final class LinkClient: ObservableObject {
                 status = .connected(mac.name)
                 for session in subscriptions { subscribe(session) }
                 if let reply = try? await request(PYLinkMessage(type: "list")) { sessions = reply.sessions ?? sessions }
+                Task { await loadOptions() }
                 return
             } catch let error as LinkError {
                 lastError = error
@@ -598,6 +706,9 @@ final class LinkClient: ObservableObject {
             AgentActivities.sync(session: session, chat: chat, mac: macName)
         case "sessions":
             sessions = message.sessions ?? sessions
+        case "prefs":
+            if let next = message.prefs { prefs = next }
+            if let next = message.sessions { sessions = next }
         default:
             break
         }

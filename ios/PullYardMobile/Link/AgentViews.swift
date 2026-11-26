@@ -8,6 +8,7 @@ struct MacLinkSection: View {
     @State private var manualHost = ""
     @State private var confirmUnpair = false
     @AppStorage(AgentActivities.enabledKey) private var liveActivity = true
+    @AppStorage(AgentNotifier.enabledKey) private var agentNotify = true
 
     var body: some View {
         Section {
@@ -30,6 +31,8 @@ struct MacLinkSection: View {
                 }
                 Toggle(isOn: $liveActivity) { Label("Live Activity for agents", systemImage: "platter.filled.top.iphone") }
                     .onChange(of: liveActivity) { _, on in if !on { AgentActivities.endAll() } }
+                Toggle(isOn: $agentNotify) { Label("Notify when an agent needs you", systemImage: "bell.badge") }
+                    .onChange(of: agentNotify) { _, on in if on { AgentNotifier.prepare() } }
                 HStack {
                     TextField("Address for VPN / Tailscale (host:port)", text: $manualHost)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -428,8 +431,8 @@ struct FixWithAgentMenu: View {
         }
         .disabled(starting || launching)
         .sheet(item: $review) { item in
-            PromptReviewSheet(review: item) { prompt in
-                launch(item, prompt: prompt)
+            PromptReviewSheet(review: item) { prompt, choice in
+                launch(item, prompt: prompt, choice: choice)
             }
             .pySheetStyle()
         }
@@ -454,14 +457,14 @@ struct FixWithAgentMenu: View {
         }
     }
 
-    private func launch(_ item: PromptReview, prompt: String) {
+    private func launch(_ item: PromptReview, prompt: String, choice: AgentLaunchChoice) {
         review = nil
         launching = true
         Task {
             defer { launching = false }
             do {
                 let edited = prompt == item.prompt ? nil : prompt
-                let session = try await link.startFix(repo: key.repo, number: key.number, kind: item.kind, text: item.text, prompt: edited)
+                let session = try await link.startFix(repo: key.repo, number: key.number, kind: item.kind, text: item.text, prompt: edited, account: choice.account, environment: choice.environment)
                 router.open(.agent(session), in: model.selectedTab)
             } catch {
                 feedback.error(error, key: "agent-start")
@@ -480,13 +483,15 @@ struct PromptReview: Identifiable {
 
 private struct PromptReviewSheet: View {
     let review: PromptReview
-    let start: (String) -> Void
+    let start: (String, AgentLaunchChoice) -> Void
     @State private var prompt: String
     @State private var editing = false
+    @State private var choice = AgentLaunchChoice()
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var link = LinkClient.shared
+    @AppStorage("agents.accountFilter") private var accountFilter = ""
 
-    init(review: PromptReview, start: @escaping (String) -> Void) {
+    init(review: PromptReview, start: @escaping (String, AgentLaunchChoice) -> Void) {
         self.review = review
         self.start = start
         _prompt = State(initialValue: review.prompt)
@@ -519,8 +524,11 @@ private struct PromptReviewSheet: View {
                 .frame(maxHeight: .infinity)
                 .background(MobileTheme.sunken, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(editing ? MobileTheme.accent.opacity(0.5) : MobileTheme.line))
+                if let options = link.options, options.accounts.count > 1 || !options.environments.isEmpty {
+                    AgentLaunchPickers(options: options, choice: $choice)
+                }
                 Button {
-                    start(prompt)
+                    start(prompt, choice)
                 } label: {
                     Label("Start on \(link.macName)", systemImage: "wand.and.stars")
                         .mobileFont(size: 16, weight: .semibold)
@@ -536,6 +544,11 @@ private struct PromptReviewSheet: View {
             .background(BrandBackdrop())
             .navigationTitle("Prompt")
             .navigationBarTitleDisplayMode(.inline)
+            .task {
+                if link.options == nil { await link.loadOptions() }
+                let accounts = link.options?.accounts ?? []
+                choice.account = accounts.contains { $0.id == accountFilter } ? accountFilter : link.options?.active
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) {
@@ -562,6 +575,10 @@ struct AgentSessionsView: View {
     @State private var query = ""
     @State private var reordering = false
     @State private var closing: PYLinkSession?
+    @State private var renaming: PYLinkSession?
+    @State private var renameText = ""
+    @State private var creating = false
+    @AppStorage("agents.accountFilter") private var accountFilter = ""
     @AppStorage("agents.collapsedProjects") private var collapsedRaw = ""
     @AppStorage("agents.projectOrder") private var orderRaw = ""
 
@@ -576,10 +593,22 @@ struct AgentSessionsView: View {
         var working: Bool { open.contains { $0.state == "working" || $0.state == "waiting" } }
     }
 
+    private var accounts: [PYLinkAccount] { link.options?.accounts ?? [] }
+    private var multiAccount: Bool { accounts.count > 1 }
+    private var accountScope: String? { multiAccount && accounts.contains { $0.id == accountFilter } ? accountFilter : nil }
+
+    private var pinned: [PYLinkSession] {
+        let open = link.sessions.filter { link.isPinned($0) && matches($0) }
+        let openKeys = Set(open.compactMap(\.sessionID))
+        let closed = link.history.filter { $0.state == "closed" && link.isPinned($0) && matches($0) && !openKeys.contains($0.id) }
+        let order = link.prefs.pinned
+        return (open + closed).sorted { (order.firstIndex(of: $0.sessionID ?? $0.id) ?? .max) < (order.firstIndex(of: $1.sessionID ?? $1.id) ?? .max) }
+    }
+
     private var active: [PYLinkSession] {
         let rank = ["waiting": 0, "working": 1, "active": 2]
         return link.sessions
-            .filter { rank[$0.state] != nil && matches($0) }
+            .filter { rank[$0.state] != nil && matches($0) && !link.isPinned($0) }
             .sorted { (rank[$0.state] ?? 3) < (rank[$1.state] ?? 3) }
     }
 
@@ -590,12 +619,12 @@ struct AgentSessionsView: View {
     private func groups(filtered: Bool = true) -> [ProjectGroup] {
         var map: [String: ProjectGroup] = [:]
         let activeIDs = Set(active.map(\.id))
-        for session in link.sessions where (!filtered || matches(session)) && !(filtered && activeIDs.contains(session.id)) {
+        for session in link.sessions where (!filtered || matches(session)) && !(filtered && (activeIDs.contains(session.id) || link.isPinned(session))) {
             let root = Self.projectRoot(session.folder)
             map[root, default: ProjectGroup(id: root)].open.append(session)
             map[root]?.latest = .distantFuture
         }
-        for session in link.history where session.state == "closed" && (!filtered || matches(session)) {
+        for session in link.history where session.state == "closed" && (!filtered || matches(session)) && !(filtered && link.isPinned(session)) {
             let root = Self.projectRoot(session.folder)
             map[root, default: ProjectGroup(id: root)].closed.append(session)
             if let updated = session.updated, updated > (map[root]?.latest ?? .distantPast) { map[root]?.latest = updated }
@@ -625,10 +654,11 @@ struct AgentSessionsView: View {
     }
 
     private func matches(_ session: PYLinkSession) -> Bool {
+        if let scope = accountScope, (session.account ?? "default") != scope { return false }
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return true }
         let number = q.hasPrefix("#") ? String(q.dropFirst()) : q
-        return session.title.localizedCaseInsensitiveContains(q)
+        return link.title(session).localizedCaseInsensitiveContains(q)
             || session.folder.localizedCaseInsensitiveContains(q)
             || (session.repo ?? "").localizedCaseInsensitiveContains(q)
             || session.number.map { String($0) == number } == true
@@ -648,12 +678,37 @@ struct AgentSessionsView: View {
                     .frame(maxWidth: .infinity).padding(.vertical, 40)
                     .listRowBackground(Color.clear)
             } else {
+                if multiAccount {
+                    AgentAccountChips(accounts: accounts, selection: $accountFilter)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                }
+                if !pinned.isEmpty {
+                    Section {
+                        ForEach(pinned) { session in
+                            if session.state == "closed" {
+                                closedRow(session)
+                            } else {
+                                NavigationLink(value: Route.agent(session.id)) { row(session, showProject: true) }
+                                    .pyRow()
+                                    .modifier(actions(session))
+                            }
+                        }
+                    } header: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "pin.fill").font(.system(size: 11)).foregroundStyle(MobileTheme.accent)
+                            Text("Pinned").mobileFont(size: 14, weight: .semibold).foregroundStyle(MobileTheme.ink)
+                        }
+                        .padding(.vertical, 6)
+                        .textCase(nil)
+                    }
+                }
                 if !active.isEmpty {
                     Section {
                         ForEach(active) { session in
                             NavigationLink(value: Route.agent(session.id)) { row(session, showProject: true) }
                                 .pyRow()
-                                .modifier(CloseActions(session: session, closing: $closing))
+                                .modifier(actions(session))
                         }
                     } header: {
                         HStack(spacing: 8) {
@@ -676,20 +731,10 @@ struct AgentSessionsView: View {
                             ForEach(group.open) { session in
                                 NavigationLink(value: Route.agent(session.id)) { row(session) }
                                     .pyRow()
-                                    .modifier(CloseActions(session: session, closing: $closing))
+                                    .modifier(actions(session))
                             }
                             ForEach(group.closed) { session in
-                                Button { resume(session) } label: {
-                                    HStack {
-                                        row(session)
-                                        Spacer(minLength: 8)
-                                        if resuming == session.id { PullYardLoader(size: 22) } else { Image(systemName: "arrow.uturn.forward.circle").foregroundStyle(MobileTheme.accent) }
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.pyPlain)
-                                .disabled(resuming != nil)
-                                .pyRow()
+                                closedRow(session)
                             }
                         }
                     } header: {
@@ -708,6 +753,11 @@ struct AgentSessionsView: View {
         .navigationTitle("Agents")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
+                Button { creating = true } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("New session")
+                    .disabled(!link.isConnected)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button { reordering = true } label: { Label("Reorder projects", systemImage: "arrow.up.arrow.down") }
                     Button { withAnimation(.snappy) { collapsedRaw = groups(filtered: false).map(\.id).joined(separator: "\n") } } label: { Label("Collapse all", systemImage: "rectangle.compress.vertical") }
@@ -723,6 +773,19 @@ struct AgentSessionsView: View {
             Button("Cancel", role: .cancel) {}
         } message: { session in
             Text(session.state == "working" || session.state == "waiting" ? "The agent is working. Closing stops it and closes the tab on your Mac. You can continue it later from History." : "This closes the tab on your Mac. You can continue it later from History.")
+        }
+        .alert("Rename session", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } }), presenting: renaming) { session in
+            TextField("Name", text: $renameText)
+            Button("Rename") { rename(session, to: renameText) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("The name is shown in PullYard on the iPhone and the Mac.")
+        }
+        .sheet(isPresented: $creating) {
+            NewAgentSessionSheet(preferredAccount: accountScope) { session in
+                router.open(.agent(session), in: model.selectedTab)
+            }
+            .pySheetStyle()
         }
         .sheet(isPresented: $reordering) {
             ProjectOrderSheet(projects: groups(filtered: false).map { ($0.id, $0.name) }) { ids in
@@ -763,8 +826,53 @@ struct AgentSessionsView: View {
     private func load() async {
         loading = true
         await link.refreshSessions()
+        await link.loadOptions()
         await link.loadHistory()
         loading = false
+    }
+
+    private func actions(_ session: PYLinkSession, closable: Bool = true) -> SessionActions {
+        SessionActions(session: session, closable: closable, pinned: link.isPinned(session), canPin: link.canPin(session), closing: $closing, pin: { setPinned(session, $0) }, rename: {
+            renameText = link.title(session)
+            renaming = session
+        })
+    }
+
+    private func closedRow(_ session: PYLinkSession) -> some View {
+        Button { resume(session) } label: {
+            HStack {
+                row(session)
+                Spacer(minLength: 8)
+                if resuming == session.id { PullYardLoader(size: 22) } else { Image(systemName: "arrow.uturn.forward.circle").foregroundStyle(MobileTheme.accent) }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.pyPlain)
+        .disabled(resuming != nil)
+        .pyRow()
+        .modifier(actions(session, closable: false))
+    }
+
+    private func setPinned(_ session: PYLinkSession, _ value: Bool) {
+        Task {
+            do {
+                try await link.setPinned(session, value)
+            } catch {
+                feedback.error(error, key: "agent-pin")
+            }
+        }
+    }
+
+    private func rename(_ session: PYLinkSession, to title: String) {
+        renaming = nil
+        Task {
+            do {
+                try await link.rename(session, to: title)
+                await link.loadHistory()
+            } catch {
+                feedback.error(error, key: "agent-rename")
+            }
+        }
     }
 
     private func close(_ session: PYLinkSession) {
@@ -796,8 +904,12 @@ struct AgentSessionsView: View {
         HStack(spacing: 10) {
             AgentStateDot(state: session.state)
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.title).mobileFont(size: 15, weight: .semibold).lineLimit(2).foregroundStyle(MobileTheme.ink)
+                Text(link.title(session)).mobileFont(size: 15, weight: .semibold).lineLimit(2).foregroundStyle(MobileTheme.ink)
                 Text(showProject ? projectSubtitle(session) : subtitle(session)).mobileFont(size: 12).foregroundStyle(MobileTheme.muted).lineLimit(1)
+            }
+            if multiAccount, accountScope == nil {
+                Spacer(minLength: 6)
+                AgentAccountBadge(account: link.account(session.account))
             }
         }
     }
@@ -826,17 +938,53 @@ struct AgentSessionsView: View {
     }
 }
 
-private struct CloseActions: ViewModifier {
+private struct RenameAlert: ViewModifier {
+    @Binding var isPresented: Bool
+    @Binding var text: String
+    let submit: () -> Void
+
+    func body(content: Content) -> some View {
+        content.alert("Rename session", isPresented: $isPresented) {
+            TextField("Name", text: $text)
+            Button("Rename", action: submit)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The name is shown in PullYard on the iPhone and the Mac.")
+        }
+    }
+}
+
+private struct SessionActions: ViewModifier {
     let session: PYLinkSession
+    let closable: Bool
+    let pinned: Bool
+    let canPin: Bool
     @Binding var closing: PYLinkSession?
+    let pin: (Bool) -> Void
+    let rename: () -> Void
 
     func body(content: Content) -> some View {
         content
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                if canPin {
+                    Button { pin(!pinned) } label: { Label(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") }
+                        .tint(MobileTheme.accent)
+                }
+            }
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button(role: .destructive) { closing = session } label: { Label("Close", systemImage: "xmark") }
+                if closable {
+                    Button(role: .destructive) { closing = session } label: { Label("Close", systemImage: "xmark") }
+                }
             }
             .contextMenu {
-                Button(role: .destructive) { closing = session } label: { Label("Close session", systemImage: "xmark.circle") }
+                if canPin {
+                    Button { pin(!pinned) } label: { Label(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") }
+                }
+                Button(action: rename) { Label("Rename…", systemImage: "pencil") }
+                if closable {
+                    Divider()
+                    Button(role: .destructive) { closing = session } label: { Label("Close session", systemImage: "xmark.circle") }
+                }
             }
     }
 }
@@ -915,6 +1063,13 @@ struct AgentChatView: View {
     @FocusState private var focused: Bool
 
     private var chat: AgentChat? { link.chats[session] }
+    private var info: PYLinkSession? { link.sessions.first { $0.id == session } }
+    private var navigationTitle: String {
+        if let info { return link.title(info) }
+        return chat?.title ?? L("Agent")
+    }
+    @State private var renaming = false
+    @State private var renameText = ""
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -1025,7 +1180,7 @@ struct AgentChatView: View {
             guard on, atBottom else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { scrollRequest += 1 }
         }
-        .navigationTitle(chat?.title ?? L("Agent"))
+        .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
@@ -1035,6 +1190,7 @@ struct AgentChatView: View {
                         .accessibilityLabel("Stop")
                 }
                 Menu {
+                    sessionMenuItems
                     Button(role: .destructive) { confirmClose = true } label: { Label("Close session", systemImage: "xmark.circle") }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -1062,11 +1218,48 @@ struct AgentChatView: View {
         } message: {
             Text(chat?.state.busy == true ? "The agent is working. Closing stops it and closes the tab on your Mac. You can continue it later from History." : "This closes the tab on your Mac. You can continue it later from History.")
         }
+        .modifier(RenameAlert(isPresented: $renaming, text: $renameText, submit: submitRename))
         .task {
             link.connectIfNeeded()
             link.subscribe(session)
         }
-        .onDisappear { link.unsubscribe(session) }
+        .onAppear(perform: enter)
+        .onDisappear(perform: leave)
+    }
+
+    private func enter() { link.viewing = session }
+
+    private func leave() {
+        if link.viewing == session { link.viewing = nil }
+        link.unsubscribe(session)
+    }
+
+    @ViewBuilder private var sessionMenuItems: some View {
+        if let info {
+            if link.canPin(info) {
+                let pinned = link.isPinned(info)
+                Button { setPinned(info, !pinned) } label: { Label(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") }
+            }
+            Button {
+                renameText = link.title(info)
+                renaming = true
+            } label: { Label("Rename…", systemImage: "pencil") }
+            Divider()
+        }
+    }
+
+    private func submitRename() {
+        guard let info else { return }
+        let title = renameText
+        Task {
+            do { try await link.rename(info, to: title) } catch { feedback.error(error, key: "agent-rename") }
+        }
+    }
+
+    private func setPinned(_ info: PYLinkSession, _ value: Bool) {
+        Task {
+            do { try await link.setPinned(info, value) } catch { feedback.error(error, key: "agent-pin") }
+        }
     }
 
     private var pullKey: PRKey? {

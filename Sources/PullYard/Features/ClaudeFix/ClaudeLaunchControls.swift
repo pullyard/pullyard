@@ -3,10 +3,10 @@ import SwiftUI
 extension ClaudeLauncher {
     @MainActor
     @discardableResult
-    static func start(app: AppModel, prompt: String, folder: String?, target: ClaudeTarget, mode: ClaudePermissionMode, name: String, profileID: String? = nil) throws -> ClaudeTab? {
+    static func start(app: AppModel, prompt: String, folder: String?, target: ClaudeTarget, mode: ClaudePermissionMode, name: String, profileID: String? = nil, environmentID: String? = nil) throws -> ClaudeTab? {
         let chosen = ClaudeProfiles.shared.profile(id: profileID)
         if target == .app, let folder {
-            let tab = app.claude.newSession(folder: folder, prompt: prompt, name: name, profileID: chosen?.id)
+            let tab = app.claude.newSession(folder: folder, prompt: prompt, name: name, profileID: chosen?.id, environmentID: environmentID)
             app.section = .claude
             return tab
         }
@@ -113,14 +113,14 @@ extension ClaudeLauncher {
     @MainActor
     @discardableResult
     static func startForPR(app: AppModel, prompt: String, folder: String?, isolate: Bool, pr: PullRequestDetail, repo: RepoRef,
-                           target: ClaudeTarget, mode: ClaudePermissionMode, profileID: String? = nil, name: String) async throws -> ClaudeTab? {
+                           target: ClaudeTarget, mode: ClaudePermissionMode, name: String, profileID: String? = nil, environmentID: String? = nil) async throws -> ClaudeTab? {
         guard isolate, target != .copy, let folder else {
-            return try start(app: app, prompt: prompt, folder: folder, target: target, mode: mode, name: name, profileID: profileID)
+            return try start(app: app, prompt: prompt, folder: folder, target: target, mode: mode, name: name, profileID: profileID, environmentID: environmentID)
         }
         let number = pr.number
         let worktree = try await Task.detached(priority: .userInitiated) { try PRWorktrees.prepare(clone: folder, repo: repo, number: number) }.value
         let adapted = PRWorktrees.adapt(prompt, worktree: worktree, pr: pr, repo: repo)
-        return try start(app: app, prompt: adapted, folder: worktree.path, target: target, mode: mode, name: name, profileID: profileID)
+        return try start(app: app, prompt: adapted, folder: worktree.path, target: target, mode: mode, name: name, profileID: profileID, environmentID: environmentID)
     }
 }
 
