@@ -46,6 +46,7 @@ struct PRDetailContent: View {
     @Environment(AppModel.self) private var app
     @Environment(\.liveFront) private var front
     @State private var showReview = false
+    @State private var reviewEvent = "COMMENT"
     @State private var showMerge = false
     @State private var showEdit = false
     @State private var showReviewers = false
@@ -54,17 +55,31 @@ struct PRDetailContent: View {
     @State private var closeLoop: CloseLoopRequest?
     @State private var showDrafts = false
     @State private var ciFix: CIFixRequest?
+    @State private var expandedOverride = false
+    @State private var showReviewPanel = false
+    @AppStorage("pr.header.autoCollapse") private var autoCollapse = true
+
+    private var collapsible: Bool {
+        autoCollapse && [PRTab.files, .checks, .commits].contains(model.tab)
+    }
+
+    private var headerCollapsed: Bool { collapsible && !expandedOverride }
 
     var body: some View {
         VStack(spacing: 0) {
-            PRHeaderView(model: model, pr: pr, onMerge: { showMerge = true }, onRequestReview: { showReviewers = true })
-            if model.features.requestReviewers {
-                ReReviewBanner(model: model, pr: pr) { showReviewers = true }
-            }
-            if model.features.claude {
-                ClaudeFixBanner(pr: pr) { showFix = true }
-                CloseLoopBanner(model: model, pr: pr) { closeLoop = CloseLoopRequest(preselected: $0) }
-                CIFailureBanner(model: model, pr: pr, onFix: { ciFix = CIFixRequest() }, onRerun: { confirm = .rerunFailed })
+            if headerCollapsed {
+                CompactPRBar(model: model, pr: pr) { expandedOverride = true }
+            } else {
+                VStack(spacing: 0) {
+                    PRHeaderView(model: model, pr: pr, onMerge: { showMerge = true }, onRequestReview: { showReviewers = true }, onFixChecks: pr.isOpen && model.features.claude ? { ciFix = CIFixRequest() } : nil, onRerun: canRerun ? { confirm = .rerunFailed } : nil, onCollapse: collapsible ? { expandedOverride = false } : nil)
+                    if model.features.requestReviewers {
+                        ReReviewBanner(model: model, pr: pr) { showReviewers = true }
+                    }
+                    if model.features.claude {
+                        ClaudeFixBanner(pr: pr) { showFix = true }
+                        CloseLoopBanner(model: model, pr: pr) { closeLoop = CloseLoopRequest(preselected: $0) }
+                    }
+                }
             }
             TabStrip(items: tabItems, selection: $model.tab, shortcuts: true)
             .padding(.top, 6)
@@ -83,12 +98,21 @@ struct PRDetailContent: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .navigationTitle(pr.title)
-        .navigationSubtitle("\(model.ref.repo.full) \(model.provider.numberPrefix)\(pr.number)")
-        .task(id: pr.url) { app.noteCanonical(model.ref, url: pr.url) }
-        .background { if front { reviewShortcuts } }
+        .transaction(value: headerCollapsed) { $0.animation = nil }
+        .onChange(of: model.tab) { expandedOverride = false }
+        .detailTitle(pr.title, subtitle: "\(model.ref.repo.full) \(model.provider.numberPrefix)\(pr.number)")
+        .task(id: pr.url) {
+            app.noteCanonical(model.ref, url: pr.url)
+            QueueStore.shared.markSeen(model.ref)
+        }
+        .onDisappear { QueueStore.shared.markSeen(model.ref) }
+        .focusedSceneValue(\.prActions, front ? actions : nil)
         .panelToolbar(id: "pr-detail") { toolbar }
-        .sheet(isPresented: $showReview) { ReviewSheet(model: model, pr: pr) }
+        .inspector(isPresented: $showReviewPanel) {
+            ReviewPanel(model: model, pr: pr) { showReviewPanel = false }
+                .inspectorColumnWidth(min: 280, ideal: 320, max: 440)
+        }
+        .sheet(isPresented: $showReview) { ReviewSheet(model: model, pr: pr, initialEvent: reviewEvent) }
         .sheet(isPresented: $showMerge) { MergeSheet(model: model, pr: pr) }
         .sheet(isPresented: $showEdit) { EditPRSheet(model: model, pr: pr) }
         .sheet(isPresented: $showReviewers) { ReviewersSheet(model: model) }
@@ -109,21 +133,34 @@ struct PRDetailContent: View {
         }
     }
 
-    private var reviewShortcuts: some View {
-        Group {
-            Button("Write review") { showReview = true }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(!pr.isOpen)
-            Button("Approve") { confirm = .approve }
-                .keyboardShortcut("a", modifiers: [.command, .shift])
-                .disabled(!pr.isOpen || pr.viewerDidAuthor)
-            Button("Merge") { showMerge = true }
-                .keyboardShortcut("m", modifiers: [.command, .shift])
-                .disabled(!canMerge)
-        }
-        .opacity(0)
-        .frame(width: 0, height: 0)
-        .accessibilityHidden(true)
+    private var actions: PRActions {
+        let failing = pr.checks.contains { $0.outcome == .failure }
+        return PRActions(
+            ref: model.ref,
+            number: pr.number,
+            isOpen: pr.isOpen,
+            canReview: pr.viewerCanApprove ?? !pr.viewerDidAuthor,
+            canMerge: canMerge,
+            hasFailing: failing,
+            unviewed: model.unviewedCount,
+            writeReview: { reviewEvent = "COMMENT"; showReview = true },
+            approve: { confirm = .approve },
+            requestChanges: { reviewEvent = "REQUEST_CHANGES"; showReview = true },
+            merge: { showMerge = true },
+            fixWithAgent: { if model.features.claude { showFix = true } },
+            fixChecks: { if model.features.claude { ciFix = CIFixRequest() } },
+            rerunFailed: { if canRerun { confirm = .rerunFailed } },
+            markAllViewed: {
+                guard model.features.viewedFiles else { return }
+                Task {
+                    await model.markAllViewed()
+                    app.showToast("Marked all files viewed")
+                }
+            },
+            openInBrowser: { openInBrowser(pr.url) },
+            copyLink: { copy(pr.url, "Copied link") },
+            copyCheckout: { copy(checkoutCommand, "Copied checkout command") }
+        )
     }
 
     @ViewBuilder
@@ -139,7 +176,7 @@ struct PRDetailContent: View {
             } else {
                 LoadingView()
             }
-        case .jira: JiraTab(pr: pr)
+        case .jira: JiraTab(pr: pr, repo: model.ref.repo)
         }
     }
 
@@ -154,7 +191,7 @@ struct PRDetailContent: View {
             items.append(TabItem(id: PRTab.stack, title: "Stack", icon: "square.stack.3d.up", badge: "\(tree.count)"))
         }
         let jiraKeys = JiraTab.keys(for: pr)
-        if JiraAccount.shared.isConfigured || !jiraKeys.isEmpty {
+        if JiraConnections.shared.isConfigured || !jiraKeys.isEmpty {
             items.append(TabItem(id: PRTab.jira, title: "Jira", icon: "ticket", badge: jiraKeys.first))
         }
         return items
@@ -188,9 +225,9 @@ struct PRDetailContent: View {
         if checks.isEmpty { return "0" }
         let failed = checks.filter { $0.outcome == .failure }.count
         let pending = checks.filter { $0.outcome == .pending }.count
-        if failed > 0 { return "✕\(failed)" }
-        if pending > 0 { return "…\(pending)" }
-        return "✓\(checks.count)"
+        if failed > 0 { return "\(failed) failing" }
+        if pending > 0 { return "\(pending) running" }
+        return "\(checks.count)"
     }
 
     private var confirmTitle: String {
@@ -223,7 +260,10 @@ struct PRDetailContent: View {
     private func perform(_ c: PRConfirm) {
         Task {
             switch c {
-            case .approve: _ = await model.submitReview(event: "APPROVE", body: "")
+            case .approve:
+                if await model.submitReview(event: "APPROVE", body: "") {
+                    app.showToast("Approved \(model.provider.numberPrefix)\(pr.number)", kind: .approved, action: app.nextReviewAction(after: model.ref))
+                }
             case .revokeApproval: await model.revokeApproval()
             case .close: await model.simple(.close)
             case .deleteBranch: await model.deleteBranch()
@@ -234,32 +274,42 @@ struct PRDetailContent: View {
         }
     }
 
+    private var checkoutCommand: String {
+        switch model.provider {
+        case .gitlab: return "glab mr checkout \(pr.number) -R \(model.ref.repo.full)"
+        case .github, .githubEnterprise: return "gh pr checkout \(pr.number) -R \(model.ref.repo.full)"
+        default: return "git fetch origin \(pr.headRefName) && git checkout \(pr.headRefName)"
+        }
+    }
+
     private var canMerge: Bool {
         pr.isOpen && !pr.isDraft && model.canWrite
+    }
+
+    private var canRerun: Bool {
+        model.features.rerunChecks && model.canWrite && pr.checks.contains { $0.outcome == .failure && $0.runId != nil }
+    }
+
+    private var hasFailingChecks: Bool {
+        pr.checks.contains { $0.outcome == .failure }
+    }
+
+    private var mergeBlocker: MergeRequirement? {
+        model.requirements.first { $0.state == .missing } ?? model.requirements.first { $0.state == .pending }
     }
 
     @ToolbarContentBuilder
     private var toolbar: some CustomizableToolbarContent {
         ToolbarItem(id: "pr.status", placement: .primaryAction) {
-            HStack(spacing: 6) {
-                if model.busy {
-                    ProgressView().controlSize(.small)
-                }
-                Button {
-                    Task { await model.load(full: true) }
-                } label: {
-                    RefreshStatus(updated: model.lastUpdated, refreshing: model.loading, error: model.refreshError, compact: true)
-                }
-                .buttonStyle(.borderless)
-                .disabled(model.loading)
-                .help(model.refreshError.map { "Last refresh failed: \($0). Click to retry (⌘R)" } ?? "Refresh (⌘R)")
-                .accessibilityLabel("Refresh")
+            RefreshPill(updated: model.lastUpdated, refreshing: model.loading || model.busy, error: model.refreshError) {
+                Task { await model.load(full: true) }
             }
         }
         if pr.isOpen {
             ToolbarItem(id: "pr.review", placement: .primaryAction) {
                 Menu {
-                    Button("Write review…") { showReview = true }
+                    Button("Write review…") { reviewEvent = "COMMENT"; showReview = true }
+                    Button(showReviewPanel ? "Hide Review Panel" : "Review in Side Panel") { showReviewPanel.toggle() }
                     if ClaudeLauncher.claudeBinary != nil {
                         Button("Draft comments with agent…") { showDrafts = true }
                     }
@@ -281,10 +331,18 @@ struct PRDetailContent: View {
                 } label: {
                     Label(model.pending.isEmpty ? "Review" : "Review (\(model.pending.count))", systemImage: "checkmark.bubble")
                 } primaryAction: {
+                    reviewEvent = "COMMENT"
                     showReview = true
                 }
                 .labelStyle(.titleAndIcon)
                 .help(model.pending.isEmpty ? "Write a review (⇧⌘R)" : "Submit review with \(plural(model.pending.count, "pending comment", "pending comments")) (⇧⌘R)")
+            }
+            ToolbarItem(id: "pr.reviewPanel", placement: .primaryAction) {
+                Button { showReviewPanel.toggle() } label: {
+                    Label("Review panel", systemImage: "sidebar.right")
+                }
+                .help(showReviewPanel ? "Hide the review panel (⌥⌘I)" : "Review next to the diff (⌥⌘I)")
+                .keyboardShortcut("i", modifiers: [.command, .option])
             }
             if model.features.requestReviewers {
                 ToolbarItem(id: "pr.requestReview", placement: .primaryAction, showsByDefault: false) {
@@ -295,16 +353,28 @@ struct PRDetailContent: View {
         }
         if pr.isOpen, model.features.claude {
             ToolbarItem(id: "pr.fix", placement: .primaryAction) {
-                Button { showFix = true } label: { Label("Fix with agent", systemImage: "wrench.and.screwdriver") }
-                    .labelStyle(.titleAndIcon)
-                    .help("Send review comments to a new agent session")
+                Menu {
+                    Button("Review comments…") { showFix = true }
+                    Button("Failing checks…") { ciFix = CIFixRequest() }
+                        .disabled(!hasFailingChecks)
+                    Button("Conflicts…") { model.showResolveConflicts = true }
+                        .disabled(!MergeConflicts.applies(pr))
+                } label: {
+                    Label("Fix with agent", systemImage: "wrench.and.screwdriver")
+                } primaryAction: {
+                    if hasFailingChecks, pr.reviewThreads.nodes.allSatisfy({ $0.isResolved || $0.isOutdated }) {
+                        ciFix = CIFixRequest()
+                    } else {
+                        showFix = true
+                    }
+                }
+                .labelStyle(.titleAndIcon)
+                .help("Start an agent session: review comments, failing checks or conflicts")
             }
         }
         if canMerge {
             ToolbarItem(id: "pr.merge", placement: .primaryAction) {
-                Button { showMerge = true } label: { Label("Merge", systemImage: "arrow.triangle.merge") }
-                    .labelStyle(.titleAndIcon)
-                    .help("Merge \(model.provider.requestTitle) (⇧⌘M)")
+                MergeToolbarButton(blocker: mergeBlocker) { showMerge = true }
             }
         }
         ToolbarItem(id: "pr.more", placement: .primaryAction) {
@@ -418,8 +488,7 @@ struct StackPreviewContent: View {
             Divider()
             StackTab(model: model, tree: tree)
         }
-        .navigationTitle(node.title)
-        .navigationSubtitle("\(model.ref.repo.full) #\(node.number)")
+        .detailTitle(node.title, subtitle: "\(model.ref.repo.full) #\(node.number)")
     }
 }
 
@@ -428,6 +497,9 @@ struct PRHeaderView: View {
     let pr: PullRequestDetail
     let onMerge: () -> Void
     var onRequestReview: () -> Void = {}
+    var onFixChecks: (() -> Void)?
+    var onRerun: (() -> Void)?
+    var onCollapse: (() -> Void)?
     @State private var jiraFollowUp = JiraFollowUpLoader()
 
     var body: some View {
@@ -437,6 +509,17 @@ struct PRHeaderView: View {
                 Text("\(model.provider.numberPrefix)\(pr.number)").font(.syTitle2).foregroundStyle(Color.syDim)
                 if model.provider.isGitHub {
                     ShortLinkButton(ref: ShortLink.ref(url: pr.url) ?? model.ref)
+                }
+                Spacer(minLength: 8)
+                AgentRunChip(ref: model.ref)
+                if let onCollapse {
+                    Button(action: onCollapse) {
+                        Image(systemName: "chevron.up").font(.syIcon(11)).frame(width: 20, height: 20).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Color.syMuted)
+                    .help("Collapse the header")
+                    .accessibilityLabel("Collapse header")
                 }
             }
             HStack(spacing: 8) {
@@ -479,12 +562,12 @@ struct PRHeaderView: View {
                 RiskStrip(model: model, risks: model.risks)
             }
             JiraMergeFollowUp(pr: pr, loader: jiraFollowUp)
-            MergeStatusBar(model: model, pr: pr, onMerge: onMerge, onRequestReview: onRequestReview)
+            MergeStatusBar(model: model, pr: pr, onMerge: onMerge, onRequestReview: onRequestReview, onFixChecks: onFixChecks, onRerun: onRerun)
         }
         .animation(Motion.smooth, value: model.stackTree)
         .padding(.horizontal, 16)
         .padding(.top, 12)
-        .task(id: "\(pr.url)|\(pr.merged)") { await jiraFollowUp.load(pr) }
+        .task(id: "\(pr.url)|\(pr.merged)") { await jiraFollowUp.load(pr, repo: model.ref.repo) }
     }
 }
 
@@ -628,8 +711,11 @@ struct MergeStatusBar: View {
     let pr: PullRequestDetail
     let onMerge: () -> Void
     var onRequestReview: () -> Void = {}
+    var onFixChecks: (() -> Void)?
+    var onRerun: (() -> Void)?
     @Environment(AppModel.self) private var app
     @AppStorage("pr.mergeRequirementsExpanded") private var expanded = true
+    @State private var showConflicts = false
 
     var body: some View {
         if pr.isOpen {
@@ -646,20 +732,18 @@ struct MergeStatusBar: View {
                     checksBadge
                     Spacer()
                     if model.features.localConflicts, MergeConflicts.applies(pr) {
-                        Button(conflictsTitle) {
-                            model.tab = .conversation
-                            model.scrollToBottomToken += 1
-                        }
-                        .controlSize(.small)
-                        .help("Show the conflicting files at the end of the conversation")
+                        Button(conflictsTitle) { showConflicts = true }
+                            .controlSize(.small)
+                            .help("Show the conflicting files")
+                            .popover(isPresented: $showConflicts, arrowEdge: .bottom) { conflictsPopover }
                     }
-                    if model.features.updateBranch, pr.mergeStateStatus == "BEHIND", model.canWrite || pr.viewerCanUpdate {
+                    if !expanded || requirements.isEmpty, model.features.updateBranch, pr.mergeStateStatus == "BEHIND", model.canWrite || pr.viewerCanUpdate {
                         Button(model.features.updateBranchTitle) {
                             Task { if await model.simple(.updateBranch) { app.showToast(model.provider == .gitlab ? "Rebase started" : "Branch updated from \(pr.baseRefName)") } }
                         }
                         .controlSize(.small)
                     }
-                    if pr.isDraft, pr.viewerCanUpdate, model.features.draftToggle {
+                    if !expanded || requirements.isEmpty, pr.isDraft, pr.viewerCanUpdate, model.features.draftToggle {
                         Button(model.provider == .gitlab ? "Mark as ready" : "Ready for review") {
                             Task { if await model.simple(.readyForReview) { app.showToast("Marked ready for review") } }
                         }
@@ -695,7 +779,7 @@ struct MergeStatusBar: View {
                     }
                 }
                 if expanded, !requirements.isEmpty {
-                    MergeRequirementsList(requirements: requirements, ownership: model.ownership, canPerform: canPerform, perform: perform)
+                    MergeRequirementsList(requirements: requirements, ownership: model.ownership, canPerform: canPerform, perform: perform, agentFix: agentFix, rerun: onRerun)
                         .transition(.opacity)
                 }
             }
@@ -709,10 +793,70 @@ struct MergeStatusBar: View {
     private func canPerform(_ action: RequirementAction) -> Bool {
         switch action {
         case .requestReview: return model.features.requestReviewers && (model.canWrite || pr.viewerDidAuthor)
-        case .updateBranch, .readyForReview: return false
+        case .updateBranch: return model.features.updateBranch && (model.canWrite || pr.viewerCanUpdate)
+        case .readyForReview: return model.features.draftToggle && pr.viewerCanUpdate
         case .showConflicts: return !MergeConflicts.applies(pr)
         case .showChecks, .showConversation: return true
         }
+    }
+
+    private func agentFix(_ kind: RequirementKind) -> (() -> Void)? {
+        switch kind {
+        case .conflicts where model.features.claude && model.features.localConflicts && MergeConflicts.applies(pr): return { model.showResolveConflicts = true }
+        case .checks, .optionalChecks: return onFixChecks
+        default: return nil
+        }
+    }
+
+    private var conflictsPopover: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Conflicts with \(pr.baseRefName)").font(.syHeadline)
+            switch model.conflicts {
+            case .files(let files)?:
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(files, id: \.self) { file in
+                            Label(file, systemImage: "exclamationmark.triangle")
+                                .font(.syCallout.monospaced())
+                                .foregroundStyle(Color.syText)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                                .help(file)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 220)
+            case .checking?:
+                HStack(spacing: 6) {
+                    PYLoader(size: 12)
+                    Text("Checking which files conflict…").font(.syCallout).foregroundStyle(Color.syMuted)
+                }
+            case .noClone?:
+                Text("Choose a local clone to see which files conflict.").font(.syCallout).foregroundStyle(Color.syMuted)
+            case .unavailable(let reason)?:
+                Text(reason).font(.syCallout).foregroundStyle(Color.syMuted)
+            case nil:
+                Text("\(model.features.serviceTitle) reports conflicts with the base branch.").font(.syCallout).foregroundStyle(Color.syMuted)
+            }
+            HStack {
+                Button("Show in conversation") {
+                    showConflicts = false
+                    model.tab = .conversation
+                    model.scrollToBottomToken += 1
+                }
+                Spacer()
+                Button("Resolve with agent…") {
+                    showConflicts = false
+                    model.showResolveConflicts = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.syAgentFill)
+            }
+            .controlSize(.small)
+        }
+        .padding(14)
+        .frame(width: 380)
     }
 
     private func perform(_ action: RequirementAction) {
@@ -740,12 +884,11 @@ struct MergeStatusBar: View {
             Button {
                 model.tab = .checks
             } label: {
-                HStack(spacing: 6) {
-                    if failed > 0 { Label("\(failed)", systemImage: "xmark.circle.fill").foregroundStyle(Color.ghRed) }
-                    if pending > 0 { Label("\(pending)", systemImage: "clock.fill").foregroundStyle(Color.ghYellow) }
-                    Label("\(ok)", systemImage: "checkmark.circle.fill").foregroundStyle(Color.ghGreen)
+                HStack(spacing: 4) {
+                    if failed > 0 { StatusChip(text: "\(failed) failing", icon: "xmark.circle.fill", color: .ghRed) }
+                    if pending > 0 { StatusChip(text: "\(pending) running", icon: "circle.dashed", color: .syAmberInk) }
+                    if ok > 0 || (failed == 0 && pending == 0) { StatusChip(text: "\(ok) passing", icon: "checkmark.circle.fill", color: .ghGreen) }
                 }
-                .font(.syCaption)
             }
             .buttonStyle(.plain)
             .help(model.features.checksTitle)
@@ -885,36 +1028,57 @@ struct CommitsTab: View {
     let pr: PullRequestDetail
     @Environment(AppModel.self) private var app
 
+    private var days: [(title: String, commits: [CommitInfoNode])] {
+        let cal = Calendar.current
+        var order: [String] = []
+        var map: [String: [CommitInfoNode]] = [:]
+        for node in pr.allCommits.nodes.reversed() {
+            let date = node.commit.committedDate
+            let title: String
+            if cal.isDateInToday(date) { title = "Today" }
+            else if cal.isDateInYesterday(date) { title = "Yesterday" }
+            else { title = date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()) }
+            if map[title] == nil { order.append(title) }
+            map[title, default: []].append(node)
+        }
+        return order.map { ($0, map[$0] ?? []) }
+    }
+
     var body: some View {
+        let reviewed = model.lastReviewed?.oid
         List {
             if (pr.allCommits.totalCount ?? 0) > pr.allCommits.nodes.count {
                 Label("Showing the latest \(pr.allCommits.nodes.count) of \(pr.allCommits.totalCount ?? 0) commits", systemImage: "clock.arrow.circlepath")
                     .font(.syCaption)
                     .foregroundStyle(Color.syMuted)
             }
-            ForEach(pr.allCommits.nodes.reversed(), id: \.commit.oid) { node in
-                let c = node.commit
-                NavigationLink(value: Route.commit(model.ref.repo, c.oid)) {
-                    HStack(spacing: 10) {
-                        Avatar(url: c.author?.avatarUrl, size: 22)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(c.messageHeadline).font(.syBody).lineLimit(2)
-                            Text("\(c.author?.user?.login ?? c.author?.name ?? "") · \(Fmt.rel(c.committedDate))")
-                                .font(.syCaption).foregroundStyle(Color.syMuted)
+            ForEach(days, id: \.title) { day in
+                Section {
+                    ForEach(Array(day.commits.enumerated()), id: \.element.commit.oid) { index, node in
+                        let c = node.commit
+                        if c.oid == reviewed {
+                            reviewMarker
                         }
-                        Spacer()
-                        CIIcon(state: c.statusCheckRollup?.state)
-                        Text(c.abbreviatedOid).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
+                        NavigationLink(value: Route.commit(model.ref.repo, c.oid)) {
+                            CommitTimelineRow(commit: node, first: index == 0, last: index == day.commits.count - 1, tint: index.isMultiple(of: 2) ? .syViolet : .syAccent)
+                                .rowAppear(c.oid, model.commitRows)
+                        }
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 14))
+                        .contextMenu {
+                            Button("Copy SHA") {
+                                copyToPasteboard(c.oid, announce: false)
+                                app.showToast("Copied \(c.abbreviatedOid)")
+                            }
+                            Button("Open in browser") { openInBrowser(c.url) }
+                        }
                     }
-                    .padding(.vertical, 2)
-                    .rowAppear(c.oid, model.commitRows)
-                }
-                .contextMenu {
-                    Button("Copy SHA") {
-                        copyToPasteboard(c.oid, announce: false)
-                        app.showToast("Copied \(c.abbreviatedOid)")
-                    }
-                    Button("Open in browser") { openInBrowser(c.url) }
+                } header: {
+                    Text(day.title)
+                        .font(.sy(size: 11, weight: .semibold))
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+                        .foregroundStyle(Color.syMuted)
                 }
             }
             if (pr.allCommits.totalCount ?? 0) > pr.allCommits.nodes.count {
@@ -922,6 +1086,73 @@ struct CommitsTab: View {
             }
         }
         .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, button: false) { await model.load(full: true) }
+    }
+
+    private var reviewMarker: some View {
+        HStack(spacing: 8) {
+            Rectangle().fill(Color.syCoral.opacity(0.5)).frame(height: 1)
+            Text("Your last review")
+                .font(.sy(size: 10, weight: .semibold))
+                .textCase(.uppercase)
+                .tracking(0.5)
+                .foregroundStyle(Color.syCoralInk)
+                .fixedSize()
+            Rectangle().fill(Color.syCoral.opacity(0.5)).frame(height: 1)
+        }
+        .listRowSeparator(.hidden)
+        .padding(.vertical, 2)
+    }
+}
+
+private struct CommitTimelineRow: View {
+    let commit: CommitInfoNode
+    let first: Bool
+    let last: Bool
+    let tint: Color
+    @Environment(AppModel.self) private var app
+    @State private var hovering = false
+
+    var body: some View {
+        let c = commit.commit
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                VStack(spacing: 0) {
+                    Rectangle().fill(first ? Color.clear : Color.syLineStrong).frame(width: 2)
+                    Rectangle().fill(last ? Color.clear : Color.syLineStrong).frame(width: 2)
+                }
+                Circle()
+                    .strokeBorder(tint, lineWidth: 2.5)
+                    .background(Circle().fill(Color.syPanel))
+                    .frame(width: 12, height: 12)
+            }
+            .frame(width: 14)
+            Avatar(url: c.author?.avatarUrl, size: 24, ring: true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(c.messageHeadline).font(.syBody.weight(.medium)).foregroundStyle(Color.syText).lineLimit(2)
+                Text("\(c.author?.user?.login ?? c.author?.name ?? "") · \(Fmt.rel(c.committedDate))")
+                    .font(.syCaption).foregroundStyle(Color.syMuted)
+            }
+            Spacer(minLength: 8)
+            CIChip(state: c.statusCheckRollup?.state)
+            Button {
+                copyToPasteboard(c.oid, announce: false)
+                app.showToast("Copied \(c.abbreviatedOid)")
+            } label: {
+                HStack(spacing: 4) {
+                    Text(c.abbreviatedOid).font(.syCaption.monospaced())
+                    Image(systemName: "doc.on.doc").font(.syIcon(9)).opacity(hovering ? 1 : 0)
+                }
+                .foregroundStyle(Color.syMuted)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(Color.syText.opacity(hovering ? 0.07 : 0.04)))
+            }
+            .buttonStyle(.plain)
+            .help("Copy full SHA")
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
     }
 }
 
@@ -932,45 +1163,25 @@ struct ChecksTab: View {
     let onRerun: () -> Void
     @State private var logTarget: CheckContext?
     @State private var fixAfterLog: CIFixRequest?
+    @State private var expanded: [String: Bool] = [:]
 
     var body: some View {
         let checks = pr.checks.sorted { ($0.outcome.rawValue, $0.title) < ($1.outcome.rawValue, $1.title) }
         let failedRuns = Set(checks.filter { $0.outcome == .failure }.compactMap(\.runId))
+        let groups = Self.groups(checks)
         List {
             if checks.isEmpty {
                 Text(model.provider == .gitlab ? "No pipeline for the latest commit" : "No checks for the latest commit").font(.syBody).foregroundStyle(Color.syMuted)
+            } else {
+                summary(checks, failedRuns: failedRuns)
+                    .listRowSeparator(.hidden)
             }
-            if model.features.rerunChecks, !failedRuns.isEmpty, model.canWrite {
-                Button(action: onRerun) {
-                    Label("Re-run failed jobs (\(plural(failedRuns.count, "workflow", "workflows")))", systemImage: "arrow.clockwise")
+            ForEach(groups, id: \.name) { group in
+                Section(isExpanded: binding(for: group)) {
+                    ForEach(group.checks) { c in row(c) }
+                } header: {
+                    groupHeader(group)
                 }
-                .disabled(model.busy)
-            }
-            ForEach(checks) { c in
-                HStack(spacing: 10) {
-                    OutcomeIcon(outcome: c.outcome)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(c.workflowName.map { "\($0) / \(c.title)" } ?? c.title).font(.syBody).lineLimit(1)
-                        Text(subtitle(c)).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
-                    }
-                    Spacer()
-                    if model.features.claude, CIFailureCollector.isFixable(c), pr.isOpen {
-                        Button("Fix with agent") { onFix(CIFixRequest(focus: c.id)) }
-                            .controlSize(.small)
-                            .tint(Color.syCoral)
-                    }
-                    if model.features.jobLogs, model.backend.canShowLog(c), c.outcome != .pending, c.outcome != .skipped {
-                        Button("Log") { logTarget = c }.controlSize(.small)
-                    }
-                    if let link = c.link {
-                        Button { openInBrowser(link) } label: { Image(systemName: "arrow.up.right.square") }
-                            .buttonStyle(.borderless)
-                            .help("Open in browser")
-                            .accessibilityLabel("Open in browser")
-                    }
-                }
-                .padding(.vertical, 2)
-                .rowAppear(c.id, model.checkRows)
             }
             if model.hiddenCheckCount > 0 {
                 Button("\(model.hiddenCheckCount) more checks are not shown — open in browser") { openInBrowser(pr.url + "/checks") }
@@ -989,6 +1200,121 @@ struct ChecksTab: View {
         }
     }
 
+    struct CheckGroup {
+        let name: String
+        let checks: [CheckContext]
+        var failed: Int { checks.filter { $0.outcome == .failure }.count }
+        var running: Int { checks.filter { $0.outcome == .pending }.count }
+        var passed: Int { checks.filter { $0.outcome == .success }.count }
+        var outcome: CheckOutcome { failed > 0 ? .failure : running > 0 ? .pending : passed > 0 ? .success : .neutral }
+    }
+
+    static func groups(_ checks: [CheckContext]) -> [CheckGroup] {
+        var order: [String] = []
+        var map: [String: [CheckContext]] = [:]
+        for c in checks {
+            let name = c.workflowName ?? "Other checks"
+            if map[name] == nil { order.append(name) }
+            map[name, default: []].append(c)
+        }
+        let groups = order.map { CheckGroup(name: $0, checks: map[$0] ?? []) }
+        return groups.sorted { a, b in
+            let rank: (CheckGroup) -> Int = { $0.failed > 0 ? 0 : $0.running > 0 ? 1 : 2 }
+            return (rank(a), a.name) < (rank(b), b.name)
+        }
+    }
+
+    private func binding(for group: CheckGroup) -> Binding<Bool> {
+        Binding(
+            get: { expanded[group.name] ?? (group.failed > 0 || group.running > 0) },
+            set: { expanded[group.name] = $0 }
+        )
+    }
+
+    private func summary(_ checks: [CheckContext], failedRuns: Set<Int>) -> some View {
+        let failed = checks.filter { $0.outcome == .failure }.count
+        let running = checks.filter { $0.outcome == .pending }.count
+        let passed = checks.filter { $0.outcome == .success }.count
+        let skipped = checks.count - failed - running - passed
+        let required = checks.filter { $0.isRequired == true }
+        return HStack(spacing: 6) {
+            if failed > 0 { StatusChip(text: "\(failed) failing", icon: "xmark.circle.fill", color: .ghRed) }
+            if running > 0 { StatusChip(text: "\(running) running", icon: "circle.dashed", color: .syAmberInk) }
+            StatusChip(text: "\(passed) passing", icon: "checkmark.circle.fill", color: .ghGreen)
+            if skipped > 0 { StatusChip(text: "\(skipped) skipped", icon: "minus.circle", color: .syMuted) }
+            if !required.isEmpty {
+                let ok = required.filter { $0.outcome == .success }.count
+                Text("Required \(ok)/\(required.count)")
+                    .font(.syCaption.weight(.medium))
+                    .foregroundStyle(ok == required.count ? Color.ghGreen : Color.syMuted)
+                    .padding(.leading, 4)
+            }
+            Spacer()
+            if model.features.rerunChecks, !failedRuns.isEmpty, model.canWrite {
+                Button(action: onRerun) {
+                    Label("Re-run failed (\(plural(failedRuns.count, "workflow", "workflows")))", systemImage: "arrow.clockwise")
+                }
+                .controlSize(.small)
+                .disabled(model.busy)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func groupHeader(_ group: CheckGroup) -> some View {
+        HStack(spacing: 8) {
+            OutcomeIcon(outcome: group.outcome)
+            Text(group.name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
+            Text(groupCounts(group)).font(.syCaption).foregroundStyle(Color.syMuted)
+            Spacer()
+        }
+    }
+
+    private func groupCounts(_ group: CheckGroup) -> String {
+        var parts: [String] = []
+        if group.failed > 0 { parts.append("\(group.failed) failed") }
+        if group.running > 0 { parts.append("\(group.running) running") }
+        parts.append("\(group.passed)/\(group.checks.count) passed")
+        return parts.joined(separator: " · ")
+    }
+
+    private func row(_ c: CheckContext) -> some View {
+        HStack(spacing: 10) {
+            OutcomeIcon(outcome: c.outcome)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(c.title).font(.syBody).lineLimit(1)
+                    if c.isRequired == true {
+                        Text("Required")
+                            .font(.sy(size: 10, weight: .semibold))
+                            .foregroundStyle(Color.syMuted)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .overlay(Capsule().strokeBorder(Color.syLineStrong))
+                    }
+                }
+                Text(subtitle(c)).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
+            }
+            Spacer()
+            if model.features.claude, CIFailureCollector.isFixable(c), pr.isOpen {
+                Button("Fix with agent") { onFix(CIFixRequest(focus: c.id)) }
+                    .controlSize(.small)
+                    .tint(Color.syCoralFill)
+            }
+            if model.features.jobLogs, model.backend.canShowLog(c), c.outcome != .pending, c.outcome != .skipped {
+                Button("Log") { logTarget = c }.controlSize(.small)
+            }
+            if let link = c.link {
+                Button { openInBrowser(link) } label: { Image(systemName: "arrow.up.right.square") }
+                    .buttonStyle(.borderless)
+                    .help("Open in browser")
+                    .accessibilityLabel("Open in browser")
+            }
+        }
+        .padding(.vertical, 2)
+        .rowAppear(c.id, model.checkRows)
+    }
+
     private func subtitle(_ c: CheckContext) -> String {
         var parts: [String] = []
         switch c.outcome {
@@ -1001,5 +1327,130 @@ struct ChecksTab: View {
         if let d = c.duration { parts.append(d) }
         if let desc = c.description, !desc.isEmpty { parts.append(desc) }
         return parts.joined(separator: " · ")
+    }
+}
+
+struct MergeToolbarButton: View {
+    let blocker: MergeRequirement?
+    let action: () -> Void
+
+    var body: some View {
+        if let blocker {
+            Button(action: action) { Label("Merge", systemImage: "arrow.triangle.merge") }
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(Color.syMuted)
+                .help(blocker.state == .missing ? "Blocked: \(blocker.title). Open to review merge requirements (⇧⌘M)" : "\(blocker.title) — merge may need to wait (⇧⌘M)")
+                .accessibilityHint(blocker.title)
+        } else {
+            Button(action: action) { Label("Merge", systemImage: "arrow.triangle.merge") }
+                .labelStyle(.titleAndIcon)
+                .buttonStyle(.borderedProminent)
+                .tint(Color.syGreenFill)
+                .help("Ready to merge (⇧⌘M)")
+        }
+    }
+}
+
+struct AgentRunChip: View {
+    let ref: ItemRef
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        if let launch = app.claude.prFixes[ref] ?? app.claude.ciFixes[ref],
+           let id = launch.tabID,
+           let tab = app.claude.tabs.first(where: { $0.id == id }) {
+            let state = tab.state
+            Button {
+                app.claude.selectedTabID = tab.id
+                app.section = .claude
+            } label: {
+                HStack(spacing: 5) {
+                    if state == .working {
+                        PYLoader(size: 11, label: "Agent working")
+                    } else {
+                        Image(systemName: state == .waiting ? "hand.raised.fill" : "checkmark.circle.fill").font(.syIcon(10))
+                    }
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        Text(label(state, since: launch.at, now: context.date))
+                            .lineLimit(1)
+                    }
+                }
+                .font(.sy(size: 11, weight: .semibold))
+                .foregroundStyle(Color.syCoralInk)
+                .padding(.horizontal, 8)
+                .frame(height: TextZoom.shared.size(20))
+                .background(Capsule().fill(Color.syCoral.opacity(0.12)))
+                .fixedSize()
+            }
+            .buttonStyle(.plain)
+            .help("Open the agent session")
+            .accessibilityLabel("Agent session: \(state.title)")
+        }
+    }
+
+    private func label(_ state: ClaudeTabState, since: Date, now: Date) -> String {
+        let minutes = max(0, Int(now.timeIntervalSince(since) / 60))
+        let age = minutes < 1 ? "just now" : "\(minutes)m"
+        switch state {
+        case .working: return "Agent running · \(age)"
+        case .waiting: return "Agent needs you"
+        default: return "Agent session · \(age)"
+        }
+    }
+}
+
+struct CompactPRBar: View {
+    let model: PRDetailModel
+    let pr: PullRequestDetail
+    let onExpand: () -> Void
+
+    var body: some View {
+        let failing = pr.checks.filter { $0.outcome == .failure }.count
+        let running = pr.checks.filter { $0.outcome == .pending }.count
+        let total = model.displayedFiles.count
+        let viewed = model.viewedPaths.intersection(model.displayedFiles.map(\.id)).count
+        HStack(spacing: 8) {
+            Image(systemName: pr.visualState.compactIcon)
+                .font(.syIcon(10))
+                .foregroundStyle(pr.visualState.color)
+                .frame(width: 18, height: 18)
+                .background(Circle().fill(pr.visualState.color.opacity(Tint.tile)))
+                .help(pr.visualState.title)
+            Text("\(model.provider.numberPrefix)\(pr.number)").font(.sy(size: 13)).foregroundStyle(Color.syMuted).monospacedDigit()
+            Text(pr.title)
+                .font(.sy(size: 13, weight: .semibold))
+                .foregroundStyle(Color.syText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 8)
+            if failing > 0 {
+                Button { model.tab = .checks } label: { StatusChip(text: "\(failing) failing", icon: "xmark.circle.fill", color: .ghRed) }
+                    .buttonStyle(.plain)
+                    .help("Show \(model.features.checksTitle.lowercased())")
+            } else if running > 0 {
+                Button { model.tab = .checks } label: { StatusChip(text: "\(running) running", icon: "circle.dashed", color: .syAmberInk) }
+                    .buttonStyle(.plain)
+                    .help("Show \(model.features.checksTitle.lowercased())")
+            }
+            if MergeConflicts.applies(pr) {
+                Button(action: onExpand) { StatusChip(text: "Conflicts", icon: "exclamationmark.triangle.fill", color: .ghRed) }
+                    .buttonStyle(.plain)
+                    .help("Show merge requirements")
+            }
+            if model.features.viewedFiles, model.filesLoaded, total > 0 {
+                StatusChip(text: "Viewed \(viewed)/\(total)", icon: viewed == total ? "checkmark.circle.fill" : "eye", color: viewed == total ? .ghGreen : .syMuted)
+            }
+            AgentRunChip(ref: model.ref)
+            Button(action: onExpand) {
+                Image(systemName: "chevron.down").font(.syIcon(11)).frame(width: 20, height: 20).contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(Color.syMuted)
+            .help("Show the full header")
+            .accessibilityLabel("Expand header")
+        }
+        .padding(.horizontal, 16)
+        .frame(height: TextZoom.shared.size(36))
+        .accessibilityElement(children: .contain)
     }
 }

@@ -8,7 +8,9 @@ struct RootView: View {
     var body: some View {
         Group {
             if splashHold || app.phase == .checking {
-                SplashView().transition(.opacity)
+                SplashView()
+                    .transition(.opacity)
+                    .onTapGesture { splashHold = false }
             } else if app.phase == .loggedOut {
                 LoginView().transition(.rise)
             } else if app.phase == .locked, let account = app.lockedAccount {
@@ -56,11 +58,30 @@ struct ThemedRoot<Content: View>: View {
 
 struct MainView: View {
     @Environment(AppModel.self) private var app
+    @AppStorage(SplitAppShell.flagKey) private var nativeSplit = false
 
     var body: some View {
         @Bindable var app = app
-        AppShell()
+        Group {
+            if nativeSplit {
+                SplitAppShell()
+            } else {
+                AppShell()
+            }
+        }
             .modifier(BrandToolbar())
+            .overlay {
+                if app.showOnboarding {
+                    OnboardingView { app.finishOnboarding() }
+                        .transition(.opacity)
+                }
+            }
+            .toolbar(app.showOnboarding ? .hidden : .automatic, for: .windowToolbar)
+            .task {
+                guard !Demo.isOn, !UserDefaults.standard.bool(forKey: AppModel.onboardingKey) else { return }
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                withAnimation(Motion.smooth) { app.showOnboarding = true }
+            }
             .sheet(isPresented: $app.showOpenLink) { OpenLinkSheet() }
             .sheet(isPresented: $app.showQuickOpen) { AgentQuickOpen().environment(app) }
             .confirmationDialog(
@@ -109,6 +130,7 @@ struct AppShell: View {
     static let railWidth: CGFloat = 60
 
     private var compact: Bool { windowWidth > 0 && windowWidth < Self.compactBelow }
+    private var showsList: Bool { !(app.section == .overview && app.forge == nil) }
     private var sidebarWidth: CGFloat { compact ? Self.railWidth : CGFloat(sidebarStored) }
     private var effectiveListWidth: CGFloat { compact ? min(CGFloat(listWidth), 320) : CGFloat(listWidth) }
 
@@ -124,13 +146,15 @@ struct AppShell: View {
                     } else {
                         ColumnResizeHandle(width: $sidebarStored, range: 180...320, edge: .leading, reset: Double(Self.sidebarWidth))
                     }
-                    ContentColumn()
-                        .frame(width: effectiveListWidth)
-                        .frame(maxHeight: .infinity)
-                        .surface(.list)
-                    ColumnResizeHandle(width: $listWidth, range: 280...(compact ? 320 : 560), edge: .leading, reset: compact ? 320 : 360)
+                    if showsList {
+                        ContentColumn()
+                            .frame(width: effectiveListWidth)
+                            .frame(maxHeight: .infinity)
+                            .surface(.list)
+                        ColumnResizeHandle(width: $listWidth, range: 280...(compact ? 320 : 560), edge: .leading, reset: compact ? 320 : 360)
+                    }
                 }
-                .frame(width: sidebarWidth + 2 + effectiveListWidth)
+                .frame(width: sidebarWidth + 1 + (showsList ? 1 + effectiveListWidth : 0))
             }
             DetailColumn()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -143,16 +167,8 @@ struct AppShell: View {
             }
         }
         .animation(Motion.smooth, value: compact)
-        .edgeReveal(.leading, enabled: hidden, width: Self.sidebarWidth + 1 + CGFloat(listWidth)) {
-            HStack(spacing: 0) {
-                SidebarView()
-                    .frame(width: Self.sidebarWidth)
-                    .surface(.sidebar)
-                Rectangle().fill(Color.syLine).frame(width: 1)
-                ContentColumn()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .surface(.list)
-            }
+        .edgeReveal(.leading, enabled: hidden, width: showsList ? Self.sidebarWidth + 1 + CGFloat(listWidth) : Self.sidebarWidth) {
+            EdgePanelContent(sidebarWidth: Self.sidebarWidth)
             .environment(app)
             .font(.syBody)
             .tint(Color.syAccent)
@@ -166,6 +182,69 @@ struct AppShell: View {
     }
 }
 
+struct SplitAppShell: View {
+    static let flagKey = "shell.nativeSplitView"
+    @Environment(AppModel.self) private var app
+    @AppStorage("agents.sidebarHidden") private var hidden = false
+    @State private var visibility: NavigationSplitViewVisibility = .all
+
+    private var showsList: Bool { !(app.section == .overview && app.forge == nil) }
+
+    var body: some View {
+        Group {
+            if showsList {
+                NavigationSplitView(columnVisibility: $visibility) {
+                    sidebar
+                } content: {
+                    ContentColumn()
+                        .surface(.list)
+                        .navigationSplitViewColumnWidth(min: 280, ideal: 360, max: 560)
+                } detail: {
+                    DetailColumn()
+                }
+            } else {
+                NavigationSplitView(columnVisibility: $visibility) {
+                    sidebar
+                } detail: {
+                    DetailColumn()
+                }
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+        .onAppear { visibility = hidden ? .detailOnly : .all }
+        .onChange(of: visibility) { _, v in hidden = v == .detailOnly }
+        .onChange(of: hidden) { _, h in
+            let next: NavigationSplitViewVisibility = h ? .detailOnly : .all
+            if visibility != next { withAnimation(Motion.smooth) { visibility = next } }
+        }
+        .edgeReveal(.leading, enabled: hidden, width: showsList ? AppShell.sidebarWidth + 1 + 360 : AppShell.sidebarWidth) {
+            EdgePanelContent(sidebarWidth: AppShell.sidebarWidth)
+                .environment(app)
+                .font(.syBody)
+                .tint(Color.syAccent)
+                .environment(\.locale, .app)
+        }
+    }
+
+    private var sidebar: some View {
+        SidebarView(compact: false)
+            .modifier(SplitSidebarSurface())
+            .navigationSplitViewColumnWidth(min: 180, ideal: AppShell.sidebarWidth, max: 320)
+    }
+}
+
+private struct SplitSidebarSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        if GlassSupport.isAvailable, !reduceTransparency, Theme.isBrand {
+            content.scrollContentBackground(.hidden).background(Color.sySidebar.opacity(0.35))
+        } else {
+            content.surface(.sidebar)
+        }
+    }
+}
+
 struct DetailColumn: View {
     @Environment(AppModel.self) private var app
 
@@ -175,6 +254,8 @@ struct DetailColumn: View {
             if app.section == .claude {
                 ClaudeWorkspaceView()
                     .surface(.panel)
+            } else if app.section == .overview, app.forge == nil {
+                OverviewView()
             } else if app.forge != nil {
                 ForgeDetailColumn()
                     .surface(.panel)
@@ -184,13 +265,12 @@ struct DetailColumn: View {
                         if let root = app.detailRoot {
                             RouteView(route: root).id(root).transition(.routeSwap)
                         } else {
-                            VStack(spacing: 12) {
-                                IconTile(systemImage: "arrow.triangle.pull", color: .syViolet, size: 56)
-                                    .opacity(0.9)
-                                Text("Select a pull request, issue or project").foregroundStyle(Color.syMuted)
-                                Text("⌘L to open by link · ⌘K for the command palette · ⌘/ for all shortcuts").font(.syCaption).foregroundStyle(Color.syMuted)
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            PYEmptyState(
+                                title: "Nothing open yet",
+                                message: "Select a pull request, issue or project from the list.",
+                                shortcuts: [("⌘L", "Open by link"), ("⌘K", "Command palette"), ("⌘/", "Shortcuts")],
+                                nextUp: true
+                            )
                             .transition(.opacity)
                         }
                     }
@@ -202,6 +282,38 @@ struct DetailColumn: View {
     }
 }
 
+struct DetachedRouteWindow: View {
+    let route: Route
+    @Environment(AppModel.self) private var app
+    @State private var path: [Route] = []
+
+    var body: some View {
+        Group {
+            if app.phase == .loggedIn {
+                NavigationStack(path: $path) {
+                    RouteView(route: route, detached: true)
+                        .navigationDestination(for: Route.self) { RouteView(route: $0, detached: true) }
+                }
+            } else {
+                PYEmptyState(title: "PullYard is locked", message: "Open the main window to sign in or unlock.")
+            }
+        }
+        .surface(.panel)
+        .frame(minWidth: 720, minHeight: 520)
+    }
+}
+
+struct OpenInNewWindowCommand: View {
+    let app: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Open in New Window") { if let route = app.frontRoute { openWindow(value: route) } }
+            .keyboardShortcut(AppCommand.newWindow)
+            .disabled(app.frontRoute == nil || app.section == .claude || app.phase != .loggedIn)
+    }
+}
+
 struct SidebarToggleButton: View {
     @Binding var hidden: Bool
 
@@ -209,7 +321,7 @@ struct SidebarToggleButton: View {
         Button { withAnimation(Motion.smooth) { hidden.toggle() } } label: {
             Label(hidden ? "Show sidebar" : "Hide sidebar", systemImage: "sidebar.left")
         }
-        .keyboardShortcut("s", modifiers: [.control, .command])
+        .keyboardShortcut(AppCommand.toggleSidebar)
         .help(hidden ? "Show sidebar (⌃⌘S)" : "Hide sidebar (⌃⌘S)")
     }
 }
@@ -264,6 +376,7 @@ struct ColumnResizeHandle: View {
 
 struct RouteView: View {
     let route: Route
+    var detached = false
     @Environment(AppModel.self) private var app
 
     var body: some View {
@@ -276,7 +389,8 @@ struct RouteView: View {
             case .commit(let repo, let sha): CommitDetailView(repo: repo, sha: sha)
             }
         }
-        .environment(\.liveFront, app.frontRoute == route)
+        .environment(\.liveFront, detached || app.frontRoute == route)
+        .environment(\.detailKey, "\(route)")
     }
 }
 
@@ -286,19 +400,28 @@ struct SidebarView: View {
 
     var body: some View {
         List {
+            SidebarGroup("") {
+                if app.forge == nil {
+                    SidebarRow(section: .overview, title: "Overview", icon: "square.grid.2x2.fill", color: .syAccent)
+                    SidebarRow(section: .notifications, title: "Notifications", icon: "bell.fill", color: .syAmber, count: app.unreadCount)
+                } else if let inbox = app.forgeCaps.inboxTitle {
+                    SidebarRow(section: .notifications, title: inbox, icon: "bell.fill", color: .syAmber, count: app.unreadCount)
+                }
+                SidebarRow(section: .claude, title: "Agents", icon: "terminal.fill", color: .syCoral, count: app.claude.attentionCount > 0 ? app.claude.attentionCount : app.claude.tabs.filter(\.running).count)
+            }
             if app.forge != nil {
                 forgeSections
             } else {
                 gitHubSections
-            }
-            SidebarGroup("AI") {
-                SidebarRow(section: .claude, title: "Agents", icon: "terminal.fill", color: .syCoral, count: app.claude.attentionCount > 0 ? app.claude.attentionCount : app.claude.tabs.filter(\.running).count)
             }
         }
         .listStyle(.sidebar)
         .environment(\.sidebarCompact, compact)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
+                if !compact, app.forge == nil {
+                    SidebarPulseCard()
+                }
                 if let version = Updater.shared.availableVersion {
                     UpdateAvailableRow(version: version, compact: compact)
                 }
@@ -310,11 +433,6 @@ struct SidebarView: View {
     @ViewBuilder
     private var forgeSections: some View {
         let caps = app.forgeCaps
-        if let inbox = caps.inboxTitle {
-            SidebarGroup("Inbox") {
-                SidebarRow(section: .notifications, title: inbox, icon: "bell.fill", color: .syAmber, count: app.unreadCount)
-            }
-        }
         SidebarGroup(app.provider.requestsTitle) {
             ForEach(caps.pullFilters) { f in
                 SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0), group: app.provider.requestsTitle)
@@ -324,7 +442,7 @@ struct SidebarView: View {
             }
         }
         if !caps.issueFilters.isEmpty {
-            SidebarGroup("Issues") {
+            SidebarGroup("Issues", collapsible: true) {
                 ForEach(caps.issueFilters) { f in
                     SidebarRow(section: .issues(f), title: f.title, icon: f.tileIcon, color: f.tint, group: "Issues")
                 }
@@ -339,9 +457,6 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var gitHubSections: some View {
-        SidebarGroup("Inbox") {
-            SidebarRow(section: .notifications, title: "Notifications", icon: "bell.fill", color: .syAmber, count: app.unreadCount)
-        }
         SidebarGroup("Pull requests") {
             ForEach(PRFilter.allCases) { f in
                 SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0), group: "Pull requests")
@@ -349,7 +464,7 @@ struct SidebarView: View {
             SidebarRow(section: .myPRsByRepo, title: "My PRs by project", icon: "folder.fill", color: .syCoral)
             SidebarRow(section: .stacks, title: "Stacks", icon: "square.stack.3d.up.fill", color: .syIndigo)
         }
-        SidebarGroup("Issues") {
+        SidebarGroup("Issues", collapsible: true) {
             ForEach(IssueFilter.allCases) { f in
                 SidebarRow(section: .issues(f), title: f.title, icon: f.tileIcon, color: f.tint, group: "Issues")
             }
@@ -401,30 +516,59 @@ struct UpdateAvailableRow: View {
 
 struct SidebarGroup<Content: View>: View {
     let title: Text
+    let rawTitle: String
+    let collapsible: Bool
     @ViewBuilder let content: Content
+    @AppStorage private var expanded: Bool
 
-    init(_ title: LocalizedStringKey, @ViewBuilder content: () -> Content) {
+    init(_ title: String, collapsible: Bool = false, @ViewBuilder content: () -> Content) {
         self.title = Text(title)
+        self.rawTitle = title
+        self.collapsible = collapsible
         self.content = content()
-    }
-
-    @_disfavoredOverload
-    init<S: StringProtocol>(_ title: S, @ViewBuilder content: () -> Content) {
-        self.title = Text(title)
-        self.content = content()
+        _expanded = AppStorage(wrappedValue: true, "sidebar.expanded.\(title)")
     }
 
     @Environment(\.sidebarCompact) private var compact
 
+    private var railLabel: String {
+        let raw = rawTitle.lowercased()
+        if raw.contains("pull") || raw.contains("merge") { return "PR" }
+        if raw.contains("issue") { return "ISS" }
+        if raw.contains("inbox") { return "INBOX" }
+        if raw.contains("code") { return "CODE" }
+        return String(rawTitle.uppercased().prefix(4))
+    }
+
     var body: some View {
-        Section {
-            content
-        } header: {
-            if compact {
-                Rectangle().fill(Color.syLine).frame(height: 1).padding(.horizontal, Space.s).accessibilityHidden(true)
-            } else {
-                title.font(.sySubheadline.weight(.semibold))
+        if collapsible, !compact {
+            Section(isExpanded: $expanded) {
+                content
+            } header: {
+                header
             }
+        } else {
+            Section {
+                content
+            } header: {
+                header
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var header: some View {
+        if rawTitle.isEmpty {
+            EmptyView()
+        } else if compact {
+            Text(railLabel)
+                .font(.sy(size: 9, weight: .semibold))
+                .tracking(0.4)
+                .foregroundStyle(Color.syMuted)
+                .frame(maxWidth: .infinity)
+                .accessibilityHidden(true)
+        } else {
+            title.font(.sySubheadline.weight(.semibold))
         }
     }
 }
@@ -516,22 +660,28 @@ struct SidebarIcon: View {
     let color: Color
 
     var body: some View {
+        let side = TextZoom.shared.size(21)
         Image(systemName: systemImage.hasSuffix(".fill") ? String(systemImage.dropLast(5)) : systemImage)
             .font(.syIcon(10.5))
             .foregroundStyle(color)
-            .frame(width: 21, height: 21)
+            .frame(width: side, height: side)
             .accessibilityHidden(true)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.syText.opacity(0.05)))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(LinearGradient(colors: [Color.white.opacity(0.28), .clear], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.35)), lineWidth: 1)
-            )
+            .overlay {
+                if !GlassSupport.isAvailable {
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(LinearGradient(colors: [Color.white.opacity(0.28), .clear], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.35)), lineWidth: 1)
+                }
+            }
     }
 }
 
 struct BrandToolbar: ViewModifier {
+    static let glassKey = "ui.glassToolbar"
+    @AppStorage(BrandToolbar.glassKey) private var glass = false
+
     func body(content: Content) -> some View {
-        if Theme.isBrand {
+        if Theme.isBrand, !(glass && GlassSupport.isAvailable) {
             content.toolbarBackground(Color.syBar, for: .windowToolbar)
         } else {
             content
@@ -630,6 +780,8 @@ struct ContentColumn: View {
             ProjectsListView()
         case .claude:
             ClaudeProjectsColumn()
+        case .overview:
+            Color.clear
         case nil:
             Text("Select a section").foregroundStyle(Color.syMuted)
         }
@@ -696,7 +848,7 @@ struct RateLimitBanner: View {
             .font(.syCaption)
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
-            .background(.regularMaterial, in: Capsule())
+            .pyGlassCapsule(outline: false)
             .overlay(Capsule().stroke(Color(nsColor: .separatorColor)))
             .padding(.bottom, app.clipboardRoute == nil ? 16 : 0)
             .allowsHitTesting(false)
@@ -720,7 +872,7 @@ struct SyncErrorBanner: View {
             .font(.syCaption)
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
-            .background(.regularMaterial, in: Capsule())
+            .pyGlassCapsule(outline: false)
             .overlay(Capsule().stroke(Color(nsColor: .separatorColor)))
             .padding(.bottom, app.clipboardRoute == nil ? 16 : 0)
             .help(error)
@@ -754,7 +906,7 @@ struct ClipboardBanner: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(.regularMaterial, in: Capsule())
+            .pyGlassCapsule(outline: false)
             .overlay(Capsule().stroke(Color(nsColor: .separatorColor)))
             .shadow(radius: 8, y: 2)
             .padding(.bottom, 16)
@@ -767,6 +919,102 @@ struct ClipboardBanner: View {
         case .pr(let ref): return "PR \(ref.title)"
         case .issue(let ref): return "Issue \(ref.title)"
         default: return ""
+        }
+    }
+}
+
+struct SidebarPulseCard: View {
+    @Environment(AppModel.self) private var app
+    @State private var hovering = false
+
+    var body: some View {
+        let waiting = app.reviewRequestCount
+        let running = app.claude.tabs.filter(\.running).count
+        let attention = app.claude.attentionCount
+        Button { app.section = .overview } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    PullYardLogoMark(progress: 1, size: 26)
+                    Text("Today")
+                        .font(.system(size: TextZoom.shared.size(14), weight: .semibold, design: .serif))
+                        .foregroundStyle(Color.syText)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.syIcon(9))
+                        .foregroundStyle(Color.syDim)
+                        .opacity(hovering ? 1 : 0)
+                }
+                pulseLine(icon: "eye.fill", tint: waiting > 0 ? .syCoral : .syGreen, text: waiting == 0 ? "No reviews waiting" : plural(waiting, "review waiting", "reviews waiting"))
+                if attention > 0 {
+                    pulseLine(icon: "hand.raised.fill", tint: .syCoralInk, text: plural(attention, "agent needs you", "agents need you"))
+                } else if running > 0 {
+                    HStack(spacing: 6) {
+                        PYLoader(size: 11, label: "Agents working")
+                            .frame(width: 14)
+                        Text(plural(running, "agent working", "agents working"))
+                            .font(.syCaption)
+                            .foregroundStyle(Color.syMuted)
+                    }
+                }
+                if app.unreadCount > 0 {
+                    pulseLine(icon: "bell.fill", tint: .syAmber, text: plural(app.unreadCount, "unread notification", "unread notifications"))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.syRaised.opacity(hovering ? 1 : 0.75))
+                    .overlay(alignment: .bottom) {
+                        HarborWaves()
+                            .frame(height: 12)
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 4)
+                            .opacity(0.6)
+                    }
+            }
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.syLine))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(.easeOut(duration: Motion.Dur.fast)) { hovering = h } }
+        .padding(.horizontal, 8)
+        .padding(.bottom, 8)
+        .help("Open Overview (⌥⌘0)")
+        .accessibilityLabel("Today: open Overview")
+    }
+
+    private func pulseLine(icon: String, tint: Color, text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.syIcon(10))
+                .foregroundStyle(tint)
+                .frame(width: 14)
+            Text(text)
+                .font(.syCaption)
+                .foregroundStyle(Color.syMuted)
+                .lineLimit(1)
+        }
+    }
+}
+
+private struct EdgePanelContent: View {
+    let sidebarWidth: CGFloat
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        HStack(spacing: 0) {
+            SidebarView()
+                .frame(width: sidebarWidth)
+                .surface(.sidebar)
+            if !(app.section == .overview && app.forge == nil) {
+                Rectangle().fill(Color.syLine).frame(width: 1)
+                ContentColumn()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .surface(.list)
+            }
         }
     }
 }

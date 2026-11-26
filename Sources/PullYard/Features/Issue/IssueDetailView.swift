@@ -147,7 +147,7 @@ struct IssueDetailView: View {
             HTMLView(html: model.html, scrollToBottomToken: model.scrollToBottomToken, onLink: { url in
                 if let route = GitHubURL.parse(url.absoluteString, allowShort: false) { app.open(route, push: true) } else { LinkBrowser.open(url) }
             })
-            .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, web: true) { await model.load() }
+            .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, web: true, button: false) { await model.load() }
             Rectangle().fill(Color.syLine).frame(height: 1)
             HStack(alignment: .bottom, spacing: 8) {
                 ComposerBox(text: $text, placeholder: "Comment (Markdown) — ⌘↩ to send", minHeight: 56).frame(height: 64)
@@ -159,13 +159,11 @@ struct IssueDetailView: View {
             .padding(10)
             .background(Theme.isBrand ? Color.syBar : Color.clear)
         }
-        .navigationTitle(issue.title)
-        .navigationSubtitle("\(ref.repo.full) #\(issue.number)")
+        .detailTitle(issue.title, subtitle: "\(ref.repo.full) #\(issue.number)")
         .task(id: issue.url) { app.noteCanonical(ref, url: issue.url) }
         .panelToolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                if model.busy { ProgressView().controlSize(.small) }
-                RefreshStatus(updated: model.lastUpdated, refreshing: model.loading, error: model.refreshError, compact: true) {
+                RefreshPill(updated: model.lastUpdated, refreshing: model.loading || model.busy, error: model.refreshError) {
                     Task { await model.load() }
                 }
                 if issue.viewerCanUpdate {

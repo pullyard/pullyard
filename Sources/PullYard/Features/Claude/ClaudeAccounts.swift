@@ -103,6 +103,17 @@ final class ClaudeProfiles {
 
     var activeOverride: String? { active.configDir }
 
+    func profile(configDir: String?) -> ClaudeProfile? {
+        profiles.first { $0.configDir == configDir }
+    }
+
+    func profile(id: String?) -> ClaudeProfile? {
+        guard let id else { return nil }
+        return profiles.first { $0.id == id }
+    }
+
+    var hasSeveral: Bool { visible.count > 1 }
+
     private func save() {
         if let data = try? JSONEncoder().encode(profiles) { UserDefaults.standard.set(data, forKey: Self.listKey) }
         UserDefaults.standard.set(activeID, forKey: Self.activeKey)
@@ -175,7 +186,6 @@ final class ClaudeProfiles {
 extension AppModel {
     func switchClaudeProfile(to id: String) {
         guard id != ClaudeProfiles.shared.activeID, ClaudeProfiles.shared.visible.contains(where: { $0.id == id }) else { return }
-        claude.closeAllForProfileSwitch()
         ClaudeProfiles.shared.setActive(id)
         ClaudeUsageStore.shared.windows = []
         ClaudeUsageStore.shared.subscription = nil
@@ -196,9 +206,11 @@ extension AppModel {
                 switchClaudeProfile(to: fresh.id)
             }
         }
+        claude.closeTabs(configDir: profile.configDir)
         Task {
             await ClaudeAccountStore.shared.logout(configDir: profile.configDir)
             profiles.remove(id)
+            await claude.reloadProjects()
         }
     }
 }
@@ -340,7 +352,7 @@ struct AddClaudeProfileSheet: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(editing != nil ? "Save" : kind == nil ? "Create and sign in" : "Create", action: create)
                     .buttonStyle(.borderedProminent)
-                    .tint(.syCoral)
+                    .tint(.syCoralFill)
                     .keyboardShortcut(.defaultAction)
             }
         }

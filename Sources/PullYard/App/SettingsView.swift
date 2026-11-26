@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
+    @AppStorage(SplitAppShell.flagKey) private var nativeSplit = false
     @AppStorage("pollInterval") private var pollInterval = 30.0
     @AppStorage("oauthClientID") private var clientID = ""
     @AppStorage(Theme.styleKey) private var themeStyle = ThemeStyle.pullyard.rawValue
@@ -18,6 +19,7 @@ struct SettingsView: View {
     @State private var tokenFailed = false
     @State private var refreshingToken = false
     @AppStorage("clipboard.watch") private var watchClipboard = true
+    @AppStorage(ListDensity.key) private var density: ListDensity = .roomy
     @AppStorage("settings.tab") private var tab = "general"
     @AppStorage(SessionCost.budgetKey) private var sessionBudget = 0.0
     @AppStorage(Updater.autoCheckKey) private var autoCheckUpdates = true
@@ -38,10 +40,14 @@ struct SettingsView: View {
             integrationsForm
                 .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
                 .tag("integrations")
+            PYLinkSettingsView()
+                .tabItem { Label("iPhone", systemImage: "iphone") }
+                .tag("iphone")
             advancedForm
                 .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
                 .tag("advanced")
         }
+        .tint(Color.syAccentFill)
         .task { await ClaudeAccountStore.shared.refresh() }
         .sheet(isPresented: $showAddProfile) { AddClaudeProfileSheet().environment(app) }
         .sheet(isPresented: $showLicenses) { LicensesSheet() }
@@ -79,6 +85,11 @@ struct SettingsView: View {
                     }
                 }
                 .help("Also ⌘+ and ⌘− in the main window")
+                Picker("List density", selection: $density) {
+                    ForEach(ListDensity.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .help("How much each pull request row shows")
                 Toggle("Show PullYard in the menu bar", isOn: Binding(get: { app.showMenuBar }, set: { app.showMenuBar = $0 }))
             } header: {
                 SettingsHeader(title: "Appearance", icon: "paintpalette.fill", color: .syViolet)
@@ -198,7 +209,7 @@ struct SettingsView: View {
                         HStack {
                             Button("Sign out of Claude Code", role: .destructive) { confirmClaudeLogout = true }
                             Spacer()
-                            if loggingOut { ProgressView().controlSize(.small) }
+                            if loggingOut { PYLoader(size: 16) }
                         }
                         .disabled(loggingOut)
                     case .notInstalled:
@@ -225,7 +236,7 @@ struct SettingsView: View {
                         .font(.syCaption)
                         .foregroundStyle(Color.syMuted)
                 } header: {
-                    SettingsHeader(title: "Claude Code", icon: "terminal.fill", color: .syCoral)
+                    SettingsHeader(title: "Agents", icon: "terminal.fill", color: .syCoral)
                 }
             }
         }
@@ -261,6 +272,14 @@ struct SettingsView: View {
                 SettingsHeader(title: "Diagnostics", icon: "gauge.with.dots.needle.33percent", color: .sySky)
             }
             Section {
+                Toggle("Native split view", isOn: $nativeSplit)
+                Text("Uses the macOS split view for the sidebar, list and detail. On macOS 26 the sidebar becomes glass. The narrow icon rail is not available in this mode. Experimental.")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+            } header: {
+                SettingsHeader(title: "Window layout", icon: "sidebar.left", color: .syViolet)
+            }
+            Section {
                 TextField("Client ID", text: $clientID)
             } header: {
                 SettingsHeader(title: "GitHub OAuth app (advanced)", icon: "key.fill", color: .syAmber)
@@ -280,6 +299,21 @@ struct SettingsView: View {
                 SettingsHeader(title: "Support PullYard", icon: "heart.fill", color: .syCoral)
             }
             Section {
+                HStack(spacing: 14) {
+                    DrawnLogoMark(key: "settings-about", size: 56)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PullYard")
+                            .font(.system(size: TextZoom.shared.size(22), weight: .semibold, design: .serif))
+                            .foregroundStyle(Color.syText)
+                        Text("Version \(Updater.shared.currentVersion)")
+                            .font(.syCaption.monospacedDigit())
+                            .foregroundStyle(Color.syMuted)
+                            .textSelection(.enabled)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+                .accessibilityElement(children: .combine)
                 Text(Legal.disclaimer)
                     .font(.syCaption)
                     .foregroundStyle(Color.syMuted)

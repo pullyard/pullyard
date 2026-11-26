@@ -16,6 +16,12 @@ struct JiraIssue: Identifiable, Equatable {
     let updated: Date?
     var parentKey: String? = nil
     var parentSummary: String? = nil
+    var connectionID: String? = nil
+
+    var siteBase: String {
+        guard let r = url.range(of: "/browse/") else { return url }
+        return String(url[..<r.lowerBound])
+    }
 }
 
 struct JiraTransition: Identifiable, Equatable {
@@ -55,30 +61,276 @@ enum JiraKeys {
     }
 }
 
+struct JiraConnection: Codable, Identifiable, Hashable {
+    var id: String
+    var name: String
+    var site: String
+    var email: String
+    var displayName: String?
+    var projectKeys: [String] = []
+    var projectsUpdated: Date?
+
+    var baseURL: URL? { JiraConnections.normalizedSite(site) }
+    var host: String { baseURL?.host ?? site }
+}
+
+struct JiraLinkConnection: Hashable {
+    let id: String
+    let name: String
+    let site: String
+    let email: String
+}
+
+enum JiraRouteSource: Equatable {
+    case repoOverride, orgOverride, project, learned, only
+}
+
 @Observable
 @MainActor
-final class JiraAccount {
-    static let shared = JiraAccount()
-    private static let keychainAccount = "jira-token"
+final class JiraConnections {
+    static let shared = JiraConnections()
+    private static let listKey = "jira.connections"
+    private static let orgKey = "jira.overrides.org"
+    private static let repoKey = "jira.overrides.repo"
+    private static let learnedKey = "jira.learned"
+    private static let legacyKeychainAccount = "jira-token"
 
-    var site: String { didSet { UserDefaults.standard.set(site, forKey: "jira.site") } }
-    var email: String { didSet { UserDefaults.standard.set(email, forKey: "jira.email") } }
-    private(set) var hasToken: Bool
-    var displayName: String?
+    private(set) var connections: [JiraConnection]
+    private(set) var orgOverrides: [String: String]
+    private(set) var repoOverrides: [String: String]
+    @ObservationIgnored private var learned: [String: String]
+    @ObservationIgnored private var tokens: [String: String] = [:]
+    @ObservationIgnored private var issueCache: [String: [String: (issue: JiraIssue, at: Date)]] = [:]
 
     private init() {
-        site = UserDefaults.standard.string(forKey: "jira.site") ?? ""
-        email = UserDefaults.standard.string(forKey: "jira.email") ?? ""
-        if UserDefaults.standard.object(forKey: "jira.hasToken") == nil, !(UserDefaults.standard.string(forKey: "jira.site") ?? "").isEmpty {
-            UserDefaults.standard.set(Keychain.load(account: Self.keychainAccount) != nil, forKey: "jira.hasToken")
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: Self.listKey), let list = try? JSONDecoder().decode([JiraConnection].self, from: data) {
+            connections = list
+        } else {
+            connections = []
         }
-        hasToken = UserDefaults.standard.bool(forKey: "jira.hasToken")
-        displayName = UserDefaults.standard.string(forKey: "jira.name")
+        orgOverrides = defaults.dictionary(forKey: Self.orgKey) as? [String: String] ?? [:]
+        repoOverrides = defaults.dictionary(forKey: Self.repoKey) as? [String: String] ?? [:]
+        learned = defaults.dictionary(forKey: Self.learnedKey) as? [String: String] ?? [:]
+        migrateLegacy()
     }
 
-    var isConfigured: Bool { baseURL != nil && hasToken }
+    static func keychainAccount(_ id: String) -> String { "jira-token.\(id)" }
 
-    var baseURL: URL? { Self.normalizedSite(site) }
+    private func migrateLegacy() {
+        let defaults = UserDefaults.standard
+        guard connections.isEmpty, let site = defaults.string(forKey: "jira.site"), !site.isEmpty, defaults.object(forKey: Self.listKey) == nil else { return }
+        guard let token = Keychain.load(account: Self.legacyKeychainAccount) else { return }
+        let id = UUID().uuidString.lowercased()
+        let name = Self.normalizedSite(site)?.host.map(Self.shortName) ?? "Jira"
+        guard (try? Keychain.save(token, account: Self.keychainAccount(id))) != nil else { return }
+        connections = [JiraConnection(id: id, name: name, site: site, email: defaults.string(forKey: "jira.email") ?? "", displayName: defaults.string(forKey: "jira.name"))]
+        save()
+        Keychain.delete(account: Self.legacyKeychainAccount)
+        defaults.removeObject(forKey: "jira.hasToken")
+        Task { await refreshProjects(id) }
+    }
+
+    nonisolated static func shortName(_ host: String) -> String {
+        let first = host.split(separator: ".").first.map(String.init) ?? host
+        return first.prefix(1).uppercased() + first.dropFirst()
+    }
+
+    var isConfigured: Bool { !connections.isEmpty }
+    var hasSeveral: Bool { connections.count > 1 }
+
+    func connection(_ id: String?) -> JiraConnection? {
+        guard let id else { return nil }
+        return connections.first { $0.id == id }
+    }
+
+    var linkConnections: [JiraLinkConnection] {
+        connections.map { JiraLinkConnection(id: $0.id, name: $0.name, site: $0.baseURL?.absoluteString ?? $0.site, email: $0.email) }
+    }
+
+    func token(for id: String) -> String? {
+        if let cached = tokens[id] { return cached }
+        let value = Keychain.load(account: Self.keychainAccount(id))
+        tokens[id] = value
+        return value
+    }
+
+    func client(for id: String?) -> JiraClient? {
+        guard let c = connection(id), let base = c.baseURL, let token = token(for: c.id) else { return nil }
+        return JiraClient(base: base, authorization: Self.authorization(email: c.email, token: token))
+    }
+
+    @discardableResult
+    func add(name: String, site: String, email: String, token: String) async throws -> JiraConnection {
+        let id = UUID().uuidString.lowercased()
+        let connection = try await validated(id: id, name: name, site: site, email: email, token: token)
+        connections.append(connection)
+        save()
+        await refreshProjects(id)
+        return self.connection(id) ?? connection
+    }
+
+    func update(_ id: String, name: String, site: String, email: String, token: String?) async throws {
+        guard let index = connections.firstIndex(where: { $0.id == id }) else { return }
+        let t = token?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let secret = (t?.isEmpty == false ? t : nil) ?? self.token(for: id) ?? ""
+        var updated = try await validated(id: id, name: name, site: site, email: email, token: secret)
+        updated.projectKeys = connections[index].projectKeys
+        updated.projectsUpdated = connections[index].projectsUpdated
+        connections[index] = updated
+        issueCache[id] = nil
+        save()
+        await refreshProjects(id)
+    }
+
+    func remove(_ id: String) {
+        Keychain.delete(account: Self.keychainAccount(id))
+        tokens[id] = nil
+        issueCache[id] = nil
+        connections.removeAll { $0.id == id }
+        orgOverrides = orgOverrides.filter { $0.value != id }
+        repoOverrides = repoOverrides.filter { $0.value != id }
+        learned = learned.filter { $0.value != id }
+        save()
+    }
+
+    private func validated(id: String, name: String, site: String, email: String, token: String) async throws -> JiraConnection {
+        let normalized = Self.normalizedSite(site)?.absoluteString ?? site
+        let mail = email.trimmingCharacters(in: .whitespaces)
+        let secret = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let base = Self.normalizedSite(normalized) else { throw APIError(message: "Enter your Jira address, for example acme.atlassian.net") }
+        guard !secret.isEmpty else { throw APIError(message: "Enter an API token") }
+        let client = JiraClient(base: base, authorization: Self.authorization(email: mail, token: secret))
+        let me = try await client.myself()
+        try Keychain.save(secret, account: Self.keychainAccount(id))
+        tokens[id] = secret
+        let label = name.trimmingCharacters(in: .whitespaces)
+        return JiraConnection(id: id, name: label.isEmpty ? Self.shortName(base.host ?? "Jira") : label, site: normalized, email: mail, displayName: me)
+    }
+
+    func refreshProjects(_ id: String) async {
+        guard let client = client(for: id) else { return }
+        guard let keys = try? await client.projectKeys() else { return }
+        guard let index = connections.firstIndex(where: { $0.id == id }) else { return }
+        connections[index].projectKeys = keys.sorted()
+        connections[index].projectsUpdated = Date()
+        save()
+    }
+
+    func refreshAllProjects(olderThan age: TimeInterval = 0) async {
+        for c in connections where Date().timeIntervalSince(c.projectsUpdated ?? .distantPast) >= age {
+            await refreshProjects(c.id)
+        }
+    }
+
+    nonisolated static func projectKey(of issueKey: String) -> String {
+        issueKey.split(separator: "-").first.map { String($0).uppercased() } ?? issueKey.uppercased()
+    }
+
+    func resolve(issueKey: String, repo: RepoRef?) -> String? {
+        route(issueKey: issueKey, repo: repo)?.id
+    }
+
+    func route(issueKey: String, repo: RepoRef?) -> (id: String, source: JiraRouteSource)? {
+        Self.route(issueKey: issueKey, repo: repo, connections: connections, orgOverrides: orgOverrides, repoOverrides: repoOverrides, learned: learned)
+    }
+
+    nonisolated static func route(issueKey: String, repo: RepoRef?, connections: [JiraConnection], orgOverrides: [String: String], repoOverrides: [String: String], learned: [String: String]) -> (id: String, source: JiraRouteSource)? {
+        let ids = Set(connections.map(\.id))
+        if let repo {
+            if let id = repoOverrides[repo.full.lowercased()], ids.contains(id) { return (id, .repoOverride) }
+            if let id = orgOverrides[repo.owner.lowercased()], ids.contains(id) { return (id, .orgOverride) }
+        }
+        let project = projectKey(of: issueKey)
+        let owners = connections.filter { $0.projectKeys.contains(project) }
+        if owners.count == 1 { return (owners[0].id, .project) }
+        if let id = learned[project], ids.contains(id), owners.isEmpty || owners.contains(where: { $0.id == id }) { return (id, .learned) }
+        if connections.count == 1 { return (connections[0].id, .only) }
+        return nil
+    }
+
+    func override(for repo: RepoRef) -> (repo: String?, org: String?) {
+        (repoOverrides[repo.full.lowercased()], orgOverrides[repo.owner.lowercased()])
+    }
+
+    func setRepoOverride(_ id: String?, for repo: RepoRef) {
+        repoOverrides[repo.full.lowercased()] = id
+        save()
+    }
+
+    func setOrgOverride(_ id: String?, for org: String) {
+        orgOverrides[org.lowercased()] = id
+        save()
+    }
+
+    func connectionForRepo(_ repo: RepoRef) -> String? {
+        repoOverrides[repo.full.lowercased()] ?? orgOverrides[repo.owner.lowercased()] ?? (connections.count == 1 ? connections.first?.id : nil)
+    }
+
+    func fetchIssue(_ key: String, repo: RepoRef?) async throws -> JiraIssue {
+        if let id = resolve(issueKey: key, repo: repo), let client = client(for: id) {
+            var issue = try await client.issue(key)
+            issue.connectionID = id
+            remember(issue)
+            return issue
+        }
+        var lastError: Error = APIError(message: "No Jira connection has \(key)")
+        for c in connections {
+            guard let client = client(for: c.id) else { continue }
+            do {
+                var issue = try await client.issue(key)
+                issue.connectionID = c.id
+                learned[Self.projectKey(of: key)] = c.id
+                save()
+                remember(issue)
+                return issue
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
+    }
+
+    func cachedIssue(_ key: String, repo: RepoRef?) -> JiraIssue? {
+        let ids = resolve(issueKey: key, repo: repo).map { [$0] } ?? connections.map(\.id)
+        for id in ids {
+            if let hit = issueCache[id]?[key], Date().timeIntervalSince(hit.at) < 60 { return hit.issue }
+        }
+        return nil
+    }
+
+    func remember(_ issue: JiraIssue) {
+        guard let id = issue.connectionID else { return }
+        issueCache[id, default: [:]][issue.key] = (issue, Date())
+    }
+
+    func clearCache() {
+        issueCache = [:]
+    }
+
+    func linkedKeys(for prURL: String) -> [String] {
+        UserDefaults.standard.stringArray(forKey: "jira.links." + prURL) ?? []
+    }
+
+    func setLinkedKeys(_ keys: [String], for prURL: String) {
+        UserDefaults.standard.set(keys, forKey: "jira.links." + prURL)
+    }
+
+    func hiddenKeys(for prURL: String) -> [String] {
+        UserDefaults.standard.stringArray(forKey: "jira.hidden." + prURL) ?? []
+    }
+
+    func setHiddenKeys(_ keys: [String], for prURL: String) {
+        if keys.isEmpty { UserDefaults.standard.removeObject(forKey: "jira.hidden." + prURL) } else { UserDefaults.standard.set(keys, forKey: "jira.hidden." + prURL) }
+    }
+
+    private func save() {
+        let defaults = UserDefaults.standard
+        if let data = try? JSONEncoder().encode(connections) { defaults.set(data, forKey: Self.listKey) }
+        defaults.set(orgOverrides, forKey: Self.orgKey)
+        defaults.set(repoOverrides, forKey: Self.repoKey)
+        defaults.set(learned, forKey: Self.learnedKey)
+    }
 
     nonisolated static func normalizedSite(_ raw: String) -> URL? {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -102,73 +354,8 @@ final class JiraAccount {
         return c.url
     }
 
-    func connect(site: String, email: String, token: String) async throws {
-        self.site = Self.normalizedSite(site)?.absoluteString ?? site
-        self.email = email.trimmingCharacters(in: .whitespaces)
-        let t = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let base = baseURL else { throw APIError(message: "Enter your Jira address, for example acme.atlassian.net") }
-        let client = JiraClient(base: base, authorization: Self.authorization(email: self.email, token: t))
-        let name = try await client.myself()
-        try Keychain.save(t, account: Self.keychainAccount)
-        self.token = t
-        hasToken = true
-        UserDefaults.standard.set(true, forKey: "jira.hasToken")
-        issueCache = [:]
-        displayName = name
-        UserDefaults.standard.set(name, forKey: "jira.name")
-    }
-
-    func disconnect() {
-        Keychain.delete(account: Self.keychainAccount)
-        token = nil
-        hasToken = false
-        UserDefaults.standard.set(false, forKey: "jira.hasToken")
-        issueCache = [:]
-        displayName = nil
-        UserDefaults.standard.removeObject(forKey: "jira.name")
-    }
-
     nonisolated static func authorization(email: String, token: String) -> String {
         email.isEmpty ? "Bearer \(token)" : "Basic " + Data("\(email):\(token)".utf8).base64EncodedString()
-    }
-
-    @ObservationIgnored private var token: String?
-    @ObservationIgnored private var issueCache: [String: (issue: JiraIssue, at: Date)] = [:]
-
-    func client() -> JiraClient? {
-        guard hasToken, let base = baseURL else { return nil }
-        if token == nil { token = Keychain.load(account: Self.keychainAccount) }
-        guard let token else { return nil }
-        return JiraClient(base: base, authorization: Self.authorization(email: email, token: token))
-    }
-
-    func cachedIssue(_ key: String) -> JiraIssue? {
-        guard let hit = issueCache[key], Date().timeIntervalSince(hit.at) < 60 else { return nil }
-        return hit.issue
-    }
-
-    func clearCache() {
-        issueCache = [:]
-    }
-
-    func remember(_ issue: JiraIssue) {
-        issueCache[issue.key] = (issue, Date())
-    }
-
-    func linkedKeys(for prURL: String) -> [String] {
-        UserDefaults.standard.stringArray(forKey: "jira.links." + prURL) ?? []
-    }
-
-    func setLinkedKeys(_ keys: [String], for prURL: String) {
-        UserDefaults.standard.set(keys, forKey: "jira.links." + prURL)
-    }
-
-    func hiddenKeys(for prURL: String) -> [String] {
-        UserDefaults.standard.stringArray(forKey: "jira.hidden." + prURL) ?? []
-    }
-
-    func setHiddenKeys(_ keys: [String], for prURL: String) {
-        if keys.isEmpty { UserDefaults.standard.removeObject(forKey: "jira.hidden." + prURL) } else { UserDefaults.standard.set(keys, forKey: "jira.hidden." + prURL) }
     }
 }
 
@@ -210,6 +397,26 @@ struct JiraClient: Sendable {
             throw APIError(message: "Jira sent a web page instead of data. Check the address: it should be just your site, like acme.atlassian.net.")
         }
         return o
+    }
+
+    func projectKeys() async throws -> [String] {
+        var keys: [String] = []
+        var start = 0
+        do {
+            while true {
+                let o = try json(try await request("/rest/api/3/project/search?startAt=\(start)&maxResults=50"))
+                let values = o["values"] as? [[String: Any]] ?? []
+                keys += values.compactMap { $0["key"] as? String }
+                let total = o["total"] as? Int ?? keys.count
+                start += values.count
+                if values.isEmpty || o["isLast"] as? Bool == true || start >= total || start > 5000 { break }
+            }
+            return keys
+        } catch let error as APIError where error.status == 404 {
+            let data = try await request("/rest/api/2/project")
+            let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+            return list.compactMap { $0["key"] as? String }
+        }
     }
 
     func myself() async throws -> String {

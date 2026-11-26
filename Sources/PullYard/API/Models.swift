@@ -23,13 +23,13 @@ struct ItemRef: Hashable, Codable {
     var title: String { "\(repo.full)#\(number)" }
 }
 
-struct ProjectRef: Hashable {
+struct ProjectRef: Hashable, Codable {
     let id: String
     let title: String
     let url: String
 }
 
-enum Route: Hashable {
+enum Route: Hashable, Codable {
     case pr(ItemRef)
     case issue(ItemRef)
     case repo(RepoRef)

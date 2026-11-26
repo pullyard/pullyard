@@ -29,17 +29,38 @@ final class JiraTests: XCTestCase {
     }
 
     func testAuthorizationHeader() {
-        XCTAssertEqual(JiraAccount.authorization(email: "", token: "abc"), "Bearer abc")
-        XCTAssertEqual(JiraAccount.authorization(email: "a@b.c", token: "t"), "Basic " + Data("a@b.c:t".utf8).base64EncodedString())
+        XCTAssertEqual(JiraConnections.authorization(email: "", token: "abc"), "Bearer abc")
+        XCTAssertEqual(JiraConnections.authorization(email: "a@b.c", token: "t"), "Basic " + Data("a@b.c:t".utf8).base64EncodedString())
+    }
+
+    func testRoutesByOverrideThenProjectKeyThenLearned() {
+        let a = JiraConnection(id: "a", name: "Work A", site: "a.atlassian.net", email: "", projectKeys: ["COM", "PAY"])
+        let b = JiraConnection(id: "b", name: "Work B", site: "b.atlassian.net", email: "", projectKeys: ["OPS", "PAY"])
+        let both = [a, b]
+        let repo = RepoRef(owner: "Mabrook", name: "App")
+        func route(_ key: String, repo: RepoRef? = nil, org: [String: String] = [:], repos: [String: String] = [:], learned: [String: String] = [:], in list: [JiraConnection] = both) -> String? {
+            JiraConnections.route(issueKey: key, repo: repo, connections: list, orgOverrides: org, repoOverrides: repos, learned: learned)?.id
+        }
+        XCTAssertEqual(route("COM-1"), "a")
+        XCTAssertEqual(route("OPS-12"), "b")
+        XCTAssertNil(route("PAY-3"))
+        XCTAssertEqual(route("PAY-3", learned: ["PAY": "b"]), "b")
+        XCTAssertNil(route("NEW-1"))
+        XCTAssertEqual(route("NEW-1", learned: ["NEW": "a"]), "a")
+        XCTAssertEqual(route("OPS-1", repo: repo, org: ["mabrook": "a"]), "a")
+        XCTAssertEqual(route("OPS-1", repo: repo, org: ["mabrook": "a"], repos: ["mabrook/app": "b"]), "b")
+        XCTAssertEqual(route("OPS-1", repo: repo, org: ["mabrook": "gone"]), "b")
+        XCTAssertEqual(route("XYZ-9", in: [a]), "a")
+        XCTAssertEqual(JiraConnections.projectKey(of: "com-12"), "COM")
     }
 
     func testSiteNormalization() {
-        XCTAssertEqual(JiraAccount.normalizedSite("https://minitok.atlassian.net/jira/software/c/projects/COM/list?jql=project%20%3D%20COM")?.absoluteString, "https://minitok.atlassian.net")
-        XCTAssertEqual(JiraAccount.normalizedSite("acme.atlassian.net/browse/PAY-1")?.absoluteString, "https://acme.atlassian.net")
-        XCTAssertEqual(JiraAccount.normalizedSite("https://jira.corp.example/jira/browse/PAY-1")?.absoluteString, "https://jira.corp.example/jira")
-        XCTAssertEqual(JiraAccount.normalizedSite("https://corp.example/tracker/browse/PAY-1")?.absoluteString, "https://corp.example/tracker")
-        XCTAssertNil(JiraAccount.normalizedSite("http://insecure.example"))
-        XCTAssertNil(JiraAccount.normalizedSite("  "))
+        XCTAssertEqual(JiraConnections.normalizedSite("https://minitok.atlassian.net/jira/software/c/projects/COM/list?jql=project%20%3D%20COM")?.absoluteString, "https://minitok.atlassian.net")
+        XCTAssertEqual(JiraConnections.normalizedSite("acme.atlassian.net/browse/PAY-1")?.absoluteString, "https://acme.atlassian.net")
+        XCTAssertEqual(JiraConnections.normalizedSite("https://jira.corp.example/jira/browse/PAY-1")?.absoluteString, "https://jira.corp.example/jira")
+        XCTAssertEqual(JiraConnections.normalizedSite("https://corp.example/tracker/browse/PAY-1")?.absoluteString, "https://corp.example/tracker")
+        XCTAssertNil(JiraConnections.normalizedSite("http://insecure.example"))
+        XCTAssertNil(JiraConnections.normalizedSite("  "))
     }
 
     func testTablesAndPanelsBecomeReadableText() {

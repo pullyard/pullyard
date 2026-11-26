@@ -57,7 +57,7 @@ struct ReposView: View {
         }
         .liveRefresh(updated: lastUpdated, refreshing: refreshing, error: repos.isEmpty ? nil : error) { await load() }
         .toolbarSearch(text: $text, prompt: "Filter repositories")
-        .navigationTitle("Repositories")
+        .columnTitle("Repositories")
         .panelToolbar {
             ToolbarItem {
                 Toggle(isOn: $hideArchived) { Label("Hide archived", systemImage: "archivebox") }
@@ -163,6 +163,7 @@ struct RepoRow: View {
                     Text(repo.nameWithOwner).font(.syBody).fontWeight(.medium).foregroundStyle(Color.syText).lineLimit(1).help(repo.nameWithOwner)
                     if repo.isArchived { ChipView(text: "archived", color: .syAmber) }
                     if repo.isFork { Image(systemName: "tuningfork").font(.syCaption2).foregroundStyle(Color.syDim).accessibilityLabel("Fork") }
+                    JiraRepoBadge(full: repo.nameWithOwner)
                 }
                 if let d = repo.description, !d.isEmpty {
                     Text(d).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(2)
@@ -225,8 +226,7 @@ struct RepoDetailView: View {
                 itemsList
             }
         }
-        .navigationTitle(repo.name)
-        .navigationSubtitle(repo.owner)
+        .detailTitle(repo.name, subtitle: repo.owner)
         .panelToolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
@@ -281,6 +281,7 @@ struct RepoDetailView: View {
                             ChipView(text: "\(info.stargazerCount)", color: .syAmber, icon: "star.fill")
                             ChipView(text: "\(info.forkCount)", color: .sySky, icon: "tuningfork")
                             if let branch = info.defaultBranchRef?.name { ChipView(text: branch, color: .syTeal, icon: "arrow.branch", mono: true) }
+                            JiraRepoChip(repo: repo)
                         }
                         .padding(.top, 2)
                     }

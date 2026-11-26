@@ -97,7 +97,7 @@ struct CreatedPRCard: View {
             }
             .controlSize(.small)
             .buttonStyle(.borderedProminent)
-            .tint(.syAgentAccent)
+            .tint(.syAgentFill)
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.syViolet.opacity(0.08)))

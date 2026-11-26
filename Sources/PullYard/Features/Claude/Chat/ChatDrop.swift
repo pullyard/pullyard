@@ -65,7 +65,7 @@ struct ChatDropOverlay: View {
                     .foregroundStyle(Color.syText)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 9)
-                    .background(Capsule().fill(.regularMaterial))
+                    .pyGlassCapsule(outline: false)
             }
         }
         .padding(8)

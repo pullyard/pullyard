@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum StateFilter: String, CaseIterable, Identifiable {
@@ -21,9 +22,31 @@ enum StateFilter: String, CaseIterable, Identifiable {
     }
 }
 
+enum ListDensity: String, CaseIterable, Identifiable {
+    case compact, standard, roomy
+    static let key = "list.density"
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .compact: return "Compact"
+        case .standard: return "Standard"
+        case .roomy: return "Roomy"
+        }
+    }
+}
+
 enum ListSort: String, CaseIterable, Identifiable {
     case updated, created, comments
     var id: String { rawValue }
+
+    var short: String {
+        switch self {
+        case .updated: return "Updated"
+        case .created: return "Newest"
+        case .comments: return "Comments"
+        }
+    }
 
     var title: String {
         switch self {
@@ -282,15 +305,95 @@ struct LoadingBar: View {
     var body: some View {
         ZStack {
             if active {
-                ProgressView()
-                    .progressViewStyle(.linear)
-                    .controlSize(.small)
-                    .labelsHidden()
-                    .transition(.opacity)
+                WakeBar().transition(.opacity)
             }
         }
         .frame(height: 4)
         .clipped()
+    }
+}
+
+struct WakeBar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        WakeBarLayer(animated: !reduceMotion)
+            .frame(height: 2)
+            .frame(maxHeight: .infinity, alignment: .center)
+            .accessibilityLabel("Loading")
+    }
+}
+
+private struct WakeBarLayer: NSViewRepresentable {
+    let animated: Bool
+
+    func makeNSView(context: Context) -> WakeBarView { WakeBarView() }
+
+    func updateNSView(_ view: WakeBarView, context: Context) {
+        view.animated = animated
+    }
+}
+
+final class WakeBarView: NSView {
+    private let bar = CAGradientLayer()
+    private var laidOutWidth: CGFloat = -1
+    var animated = true {
+        didSet { if animated != oldValue { laidOutWidth = -1; needsLayout = true } }
+    }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        bar.startPoint = CGPoint(x: 0, y: 0.5)
+        bar.endPoint = CGPoint(x: 1, y: 0.5)
+        bar.cornerRadius = 1
+        layer?.addSublayer(bar)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        laidOutWidth = -1
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        let w = bounds.width
+        guard w > 0, w != laidOutWidth else { return }
+        laidOutWidth = w
+        applyColors()
+        let span = max(60, w * 0.32)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        bar.removeAllAnimations()
+        bar.bounds = CGRect(x: 0, y: 0, width: animated ? span : w, height: bounds.height)
+        bar.position = CGPoint(x: w / 2, y: bounds.midY)
+        CATransaction.commit()
+        guard animated else { return }
+        let move = CABasicAnimation(keyPath: "position.x")
+        move.fromValue = -span / 2
+        move.toValue = w + span / 2
+        move.duration = 1.4
+        move.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        move.repeatCount = .infinity
+        bar.add(move, forKey: "sweep")
+    }
+
+    private func applyColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let wake = NSColor.syWake
+            bar.colors = [wake.withAlphaComponent(0).cgColor, wake.cgColor, NSColor.syViolet.withAlphaComponent(0.6).cgColor, wake.withAlphaComponent(0).cgColor]
+        }
     }
 }
 
@@ -306,6 +409,8 @@ struct SearchListView: View {
     @State private var text: String
     @State private var loadedText = ""
     @State private var collapsed: Set<String> = []
+    @AppStorage(ListDensity.key) private var density: ListDensity = .roomy
+    @State private var showSnoozed = false
     private let memoryKey: String
 
     init(title: String, kind: String, baseQuery: String, grouped: Bool = false) {
@@ -334,6 +439,7 @@ struct SearchListView: View {
                     ForEach(StateFilter.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                .tint(Color.syAccentFill)
                 .labelsHidden()
                 .accessibilityLabel("State")
                 Menu {
@@ -341,13 +447,22 @@ struct SearchListView: View {
                         ForEach(ListSort.allCases) { Text($0.title).tag($0) }
                     }
                     .pickerStyle(.inline)
+                    Divider()
+                    Picker("Density", selection: $density) {
+                        ForEach(ListDensity.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.inline)
                 } label: {
-                    Image(systemName: "arrow.up.arrow.down")
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.up.arrow.down")
+                        Text(sort.short)
+                    }
+                    .font(.syCaption.weight(.medium))
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("Sort: \(sort.title)")
+                .help("Sort: \(sort.title) · Density: \(density.title)")
                 .accessibilityLabel("Sort")
                 .accessibilityValue(sort.title)
             }
@@ -370,7 +485,19 @@ struct SearchListView: View {
                         }
                     }
                 } else {
-                    ForEach(model.items) { row($0) }
+                    let queue = QueueStore.shared
+                    let active = model.items.filter { queue.snoozedUntil($0.ref) == nil }
+                    let sleeping = model.items.filter { queue.snoozedUntil($0.ref) != nil }
+                    ForEach(active) { row($0) }
+                    if !sleeping.isEmpty {
+                        Section(isExpanded: $showSnoozed) {
+                            ForEach(sleeping) { row($0).opacity(0.7) }
+                        } header: {
+                            Label("Snoozed · \(sleeping.count)", systemImage: "moon.zzz")
+                                .font(.syCaption.weight(.semibold))
+                                .foregroundStyle(Color.syMuted)
+                        }
+                    }
                 }
                 if let e = model.loadMoreError {
                     LoadMoreErrorRow(message: e) {
@@ -386,6 +513,10 @@ struct SearchListView: View {
                         .font(.syCaption)
                         .listRowSeparator(.hidden)
                 }
+            }
+            .onKeyPress(characters: CharacterSet(charactersIn: "jk")) { press in
+                step(press.characters == "j" ? 1 : -1)
+                return .handled
             }
             .opacity(model.loading && !model.showingCached && !model.items.isEmpty ? 0.55 : 1)
             .animation(.easeOut(duration: 0.15), value: model.loading)
@@ -404,8 +535,7 @@ struct SearchListView: View {
             }
         }
         .toolbarSearch(text: $text, prompt: "Filter: text, repo:org/name, label:bug")
-        .navigationTitle(title)
-        .navigationSubtitle(model.total > 0 ? plural(model.total, "result", "results") : "")
+        .columnTitle(title, subtitle: model.total > 0 ? plural(model.total, "result", "results") : "")
         .task(id: "\(query)|\(app.cacheAccount ?? "")|\(app.api != nil)") {
             if !text.isEmpty { try? await Task.sleep(nanoseconds: 350_000_000) }
             guard !Task.isCancelled else { return }
@@ -430,6 +560,19 @@ struct SearchListView: View {
             .contextMenu { ItemContextMenu(item: item) }
     }
 
+    private var visibleItems: [SearchItem] {
+        guard grouped else { return model.items }
+        return model.groups.flatMap { !collapsed.contains($0.id) || !text.isEmpty ? $0.items : [] }
+    }
+
+    private func step(_ delta: Int) {
+        let items = visibleItems
+        guard !items.isEmpty else { return }
+        let index = items.firstIndex { $0.route == app.detailRoot }
+        let next = index.map { min(items.count - 1, max(0, $0 + delta)) } ?? (delta > 0 ? 0 : items.count - 1)
+        app.select(items[next].route)
+    }
+
     private func reload(silent: Bool = false, typing: Bool = false) async {
         await model.load(api: app.api, account: app.cacheAccount, query: query, silent: silent, typing: typing, persist: text.isEmpty)
         if grouped { await model.loadAll(api: app.api) }
@@ -439,7 +582,7 @@ struct SearchListView: View {
 struct LoadingMoreRow: View {
     var body: some View {
         HStack(spacing: Space.s) {
-            ProgressView().controlSize(.small)
+            PYLoader(size: 16)
             Text("Loading more…").font(.syCaption).foregroundStyle(Color.syMuted)
         }
         .frame(maxWidth: .infinity)
@@ -511,6 +654,23 @@ struct ItemContextMenu: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
+        let queue = QueueStore.shared
+        if let until = queue.snoozedUntil(item.ref) {
+            Button("Wake Up (snoozed until \(until.formatted(date: .abbreviated, time: .shortened)))") { queue.wake(item.ref) }
+        } else {
+            Menu("Snooze") {
+                ForEach(QueueStore.presets(), id: \.title) { preset in
+                    Button(preset.title) {
+                        queue.snooze(item.ref, until: preset.date)
+                        app.showToast("Snoozed \(ShortLink.make(item.ref))", action: ToastAction(title: "Undo") { queue.wake(item.ref) })
+                    }
+                }
+            }
+        }
+        Button("Mark as Seen") { queue.markSeen(item.ref) }
+            .disabled(!queue.hasNews(item))
+        Divider()
+        OpenItemInWindowButton(route: item.route)
         Button("Open in Browser") { openInBrowser(item.url) }
         Button("Copy Link") { copyToPasteboard(item.url) }
         Button("Copy Short Link") { app.copyShortLink(item.ref) }
@@ -524,6 +684,20 @@ struct ItemRow: View {
     let item: SearchItem
     var showRepo = true
     var numberPrefix = "#"
+    @AppStorage(ListDensity.key) private var density: ListDensity = .roomy
+
+    private var news: Bool { QueueStore.shared.hasNews(item) }
+
+    private var newsDot: some View {
+        Circle()
+            .fill(Color.syCoral)
+            .frame(width: 7, height: 7)
+            .overlay(Circle().strokeBorder(Color.syList, lineWidth: 1.5))
+            .opacity(news ? 1 : 0)
+            .help("New activity since you last opened it")
+            .accessibilityHidden(!news)
+            .accessibilityLabel("New activity")
+    }
 
     private var reference: String {
         showRepo ? "\(item.repository.nameWithOwner)\(numberPrefix)\(item.number)" : "\(numberPrefix)\(item.number)"
@@ -553,8 +727,98 @@ struct ItemRow: View {
     }
 
     var body: some View {
+        Group {
+            switch density {
+            case .compact: compactRow
+            case .standard: standardRow
+            case .roomy: roomyRow
+            }
+        }
+        .padding(.vertical, density == .compact ? 2 : 4)
+        .padding(.horizontal, 6)
+        .contentShape(Rectangle())
+        .hoverHighlight(radius: 7)
+        .padding(.horizontal, -6)
+        .help(item.title)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenLabel)
+    }
+
+    @ViewBuilder
+    private var trailingChips: some View {
+        if item.isPR {
+            ReviewChip(decision: item.reviewDecision)
+            CIChip(state: item.ciState)
+        }
+        if let comments = item.comments?.totalCount, comments > 0 {
+            Label("\(comments)", systemImage: "bubble.left").labelStyle(.titleAndIcon).monospacedDigit()
+        }
+    }
+
+    private var compactRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: item.visualState.compactIcon)
+                .font(.syIcon(10))
+                .foregroundStyle(item.visualState.color)
+                .frame(width: 16)
+                .overlay(alignment: .topTrailing) { newsDot.offset(x: 3, y: -3) }
+                .accessibilityHidden(true)
+            Text(item.title)
+                .font(.syBody.weight(.medium))
+                .foregroundStyle(Color.syText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 6)
+            if item.isPR { CIIcon(state: item.ciState).font(.syCaption) }
+            Text(Fmt.rel(item.updatedAt))
+                .font(.syCaption.monospacedDigit())
+                .foregroundStyle(Color.syMuted)
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .frame(minHeight: TextZoom.shared.size(22))
+    }
+
+    private var standardRow: some View {
         HStack(alignment: .top, spacing: 10) {
             StateBadge(state: item.visualState, compact: true)
+                .overlay(alignment: .topTrailing) { newsDot.offset(x: 2, y: -1) }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(item.title)
+                        .font(.syBody.weight(.medium))
+                        .foregroundStyle(Color.syText)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 6)
+                    Text(Fmt.rel(item.updatedAt))
+                        .font(.syCaption.monospacedDigit())
+                        .foregroundStyle(Color.syMuted)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                HStack(spacing: 6) {
+                    Text(reference).font(.syCaption.monospaced()).lineLimit(1).truncationMode(.middle)
+                    if showRepo || item.author != nil {
+                        Text(item.author?.login ?? "").lineLimit(1)
+                    }
+                    if let labels = item.labels?.nodes, let first = labels.first {
+                        LabelChip(label: first)
+                        if labels.count > 1 { Text("+\(labels.count - 1)").foregroundStyle(Color.syDim) }
+                    }
+                    Spacer(minLength: 6)
+                    HStack(spacing: 6) { trailingChips }.fixedSize()
+                }
+                .font(.syCaption)
+                .foregroundStyle(Color.syMuted)
+            }
+        }
+    }
+
+    private var roomyRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            StateBadge(state: item.visualState, compact: true)
+                .overlay(alignment: .topTrailing) { newsDot.offset(x: 2, y: -1) }
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
                     .font(.syBody.weight(.medium))
@@ -575,16 +839,8 @@ struct ItemRow: View {
                     Avatar(url: item.author?.avatarUrl, size: 18, ring: true)
                     Text(item.author?.login ?? "").lineLimit(1)
                     Spacer(minLength: 6)
-                    HStack(spacing: 8) {
-                        if item.isPR {
-                            CIIcon(state: item.ciState)
-                            reviewBadge
-                        }
-                        if let comments = item.comments?.totalCount, comments > 0 {
-                            Label("\(comments)", systemImage: "bubble.left").labelStyle(.titleAndIcon).monospacedDigit()
-                        }
-                    }
-                    .fixedSize()
+                    HStack(spacing: 8) { trailingChips }
+                        .fixedSize()
                 }
                 .font(.syCaption)
                 .foregroundStyle(Color.syMuted)
@@ -601,23 +857,14 @@ struct ItemRow: View {
                 }
             }
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 6)
-        .contentShape(Rectangle())
-        .hoverHighlight(radius: 7)
-        .padding(.horizontal, -6)
-        .help(item.title)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spokenLabel)
     }
+}
 
-    @ViewBuilder
-    private var reviewBadge: some View {
-        switch item.reviewDecision {
-        case "APPROVED": Image(systemName: "checkmark.seal.fill").foregroundStyle(Color.ghGreen).font(.syCaption).help("Approved")
-        case "CHANGES_REQUESTED": Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(Color.ghRed).font(.syCaption).help("Changes requested")
-        case "REVIEW_REQUIRED": Image(systemName: "eye").foregroundStyle(Color.syMuted).font(.syCaption).help("Review required")
-        default: EmptyView()
-        }
+struct OpenItemInWindowButton: View {
+    let route: Route
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Open in New Window") { openWindow(value: route) }
     }
 }

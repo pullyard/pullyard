@@ -11,11 +11,29 @@ enum Motion {
     static var swap: Animation? { reduced ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.22) }
     static var insert: Animation { reduced ? .easeOut(duration: 0.2) : .timingCurve(0.22, 1, 0.36, 1, duration: 0.45) }
 
-    static func rowIn(_ index: Int) -> Animation { rowIn(delay: Double(index) * 0.035) }
+    static func rowIn(_ index: Int) -> Animation { rowIn(delay: Double(index) * 0.03) }
 
     static func rowIn(delay: Double) -> Animation {
         reduced ? .easeOut(duration: 0.2) : .timingCurve(0.22, 1, 0.36, 1, duration: 0.45).delay(delay)
     }
+
+    static func easeInOut(_ x: Double) -> Double {
+        let t = min(1, max(0, x))
+        return t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2
+    }
+
+    enum Dur {
+        static let micro = 0.12
+        static let fast = 0.18
+        static let base = 0.24
+        static let slow = 0.36
+        static let story = 0.7
+    }
+
+    static var snappy: Animation? { reduced ? .easeOut(duration: 0.15) : .spring(response: 0.28, dampingFraction: 0.86) }
+    static var bouncy: Animation? { reduced ? .easeOut(duration: 0.15) : .spring(response: 0.36, dampingFraction: 0.72) }
+    static var gentle: Animation? { reduced ? .easeOut(duration: 0.15) : .spring(response: 0.5, dampingFraction: 0.9) }
+    static var brand: Animation { reduced ? .easeOut(duration: 0.15) : .timingCurve(0.22, 1, 0.36, 1, duration: Dur.base) }
 }
 
 extension AnyTransition {

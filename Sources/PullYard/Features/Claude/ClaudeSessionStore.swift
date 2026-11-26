@@ -16,6 +16,7 @@ struct ClaudeSessionInfo: Identifiable, Hashable {
     var parentId: String? = nil
     var desktopId: String? = nil
     var archived = false
+    var profileID: String? = nil
 
     var worktreeName: String? {
         guard let r = cwd.range(of: "/.claude/worktrees/") else { return nil }
@@ -29,6 +30,7 @@ extension ClaudeSessionInfo {
         copy.parentId = parentId
         copy.desktopId = desktopId
         copy.archived = archived
+        copy.profileID = profileID
         return copy
     }
 }

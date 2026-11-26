@@ -52,13 +52,7 @@ struct ChatTasksPanel: View {
         let finished = calls.filter { !ChatTaskState($0).isActive }
         Group {
             if calls.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "terminal").font(.syLargeTitle).foregroundStyle(Color.syDim)
-                    Text("Commands and agents Claude runs will show up here")
-                        .font(.syCallout).foregroundStyle(Color.syMuted).multilineTextAlignment(.center)
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                InspectorEmptyState(icon: "terminal", title: "No tasks yet", message: "Commands and sub-agents the agent runs will show up here, live.")
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
@@ -86,7 +80,11 @@ struct ChatTasksPanel: View {
             withAnimation(Motion.fade) { showFinished.toggle() }
         } label: {
             HStack(spacing: 4) {
-                Text(title).font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                Text(title)
+                    .font(.sy(size: 10, weight: .semibold))
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+                    .foregroundStyle(Color.syMuted)
                 if collapsible {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
@@ -218,12 +216,12 @@ private struct ChatTaskRow: View {
                             .foregroundStyle(Color.syMuted)
                     }
                 }
-                ProgressView().controlSize(.mini)
+                PYLoader(size: 12)
             }
         case .stopping:
             HStack(spacing: 6) {
                 Text("Stopping…").font(.syCaption).foregroundStyle(Color.syMuted)
-                ProgressView().controlSize(.mini)
+                PYLoader(size: 12)
             }
         case .failed:
             Text("Failed").font(.syCaption.weight(.medium)).foregroundStyle(Color.syRed)

@@ -45,7 +45,7 @@ struct AccountDialogs: ViewModifier {
                 Button("Switch") { app.requestSwitch(to: a.id) }
                 Button("Cancel", role: .cancel) {}
             } message: { _ in
-                Text("Running Claude sessions stop. Their history stays, and this account's Claude Code sign-in is kept for when you switch back.")
+                Text("Running agent sessions stop. Their history stays, and this account's Claude Code sign-in is kept for when you switch back.")
             }
             .confirmationDialog("Sign out of \(app.account?.subtitle ?? "this account")?", isPresented: $confirmSignOut) {
                 Button("Sign Out", role: .destructive) {
