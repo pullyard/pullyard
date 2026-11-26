@@ -3,13 +3,15 @@ import SwiftUI
 extension ClaudeLauncher {
     @MainActor
     @discardableResult
-    static func start(app: AppModel, prompt: String, folder: String?, target: ClaudeTarget, mode: ClaudePermissionMode, name: String) throws -> ClaudeTab? {
+    static func start(app: AppModel, prompt: String, folder: String?, target: ClaudeTarget, mode: ClaudePermissionMode, name: String, profileID: String? = nil) throws -> ClaudeTab? {
+        let chosen = ClaudeProfiles.shared.profile(id: profileID)
         if target == .app, let folder {
-            let tab = app.claude.newSession(folder: folder, prompt: prompt, name: name)
+            let tab = app.claude.newSession(folder: folder, prompt: prompt, name: name, profileID: chosen?.id)
             app.section = .claude
             return tab
         }
-        try launch(prompt: prompt, folder: folder ?? "", target: target, mode: mode, sessionName: name, configDir: ClaudeProfiles.shared.activeOverride)
+        let configDir = chosen.map { $0.configDir } ?? ClaudeProfiles.shared.activeOverride
+        try launch(prompt: prompt, folder: folder ?? "", target: target, mode: mode, sessionName: name, configDir: configDir)
         return nil
     }
 }
@@ -62,6 +64,7 @@ struct ClaudeFolderRow: View {
 struct ClaudeLaunchRow: View {
     @Binding var target: ClaudeTarget
     @Binding var mode: ClaudePermissionMode
+    var profileID: Binding<String>? = nil
     let canLaunch: Bool
     let onLaunch: () -> Void
     @Environment(\.dismiss) private var dismiss
@@ -71,11 +74,21 @@ struct ClaudeLaunchRow: View {
             Picker("Open in", selection: $target) {
                 ForEach(ClaudeTarget.allCases.filter(\.available)) { Text($0.title).tag($0) }
             }
-            .frame(width: 220)
+            .frame(width: 200)
+            if let profileID, ClaudeProfiles.shared.hasSeveral {
+                Picker("Account", selection: profileID) {
+                    ForEach(ClaudeProfiles.shared.visible) { p in
+                        Text(AgentAccountFilter.name(p)).tag(p.id)
+                    }
+                }
+                .frame(width: 210)
+                .disabled(target == .copy)
+                .help("Claude account the session runs as")
+            }
             Picker("Mode", selection: $mode) {
                 ForEach(ClaudePermissionMode.allCases) { Text($0.title).tag($0) }
             }
-            .frame(width: 250)
+            .frame(width: 200)
             .disabled(target == .desktop || target == .copy || target == .app)
             Spacer()
             Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -100,14 +113,14 @@ extension ClaudeLauncher {
     @MainActor
     @discardableResult
     static func startForPR(app: AppModel, prompt: String, folder: String?, isolate: Bool, pr: PullRequestDetail, repo: RepoRef,
-                           target: ClaudeTarget, mode: ClaudePermissionMode, name: String) async throws -> ClaudeTab? {
+                           target: ClaudeTarget, mode: ClaudePermissionMode, profileID: String? = nil, name: String) async throws -> ClaudeTab? {
         guard isolate, target != .copy, let folder else {
-            return try start(app: app, prompt: prompt, folder: folder, target: target, mode: mode, name: name)
+            return try start(app: app, prompt: prompt, folder: folder, target: target, mode: mode, name: name, profileID: profileID)
         }
         let number = pr.number
         let worktree = try await Task.detached(priority: .userInitiated) { try PRWorktrees.prepare(clone: folder, repo: repo, number: number) }.value
         let adapted = PRWorktrees.adapt(prompt, worktree: worktree, pr: pr, repo: repo)
-        return try start(app: app, prompt: adapted, folder: worktree.path, target: target, mode: mode, name: name)
+        return try start(app: app, prompt: adapted, folder: worktree.path, target: target, mode: mode, name: name, profileID: profileID)
     }
 }
 
@@ -126,7 +139,7 @@ struct ClaudeWorktreeRow: View {
                 Toggle("Work in an isolated git worktree", isOn: $isolate)
                     .toggleStyle(.checkbox)
                     .disabled(folder == nil || target == .copy)
-                    .help("PullYard checks out the pull request in a separate worktree next to your clone, so your current branch and uncommitted changes stay untouched")
+                    .help("PullYard checks out the pull request in a worktree inside your project (.claude/worktrees), so your current branch and uncommitted changes stay untouched")
                 Spacer()
                 if let existing {
                     Button(removing ? "Removing…" : "Remove worktree") { remove(existing) }
@@ -136,7 +149,7 @@ struct ClaudeWorktreeRow: View {
                 }
             }
             if let folder, isolate, target != .copy {
-                Text("\(existing == nil ? "Creates" : "Reuses") \(display(PRWorktrees.path(clone: folder, number: number))) on branch \(PRWorktrees.branch(number: number)) at the pull request head. The checkout step in the prompt is replaced when it starts.")
+                Text("\(existing == nil ? "Creates" : "Reuses") \(display(existing ?? PRWorktrees.path(clone: folder, number: number))) on branch \(PRWorktrees.branch(number: number)) at the pull request head. The checkout step in the prompt is replaced when it starts.")
                     .font(.syCaption)
                     .foregroundStyle(Color.syMuted)
                     .fixedSize(horizontal: false, vertical: true)

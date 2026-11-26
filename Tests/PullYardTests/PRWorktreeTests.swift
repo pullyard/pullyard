@@ -34,7 +34,7 @@ final class PRWorktreeTests: XCTestCase {
 
     func testCreatesWorktreeAtPRHeadWithoutTouchingClone() throws {
         let wt = try PRWorktrees.prepare(clone: clone, repo: repo, number: 7)
-        XCTAssertEqual(wt.path, root.appendingPathComponent("work/r-worktrees/pr-7").standardizedFileURL.path)
+        XCTAssertEqual(wt.path, root.appendingPathComponent("work/r/.claude/worktrees/pr-7").standardizedFileURL.path)
         XCTAssertEqual(wt.remote, "origin")
         XCTAssertFalse(wt.reused)
         XCTAssertTrue(FileManager.default.fileExists(atPath: wt.path + "/b.txt"))
@@ -43,6 +43,8 @@ final class PRWorktreeTests: XCTestCase {
         XCTAssertEqual(try git(["branch", "--show-current"], in: clone), "main")
         XCTAssertFalse(FileManager.default.fileExists(atPath: clone + "/b.txt"))
         XCTAssertEqual(PRWorktrees.existing(clone: clone, number: 7), wt.path)
+        XCTAssertEqual(try git(["status", "--porcelain"], in: clone), "")
+        XCTAssertEqual(ProjectRoot.of(wt.path), URL(fileURLWithPath: clone).standardizedFileURL.path)
     }
 
     func testReuseUpdatesCleanWorktreeAndKeepsDirtyOne() throws {

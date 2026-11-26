@@ -8,6 +8,7 @@ struct ResolveConflictsSheet: View {
     @AppStorage("claudeTarget.v2") private var target: ClaudeTarget = .app
     @AppStorage("claudeMode") private var mode: ClaudePermissionMode = .standard
     @AppStorage("agentFix.isolatedWorktree") private var isolate = true
+    @AppStorage("agentFix.profile") private var profileID = ""
     @State private var launching = false
     @State private var push = true
     @State private var custom: String?
@@ -44,7 +45,7 @@ struct ResolveConflictsSheet: View {
             ClaudeFolderRow(repo: model.ref.repo, folder: $folder, detecting: detecting)
             ClaudeWorktreeRow(folder: folder, number: pr.number, target: target, isolate: $isolate)
             if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
-            ClaudeLaunchRow(target: $target, mode: $mode, canLaunch: !launching && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (target == .copy || folder != nil), onLaunch: launch)
+            ClaudeLaunchRow(target: $target, mode: $mode, profileID: Binding(get: { ClaudeProfiles.shared.profile(id: profileID).map { p in ClaudeProfiles.shared.visible.contains(p) ? p.id : ClaudeProfiles.shared.activeID } ?? ClaudeProfiles.shared.activeID }, set: { profileID = $0 }), canLaunch: !launching && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (target == .copy || folder != nil), onLaunch: launch)
         }
         .padding(20)
         .frame(width: 780, height: 640)
@@ -118,7 +119,7 @@ struct ResolveConflictsSheet: View {
         Task {
             defer { launching = false }
             do {
-                try await ClaudeLauncher.startForPR(app: app, prompt: prompt, folder: folder, isolate: isolate, pr: pr, repo: model.ref.repo, target: target, mode: mode, name: "Resolve conflicts PR #\(pr.number): \(pr.title)")
+                try await ClaudeLauncher.startForPR(app: app, prompt: prompt, folder: folder, isolate: isolate, pr: pr, repo: model.ref.repo, target: target, mode: mode, profileID: ClaudeProfiles.shared.profile(id: profileID).flatMap { ClaudeProfiles.shared.visible.contains($0) ? $0.id : nil }, name: "Resolve conflicts PR #\(pr.number): \(pr.title)")
                 dismiss()
             } catch {
                 self.error = error.localizedDescription
