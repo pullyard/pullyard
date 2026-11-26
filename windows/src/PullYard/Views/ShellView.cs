@@ -73,6 +73,8 @@ public sealed class ShellView : Grid
         else ShowEmptyDetail();
         Loaded += (_, _) =>
         {
+            if (!Program.SmokeUi && !Program.SmokeTour && !Core.Util.Demo.IsOn)
+                DispatcherQueue.TryEnqueue(() => WelcomeTour.ShowIfNeeded(XamlRoot, () => app.Section = Section.Overview).Forget());
             if (pendingToast is not { } queued) return;
             pendingToast = null;
             ShowToast(queued.Text, queued.IsError);
@@ -127,6 +129,8 @@ public sealed class ShellView : Grid
         };
         BuildNavItems();
         nav.PaneFooter = footer;
+        nav.PaneOpened += (_, _) => today.Visibility = Visibility.Visible;
+        nav.PaneClosed += (_, _) => today.Visibility = nav.DisplayMode == NavigationViewDisplayMode.Expanded ? Visibility.Visible : Visibility.Collapsed;
         UpdateBackground();
     }
 
@@ -136,9 +140,11 @@ public sealed class ShellView : Grid
         navItems.Clear();
         navTitles.Clear();
         var group = "";
+        NavigationViewItem? parent = null;
         void Header(string text)
         {
             group = text;
+            parent = null;
             nav.MenuItems.Add(new NavigationViewItemHeader { Content = text });
         }
         void Item(Section s, string title, string glyph)
@@ -151,23 +157,42 @@ public sealed class ShellView : Grid
             };
             navItems[s.Key] = item;
             navTitles[s.Key] = s.Kind is SectionKind.Prs or SectionKind.Issues && group.Length > 0 ? $"{group}: {title}" : title;
-            nav.MenuItems.Add(item);
+            if (parent is not null) parent.MenuItems.Add(item);
+            else nav.MenuItems.Add(item);
         }
+        void Collapsible(string title, string glyph, bool expanded)
+        {
+            group = title;
+            parent = new NavigationViewItem
+            {
+                Content = title,
+                SelectsOnInvoked = false,
+                IsExpanded = expanded,
+                Icon = new FontIcon { Glyph = glyph, FontFamily = Ui.Icons }
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(parent, title);
+            nav.MenuItems.Add(parent);
+        }
+        void Top(bool inbox, string inboxTitle)
+        {
+            group = "";
+            parent = null;
+            Item(Section.Overview, L.T("Section_Overview", "Overview"), "\uE80F");
+            if (inbox) Item(Section.Notifications, inboxTitle, "\uEA8F");
+            Item(Section.Claude, L.T("Section_Claude", "Agents"), "\uE945");
+        }
+        var issuesOpen = app.Section.Kind == SectionKind.Issues;
         if (app.Forge is not null)
         {
             var caps = app.ForgeCaps;
             var provider = app.Provider;
-            if (caps.HasInbox)
-            {
-                Header(L.T("Nav_Inbox", "Inbox"));
-                Item(Section.Notifications, caps.Inbox.Title(), "\uEA8F");
-            }
+            Top(caps.HasInbox, caps.Inbox.Title());
             Header(provider.RequestsTitle());
             foreach (var f in caps.PullFilters) Item(Section.Prs(f.Filter()), f.Filter().Title(), f.Filter().Glyph());
             if (caps.PullFilters.Contains(Core.Auth.ForgeFilter.Mine)) Item(Section.MyPrsByRepo, provider.ByProjectTitle(), "\uE8B7");
             if (caps.IssueFilters.Count > 0)
             {
-                Header(L.T("Nav_Issues", "Issues"));
+                Collapsible(L.T("Nav_Issues", "Issues"), "\uE7C3", issuesOpen);
                 foreach (var f in caps.IssueFilters) Item(Section.Issues(f.Filter()), f.Filter().Title(), f.Filter().Glyph());
             }
             if (caps.Repositories)
@@ -175,25 +200,20 @@ public sealed class ShellView : Grid
                 Header(L.T("Nav_Code", "Code"));
                 Item(Section.Repos, provider.RepositoriesTitle(), "\uE8F1");
             }
-            Header(L.T("Nav_AI", "AI"));
-            Item(Section.Claude, L.T("Section_Claude", "Agents"), "\uE945");
             SyncNavSelection();
             UpdateBadges();
             return;
         }
-        Header(L.T("Nav_Inbox", "Inbox"));
-        Item(Section.Notifications, L.T("Section_Notifications", "Notifications"), "");
+        Top(true, L.T("Section_Notifications", "Notifications"));
         Header(L.T("Nav_PullRequests", "Pull requests"));
         foreach (var f in Enum.GetValues<PRFilter>()) Item(Section.Prs(f), f.Title(), f.Glyph());
-        Item(Section.MyPrsByRepo, L.T("Section_MyPrsByProject", "My PRs by project"), "");
+        Item(Section.MyPrsByRepo, L.T("Section_MyPrsByProject", "My PRs by project"), "\uE8B7");
         Item(Section.Stacks, L.T("Section_Stacks", "Stacks"), "\uE81E");
-        Header(L.T("Nav_Issues", "Issues"));
+        Collapsible(L.T("Nav_Issues", "Issues"), "\uE7C3", issuesOpen);
         foreach (var f in Enum.GetValues<IssueFilter>()) Item(Section.Issues(f), f.Title(), f.Glyph());
         Header(L.T("Nav_Code", "Code"));
-        Item(Section.Repos, L.T("Section_Repositories", "Repositories"), "");
-        Item(Section.Projects, L.T("Section_Projects", "Projects"), "");
-        Header(L.T("Nav_AI", "AI"));
-        Item(Section.Claude, L.T("Section_Claude", "Agents"), "");
+        Item(Section.Repos, L.T("Section_Repositories", "Repositories"), "\uE8F1");
+        Item(Section.Projects, L.T("Section_Projects", "Projects"), "\uE8A9");
         SyncNavSelection();
         UpdateBadges();
     }
@@ -236,11 +256,53 @@ public sealed class ShellView : Grid
         var attention = app.Claude.AttentionCount;
         var claude = attention > 0 ? attention : app.Claude.RunningCount;
         Badge(Section.Claude.Key, claude, attention > 0, attention > 0 ? L.F("Nav_NeedYouCount", "{0} need you", attention) : L.F("Nav_RunningCount", "{0} running", claude));
+        RenderToday();
+    }
+
+    private readonly ContentControl today = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, IsTabStop = false };
+
+    private void RenderToday()
+    {
+        var waiting = app.ReviewRequestCount;
+        var running = app.Claude.RunningCount;
+        var attention = app.Claude.AttentionCount;
+        var unread = app.UnreadCount;
+        var lines = Ui.V(3, Ui.Text(L.T("Today_Title", "Today").ToUpperInvariant(), 10, "coralInk", FontWeights.SemiBold));
+        void Line(string glyph, string color, string text)
+        {
+            var row = Ui.Columns((Ui.Glyph(glyph, 11, color), Ui.Auto), (Ui.Text(text, 12, "text", maxLines: 1), Ui.Star));
+            row.ColumnSpacing = 6;
+            lines.Children.Add(row);
+        }
+        Line("\uE7B3", waiting > 0 ? "link" : "muted", waiting == 0 ? L.T("Today_NoReviews", "No reviews waiting") : waiting == 1 ? L.T("Today_OneReview", "1 review waiting") : L.F("Today_Reviews", "{0} reviews waiting", waiting));
+        if (attention > 0) Line("\uE945", "coral", L.F("Today_AgentsNeedYou", "{0} agents need you", attention));
+        else if (running > 0) Line("\uE945", "violet", running == 1 ? L.T("Today_OneAgent", "1 agent running") : L.F("Today_Agents", "{0} agents running", running));
+        if (unread > 0) Line("\uEA8F", "link", L.F("Today_Unread", "{0} unread", app.Forge is null ? GitHubApi.CountLabel(unread) : unread.ToString()));
+        var card = new Button
+        {
+            Content = lines,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(12, 10, 12, 10),
+            Margin = new Thickness(8, 0, 8, 8),
+            Background = Palette.Brush("raised"),
+            BorderBrush = Palette.Brush("line"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10)
+        };
+        card.Click += (_, _) => app.Section = Section.Overview;
+        var spoken = string.Join(", ", lines.Children.OfType<Grid>().Select(g => g.Children.OfType<TextBlock>().FirstOrDefault()?.Text).Where(t => t is not null));
+        Ui.Tip(card, L.T("Today_Open", "Open Overview"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(card, $"{L.T("Today_Title", "Today")}: {spoken}");
+        today.Content = card;
+        today.Visibility = nav.DisplayMode == NavigationViewDisplayMode.Expanded || nav.IsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void RenderFooter()
     {
         footer.Children.Clear();
+        RenderToday();
+        footer.Children.Add(today);
         if (app.Updater.AvailableVersion is { } version)
         {
             var row = new Button
@@ -275,7 +337,8 @@ public sealed class ShellView : Grid
     private void BuildBody()
     {
         body.ColumnDefinitions.Add(listColumn);
-        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
+        splitterColumn = new ColumnDefinition { Width = new GridLength(1) };
+        body.ColumnDefinitions.Add(splitterColumn);
         body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Grid.SetColumn(listBackground, 0);
         Grid.SetColumn(listHost, 0);
@@ -419,6 +482,12 @@ public sealed class ShellView : Grid
         var s = app.Section;
         if (!force && shownSection == s.Key) return;
         shownSection = s.Key;
+        SetListVisible(s.Kind != SectionKind.Overview);
+        if (s.Kind == SectionKind.Overview)
+        {
+            ShowOverview();
+            return;
+        }
         if (app.Forge is not null)
         {
             ShowForgeSection(s);
@@ -434,6 +503,7 @@ public sealed class ShellView : Grid
             SectionKind.Repos => new ReposView(),
             SectionKind.Projects => new ProjectsView(),
             SectionKind.Claude => new ClaudeSessionsView(),
+            SectionKind.Search => new SearchListView(s.Title, "pr", s.Query ?? "", false),
             _ => new Grid()
         };
         list.Transitions = new TransitionCollection { new ContentThemeTransition() };
@@ -454,6 +524,41 @@ public sealed class ShellView : Grid
         {
             ShowEmptyDetail();
         }
+    }
+
+    private ColumnDefinition? splitterColumn;
+    private GridLength listWidth = new(380);
+
+    private void SetListVisible(bool visible)
+    {
+        if (splitterColumn is null) return;
+        var hidden = listColumn.Width.Value == 0;
+        if (visible == !hidden) return;
+        if (!visible)
+        {
+            listWidth = listColumn.Width;
+            listColumn.Width = new GridLength(0);
+            splitterColumn.Width = new GridLength(0);
+            listHost.Content = null;
+        }
+        else
+        {
+            listColumn.Width = listWidth;
+            splitterColumn.Width = new GridLength(1);
+        }
+    }
+
+    private void ShowOverview()
+    {
+        listHost.Content = null;
+        App.MainWindow?.SetSubtitle(Section.Overview.Title);
+        var view = new OverviewView(section =>
+        {
+            if (app.Forge is null || app.ForgeSupports(section)) app.Section = section;
+        }, (title, query) => app.Section = Section.Search(title, query));
+        view.Transitions = new TransitionCollection { new ContentThemeTransition() };
+        TextZoom.ApplyWhenLoaded(view);
+        detailHost.Content = view;
     }
 
     private void ShowForgeSection(Section s)
@@ -484,7 +589,7 @@ public sealed class ShellView : Grid
 
     private void ShowForgeDetail()
     {
-        if (app.Forge is null || app.Section.Kind == SectionKind.Claude) return;
+        if (app.Forge is null || app.Section.Kind is SectionKind.Claude or SectionKind.Overview) return;
         if (app.ForgeSelection is { IsPR: true } pr && app.ForgeReviews)
         {
             app.Select(Route.Pr(pr.Ref));
@@ -511,23 +616,18 @@ public sealed class ShellView : Grid
             ShowForgeDetail();
             return;
         }
-        if (app.Section.Kind == SectionKind.Claude) return;
-        var tile = Ui.IconTile("", "violet", 56);
-        tile.HorizontalAlignment = HorizontalAlignment.Center;
-        tile.Opacity = 0.9;
-        var a = Ui.Text(L.T("Detail_Empty", "Select a pull request, issue or project"), 13, "muted");
-        a.HorizontalAlignment = HorizontalAlignment.Center;
-        var b = Ui.Text(L.T("Detail_EmptyHints", "Ctrl+L to open by link · Ctrl+K for the command palette · Ctrl+/ for all shortcuts"), 12, "dim");
-        b.HorizontalAlignment = HorizontalAlignment.Center;
-        var panel = Ui.V(12, tile, a, b);
-        panel.HorizontalAlignment = HorizontalAlignment.Center;
-        panel.VerticalAlignment = VerticalAlignment.Center;
-        detailHost.Content = panel;
+        if (app.Section.Kind is SectionKind.Claude or SectionKind.Overview) return;
+        detailHost.Content = new EmptyHarbor("detail-empty", L.T("Detail_EmptyTitle", "Nothing open yet"), L.T("Detail_Empty", "Select a pull request, issue or project"), new[]
+        {
+            ("Ctrl+L", L.T("Detail_HintLink", "Open by link")),
+            ("Ctrl+K", L.T("Detail_HintPalette", "Command palette")),
+            ("Ctrl+/", L.T("Detail_HintShortcuts", "All shortcuts"))
+        }, nextUp: true);
     }
 
     private void OnRoute(Route route, bool push)
     {
-        if (app.Section.Kind == SectionKind.Claude || (app.Forge is not null && !app.ForgeReviews)) return;
+        if (app.Section.Kind is SectionKind.Claude or SectionKind.Overview || (app.Forge is not null && !app.ForgeReviews)) return;
         if (!push) stack.Clear();
         if (stack.Count > 0 && stack[^1].Route == route) return;
         if (!goingForward) history.Navigated();
@@ -604,9 +704,11 @@ public sealed class ShellView : Grid
         Toast(message);
     }
 
-    public static void Toast(string text, bool isError = false)
+    public static void Toast(string text, bool isError = false) => Toast(text, isError, null, null);
+
+    public static void Toast(string text, bool isError, string? actionTitle, Action? action, string? glyph = null, string glyphColor = "green")
     {
-        if (Current is { } shell) shell.ShowToast(text, isError);
+        if (Current is { } shell) shell.ShowToast(text, isError, actionTitle, action, glyph, glyphColor);
         else if (isError) pendingToast = (text, true);
     }
 
@@ -617,7 +719,14 @@ public sealed class ShellView : Grid
         toast.IsHitTestVisible = false;
     }
 
-    private void ShowToast(string text, bool isError = false)
+    private static Brush FloatingBrush()
+    {
+        var overlay = Palette.Get("overlay");
+        if (ThemeService.IsHighContrast) return Palette.Brush("overlay");
+        return new AcrylicBrush { TintColor = overlay, TintOpacity = 0.72, TintLuminosityOpacity = 0.9, FallbackColor = overlay };
+    }
+
+    private void ShowToast(string text, bool isError = false, string? actionTitle = null, Action? action = null, string? glyph = null, string glyphColor = "green")
     {
         if (isError)
         {
@@ -634,14 +743,25 @@ public sealed class ShellView : Grid
         }
         else
         {
-            toast.Child = Ui.H(8, Ui.Glyph("\uE73E", 13, "green"), Ui.Text(text, 13));
+            var row = Ui.H(8, Ui.Glyph(glyph ?? "\uE73E", 13, glyphColor), Ui.Text(text, 13));
+            if (actionTitle is not null && action is not null)
+            {
+                var button = new HyperlinkButton { Content = actionTitle, Padding = new Thickness(6, 2, 6, 2), FontWeight = FontWeights.SemiBold };
+                button.Click += (_, _) =>
+                {
+                    DismissToast();
+                    action();
+                };
+                row.Children.Add(TextZoom.Track(button, 13));
+            }
+            toast.Child = row;
         }
-        toast.IsHitTestVisible = isError;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toast, text);
+        toast.IsHitTestVisible = isError || action is not null;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toast, actionTitle is null ? text : $"{text}, {actionTitle}");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(toast, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
-        toast.Padding = new Thickness(14, 7, 16, 7);
+        toast.Padding = new Thickness(14, 7, actionTitle is null ? 16 : 8, 7);
         toast.CornerRadius = new CornerRadius(20);
-        toast.Background = Palette.Brush("overlay");
+        toast.Background = FloatingBrush();
         toast.BorderBrush = isError ? Palette.Brush("red", 0.5) : Palette.Brush("lineStrong");
         toast.BorderThickness = new Thickness(1);
         toast.Shadow = new ThemeShadow();
@@ -650,7 +770,7 @@ public sealed class ShellView : Grid
         toast.Opacity = 1;
         toastTimer ??= DispatcherQueue.CreateTimer();
         toastTimer.Stop();
-        toastTimer.Interval = TimeSpan.FromMilliseconds(isError ? 8000 : 1800);
+        toastTimer.Interval = TimeSpan.FromMilliseconds(isError ? 8000 : action is not null ? 5000 : 1800);
         toastTimer.IsRepeating = false;
         toastTimer.Tick -= HideToast;
         toastTimer.Tick += HideToast;

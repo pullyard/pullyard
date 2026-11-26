@@ -41,7 +41,8 @@ public sealed class RowAppear
     {
         if (e.InRecycleQueue || pending.Count == 0 || e.Item is null) return;
         if (key(e.Item) is not { } id || !pending.Remove(id) || DateTimeOffset.Now > until) return;
-        Play(e.ItemContainer, cascade ? TimeSpan.FromMilliseconds(Math.Min(e.ItemIndex, 12) * 25) : TimeSpan.Zero);
+        if (!PullYard.Views.Motion.Enabled || (cascade && e.ItemIndex >= 8)) return;
+        Play(e.ItemContainer, cascade ? TimeSpan.FromMilliseconds(e.ItemIndex * 30) : TimeSpan.Zero);
     }
 
     private static void Play(UIElement row, TimeSpan delay)

@@ -935,14 +935,14 @@ public sealed partial class ChatSession : ObservableObject
         AttentionRequested?.Invoke();
     }
 
-    private static void HandleRateLimit(JsonObject o)
+    private void HandleRateLimit(JsonObject o)
     {
         if (o.Obj("rate_limit_info") is not { } info) return;
-        var store = ClaudeUsageStore.Shared;
+        List<RateWindow>? next = null;
         if (info.Obj("unifiedWindows") is { } windows)
         {
             var order = new Dictionary<string, int> { ["five_hour"] = 0, ["seven_day"] = 1 };
-            store.Windows = windows
+            next = windows
                 .Where(kv => kv.Value is JsonObject)
                 .Select(kv =>
                 {
@@ -955,8 +955,8 @@ public sealed partial class ChatSession : ObservableObject
                 .ToList();
         }
         var st = info.Str("status");
-        store.OverageNote = st == "rejected" ? "Limit reached" : st == "allowed_warning" ? "Close to the limit" : null;
-        store.UpdatedAt = DateTimeOffset.Now;
+        var note = st == "rejected" ? "Limit reached" : st == "allowed_warning" ? "Close to the limit" : null;
+        ClaudeUsageStore.Shared.Record(ConfigDir, next, note, DateTimeOffset.Now);
     }
 
     public void RefreshContext()
@@ -995,7 +995,7 @@ public sealed partial class ChatSession : ObservableObject
                 .Select(m => new ChatModelOption(m.Str("value")!, m.Str("displayName") ?? m.Str("value")!, m.Str("description") ?? "", m.Arr("supportedEffortLevels").Strings().ToList()))
                 .ToList();
             if (body.Obj("account").Str("subscriptionType") is { } sub)
-                ClaudeUsageStore.Shared.Subscription = sub.Replace("Claude ", "");
+                ClaudeUsageStore.Shared.RecordPlan(ConfigDir, sub.Replace("Claude ", ""));
             Commands = body.Arr("commands").Objects()
                 .Where(c => c.Str("name") is not null)
                 .Select(c => new ChatCommand(c.Str("name")!, c.Str("description") ?? ""))

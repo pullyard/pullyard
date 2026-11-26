@@ -9,10 +9,12 @@ public enum PRFilter { ReviewRequested, Mine, Assigned, Mentioned, Reviewed }
 
 public enum IssueFilter { Assigned, Mine, Mentioned }
 
-public enum SectionKind { Notifications, Prs, MyPrsByRepo, Stacks, Issues, Repos, Projects, Claude }
+public enum SectionKind { Notifications, Prs, MyPrsByRepo, Stacks, Issues, Repos, Projects, Claude, Overview, Search }
 
-public sealed record Section(SectionKind Kind, PRFilter Pr = PRFilter.ReviewRequested, IssueFilter Issue = IssueFilter.Assigned)
+public sealed record Section(SectionKind Kind, PRFilter Pr = PRFilter.ReviewRequested, IssueFilter Issue = IssueFilter.Assigned, string? Query = null, string? Label = null)
 {
+    public static Section Overview { get; } = new(SectionKind.Overview);
+    public static Section Search(string label, string query) => new(SectionKind.Search, Query: query, Label: label);
     public static Section Notifications { get; } = new(SectionKind.Notifications);
     public static Section MyPrsByRepo { get; } = new(SectionKind.MyPrsByRepo);
     public static Section Stacks { get; } = new(SectionKind.Stacks);
@@ -26,6 +28,7 @@ public sealed record Section(SectionKind Kind, PRFilter Pr = PRFilter.ReviewRequ
     {
         SectionKind.Prs => $"prs:{Pr}",
         SectionKind.Issues => $"issues:{Issue}",
+        SectionKind.Search => $"search:{Query}",
         _ => Kind.ToString()
     };
 
@@ -39,10 +42,12 @@ public sealed record Section(SectionKind Kind, PRFilter Pr = PRFilter.ReviewRequ
         SectionKind.Repos => L.T("Section_Repositories", "Repositories"),
         SectionKind.Projects => L.T("Section_Projects", "Projects"),
         SectionKind.Claude => L.T("Section_Claude", "Agents"),
+        SectionKind.Overview => L.T("Section_Overview", "Overview"),
+        SectionKind.Search => Label ?? "",
         _ => ""
     };
 
-    public static IReadOnlyList<string> AllKeys { get; } = new[] { Notifications, MyPrsByRepo, Stacks, Repos, Projects, Claude }
+    public static IReadOnlyList<string> AllKeys { get; } = new[] { Overview, Notifications, MyPrsByRepo, Stacks, Repos, Projects, Claude }
         .Concat(Enum.GetValues<PRFilter>().Select(Prs))
         .Concat(Enum.GetValues<IssueFilter>().Select(Issues))
         .Select(s => s.Key)

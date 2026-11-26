@@ -116,6 +116,82 @@ public static class Ui
         };
     }
 
+    public static string InkKey(string key) => key switch
+    {
+        "green" => "greenText",
+        "amber" => "amberInk",
+        "coral" => "coralInk",
+        "sky" or "accent" => "link",
+        _ => key
+    };
+
+    public static Border StatusChip(string text, string color, string? glyph = null, string? tooltip = null)
+    {
+        var ink = InkKey(color);
+        var content = H(4);
+        if (glyph is not null) content.Children.Add(Glyph(glyph, 10, ink));
+        content.Children.Add(Text(text, 11, ink, FontWeights.SemiBold));
+        var fill = Palette.Brush(ink, Palette.IsDark ? 0.18 : 0.12);
+        var hover = Palette.Brush(ink, Palette.IsDark ? 0.26 : 0.2);
+        var chip = new Border
+        {
+            Background = fill,
+            CornerRadius = new CornerRadius(9),
+            MinHeight = 18,
+            Padding = new Thickness(6, 0, 6, 0),
+            Child = content,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        if (ThemeService.IsHighContrast)
+        {
+            chip.BorderBrush = Palette.Brush(ink);
+            chip.BorderThickness = new Thickness(1);
+        }
+        chip.PointerEntered += (_, _) => chip.Background = hover;
+        chip.PointerExited += (_, _) => chip.Background = fill;
+        Tip(chip, tooltip ?? text);
+        AutomationProperties.SetName(chip, tooltip ?? text);
+        return chip;
+    }
+
+    public static Border? CiChip(string? state)
+    {
+        if (Palette.CiIcon(state) is not { } ci) return null;
+        var text = state switch
+        {
+            "SUCCESS" => L.T("Ci_Passing", "Passing"),
+            "FAILURE" or "ERROR" => L.T("Ci_Failing", "Failing"),
+            _ => L.T("Ci_RunningChip", "Running")
+        };
+        return StatusChip(text, ci.Key, ci.Glyph, CiTitle(state));
+    }
+
+    public static Border? ReviewChip(string? decision) => decision switch
+    {
+        "APPROVED" => StatusChip(L.T("Review_Approved", "Approved"), "green", "\uE8FB"),
+        "CHANGES_REQUESTED" => StatusChip(L.T("Review_ChangesRequested", "Changes requested"), "red", "\uE7BA"),
+        "REVIEW_REQUIRED" => StatusChip(L.T("Review_Required", "Review required"), "amber", "\uE7B3"),
+        _ => null
+    };
+
+    public static StackPanel CheckChips(int failed, int pending, int passed)
+    {
+        var row = H(4);
+        if (failed > 0) row.Children.Add(StatusChip(L.F("Checks_FailingN", "{0} failing", failed), "red", Palette.CheckGlyph(CheckOutcome.Failure)));
+        if (pending > 0) row.Children.Add(StatusChip(L.F("Checks_RunningN", "{0} running", pending), "amber", Palette.CheckGlyph(CheckOutcome.Pending)));
+        if (passed > 0 || (failed == 0 && pending == 0)) row.Children.Add(StatusChip(L.F("Checks_PassingN", "{0} passing", passed), "green", Palette.CheckGlyph(CheckOutcome.Success)));
+        return row;
+    }
+
+    public static string CheckSummary(int failed, int pending, int passed)
+    {
+        var parts = new List<string>();
+        if (failed > 0) parts.Add(L.F("Checks_FailingN", "{0} failing", failed));
+        if (pending > 0) parts.Add(L.F("Checks_RunningN", "{0} running", pending));
+        if (passed > 0 || parts.Count == 0) parts.Add(L.F("Checks_PassingN", "{0} passing", passed));
+        return string.Join(" · ", parts);
+    }
+
     public static Border LabelChip(LabelInfo label)
     {
         var t = Text(label.Name, 11, "text", FontWeights.Medium);
@@ -335,7 +411,9 @@ public static class Ui
     public static GridLength Auto => GridLength.Auto;
     public static GridLength Star => new(1, GridUnitType.Star);
 
-    public static WakeLoader Spinner(double size = 16) => new(size);
+    public static FrameworkElement Spinner(double size = 16) => new BranchLoader(size);
+
+    public static WakeLoader Wake(double size = 16) => new(size);
 
     public static Button RefreshButton(Func<Task> refresh, string? tooltip = null)
     {
@@ -447,7 +525,7 @@ public static class Ui
         return panel;
     }
 
-    public static FrameworkElement Loading(double size = 56) => new LogoLoader(size)
+    public static FrameworkElement Loading(double size = 44) => new LogoLoader(size)
     {
         HorizontalAlignment = HorizontalAlignment.Center,
         VerticalAlignment = VerticalAlignment.Center

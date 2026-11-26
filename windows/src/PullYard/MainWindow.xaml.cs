@@ -199,13 +199,14 @@ public sealed partial class MainWindow : Window
         });
         void Go(Section section)
         {
-            if (model.Forge is null || section.Kind == SectionKind.Claude || model.ForgeSupports(section)) model.Section = section;
+            if (model.Forge is null || section.Kind is SectionKind.Claude or SectionKind.Overview || model.ForgeSupports(section)) model.Section = section;
         }
         RootGrid.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
         AddSignedIn(VirtualKey.R, VirtualKeyModifiers.Control, () => model.Refresh());
         AddSignedIn(VirtualKey.F5, VirtualKeyModifiers.None, () => model.Refresh());
         AddSignedIn(VirtualKey.L, VirtualKeyModifiers.Control, () => { if (model.Forge is null) model.RequestOpenLink(); });
         Add((VirtualKey)188, VirtualKeyModifiers.Control, () => model.RequestSettings());
+        AddSignedIn(VirtualKey.Number0, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, () => Go(Section.Overview));
         AddSignedIn(VirtualKey.Number1, VirtualKeyModifiers.Control, () => Go(Section.Prs(PRFilter.ReviewRequested)));
         AddSignedIn(VirtualKey.Number2, VirtualKeyModifiers.Control, () => Go(Section.Prs(PRFilter.Mine)));
         AddSignedIn(VirtualKey.Number3, VirtualKeyModifiers.Control, () => Go(Section.Notifications));

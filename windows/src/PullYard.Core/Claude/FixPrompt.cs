@@ -28,7 +28,22 @@ public static class FixPrompt
 
     private static string Quote(string body) => string.Join("\n", body.Replace("\r\n", "\n").Split('\n').Select(l => "> " + l));
 
-    public static string Build(PullRequestDetail pr, RepoRef repo, IReadOnlyList<ReviewThread> threads, IReadOnlyList<GeneralFeedback> general, FixOptions options)
+    public static string Tickets(IReadOnlyList<PullYard.Core.Jira.JiraIssue> issues)
+    {
+        if (issues.Count == 0) return "";
+        var sb = new StringBuilder("\n## Linked Jira tickets\n");
+        foreach (var issue in issues.Take(3))
+        {
+            sb.Append($"\n**{issue.Key}** — {issue.Summary} ({issue.Status})\n{issue.Url}\n");
+            var description = issue.Description.Trim();
+            if (description.Length == 0) continue;
+            var shortened = description.Length > 1200 ? description[..1200] + "…" : description;
+            sb.Append(Quote(shortened)).Append('\n');
+        }
+        return sb.ToString();
+    }
+
+    public static string Build(PullRequestDetail pr, RepoRef repo, IReadOnlyList<ReviewThread> threads, IReadOnlyList<GeneralFeedback> general, FixOptions options, IReadOnlyList<PullYard.Core.Jira.JiraIssue>? tickets = null)
     {
         var sb = new StringBuilder();
         sb.Append($"Address the code review feedback on pull request #{pr.Number} \"{pr.Title}\" in {repo.Full}.\n");
@@ -75,6 +90,7 @@ public static class FixPrompt
             sb.Append("\n## General review feedback (changes requested)\n");
             foreach (var g in general) sb.Append($"\n**@{g.Author}**:\n{Quote(g.Body)}\n");
         }
+        if (tickets is { Count: > 0 }) sb.Append(Tickets(tickets));
         return sb.ToString();
     }
 }

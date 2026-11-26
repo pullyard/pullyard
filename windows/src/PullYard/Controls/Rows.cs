@@ -99,13 +99,33 @@ public sealed class FeedRow : CodeRow
         SearchItem s => SearchRow(s, true),
         GroupedSearchItem g => SearchRow(g.Item, false),
         GroupHeaderItem h => GroupHeader(h),
+        SnoozedSearchItem z => Dimmed(SearchRow(z.Item, true)),
+        SnoozedHeaderItem z => SnoozedHeader(z),
         _ => null
     };
+
+    private static UIElement Dimmed(UIElement row)
+    {
+        row.Opacity = 0.7;
+        return row;
+    }
+
+    private static UIElement SnoozedHeader(SnoozedHeaderItem z)
+    {
+        var grid = Ui.Columns(
+            (Ui.Glyph(z.Expanded ? "\uE70D" : "\uE76C", 10, "dim"), Ui.Auto),
+            (Ui.Glyph("\uE708", 12, "muted"), Ui.Auto),
+            (Ui.Text(L.F("Queue_SnoozedHeader", "Snoozed · {0}", z.Count), 12, "muted", FontWeights.SemiBold), Ui.Star));
+        grid.Padding = new Thickness(0, 8, 0, 6);
+        return grid;
+    }
 
     protected override string? Spoken(object item) => item switch
     {
         SearchItem s => SpokenLabel(s),
         GroupedSearchItem g => SpokenLabel(g.Item),
+        SnoozedSearchItem z => $"{L.T("Queue_SnoozedA11y", "Snoozed")}, {SpokenLabel(z.Item)}",
+        SnoozedHeaderItem z => $"{L.F("Queue_SnoozedHeader", "Snoozed · {0}", z.Count)}, {(z.Expanded ? L.T("A11y_Expanded", "Expanded") : L.T("A11y_Collapsed", "Collapsed"))}",
         GroupHeaderItem h => $"{h.Group.Id}, {Fmt.Plural(h.Group.Items.Count, "item", "items")}, {(h.Expanded ? L.T("A11y_Expanded", "Expanded") : L.T("A11y_Collapsed", "Collapsed"))}",
         _ => null
     };
@@ -116,6 +136,7 @@ public sealed class FeedRow : CodeRow
     {
         var parts = new List<string> { item.Title, $"{item.Repository.NameWithOwner}{Prefix}{item.Number}" };
         if (item.Author?.Login is { Length: > 0 } login) parts.Add(L.F("A11y_ByAuthor", "by {0}", login));
+        if (item.IsPR && QueueStore.Shared.HasNews(item.Ref, item.UpdatedAt)) parts.Add(L.T("Queue_NewActivity", "New activity since you last opened it"));
         parts.Add(Ui.StateTitle(item.VisualState));
         if (item.IsPR)
         {
@@ -151,19 +172,8 @@ public sealed class FeedRow : CodeRow
         var signals = Ui.H(8);
         if (item.IsPR)
         {
-            if (Ui.CiIcon(item.CiState, 11) is { } ci) signals.Children.Add(ci);
-            switch (item.ReviewDecision)
-            {
-                case "APPROVED":
-                    signals.Children.Add(Ui.StatusGlyph("\uE8FB", 11, "green", L.T("Review_Approved", "Approved")));
-                    break;
-                case "CHANGES_REQUESTED":
-                    signals.Children.Add(Ui.StatusGlyph("\uE7BA", 11, "red", L.T("Review_ChangesRequested", "Changes requested")));
-                    break;
-                case "REVIEW_REQUIRED":
-                    signals.Children.Add(Ui.StatusGlyph("\uE7B3", 11, "muted", L.T("Review_Required", "Review required")));
-                    break;
-            }
+            if (Ui.ReviewChip(item.ReviewDecision) is { } review) signals.Children.Add(review);
+            if (Ui.CiChip(item.CiState) is { } ci) signals.Children.Add(ci);
         }
         if (item.Comments.TotalCount > 0)
         {
@@ -188,7 +198,25 @@ public sealed class FeedRow : CodeRow
             foreach (var l in labels.Take(4)) row.Children.Add(Ui.LabelChip(l));
             body.Children.Add(row);
         }
-        var grid = Ui.Columns((Ui.StateBadge(item.VisualState, true), Ui.Auto), (body, Ui.Star));
+        var badge = new Grid { VerticalAlignment = VerticalAlignment.Top };
+        badge.Children.Add(Ui.StateBadge(item.VisualState, true));
+        if (item.IsPR && QueueStore.Shared.HasNews(item.Ref, item.UpdatedAt))
+        {
+            var dot = new Microsoft.UI.Xaml.Shapes.Ellipse
+            {
+                Width = 8,
+                Height = 8,
+                Fill = Palette.Brush("coral"),
+                Stroke = Palette.Brush("list"),
+                StrokeThickness = 1.5,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, -2, -3, 0)
+            };
+            Ui.Tip(dot, L.T("Queue_NewActivity", "New activity since you last opened it"));
+            badge.Children.Add(dot);
+        }
+        var grid = Ui.Columns((badge, Ui.Auto), (body, Ui.Star));
         grid.ColumnSpacing = 10;
         grid.Padding = new Thickness(0, 6, 0, 6);
         return grid;
@@ -218,8 +246,14 @@ public sealed class FeedRow : CodeRow
 
 public sealed record GroupedSearchItem(SearchItem Item);
 
+public sealed record SnoozedSearchItem(SearchItem Item);
+
+public sealed record SnoozedHeaderItem(int Count, bool Expanded);
+
 public sealed class NotificationRow : CodeRow
 {
+    public static event Action<NotificationThread>? DoneRequested;
+
     protected override UIElement? Build(object item)
     {
         if (item is not NotificationThread n) return null;
@@ -251,15 +285,24 @@ public sealed class NotificationRow : CodeRow
             "security_alert" => "security alert",
             var r => r.Replace('_', ' ')
         };
-        var dot = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 7, Height = 7, Fill = n.Unread ? Palette.Brush("sky") : new SolidColorBrush(Microsoft.UI.Colors.Transparent), Margin = new Thickness(0, 7, 0, 0), VerticalAlignment = VerticalAlignment.Top };
+        var dot = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 7, Height = 7, Fill = n.Unread ? Palette.Brush("coral") : new SolidColorBrush(Microsoft.UI.Colors.Transparent), Margin = new Thickness(0, 7, 0, 0), VerticalAlignment = VerticalAlignment.Top };
         var tile = Ui.IconTile(glyph, color, 22);
         tile.VerticalAlignment = VerticalAlignment.Top;
         var title = Ui.Text(n.Subject.Title, 13.5, n.Unread ? "text" : "muted", n.Unread ? FontWeights.SemiBold : FontWeights.Normal, maxLines: 2);
         Ui.Tip(title, n.Subject.Title);
         Ui.Tip(tile, TypeTitle(n.Subject.Type));
         var meta = Ui.H(5, Ui.Avatar(n.Repository.Owner?.AvatarUrl, 13, ring: true), Ui.Caption(n.Repository.FullName), Ui.Caption("·", "dim"), Ui.Caption(reason, reasonColor), Ui.Caption("·", "dim"), Ui.Caption(Fmt.Rel(n.UpdatedAt), "dim"));
-        var grid = Ui.Columns((dot, Ui.Auto), (tile, Ui.Auto), (Ui.V(3, title, meta), Ui.Star));
+        var done = Ui.IconButton("\uE73E", L.T("Notifications_DoneHint", "Done (E)"), () => DoneRequested?.Invoke(n), "muted");
+        done.Padding = new Thickness(6, 4, 6, 4);
+        done.Opacity = 0;
+        done.VerticalAlignment = VerticalAlignment.Center;
+        var grid = Ui.Columns((dot, Ui.Auto), (tile, Ui.Auto), (Ui.V(3, title, meta), Ui.Star), (done, Ui.Auto));
         grid.Padding = new Thickness(0, 5, 0, 5);
+        grid.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        grid.PointerEntered += (_, _) => done.Opacity = 1;
+        grid.PointerExited += (_, _) => done.Opacity = 0;
+        done.GotFocus += (_, _) => done.Opacity = 1;
+        done.LostFocus += (_, _) => done.Opacity = 0;
         return grid;
     }
 
@@ -299,6 +342,7 @@ public sealed class RepoRow : CodeRow
         Ui.Tip(name, repo.NameWithOwner);
         var title = Ui.H(5, name);
         if (repo.IsArchived) title.Children.Add(Ui.Chip(L.T("Repo_Archived", "archived"), "amber"));
+        if (PullYard.Views.JiraRepo.Badge(repo.NameWithOwner) is { } jira) title.Children.Add(jira);
         if (repo.IsFork) title.Children.Add(Ui.StatusGlyph("", 10, "dim", L.T("A11y_Fork", "Fork")));
         var body = Ui.V(3, title);
         if (!string.IsNullOrEmpty(repo.Description)) body.Children.Add(Ui.Text(repo.Description, 12, "muted", maxLines: 2));
@@ -383,6 +427,7 @@ public sealed class SessionRow : CodeRow
             s.Session.Title,
             s.Open ? L.T("A11y_OpenTab", "open") : null,
             s.Session.PrNumber is { } n ? $"PR #{n}" : null,
+            ClaudeProfiles.Shared.HasSeveral && ClaudeProfiles.Shared.Profile(ClaudeWorkspace.OwnerId(s.Session)) is { } owner ? L.F("Agents_AccountChip", "Account {0}", owner.Label) : null,
             s.ChildCount > 0 ? Fmt.Plural(s.ChildCount, "sub-session", "sub-sessions") + ", " + (s.Collapsed ? L.T("A11y_Collapsed", "Collapsed") : L.T("A11y_Expanded", "Expanded")) : null,
             L.F("Agents_Updated", "Updated {0}", Fmt.Rel(s.Session.Modified))
         }.Where(x => x is not null)),
@@ -441,6 +486,7 @@ public sealed class SessionRow : CodeRow
         cols.Add((title, Ui.Star));
         if (s.PrNumber is not null) cols.Add((Ui.StatusGlyph("", 11, "violet", L.T("A11y_PullRequest", "Pull request")), Ui.Auto));
         if (item.ChildCount > 0) cols.Add((Ui.Text(item.ChildCount.ToString(Fmt.Culture), 11.5, "dim"), Ui.Auto));
+        if (AgentAccount.Chip(ClaudeProfiles.Shared.Profile(ClaudeWorkspace.OwnerId(s)), compact: true) is { } chip) cols.Add((chip, Ui.Auto));
         cols.Add((Ui.Text(Fmt.Rel(s.Modified), 11.5, "dim"), Ui.Auto));
         cols.Add((SessionDot.ForSession(s, ws), Ui.Auto));
         var grid = Ui.Columns(cols.ToArray());
@@ -521,7 +567,7 @@ public sealed class SessionRow : CodeRow
         var title = Ui.Text(tab.Title, 13, "text", item.Selected ? FontWeights.SemiBold : FontWeights.Normal);
         var project = Ui.Text(tab.ProjectName, 12, "dim");
         project.MaxWidth = 120;
-        var grid = Ui.Columns((bar, Ui.Auto), (title, Ui.Star), (project, Ui.Auto), (SessionDot.ForTab(tab), Ui.Auto));
+        var grid = Ui.Columns((bar, Ui.Auto), (title, Ui.Star), (project, Ui.Auto), (AgentAccount.Chip(tab.Profile, compact: true), Ui.Auto), (SessionDot.ForTab(tab), Ui.Auto));
         grid.ColumnSpacing = 8;
         grid.MinHeight = 34;
         grid.Padding = new Thickness(6, 7, 4, 7);
