@@ -149,6 +149,19 @@ private struct ChatTaskRow: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    /// Full name and command for the hover tooltip; the row truncates both.
+    private var tooltip: String {
+        var lines = [title]
+        if isAgent {
+            if let type = call.string("subagent_type") { lines.append(type) }
+        } else if !command.isEmpty, command != title {
+            let shown = command.count > 600 ? String(command.prefix(600)) + "…" : command
+            lines.append(shown)
+        }
+        if call.backgrounded { lines.append("Runs in the background") }
+        return lines.joined(separator: "\n\n")
+    }
+
     private var output: String? {
         if let s = call.structured {
             let out = [s["stdout"] as? String, s["stderr"] as? String].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
@@ -190,6 +203,7 @@ private struct ChatTaskRow: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .help(tooltip)
                 .accessibilityValue(open ? "Expanded" : "Collapsed")
                 if ToolStopButton.shows(call) {
                     ToolStopButton(call: call, chat: chat)
