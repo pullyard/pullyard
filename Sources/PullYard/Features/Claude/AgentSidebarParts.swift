@@ -198,10 +198,11 @@ struct AgentAccountSwitcher: View {
         DispatchQueue.main.async(execute: action)
     }
 
+    /// Picking an account always narrows the list to it, including when
+    /// coming from "All accounts"; "All accounts" is its own row.
     private func select(_ p: ClaudeProfile) {
-        let keepAll = allMode
         app.switchClaudeProfile(to: p.id)
-        if !keepAll { app.claude.accountFilter = profiles.hasSeveral ? p.id : nil }
+        app.claude.accountFilter = profiles.hasSeveral ? p.id : nil
         open = false
     }
 }
