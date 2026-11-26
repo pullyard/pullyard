@@ -39,24 +39,25 @@ final class JiraFollowUpLoader {
     private(set) var transitions: [String: JiraTransition] = [:]
     var dismissed = false
 
-    func load(_ pr: PullRequestDetail) async {
+    func load(_ pr: PullRequestDetail, repo: RepoRef) async {
         dismissed = JiraFollowUp.isDismissed(pr.url)
-        guard pr.merged, !dismissed, JiraAccount.shared.isConfigured, let client = JiraAccount.shared.client() else {
+        let store = JiraConnections.shared
+        guard pr.merged, !dismissed, store.isConfigured else {
             issues = []
             transitions = [:]
             return
         }
         var found: [JiraIssue] = []
         for key in JiraTab.keys(for: pr).prefix(5) {
-            if let hit = JiraAccount.shared.cachedIssue(key) {
+            if let hit = store.cachedIssue(key, repo: repo) {
                 found.append(hit)
-            } else if let fresh = try? await client.issue(key) {
-                JiraAccount.shared.remember(fresh)
+            } else if let fresh = try? await store.fetchIssue(key, repo: repo) {
                 found.append(fresh)
             }
         }
         var moves: [String: JiraTransition] = [:]
         for issue in JiraFollowUp.open(found) {
+            guard let client = store.client(for: issue.connectionID) else { continue }
             if let t = JiraFollowUp.doneTransition((try? await client.transitions(issue.key)) ?? []) { moves[issue.key] = t }
         }
         issues = found
@@ -114,14 +115,15 @@ struct JiraMergeFollowUp: View {
     }
 
     private func move(_ issue: JiraIssue, _ t: JiraTransition) {
-        guard let client = JiraAccount.shared.client() else { return }
+        guard let client = JiraConnections.shared.client(for: issue.connectionID) else { return }
         working = issue.key
         error = nil
         Task {
             do {
                 try await client.transition(issue.key, to: t.id)
-                if let fresh = try? await client.issue(issue.key) {
-                    JiraAccount.shared.remember(fresh)
+                if var fresh = try? await client.issue(issue.key) {
+                    fresh.connectionID = issue.connectionID
+                    JiraConnections.shared.remember(fresh)
                     loader.replace(fresh)
                 }
                 app.showToast("\(issue.key) moved to \(t.to)")

@@ -159,7 +159,7 @@ struct LoginView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    if busy || deviceStarting { ProgressView().controlSize(.small).id("loginProgress") }
+                    if busy || deviceStarting { PYLoader(size: 16).id("loginProgress") }
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(Color.syRed)

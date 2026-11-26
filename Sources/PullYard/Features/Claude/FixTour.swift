@@ -342,16 +342,16 @@ struct FixTourOverlay: View {
                     }
                     Spacer()
                     if tour.index == tour.steps.count - 1 {
-                        Button("Done") { tour.finish() }.buttonStyle(.borderedProminent).tint(.syAgentAccent)
+                        Button("Done") { tour.finish() }.buttonStyle(.borderedProminent).tint(.syAgentFill)
                     } else {
-                        Button("Next") { tour.next() }.buttonStyle(.borderedProminent).tint(.syAgentAccent).keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                        Button("Next") { tour.next() }.buttonStyle(.borderedProminent).tint(.syAgentFill).keyboardShortcut(.rightArrow, modifiers: [.command, .option])
                     }
                 }
                 .controlSize(.small)
             }
             .padding(14)
             .frame(width: 360)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .pyGlass(in: RoundedRectangle(cornerRadius: 14), outline: false)
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(nsColor: .separatorColor)))
             .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
             .padding(16)

@@ -125,6 +125,8 @@ final class PRDetailModel {
     @ObservationIgnored private var conflictScan: Task<Void, Never>?
 
     var files: [DiffFile] = []
+    var expandedFiles: [String: [DiffLine]] = [:]
+    var expandingFiles: Set<String> = []
     var filesLoaded = false
     var filesLoading = false
     var filesError: String?
@@ -636,6 +638,7 @@ final class PRDetailModel {
                 collapsed = Set(parsed.filter { viewedPaths.contains($0.id) || $0.lines.count > 1500 }.map(\.id))
             }
             fileRows.seed(parsed.map(\.id))
+            if filesOid != oid { expandedFiles = [:] }
             files = parsed
             filesOid = oid
             if mark == filesStaleMark { filesStale = false }
@@ -689,8 +692,33 @@ final class PRDetailModel {
         return max(total - contexts.nodes.count, 0)
     }
 
+    func expandFile(_ file: DiffFile) async {
+        guard let pr, let api, !expandingFiles.contains(file.id), file.status != "removed" else { return }
+        expandingFiles.insert(file.id)
+        defer { expandingFiles.remove(file.id) }
+        do {
+            guard let data = try await api.rawFile(ref.repo, ref: pr.headRefOid, path: file.id), let text = String(data: data, encoding: .utf8) else {
+                actionError = "This file can't be shown in full."
+                return
+            }
+            var lines = text.components(separatedBy: "\n")
+            if lines.last == "" { lines.removeLast() }
+            guard lines.count <= 20_000 else {
+                actionError = "This file is too large to show in full."
+                return
+            }
+            expandedFiles[file.id] = DiffExpand.fullFile(file.lines, newText: lines)
+        } catch {
+            if !isCancellation(error) { actionError = error.localizedDescription }
+        }
+    }
+
+    func collapseFile(_ path: String) {
+        expandedFiles[path] = nil
+    }
+
     func flatRows(filter: String) -> [FlatDiffRow] {
-        let key = "\(diffScope)|\(filter)|\(filesVersion)|\(collapsed.sorted().joined(separator: ","))|\(pending.map { $0.id.uuidString }.joined())|\(composer.map { "\($0.path):\($0.side):\($0.line)" } ?? "")|\(threadsVersion)"
+        let key = "\(diffScope)|\(expandedFiles.keys.sorted().joined(separator: ","))|\(filter)|\(filesVersion)|\(collapsed.sorted().joined(separator: ","))|\(pending.map { $0.id.uuidString }.joined())|\(composer.map { "\($0.path):\($0.side):\($0.line)" } ?? "")|\(threadsVersion)"
         if key == flatCacheKey { return flatCache }
         var out: [FlatDiffRow] = []
         for file in displayedFiles where filter.isEmpty || file.id.localizedCaseInsensitiveContains(filter) {
@@ -711,9 +739,10 @@ final class PRDetailModel {
         guard file.hasPatch else { return [.note("Diff unavailable (binary or too large)")] }
         if diffScope == .sinceReview { return file.lines.map { .line($0) } }
         var rows: [DiffRow] = []
-        rows.reserveCapacity(file.lines.count + 4)
+        let lines = expandedFiles[file.id] ?? file.lines
+        rows.reserveCapacity(lines.count + 4)
         let filePending = pending.filter { $0.path == file.id }
-        for line in file.lines {
+        for line in lines {
             rows.append(.line(line))
             guard line.commentable else { continue }
             var keys: [String] = []
@@ -856,6 +885,23 @@ final class PRDetailModel {
 
     func requestReviewers(_ logins: [String]) async -> Bool {
         await run { try await backend.requestReviewers(ref, logins: logins) }
+    }
+
+    var unviewedCount: Int {
+        guard filesLoaded else { return pr?.changedFiles ?? 0 }
+        return files.filter { !viewedPaths.contains($0.id) }.count
+    }
+
+    func markAllViewed() async {
+        if !filesLoaded { await loadFiles() }
+        for file in files where !viewedPaths.contains(file.id) {
+            await toggleViewed(file.id, scroll: false)
+        }
+    }
+
+    func restoreBranch(_ branch: String, repo: String, sha: String) async -> Bool {
+        guard let api else { return false }
+        return await run { try await api.restoreBranch(repo: repo, branch: branch, sha: sha) }
     }
 
     func deleteBranch() async {

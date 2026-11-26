@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 private enum LogoGeometry {
@@ -69,12 +70,15 @@ private enum LogoGeometry {
 
 private struct LogoPart: Shape {
     let base: Path
+    var box = LogoGeometry.box
 
-    init(_ base: Path) { self.base = base }
+    init(_ base: Path, box: CGRect = LogoGeometry.box) {
+        self.base = base
+        self.box = box
+    }
 
     func path(in rect: CGRect) -> Path {
         let p = base
-        let box = LogoGeometry.box
         let scale = min(rect.width / box.width, rect.height / box.height)
         let dx = rect.midX - box.midX * scale
         let dy = rect.midY - box.midY * scale
@@ -114,8 +118,7 @@ struct PullYardLogoMark: View {
     var size: CGFloat = 40
 
     private func stage(_ from: Double, _ to: Double) -> Double {
-        let t = min(1, max(0, (progress - from) / (to - from)))
-        return t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2
+        Motion.easeInOut((progress - from) / (to - from))
     }
 
     var body: some View {
@@ -182,7 +185,7 @@ struct LogoDrawOn: View {
         } else {
             TimelineView(.animation(minimumInterval: 1 / 60)) { context in
                 let t = min(1, context.date.timeIntervalSince(start) / duration)
-                PullYardLogoMark(progress: (1 - cos(t * .pi)) / 2, size: size)
+                PullYardLogoMark(progress: Motion.easeInOut(t), size: size)
             }
             .task {
                 try? await Task.sleep(for: .seconds(duration))
@@ -211,39 +214,257 @@ struct PullYardLoader: View {
                 let t = context.date.timeIntervalSince(start).truncatingRemainder(dividingBy: cycle)
                 let progress = min(1, t / Self.draw)
                 let erase = t > Self.draw + Self.hold ? (t - Self.draw - Self.hold) / Self.fade : 0
-                PullYardLogoMark(progress: progress, erase: easeInOut(erase), size: size)
+                PullYardLogoMark(progress: progress, erase: Motion.easeInOut(erase), size: size)
             }
             .accessibilityLabel("Loading")
         }
     }
-
-    private func easeInOut(_ t: Double) -> Double {
-        t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
-    }
 }
 
 struct WakeLoader: View {
-    @State private var start = Date()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: Motion.reduced)) { context in
-            let t = context.date.timeIntervalSince(start)
-            Canvas { ctx, size in
-                let colors = [LogoGeometry.sky, Color(red: 0.43, green: 0.65, blue: 0.98), LogoGeometry.violet]
-                for i in 0..<3 {
-                    let phase = Motion.reduced ? 0.5 : (t * 1.6 - Double(i) * 0.22).truncatingRemainder(dividingBy: 1)
-                    let p = phase < 0 ? phase + 1 : phase
-                    let x = size.width * (0.12 + 0.3 * CGFloat(i))
-                    let lift = CGFloat(sin(p * .pi)) * size.height * 0.28
-                    let y = size.height * 0.62 - lift
-                    var wave = Path()
-                    wave.move(to: CGPoint(x: x - 3, y: y))
-                    wave.addQuadCurve(to: CGPoint(x: x + 3, y: y), control: CGPoint(x: x, y: y - 3))
-                    ctx.stroke(wave, with: .color(colors[i].opacity(0.45 + 0.55 * sin(p * .pi))), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+        WakeLayer(animated: !reduceMotion)
+            .frame(width: 20, height: 12)
+            .accessibilityLabel("Running")
+    }
+}
+
+private struct WakeLayer: NSViewRepresentable {
+    let animated: Bool
+
+    func makeNSView(context: Context) -> WakeLayerView { WakeLayerView() }
+
+    func updateNSView(_ view: WakeLayerView, context: Context) {
+        view.animated = animated
+    }
+}
+
+final class WakeLayerView: NSView {
+    private var arcs: [CAShapeLayer] = []
+    var animated = true {
+        didSet { if animated != oldValue { restart() } }
+    }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.isGeometryFlipped = true
+        for _ in 0..<3 {
+            let arc = CAShapeLayer()
+            arc.fillColor = nil
+            arc.lineWidth = 2
+            arc.lineCap = .round
+            layer?.addSublayer(arc)
+            arcs.append(arc)
+        }
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { restart() }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    override func layout() {
+        super.layout()
+        let w = bounds.width, h = bounds.height
+        for (i, arc) in arcs.enumerated() {
+            let x = w * (0.12 + 0.3 * CGFloat(i))
+            let y = h * 0.62
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: x - 3, y: y))
+            path.addQuadCurve(to: CGPoint(x: x + 3, y: y), control: CGPoint(x: x, y: y - 3))
+            arc.frame = bounds
+            arc.path = path
+        }
+        applyColors()
+    }
+
+    private func applyColors() {
+        let colors = [NSColor(srgbRed: 0.22, green: 0.741, blue: 0.973, alpha: 1), NSColor(srgbRed: 0.43, green: 0.65, blue: 0.98, alpha: 1), NSColor(srgbRed: 0.655, green: 0.545, blue: 0.98, alpha: 1)]
+        for (i, arc) in arcs.enumerated() { arc.strokeColor = colors[i].cgColor }
+    }
+
+    private func restart() {
+        for (i, arc) in arcs.enumerated() {
+            arc.removeAllAnimations()
+            arc.opacity = animated ? 0.45 : 0.8
+            guard animated, window != nil else { continue }
+            let lift = CAKeyframeAnimation(keyPath: "transform.translation.y")
+            lift.values = [0, -3.4, 0]
+            lift.keyTimes = [0, 0.5, 1]
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.values = [0.45, 1, 0.45]
+            fade.keyTimes = [0, 0.5, 1]
+            let group = CAAnimationGroup()
+            group.animations = [lift, fade]
+            group.duration = 0.625
+            group.repeatCount = .infinity
+            group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            group.beginTime = CACurrentMediaTime() + Double(i) * 0.1375
+            group.isRemovedOnCompletion = false
+            arc.add(group, forKey: "wake")
+        }
+    }
+}
+
+enum PYLoaderStyle {
+    case inline, block
+}
+
+struct PYLoader: View {
+    var style: PYLoaderStyle = .inline
+    var size: CGFloat?
+    var label = "Loading"
+    var fadeIn = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var start = Date()
+    @State private var visible = false
+
+    var body: some View {
+        content
+            .opacity(visible || !fadeIn ? 1 : 0)
+            .task {
+                guard fadeIn else { return }
+                try? await Task.sleep(nanoseconds: 180_000_000)
+                withAnimation(.easeOut(duration: Motion.Dur.fast)) { visible = true }
+            }
+            .accessibilityElement()
+            .accessibilityLabel(label)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch style {
+        case .inline: inline(size ?? 14)
+        case .block: block(size ?? 44)
+        }
+    }
+
+    private func inline(_ side: CGFloat) -> some View {
+        LogoBranchesLayer(side: side, animated: !reduceMotion)
+            .frame(width: side, height: side)
+    }
+
+    private func block(_ side: CGFloat) -> some View {
+        Group {
+            if reduceMotion {
+                PullYardLogoMark(progress: 1, size: side).opacity(0.8)
+            } else {
+                TimelineView(.animation(minimumInterval: 1 / 30)) { context in
+                    let draw = 1.1, hold = 0.3, fade = 0.4
+                    let t = (context.date.timeIntervalSince(start) + draw * 0.3).truncatingRemainder(dividingBy: draw + hold + fade)
+                    let erase = t > draw + hold ? Motion.easeInOut((t - draw - hold) / fade) : 0
+                    PullYardLogoMark(progress: min(1, t / draw), erase: erase, size: side)
                 }
             }
         }
-        .frame(width: 20, height: 12)
-        .accessibilityLabel("Running")
+    }
+}
+
+private struct LogoBranchesLayer: NSViewRepresentable {
+    let side: CGFloat
+    let animated: Bool
+
+    func makeNSView(context: Context) -> LogoBranchesView { LogoBranchesView() }
+
+    func updateNSView(_ view: LogoBranchesView, context: Context) {
+        view.configure(side: side, animated: animated)
+    }
+}
+
+final class LogoBranchesView: NSView {
+    private static let box = CGRect(x: 160, y: 454, width: 372, height: 364)
+    private static let cycle: CFTimeInterval = 1.8
+    private var layers: [(shape: CAShapeLayer, violet: Bool, curve: Bool)] = []
+    private var state: (side: CGFloat, animated: Bool)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.isGeometryFlipped = true
+        let parts: [(Path, Bool, Bool)] = [
+            (LogoPaths.nodeA, true, false), (LogoPaths.nodeB, false, false),
+            (LogoPaths.curveA, true, true), (LogoPaths.curveB, false, true)
+        ]
+        for (_, violet, curve) in parts {
+            let shape = CAShapeLayer()
+            shape.fillColor = nil
+            shape.lineCap = .round
+            layer?.addSublayer(shape)
+            layers.append((shape, violet, curve))
+        }
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil, let state { restartAnimations(state.animated) }
+    }
+
+    func configure(side: CGFloat, animated: Bool) {
+        guard state?.side != side || state?.animated != animated else { return }
+        state = (side, animated)
+        let rect = CGRect(x: 0, y: 0, width: side, height: side)
+        let paths = [LogoPaths.nodeA, LogoPaths.nodeB, LogoPaths.curveA, LogoPaths.curveB]
+        for (i, item) in layers.enumerated() {
+            item.shape.frame = rect
+            item.shape.path = LogoPart(paths[i], box: Self.box).path(in: rect).cgPath
+            item.shape.lineWidth = max(1.4, side / 9)
+        }
+        applyColors()
+        restartAnimations(animated)
+    }
+
+    private func applyColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            for item in layers {
+                item.shape.strokeColor = (item.violet ? NSColor.syViolet : NSColor.syAccent).cgColor
+            }
+        }
+    }
+
+    private func restartAnimations(_ animated: Bool) {
+        for item in layers {
+            item.shape.removeAllAnimations()
+            item.shape.strokeStart = 0
+            item.shape.strokeEnd = 1
+            guard animated else { continue }
+            let ease = CAMediaTimingFunction(name: .easeInEaseOut)
+            let end = CAKeyframeAnimation(keyPath: "strokeEnd")
+            end.values = item.curve ? [0, 0, 1, 1] : [0, 1, 1]
+            end.keyTimes = item.curve ? [0, 0.12, 0.5, 1] : [0, 0.25, 1]
+            end.timingFunctions = item.curve ? [ease, ease, ease] : [ease, ease]
+            let start = CAKeyframeAnimation(keyPath: "strokeStart")
+            start.values = [0, 0, 1]
+            start.keyTimes = [0, 0.5, 1]
+            start.timingFunctions = [ease, ease]
+            let group = CAAnimationGroup()
+            group.animations = [end, start]
+            group.duration = Self.cycle
+            group.repeatCount = .infinity
+            group.isRemovedOnCompletion = false
+            item.shape.add(group, forKey: "draw")
+        }
     }
 }

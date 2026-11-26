@@ -198,7 +198,11 @@ struct ToolGroupView: View {
                             .rotationEffect(.degrees(open ? 90 : 0))
                     }
                     .font(.syCallout)
-                    .contentShape(Rectangle())
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.syText.opacity(0.04)))
+                    .overlay(Capsule().strokeBorder(Color.syLine))
+                    .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityValue(open ? "Expanded" : "Collapsed")
@@ -213,20 +217,17 @@ struct ToolGroupView: View {
                         }
                     }
                     .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syLine))
-                    .transition(.reveal)
                 }
             }
         }
     }
 
     private func toggle() {
-        withAnimation(Motion.quick) {
-            if open {
-                chat.expandedTools.remove(groupKey)
-                for c in calls { chat.expandedTools.remove(c.id) }
-            } else {
-                chat.expandedTools.insert(groupKey)
-            }
+        if open {
+            chat.expandedTools.remove(groupKey)
+            for c in calls { chat.expandedTools.remove(c.id) }
+        } else {
+            chat.expandedTools.insert(groupKey)
         }
     }
 }
@@ -241,9 +242,7 @@ struct ThinkingStepRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(Motion.quick) {
-                    if open { chat.expandedTools.remove(key) } else { chat.expandedTools.insert(key) }
-                }
+                if open { chat.expandedTools.remove(key) } else { chat.expandedTools.insert(key) }
             } label: {
                 HStack(spacing: 6) {
                     Text("Thinking").foregroundStyle(Color.syDim)
@@ -264,7 +263,6 @@ struct ThinkingStepRow: View {
                 Text(text.text).font(.syCallout).foregroundStyle(Color.syMuted).textSelection(.enabled)
                     .padding(.horizontal, 10)
                     .padding(.bottom, 10)
-                    .transition(.reveal)
             }
         }
     }
@@ -282,9 +280,7 @@ struct ToolRowView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Button {
-                    withAnimation(Motion.quick) {
-                        if open { chat.expandedTools.remove(call.id) } else { chat.expandedTools.insert(call.id) }
-                    }
+                    if open { chat.expandedTools.remove(call.id) } else { chat.expandedTools.insert(call.id) }
                 } label: {
                     HStack(spacing: 7) {
                         statusGlyph
@@ -332,7 +328,6 @@ struct ToolRowView: View {
                     .padding(.horizontal, framed ? 10 : 0)
                     .padding(.top, framed ? 0 : 6)
                     .padding(.bottom, framed ? 10 : 0)
-                    .transition(.reveal)
             }
         }
     }

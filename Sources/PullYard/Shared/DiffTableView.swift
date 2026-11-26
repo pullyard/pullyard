@@ -30,6 +30,52 @@ enum DiffTableRow {
     }
 }
 
+enum DiffIntraline {
+    static func changedRange(_ text: String, _ other: String) -> NSRange? {
+        let a = Array(text.utf16), b = Array(other.utf16)
+        guard !a.isEmpty, a.count < 500, b.count < 500 else { return nil }
+        var prefix = 0
+        while prefix < a.count, prefix < b.count, a[prefix] == b[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < a.count - prefix, suffix < b.count - prefix, a[a.count - 1 - suffix] == b[b.count - 1 - suffix] { suffix += 1 }
+        let common = prefix + suffix
+        let length = a.count - common
+        guard length > 0, common > 0, Double(common) / Double(max(a.count, b.count)) >= 0.4 else { return nil }
+        return NSRange(location: prefix, length: length)
+    }
+
+    static func partners(_ rows: [DiffTableRow]) -> [String: String] {
+        var out: [String: String] = [:]
+        var dels: [(id: String, text: String)] = []
+        var matched = 0
+        for row in rows {
+            guard case .line(let id, let line, _, _) = row else {
+                dels = []
+                matched = 0
+                continue
+            }
+            switch line.kind {
+            case .del:
+                if matched > 0 {
+                    dels = []
+                    matched = 0
+                }
+                dels.append((id, line.text))
+            case .add:
+                if matched < dels.count {
+                    out[dels[matched].id] = line.text
+                    out[id] = dels[matched].text
+                    matched += 1
+                }
+            default:
+                dels = []
+                matched = 0
+            }
+        }
+        return out
+    }
+}
+
 private enum DiffStyle {
     private(set) static var scale: CGFloat = 1
     private(set) static var font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -76,6 +122,8 @@ private enum DiffStyle {
     }
 
     private(set) static var gutterAttributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.syGutter]
+    static var commentMarkAttributes: [NSAttributedString.Key: Any] { [.font: NSFont.monospacedSystemFont(ofSize: font.pointSize, weight: .bold), .foregroundColor: NSColor.syCoral] }
+    static let changeBarWidth: CGFloat = 3
 
     static func codeText(_ line: DiffLine) -> String {
         switch line.kind {
@@ -109,11 +157,14 @@ private enum DiffStyle {
         return p
     }
 
-    static func attributed(_ line: DiffLine, ext: String, codeWidth: CGFloat, wrap: Bool, highlight: Bool) -> NSAttributedString {
+    static func attributed(_ line: DiffLine, ext: String, codeWidth: CGFloat, wrap: Bool, highlight: Bool, partner: String? = nil) -> NSAttributedString {
         let text = codeText(line)
         let s = NSMutableAttributedString(string: text, attributes: [.font: font, .paragraphStyle: paragraph(line, codeWidth: codeWidth, wrap: wrap), .foregroundColor: color(line.kind)])
         if highlight, isCode(line.kind), !ext.isEmpty, s.length > 1, s.length <= maxHighlightLength {
             SyntaxHighlighter.highlight(s, range: NSRange(location: 1, length: s.length - 1), ext: ext)
+        }
+        if let partner, line.kind == .add || line.kind == .del, let range = DiffIntraline.changedRange(DiffText.expandTabs(line.text), DiffText.expandTabs(partner)) {
+            s.addAttribute(.backgroundColor, value: line.kind == .add ? NSColor.syAddWord : NSColor.syDelWord, range: NSRange(location: 1 + range.location, length: range.length))
         }
         return s
     }
@@ -141,7 +192,9 @@ final class DiffRenderState {
 }
 
 final class DiffLineCell: NSView {
-    var line: DiffLine?
+    var line: DiffLine? {
+        didSet { hoverSide = nil }
+    }
     var left: DiffLine?
     var right: DiffLine?
     var isSplit = false
@@ -151,6 +204,54 @@ final class DiffLineCell: NSView {
     var commentable = false
     var onComment: ((DiffLine) -> Void)?
     weak var state: DiffRenderState?
+    private var hoverSide: Int? {
+        didSet { if hoverSide != oldValue { needsDisplay = true } }
+    }
+    private var hoverArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        updateHover(convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        updateHover(convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoverSide = nil
+    }
+
+    private func updateHover(_ p: NSPoint) {
+        guard commentable, commentTarget(at: p) != nil else {
+            hoverSide = nil
+            return
+        }
+        hoverSide = isSplit && p.x >= floor(bounds.width / 2) ? 1 : 0
+    }
+
+    private func drawChangeBar(_ kind: DiffLine.Kind, x: CGFloat, height: CGFloat) {
+        switch kind {
+        case .add: NSColor.syGreen.setFill()
+        case .del: NSColor.syRed.setFill()
+        default: return
+        }
+        NSRect(x: x, y: 0, width: DiffStyle.changeBarWidth, height: height).fill()
+    }
+
+    private func drawGutter(_ numbers: String, at point: NSPoint, mark: Bool) {
+        (numbers as NSString).draw(at: point, withAttributes: DiffStyle.gutterAttributes)
+        guard mark else { return }
+        let width = (numbers as NSString).size(withAttributes: DiffStyle.gutterAttributes).width
+        ("+" as NSString).draw(at: NSPoint(x: point.x + width + DiffStyle.charWidth, y: point.y), withAttributes: DiffStyle.commentMarkAttributes)
+    }
 
     override var isFlipped: Bool { true }
 
@@ -201,10 +302,11 @@ final class DiffLineCell: NSView {
         case .hunk: DiffStyle.hunkBG.setFill(); bounds.fill()
         default: break
         }
+        drawChangeBar(line.kind, x: 0, height: bounds.height)
         let pad: CGFloat = line.kind == .hunk ? 3.5 : DiffStyle.vPad
         if line.kind != .hunk {
-            let gutter = DiffStyle.gutter(line.oldLine) + " " + DiffStyle.gutter(line.newLine) + (commentable && line.commentable ? " +" : "  ")
-            (gutter as NSString).draw(at: NSPoint(x: 4, y: pad), withAttributes: DiffStyle.gutterAttributes)
+            let numbers = DiffStyle.gutter(line.oldLine) + " " + DiffStyle.gutter(line.newLine)
+            drawGutter(numbers, at: NSPoint(x: 4, y: pad), mark: commentable && line.commentable && hoverSide == 0)
         }
         let x = DiffStyle.gutterWidth
         drawCode(text, in: NSRect(x: x, y: pad, width: bounds.width - x - 8, height: bounds.height - pad), scrolls: line.kind != .hunk)
@@ -230,8 +332,9 @@ final class DiffLineCell: NSView {
         case .del: DiffStyle.delBG.setFill(); rect.fill()
         default: break
         }
-        let gutter = DiffStyle.gutter(old ? line.oldLine : line.newLine) + (commentable && line.commentable ? " +" : "  ")
-        (gutter as NSString).draw(at: NSPoint(x: x + 4, y: DiffStyle.vPad), withAttributes: DiffStyle.gutterAttributes)
+        drawChangeBar(line.kind, x: x, height: bounds.height)
+        let numbers = DiffStyle.gutter(old ? line.oldLine : line.newLine)
+        drawGutter(numbers, at: NSPoint(x: x + 4, y: DiffStyle.vPad), mark: commentable && line.commentable && hoverSide == (old ? 0 : 1))
         let codeX = x + DiffStyle.splitGutterWidth
         drawCode(text, in: NSRect(x: codeX, y: DiffStyle.vPad, width: width - DiffStyle.splitGutterWidth - 8, height: bounds.height - DiffStyle.vPad), scrolls: true)
     }
@@ -512,7 +615,10 @@ struct DiffTableView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         weak var table: NSTableView?
         weak var bar: DiffHorizontalBar?
-        var rows: [DiffTableRow] = []
+        var rows: [DiffTableRow] = [] {
+            didSet { partners = DiffIntraline.partners(rows) }
+        }
+        private var partners: [String: String] = [:]
         var ids: [String] = []
         var signature: [Int] = []
         var version = -1
@@ -811,11 +917,11 @@ struct DiffTableView: NSViewRepresentable {
             }
         }
 
-        private func text(_ key: String, _ line: DiffLine?, ext: String, codeWidth: CGFloat) -> NSAttributedString? {
+        private func text(_ key: String, _ line: DiffLine?, ext: String, codeWidth: CGFloat, partner: String? = nil) -> NSAttributedString? {
             guard let line else { return nil }
             if let cached = texts[key] { return cached }
             if texts.count > 4000 { texts.removeAll() }
-            let s = DiffStyle.attributed(line, ext: ext, codeWidth: codeWidth, wrap: state.wrap, highlight: true)
+            let s = DiffStyle.attributed(line, ext: ext, codeWidth: codeWidth, wrap: state.wrap, highlight: true, partner: partner)
             texts[key] = s
             return s
         }
@@ -828,7 +934,7 @@ struct DiffTableView: NSViewRepresentable {
                 cell.line = line
                 cell.left = nil
                 cell.right = nil
-                cell.text = text(id, line, ext: ext, codeWidth: DiffStyle.unifiedCodeWidth(width))
+                cell.text = text(id, line, ext: ext, codeWidth: DiffStyle.unifiedCodeWidth(width), partner: partners[id])
                 cell.commentable = commentable
                 cell.onComment = { [weak self] l in self?.onComment?(id, l) }
             case .split(let id, let left, let right, let commentable, let ext):
@@ -837,8 +943,8 @@ struct DiffTableView: NSViewRepresentable {
                 cell.line = nil
                 cell.left = left
                 cell.right = right
-                cell.leftText = text(id + "|L", left, ext: ext, codeWidth: w)
-                cell.rightText = text(id + "|R", right, ext: ext, codeWidth: w)
+                cell.leftText = text(id + "|L", left, ext: ext, codeWidth: w, partner: right?.text)
+                cell.rightText = text(id + "|R", right, ext: ext, codeWidth: w, partner: left?.text)
                 cell.commentable = commentable
                 cell.onComment = { [weak self] l in self?.onComment?(id, l) }
             case .view:

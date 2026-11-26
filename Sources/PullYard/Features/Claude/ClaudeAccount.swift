@@ -293,7 +293,7 @@ struct ClaudeAuthView: View {
                 Button("Copy command") { copyToPasteboard(Self.installCommand) }
                 Button("Docs") { openInBrowser("https://code.claude.com/docs/en/setup") }
                 Spacer()
-                Button("Check again") { Task { await store.refresh(force: true) } }.buttonStyle(.borderedProminent).tint(.syAgentAccent)
+                Button("Check again") { Task { await store.refresh(force: true) } }.buttonStyle(.borderedProminent).tint(.syAgentFill)
             }
         }
     }
@@ -306,7 +306,7 @@ struct ClaudeAuthView: View {
             if store.loggingIn {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
+                        PYLoader(size: 16)
                         Text("Confirm the sign-in in your browser…")
                     }
                     if let url = store.fallbackURL {
@@ -336,7 +336,7 @@ struct ClaudeAuthView: View {
                         Label("Sign in with browser", systemImage: "person.badge.key")
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.syAgentAccent)
+                    .tint(.syAgentFill)
                     .controlSize(.large)
                     .keyboardShortcut(.defaultAction)
                 }

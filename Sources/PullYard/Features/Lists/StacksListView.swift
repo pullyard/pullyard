@@ -160,8 +160,7 @@ struct StacksListView: View {
         .liveRefresh(updated: model.lastUpdated, refreshing: model.refreshing, error: model.entries.isEmpty ? nil : model.error) {
             await model.load(api: app.api, account: app.cacheAccount, force: true)
         }
-        .navigationTitle("Stacks")
-        .navigationSubtitle(model.entries.isEmpty ? "" : "\(model.entries.count)")
+        .columnTitle("Stacks", subtitle: model.entries.isEmpty ? "" : "\(model.entries.count)")
         .task(id: "\(app.cacheAccount ?? "")|\(app.api != nil)") {
             model.restore(account: app.cacheAccount)
             await model.load(api: app.api, account: app.cacheAccount)

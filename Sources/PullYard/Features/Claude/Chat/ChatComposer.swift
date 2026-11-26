@@ -222,7 +222,9 @@ struct ChatComposer: View {
                 bottomBar
             }
             .padding(10)
-            .card(radius: 12)
+            .card(radius: 14)
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.syLineStrong))
+            .shadow(color: .black.opacity(0.06), radius: 14, y: 4)
             .padding(12)
         }
         .onChange(of: text) { updateCompletion() }

@@ -89,9 +89,17 @@ struct ClaudeProjectsColumn: View {
         return true
     }
 
-    private var filtered: [ClaudeProject] {
-        guard !query.isEmpty else { return ws.projects }
+    private var accountScoped: [ClaudeProject] {
+        guard ws.accountFilter != nil, ClaudeProfiles.shared.hasSeveral else { return ws.projects }
         return ws.projects.compactMap { p in
+            let s = ws.visibleSessions(p.sessions)
+            return s.isEmpty ? nil : ClaudeProject(id: p.id, path: p.path, sessions: s)
+        }
+    }
+
+    private var filtered: [ClaudeProject] {
+        guard !query.isEmpty else { return accountScoped }
+        return accountScoped.compactMap { p in
             if p.name.localizedCaseInsensitiveContains(query) { return p }
             let s = p.sessions.filter { $0.title.localizedCaseInsensitiveContains(query) || ($0.branch ?? "").localizedCaseInsensitiveContains(query) }
             return s.isEmpty ? nil : ClaudeProject(id: p.id, path: p.path, sessions: s)
@@ -121,7 +129,12 @@ struct ClaudeProjectsColumn: View {
                 default:
                     EmptyView()
                 }
-                if ClaudeAccountStore.shared.isLoggedIn {
+                if ClaudeProfiles.shared.hasSeveral {
+                    AgentAccountFilter()
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 4)
+                }
+                if ClaudeAccountStore.shared.isLoggedIn || ClaudeProfiles.shared.hasSeveral {
                     if ready { historyContent }
                 } else if case .checking = ClaudeAccountStore.shared.status {
                     HStack { Spacer(); PullYardLoader(size: 32); Spacer() }.padding(.top, 20)
@@ -261,9 +274,16 @@ struct ClaudeProjectsColumn: View {
                         if expanded.contains(project.id) { expanded.remove(project.id) } else { expanded.insert(project.id) }
                     }
                 } onNew: {
-                    ws.newSession(folder: project.path)
+                    ws.newSession(folder: project.path, profileID: ws.accountFilter)
                 }
                 .padding(.horizontal, 8)
+                .contextMenu {
+                    if ClaudeProfiles.shared.hasSeveral {
+                        ForEach(ClaudeProfiles.shared.visible) { p in
+                            Button("New Session as \(p.label)") { ws.newSession(folder: project.path, profileID: p.id) }
+                        }
+                    }
+                }
                 Collapsible(open: open) {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(nodes(project)) { node in
@@ -284,7 +304,7 @@ struct ClaudeProjectsColumn: View {
             }
         }
         if ws.projects.isEmpty, !ws.loadingProjects {
-            Text("No Claude Code sessions yet").font(.syBody).foregroundStyle(Color.syMuted).padding(12)
+            Text("No agent sessions yet").font(.syBody).foregroundStyle(Color.syMuted).padding(12)
         } else {
             Button(showArchived ? "Hide archived sessions" : "Show archived sessions") { withAnimation(Motion.smooth) { showArchived.toggle() } }
                 .buttonStyle(.link)
@@ -380,8 +400,18 @@ struct ProjectHeader: View {
                 .foregroundStyle(Color.syDim)
                 .rotationEffect(.degrees(expanded ? 90 : 0))
                 .frame(width: 10)
+            Image(systemName: "folder.fill")
+                .font(.syIcon(10))
+                .foregroundStyle(project.exists ? Color.syCoral : Color.syDim)
+                .frame(width: 20, height: 20)
+                .background(RoundedRectangle(cornerRadius: 6).fill((project.exists ? Color.syCoral : Color.syDim).opacity(0.12)))
             Text(project.name).font(.syCallout.weight(.semibold)).foregroundStyle(project.exists ? Color.syText : Color.syMuted).lineLimit(1)
-            Text("\(project.sessions.count)").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
+            Text("\(project.sessions.count)")
+                .font(.syCaption2.monospacedDigit().weight(.medium))
+                .foregroundStyle(Color.syMuted)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(Color.syText.opacity(0.06)))
             Spacer()
             Button(action: onNew) { Image(systemName: "plus") }
                 .buttonStyle(.borderless)
@@ -482,11 +512,23 @@ struct SessionRow: View {
                 .accessibilityLabel(collapsed ? "Expand" : "Collapse")
             }
             Spacer(minLength: 8)
-            if session.prNumber != nil {
-                Image(systemName: "arrow.triangle.pull").font(.syCaption).foregroundStyle(Color.syViolet.opacity(0.85)).accessibilityLabel("Pull request")
+            if let n = session.prNumber {
+                Text("#\(n)")
+                    .font(.syCaption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(Color.syViolet)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.syViolet.opacity(0.12)))
+                    .accessibilityLabel("Pull request \(n)")
             }
             if childCount > 0 {
                 Text("\(childCount)").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
+            }
+            AgentAccountChip(profile: ClaudeProfiles.shared.profile(id: session.profileID), compact: true)
+            if depth == 0, indicator == .none {
+                Text(Self.age(session.modified))
+                    .font(.syCaption2.monospacedDigit())
+                    .foregroundStyle(Color.syDim)
             }
             SessionIndicatorDot(indicator: expired ? SessionIndicator(closed: session) : indicator)
                 .task(id: indicator == .working && !open) {
@@ -500,6 +542,17 @@ struct SessionRow: View {
         .padding(.leading, 4)
         .frame(minHeight: 32)
         .help(details)
+    }
+
+    static func age(_ date: Date) -> String {
+        let s = max(0, Int(Date().timeIntervalSince(date)))
+        switch s {
+        case ..<60: return "now"
+        case ..<3600: return "\(s / 60)m"
+        case ..<86_400: return "\(s / 3600)h"
+        case ..<604_800: return "\(s / 86_400)d"
+        default: return "\(s / 604_800)w"
+        }
     }
 
     private var details: String {
@@ -535,7 +588,7 @@ struct SessionStateGlyph: View {
     var body: some View {
         Group {
             switch state {
-            case .working: ProgressView().controlSize(.mini)
+            case .working: PYLoader(size: 11, label: "Working")
             case .waiting: Circle().fill(Color.syAmber).frame(width: 7, height: 7)
             case .active: Circle().fill(Color.syMuted).frame(width: 5, height: 5)
             case .sleeping, .stopped: Circle().strokeBorder(Color.syDim, lineWidth: 1).frame(width: 6, height: 6)
@@ -627,7 +680,7 @@ struct ClaudeWorkspaceView: View {
                                                     Text("Session ended" + (tab.exitCode.map { " (\($0))" } ?? "")).foregroundStyle(Color.syMuted)
                                                 }
                                                 HStack {
-                                                    Button("Resume session") { ws.restart(tab) }.buttonStyle(.borderedProminent).tint(.syAgentAccent)
+                                                    Button("Resume session") { ws.restart(tab) }.buttonStyle(.borderedProminent).tint(.syAgentFill)
                                                     Button("Close tab") { ws.close(tab) }
                                                 }
                                             }
@@ -710,37 +763,77 @@ struct ClaudeEmptyState: View {
 
     var body: some View {
         let ws = app.claude
-        VStack(spacing: 16) {
-            Image(systemName: "terminal").font(.system(size: 34, weight: .light)).foregroundStyle(Color.syMuted)
-            Text("Agents").font(.syTitle2.weight(.semibold)).foregroundStyle(Color.syText)
-            Text("Runs Claude Code, installed on this Mac. Start a new session in a project or resume one from the history on the left.")
-                .foregroundStyle(Color.syMuted)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(ws.projects.filter(\.exists).prefix(6)) { p in
-                    Button {
-                        ws.newSession(folder: p.path)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "folder").foregroundStyle(Color.syMuted).frame(width: 22)
-                            Text(p.name).fontWeight(.medium).foregroundStyle(Color.syText)
-                            Spacer()
-                            Text(Fmt.rel(p.lastActivity)).font(.syCaption).foregroundStyle(Color.syDim)
-                            Image(systemName: "plus").foregroundStyle(Color.syMuted)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                        .card(radius: 10)
-                    }
-                    .buttonStyle(.plain)
+        let projects = Array(ws.projects.filter(\.exists).prefix(6))
+        ZStack {
+            if Theme.isBrand { BrandAurora().opacity(0.8) }
+            VStack(spacing: 18) {
+                ZStack(alignment: .bottom) {
+                    HarborWaves().frame(width: 180, height: 20).offset(y: 14)
+                    DrawnLogoMark(key: "agents-empty", size: 88)
                 }
+                .padding(.bottom, 10)
+                Text("Agents on deck")
+                    .font(.system(size: TextZoom.shared.size(26), weight: .semibold, design: .serif))
+                    .foregroundStyle(Color.syText)
+                Text("Runs Claude Code, installed on this Mac. Start a new session in a project or resume one from the history on the left.")
+                    .foregroundStyle(Color.syMuted)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 440)
+                if !projects.isEmpty {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                        ForEach(projects) { p in
+                            AgentProjectCard(name: p.name, path: p.path, last: p.lastActivity) { ws.newSession(folder: p.path) }
+                        }
+                    }
+                    .frame(maxWidth: 520)
+                    .padding(.top, 6)
+                }
+                HStack(spacing: 16) {
+                    HStack(spacing: 6) { Keycap(key: "⌘N"); Text("New session").font(.syCaption).foregroundStyle(Color.syMuted) }
+                    HStack(spacing: 6) { Keycap(key: "⇧⌘K"); Text("Go to session").font(.syCaption).foregroundStyle(Color.syMuted) }
+                }
+                .padding(.top, 4)
             }
-            .frame(width: 380)
+            .padding(32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .surface(.panel)
+    }
+}
+
+private struct AgentProjectCard: View {
+    let name: String
+    let path: String
+    let last: Date
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "folder.fill")
+                    .font(.syIcon(13))
+                    .foregroundStyle(Color.syCoral)
+                    .frame(width: 30, height: 30)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.syCoral.opacity(0.12)))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
+                    Text(Fmt.rel(last)).font(.syCaption).foregroundStyle(Color.syMuted)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "plus")
+                    .font(.syIcon(11))
+                    .foregroundStyle(hovering ? Color.syCoralInk : Color.syDim)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.syRaised))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(hovering ? Color.syCoral.opacity(0.45) : Color.syLine))
+            .shadow(color: .black.opacity(hovering ? 0.07 : 0.03), radius: hovering ? 10 : 4, y: 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .onHover { h in withAnimation(.easeOut(duration: Motion.Dur.fast)) { hovering = h } }
+        .help("New session in \(path)")
     }
 }
 
@@ -752,32 +845,19 @@ struct ClaudeTabBar: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
                 ForEach(ws.tabs) { tab in
-                    let selected = tab.id == ws.selectedTabID
-                    HStack(spacing: 6) {
-                        SessionStateGlyph(state: tab.state)
-                        Text(tab.title).lineLimit(1).frame(maxWidth: 180, alignment: .leading).foregroundStyle(selected ? Color.syText : Color.syMuted)
-                        Text(tab.projectName).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
-                        Button { ws.requestClose(tab) } label: { Image(systemName: "xmark").font(.syCaption2.weight(.bold)).frame(width: 16, height: 16).contentShape(Rectangle()) }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(Color.syMuted)
-                            .help("Close \(tab.title)")
-                            .accessibilityLabel("Close \(tab.title)")
-                    }
-                    .font(.syCallout)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: Radius.m).fill(selected ? Color.sySelected : Color.clear))
-                    .contentShape(Rectangle())
-                    .onTapGesture { ws.selectedTabID = tab.id }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel("\(tab.title), \(tab.projectName), \(tab.state.title)")
-                    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-                    .accessibilityAction { ws.selectedTabID = tab.id }
+                    ClaudeTabChip(tab: tab, selected: tab.id == ws.selectedTabID)
                 }
                 Menu {
                     if let current = ws.selectedTab {
-                        Button("Chat in \(current.projectName)") { ws.newSession(folder: current.folder, kind: .chat) }
-                        Button("Terminal in \(current.projectName)") { ws.newSession(folder: current.folder, kind: .terminal) }
+                        Button("Chat in \(current.projectName)") { ws.newSession(folder: current.folder, kind: .chat, profileID: current.profile?.id) }
+                        Button("Terminal in \(current.projectName)") { ws.newSession(folder: current.folder, kind: .terminal, profileID: current.profile?.id) }
+                        if ClaudeProfiles.shared.hasSeveral {
+                            Menu("New Chat As") {
+                                ForEach(ClaudeProfiles.shared.visible) { p in
+                                    Button(p.email.map { "\(p.label) · \($0)" } ?? p.label) { ws.newSession(folder: current.folder, kind: .chat, profileID: p.id) }
+                                }
+                            }
+                        }
                         Divider()
                     }
                     ForEach(ws.projects.filter(\.exists).prefix(12)) { p in
@@ -808,6 +888,7 @@ struct ClaudeControlBar: View {
         HStack(spacing: 6) {
             HStack(spacing: 8) {
                 Text(tab.projectName).fontWeight(.semibold).foregroundStyle(Color.syText).lineLimit(1)
+                AgentAccountChip(profile: tab.profile)
                 AgentBranchMenu(tab: tab, pr: ws.pullRequest(for: tab))
                 TabStateBadge(state: tab.state, memory: tab.memoryBytes)
             }
@@ -995,9 +1076,9 @@ struct ChangesPanel: View {
         let git = tab.git
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                if git.loading { ProgressView().controlSize(.mini) }
+                if git.loading { PYLoader(size: 12) }
                 Text(git.changes.isEmpty ? "No uncommitted changes" : plural(git.changes.count, "file changed", "files changed"))
-                    .font(.syCaption).foregroundStyle(Color.syMuted)
+                    .font(.syCaption.weight(.medium)).foregroundStyle(git.changes.isEmpty ? Color.syMuted : Color.syText)
                 if !git.changes.isEmpty {
                     DiffStat(additions: git.changes.reduce(0) { $0 + $1.additions }, deletions: git.changes.reduce(0) { $0 + $1.deletions })
                 }
@@ -1010,28 +1091,37 @@ struct ChangesPanel: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             if !git.unpushed.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Unpushed commits" + " · \(git.unpushed.count)").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.up.circle.fill").foregroundStyle(Color.syCoral)
+                        Text(plural(git.unpushed.count, "unpushed commit", "unpushed commits"))
+                            .font(.sy(size: 10, weight: .semibold))
+                            .textCase(.uppercase)
+                            .tracking(0.5)
+                            .foregroundStyle(Color.syCoralInk)
+                    }
                     ForEach(git.unpushed.prefix(6)) { c in
                         HStack(spacing: 6) {
-                            Text(c.short).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
-                            Text(c.subject).font(.syCaption).lineLimit(1)
+                            Text(c.short)
+                                .font(.syCaption2.monospaced())
+                                .foregroundStyle(Color.syMuted)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.syText.opacity(0.05)))
+                            Text(c.subject).font(.syCaption).foregroundStyle(Color.syText).lineLimit(1)
                         }
                     }
                 }
+                .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.syCoral.opacity(0.06)))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syCoral.opacity(0.2)))
                 .padding(.horizontal, 10)
-                .padding(.bottom, 6)
+                .padding(.bottom, 8)
             }
             ClaudeHairline()
             if git.changes.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle").font(.syLargeTitle).foregroundStyle(Color.syDim)
-                    Text("Changes Claude makes will show up here automatically")
-                        .font(.syCallout).foregroundStyle(Color.syMuted).multilineTextAlignment(.center)
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                InspectorEmptyState(icon: "checkmark.seal", title: "Working tree clean", message: "Changes the agent makes will show up here automatically.")
             } else {
                 PlainDiffList(files: git.changes, collapsed: $collapsed, scrollTarget: target) { path in
                     NSWorkspace.shared.open(URL(fileURLWithPath: tab.folder + "/" + path))
@@ -1193,7 +1283,7 @@ struct BranchPRPanel: View {
                                     app.claude.send(AgentShip.openPRPrompt(branch: b, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead, remote: tab.git.remote), to: tab)
                                 }
                                 .buttonStyle(.borderedProminent)
-                                .tint(.syAgentAccent)
+                                .tint(.syAgentFill)
                                 .disabled(tab.busy)
                                 Button("Create in Browser") { openInBrowser("https://github.com/\(repo.full)/pull/new/\(b)") }
                             }
@@ -1355,7 +1445,7 @@ struct ForgeBranchPanel: View {
                                 app.claude.send(AgentShip.openPRPrompt(branch: b, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead, remote: remote.with(kind: kind)), to: tab)
                             }
                             .buttonStyle(.borderedProminent)
-                            .tint(.syAgentAccent)
+                            .tint(.syAgentFill)
                             .disabled(tab.busy)
                             Button("Create in Browser") { openInBrowser(remote.newRequestURL(branch: b, kind: kind)) }
                         }
@@ -1563,7 +1653,7 @@ struct InspectorPRDetail: View {
                         Label("Ask Claude to review this PR", systemImage: "text.magnifyingglass")
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .tint(.syAgentAccent)
+                    .tint(.syAgentFill)
                 }
                 .controlSize(.small)
             }
@@ -1741,5 +1831,155 @@ struct Collapsible<Content: View>: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
             }
         }
+    }
+}
+
+private struct ClaudeTabChip: View {
+    let tab: ClaudeTab
+    let selected: Bool
+    @Environment(AppModel.self) private var app
+    @State private var hovering = false
+
+    var body: some View {
+        let ws = app.claude
+        let waiting = tab.state == .waiting
+        HStack(spacing: 6) {
+            SessionStateGlyph(state: tab.state)
+            Text(tab.title)
+                .lineLimit(1)
+                .frame(maxWidth: 180, alignment: .leading)
+                .foregroundStyle(selected ? Color.syText : Color.syMuted)
+                .fontWeight(selected ? .medium : .regular)
+            AgentAccountChip(profile: tab.profile, compact: true)
+            if waiting {
+                Text("Needs you")
+                    .font(.sy(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.syCoralInk)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.syCoral.opacity(0.14)))
+            } else {
+                Text(tab.projectName).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
+            }
+            Button { ws.requestClose(tab) } label: { Image(systemName: "xmark").font(.syCaption2.weight(.bold)).frame(width: 16, height: 16).contentShape(Rectangle()) }
+                .buttonStyle(.borderless)
+                .foregroundStyle(Color.syMuted)
+                .opacity(selected || hovering ? 1 : 0)
+                .help("Close \(tab.title)")
+                .accessibilityLabel("Close \(tab.title)")
+        }
+        .font(.syCallout)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background {
+            RoundedRectangle(cornerRadius: Radius.m)
+                .fill(selected ? Color.syRaised : (hovering ? Color.syHover : Color.clear))
+                .shadow(color: .black.opacity(selected ? 0.06 : 0), radius: 4, y: 1)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: Radius.m)
+                .strokeBorder(selected ? Color.syLineStrong : (waiting ? Color.syCoral.opacity(0.4) : Color.clear))
+        }
+        .overlay(alignment: .bottom) {
+            if selected {
+                Capsule().fill(Color.syAgentAccent).frame(height: 2).padding(.horizontal, 10).offset(y: 1)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { ws.selectedTabID = tab.id }
+        .onHover { h in withAnimation(.easeOut(duration: Motion.Dur.micro)) { hovering = h } }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(tab.title), \(tab.projectName), \(tab.state.title)")
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { ws.selectedTabID = tab.id }
+    }
+}
+
+struct InspectorEmptyState: View {
+    let icon: String
+    let title: String
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.syIcon(18))
+                .foregroundStyle(Color.syAgentAccent)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(Color.syAgentAccent.opacity(0.1)))
+                .overlay(Circle().strokeBorder(Color.syAgentAccent.opacity(0.2)))
+            Text(title)
+                .font(.system(size: TextZoom.shared.size(15), weight: .semibold, design: .serif))
+                .foregroundStyle(Color.syText)
+            Text(message)
+                .font(.syCaption)
+                .foregroundStyle(Color.syMuted)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 240)
+            HarborWaves().frame(width: 90, height: 12).opacity(0.7)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct AgentAccountChip: View {
+    let profile: ClaudeProfile?
+    var compact = false
+
+    static func color(for id: String) -> Color {
+        let palette: [Color] = [.sySky, .syViolet, .syTeal, .syAmberInk, .syIndigo, .syCoralInk]
+        let sum = id.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+        return palette[id == ClaudeProfiles.defaultID ? 0 : 1 + sum % (palette.count - 1)]
+    }
+
+    var body: some View {
+        if ClaudeProfiles.shared.hasSeveral, let profile {
+            let tint = Self.color(for: profile.id)
+            Text(compact ? profile.initial : profile.label)
+                .font(.sy(size: 10, weight: .semibold))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .padding(.horizontal, compact ? 5 : 6)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(tint.opacity(0.14)))
+                .help(profile.email.map { "\(profile.label) · \($0)" } ?? profile.label)
+                .accessibilityLabel("Account \(profile.label)")
+        }
+    }
+}
+
+struct AgentAccountFilter: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        let ws = app.claude
+        HStack(spacing: 4) {
+            filterButton(title: "All", id: nil, tint: .syMuted, selected: ws.accountFilter == nil)
+            ForEach(ClaudeProfiles.shared.visible) { p in
+                filterButton(title: p.label, id: p.id, tint: AgentAccountChip.color(for: p.id), selected: ws.accountFilter == p.id)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func filterButton(title: String, id: String?, tint: Color, selected: Bool) -> some View {
+        Button {
+            app.claude.accountFilter = id
+        } label: {
+            HStack(spacing: 4) {
+                if id != nil { Circle().fill(tint).frame(width: 6, height: 6) }
+                Text(title).lineLimit(1)
+            }
+            .font(.syCaption.weight(selected ? .semibold : .regular))
+            .foregroundStyle(selected ? Color.syText : Color.syMuted)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(selected ? Color.syRaised : Color.clear))
+            .overlay(Capsule().strokeBorder(selected ? Color.syLineStrong : Color.syLine))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(id == nil ? "Sessions from all accounts" : "Only sessions from \(title)")
     }
 }

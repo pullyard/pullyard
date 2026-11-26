@@ -26,7 +26,21 @@ enum FixPrompt {
         "Make sure the working tree is on the PR branch: run `gh pr checkout \(number)` and `git pull`. If there are uncommitted local changes, stop and ask me first."
     }
 
-    static func build(pr: PullRequestDetail, repo: RepoRef, threads: [ReviewThread], general: [GeneralFeedback], options: FixOptions) -> String {
+    static func tickets(_ issues: [JiraIssue]) -> String {
+        guard !issues.isEmpty else { return "" }
+        var out = "\n## Linked Jira tickets\n"
+        for issue in issues {
+            out += "\n**\(issue.key)** — \(issue.summary) (\(issue.status))\n\(issue.url)\n"
+            let description = issue.description.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !description.isEmpty {
+                let short = description.count > 1200 ? String(description.prefix(1200)) + "…" : description
+                out += short.split(separator: "\n", omittingEmptySubsequences: false).map { "> \($0)" }.joined(separator: "\n") + "\n"
+            }
+        }
+        return out
+    }
+
+    static func build(pr: PullRequestDetail, repo: RepoRef, threads: [ReviewThread], general: [GeneralFeedback], options: FixOptions, tickets issues: [JiraIssue] = []) -> String {
         var out = """
         Address the code review feedback on pull request #\(pr.number) "\(pr.title)" in \(repo.full).
         PR: \(pr.url)
@@ -85,6 +99,7 @@ enum FixPrompt {
                 out += "\n**@\(g.author)**:\n" + g.body.split(separator: "\n", omittingEmptySubsequences: false).map { "> \($0)" }.joined(separator: "\n") + "\n"
             }
         }
+        out += tickets(issues)
         return out
     }
 }

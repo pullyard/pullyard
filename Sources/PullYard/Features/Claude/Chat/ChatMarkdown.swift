@@ -282,8 +282,11 @@ struct CodeBlockView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(language.isEmpty ? "code" : language).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(LinearGradient(colors: [Color.syViolet, Color.syAccent], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 7, height: 7)
+                Text(language.isEmpty ? "code" : language).font(.syCaption.monospaced().weight(.medium)).foregroundStyle(Color.syMuted)
                 Spacer()
                 Button {
                     copyToPasteboard(code)
@@ -308,7 +311,8 @@ struct CodeBlockView: View {
             }
         }
         .background(Color.sySunken)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syLine))
     }
 
     private var highlighted: AttributedString {

@@ -91,7 +91,17 @@ struct UsageRingButton: View {
 struct UsageOverlay: View {
     let chat: ChatSession
     @State private var detailed = false
-    private var usage: ClaudeUsageStore { ClaudeUsageStore.shared }
+    private var usage: ClaudeUsageStore.Snapshot { ClaudeUsageStore.shared.snapshot(for: chat.configDir) }
+
+    private var headerTitle: String {
+        var parts = ["Your usage limits"]
+        if let plan = usage.subscription { parts.append(plan) }
+        if ClaudeProfiles.shared.hasSeveral {
+            let label: String = ClaudeProfiles.shared.profile(configDir: chat.configDir)?.label ?? "Main"
+            parts.append(label)
+        }
+        return parts.joined(separator: " · ")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -161,7 +171,7 @@ struct UsageOverlay: View {
     private var limitsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Your usage limits" + (usage.subscription.map { " · \($0)" } ?? "")).fontWeight(.medium).foregroundStyle(Color.syText)
+                Text(headerTitle).fontWeight(.medium).foregroundStyle(Color.syText)
                 Spacer()
                 Button { openInBrowser("https://claude.ai/settings/usage") } label: { Image(systemName: "arrow.up.right") }
                     .buttonStyle(.borderless)

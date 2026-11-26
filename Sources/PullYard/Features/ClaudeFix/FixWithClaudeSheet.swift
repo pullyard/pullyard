@@ -29,6 +29,7 @@ struct FixWithClaudeSheet: View {
     @State private var ciHead: String?
     @State private var ciNonce = CIFixPrompt.nonce()
     @State private var ciStale = false
+    @State private var tickets: [JiraIssue] = []
 
     private var allFailing: [CheckContext] { CIFailureCollector.failing(pr.checks) }
     private var failing: [CheckContext] { CIFailureCollector.shown(allFailing, focus: ci?.focus) }
@@ -45,7 +46,7 @@ struct FixWithClaudeSheet: View {
             return CIFixPrompt.build(pr: pr, repo: model.ref.repo, failures: chosen.compactMap { ciItems[$0.id] }, pending: chosen.filter { ciItems[$0.id] == nil }.map { CIFailure(check: $0).name }, options: options, nonce: ciNonce)
         }
         let chosen = threads.filter { selected.contains($0.id) }
-        return FixPrompt.build(pr: pr, repo: model.ref.repo, threads: chosen, general: general, options: options)
+        return FixPrompt.build(pr: pr, repo: model.ref.repo, threads: chosen, general: general, options: options, tickets: tickets)
     }
 
     private var prompt: String { custom ?? generated }
@@ -119,6 +120,16 @@ struct FixWithClaudeSheet: View {
             if selected.isEmpty { selected = Set(threads.map(\.id)) }
             folder = await LocalRepoStore.detect(model.ref.repo)
             detecting = false
+        }
+        .task(id: pr.url) {
+            let store = JiraConnections.shared
+            guard store.isConfigured else { return }
+            var found: [JiraIssue] = []
+            for key in JiraTab.keys(for: pr).prefix(3) {
+                if let issue = try? await store.fetchIssue(key, repo: model.ref.repo) { found.append(issue) }
+            }
+            guard !found.isEmpty else { return }
+            tickets = found
         }
     }
 
@@ -195,7 +206,7 @@ struct FixWithClaudeSheet: View {
                     Text("showing \(failing.count) of \(allFailing.count)").font(.syCaption).foregroundStyle(Color.syDim)
                 }
                 if ciLoading {
-                    ProgressView().controlSize(.mini)
+                    PYLoader(size: 12)
                     Text("Collecting logs…").font(.syCaption).foregroundStyle(Color.syDim)
                 }
                 Spacer()
@@ -238,7 +249,7 @@ struct FixWithClaudeSheet: View {
                 Text(ciDetail(item)).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
             }
         } else if ciLoading {
-            ProgressView().controlSize(.mini)
+            PYLoader(size: 12)
         }
     }
 
@@ -319,6 +330,9 @@ struct FixWithClaudeSheet: View {
                 if source == .ci, target != .copy {
                     app.claude.ciFixes[model.ref] = CIFixLaunch(tabID: tab?.id, target: target, headOid: pr.headRefOid, at: Date())
                 }
+                if let tab {
+                    app.claude.prFixes[model.ref] = CIFixLaunch(tabID: tab.id, target: target, headOid: pr.headRefOid, at: Date())
+                }
                 if source != .ci, target != .copy {
                     let ids = (source == .composed ? threads.filter { selected.contains($0.id) } : threads).map(\.id)
                     if !ids.isEmpty { app.claude.reviewFixes[model.ref] = ReviewFixLaunch(threadIDs: ids, headOid: pr.headRefOid, at: Date()) }
@@ -364,7 +378,7 @@ struct ClaudeFixBanner: View {
                 Button("Fix with agent", action: action)
                     .controlSize(.small)
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.syCoral)
+                    .tint(Color.syCoralFill)
             }
             .font(.syCallout)
             .padding(.horizontal, 10)
@@ -418,7 +432,7 @@ struct ReReviewBanner: View {
                     } label: {
                         HStack(spacing: 5) {
                             if sending {
-                                ProgressView().controlSize(.mini)
+                                PYLoader(size: 12)
                             } else {
                                 Image(systemName: "arrow.triangle.2.circlepath")
                             }

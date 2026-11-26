@@ -28,7 +28,7 @@ struct ClaudeFolderRow: View {
         HStack(spacing: 8) {
             Image(systemName: "folder.fill").foregroundStyle(Color.syTeal)
             if detecting {
-                ProgressView().controlSize(.small)
+                PYLoader(size: 16)
                 Text("Looking for a local clone of \(repo.full)…").font(.syCallout).foregroundStyle(Color.syMuted)
             } else if let folder {
                 Text(folder.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
@@ -81,7 +81,7 @@ struct ClaudeLaunchRow: View {
             Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
             Button(target == .copy ? "Copy" : "Launch", action: onLaunch)
                 .buttonStyle(.borderedProminent)
-                .tint(Color.syCoral)
+                .tint(Color.syCoralFill)
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(!canLaunch)
         }

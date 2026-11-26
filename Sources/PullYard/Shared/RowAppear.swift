@@ -14,8 +14,8 @@ enum RowEntrance {
 @MainActor
 final class RowAppearTracker {
     private static var registry: [String: RowAppearTracker] = [:]
-    private static let cascadeLimit = 12
-    private static let stagger = 0.035
+    private static let cascadeLimit = 8
+    private static let stagger = 0.03
 
     private(set) var epoch = 0
     @ObservationIgnored private var seen: Set<String> = []
@@ -97,12 +97,13 @@ struct RowAppear: ViewModifier {
     var radius: CGFloat?
     @State private var entered: Bool?
     @State private var glow = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         let visible = entered ?? !tracker.isPending(id)
         content
             .opacity(visible ? 1 : 0)
-            .offset(x: visible || Motion.reduced ? 0 : 60)
+            .offset(x: visible || reduceMotion ? 0 : 8)
             .background {
                 if glow, radius == nil { glowLayer.padding(bleed) }
             }

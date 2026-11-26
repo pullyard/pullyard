@@ -190,6 +190,16 @@ enum VisualState {
         }
     }
 
+    var compactIcon: String {
+        switch self {
+        case .draft: return "pencil"
+        case .closed: return "xmark"
+        case .completed: return "checkmark"
+        case .notPlanned: return "minus"
+        default: return icon
+        }
+    }
+
     var title: String {
         switch self {
         case .open, .issueOpen: return "Open"
@@ -234,7 +244,7 @@ struct StateBadge: View {
 
     var body: some View {
         if compact {
-            Image(systemName: state.icon)
+            Image(systemName: state.compactIcon)
                 .font(.syIcon(11))
                 .foregroundStyle(state.color)
                 .frame(width: 22, height: 22)
@@ -274,9 +284,61 @@ struct CIIcon: View {
 
     var body: some View {
         switch state {
-        case "SUCCESS": Image(systemName: "checkmark").foregroundStyle(Color.ghGreen).help("Checks passed").accessibilityLabel("Checks passed")
-        case "FAILURE", "ERROR": Image(systemName: "xmark").foregroundStyle(Color.ghRed).help("Checks failed").accessibilityLabel("Checks failed")
-        case "PENDING", "EXPECTED": Image(systemName: "circle.dotted").foregroundStyle(Color.ghYellow).help("Checks running").accessibilityLabel("Checks running")
+        case "SUCCESS": Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.ghGreen).help("Checks passed").accessibilityLabel("Checks passed")
+        case "FAILURE", "ERROR": Image(systemName: "xmark.circle.fill").foregroundStyle(Color.ghRed).help("Checks failed").accessibilityLabel("Checks failed")
+        case "PENDING", "EXPECTED": Image(systemName: "circle.dashed").foregroundStyle(Color.ghYellow).help("Checks running").accessibilityLabel("Checks running")
+        default: EmptyView()
+        }
+    }
+}
+
+struct StatusChip: View {
+    let text: String
+    var icon: String?
+    var color: Color = .syMuted
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            if let icon {
+                Image(systemName: icon).font(.syIcon(10)).accessibilityHidden(true)
+            }
+            Text(text).lineLimit(1).monospacedDigit()
+        }
+        .font(.sy(size: 11, weight: .semibold))
+        .foregroundStyle(color)
+        .padding(.horizontal, 6)
+        .frame(height: TextZoom.shared.size(18))
+        .background(Capsule().fill(color.opacity(hovering ? 0.2 : (scheme == .dark ? 0.18 : 0.12))))
+        .overlay { if contrast == .increased { Capsule().strokeBorder(color, lineWidth: 1) } }
+        .fixedSize()
+        .onHover { hovering = $0 }
+    }
+}
+
+struct CIChip: View {
+    let state: String?
+
+    var body: some View {
+        switch state {
+        case "SUCCESS": StatusChip(text: "Passing", icon: "checkmark.circle.fill", color: .ghGreen).help("All checks passed")
+        case "FAILURE", "ERROR": StatusChip(text: "Failing", icon: "xmark.circle.fill", color: .ghRed).help("Some checks failed")
+        case "PENDING", "EXPECTED": StatusChip(text: "Running", icon: "circle.dashed", color: .syAmberInk).help("Checks are running")
+        default: EmptyView()
+        }
+    }
+}
+
+struct ReviewChip: View {
+    let decision: String?
+
+    var body: some View {
+        switch decision {
+        case "APPROVED": StatusChip(text: "Approved", icon: "checkmark.seal.fill", color: .ghGreen)
+        case "CHANGES_REQUESTED": StatusChip(text: "Changes requested", icon: "exclamationmark.bubble.fill", color: .ghRed)
+        case "REVIEW_REQUIRED": Image(systemName: "eye").font(.syCaption).foregroundStyle(Color.syMuted).help("Review required").accessibilityLabel("Review required")
         default: EmptyView()
         }
     }
@@ -326,16 +388,9 @@ struct ErrorStateView: View {
 }
 
 struct LoadingView: View {
-    @State private var visible = false
-
     var body: some View {
-        PullYardLoader(size: 48)
-            .opacity(visible ? 1 : 0)
+        PYLoader(style: .block, size: 48)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .task {
-                try? await Task.sleep(nanoseconds: 180_000_000)
-                withAnimation(Motion.fade) { visible = true }
-            }
     }
 }
 
@@ -369,6 +424,7 @@ struct ComposerBox: View {
         }
         .frame(minHeight: minHeight)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.sySunken))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.syLine))
     }
 }
 
@@ -389,7 +445,7 @@ struct DrawnLogoMark: View {
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 60, paused: done)) { context in
-            PullYardLogoMark(progress: done ? 1 : eased(context.date.timeIntervalSince(start) / duration), size: size)
+            PullYardLogoMark(progress: done ? 1 : Motion.easeInOut(context.date.timeIntervalSince(start) / duration), size: size)
         }
         .task {
             guard !done else { return }
@@ -401,11 +457,6 @@ struct DrawnLogoMark: View {
             try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
             done = true
         }
-    }
-
-    private func eased(_ x: Double) -> Double {
-        let t = min(1, max(0, x))
-        return t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
     }
 }
 
@@ -516,7 +567,7 @@ struct CommentSendButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if busy { ProgressView().controlSize(.small) }
+                if busy { PYLoader(size: 16) }
                 Text(busy ? "Sending…" : "Comment")
             }
         }

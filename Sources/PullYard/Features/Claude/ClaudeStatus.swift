@@ -165,7 +165,7 @@ struct TabStateBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             if state == .working {
-                ProgressView().controlSize(.mini).frame(width: 10, height: 10)
+                PYLoader(size: 11, label: "Working")
             } else {
                 Image(systemName: state.icon).font(.system(size: state == .active ? 6 : 9)).accessibilityLabel(state.title).accessibilityHidden(!compact)
             }
