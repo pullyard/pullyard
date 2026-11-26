@@ -672,6 +672,9 @@ struct JiraIssueCard: View {
             Text(issue.summary).font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText).textSelection(.enabled)
             meta
             if !issue.description.isEmpty { description }
+            if !issue.attachments.isEmpty {
+                JiraAttachmentsSection(attachments: issue.attachments, connectionID: issue.connectionID)
+            }
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill").font(.syCaption).foregroundStyle(Color.syRed)
             }

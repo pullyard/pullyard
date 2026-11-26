@@ -28,6 +28,33 @@ final class JiraTests: XCTestCase {
         XCTAssertNotNil(issue.updated)
     }
 
+    func testParsesAttachmentsAndKinds() {
+        let o: [String: Any] = [
+            "key": "KRIS-716",
+            "fields": [
+                "summary": "Dialog stays",
+                "attachment": [
+                    ["id": "10001", "filename": "ScreenRecording_1.MP4", "mimeType": "video/mp4", "size": 4_200_000,
+                     "content": "https://acme.atlassian.net/rest/api/2/attachment/content/10001",
+                     "author": ["displayName": "Alexan"], "created": "2026-11-17T15:59:46.000+0400"],
+                    ["id": 10002, "filename": "shot.PNG", "mimeType": "application/octet-stream", "size": 1200,
+                     "content": "https://acme.atlassian.net/rest/api/2/attachment/content/10002",
+                     "thumbnail": "https://acme.atlassian.net/rest/api/2/attachment/thumbnail/10002"],
+                    ["id": "10003", "filename": "log.txt", "mimeType": "text/plain", "size": 10,
+                     "content": "https://acme.atlassian.net/rest/api/2/attachment/content/10003"],
+                    ["id": "10004", "filename": "broken.png"],
+                ],
+            ],
+        ]
+        let issue = JiraClient.parseIssue(o, base: URL(string: "https://acme.atlassian.net")!)
+        XCTAssertEqual(issue.attachments.map(\.id), ["10001", "10002", "10003"])
+        XCTAssertEqual(issue.attachments.map(\.kind), [.video, .image, .other])
+        XCTAssertEqual(issue.attachments[0].author, "Alexan")
+        XCTAssertNotNil(issue.attachments[0].created)
+        XCTAssertNotNil(issue.attachments[1].thumbnail)
+        XCTAssertFalse(issue.attachments[2].isMedia)
+    }
+
     func testAuthorizationHeader() {
         XCTAssertEqual(JiraConnections.authorization(email: "", token: "abc"), "Bearer abc")
         XCTAssertEqual(JiraConnections.authorization(email: "a@b.c", token: "t"), "Basic " + Data("a@b.c:t".utf8).base64EncodedString())

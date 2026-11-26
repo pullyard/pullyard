@@ -16,12 +16,36 @@ struct JiraIssue: Identifiable, Equatable {
     let updated: Date?
     var parentKey: String? = nil
     var parentSummary: String? = nil
+    var attachments: [JiraAttachment] = []
     var connectionID: String? = nil
 
     var siteBase: String {
         guard let r = url.range(of: "/browse/") else { return url }
         return String(url[..<r.lowerBound])
     }
+}
+
+struct JiraAttachment: Identifiable, Equatable, Hashable, Sendable {
+    enum Kind: Equatable, Sendable { case image, video, other }
+
+    let id: String
+    let filename: String
+    let mimeType: String
+    let size: Int
+    let content: String
+    let thumbnail: String?
+    let author: String?
+    let created: Date?
+
+    var kind: Kind {
+        let mime = mimeType.lowercased()
+        let ext = (filename as NSString).pathExtension.lowercased()
+        if mime.hasPrefix("image/") || ["png", "jpg", "jpeg", "gif", "heic", "heif", "webp", "bmp", "tif", "tiff"].contains(ext) { return .image }
+        if mime.hasPrefix("video/") || ["mp4", "mov", "m4v", "webm", "avi", "mkv", "3gp"].contains(ext) { return .video }
+        return .other
+    }
+
+    var isMedia: Bool { kind != .other }
 }
 
 struct JiraTransition: Identifiable, Equatable {
@@ -359,6 +383,17 @@ final class JiraConnections {
     }
 }
 
+final class JiraRedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest) async -> URLRequest? {
+        guard request.url?.scheme == "https" else { return nil }
+        var next = request
+        if request.url?.host != task.originalRequest?.url?.host {
+            next.setValue(nil, forHTTPHeaderField: "Authorization")
+        }
+        return next
+    }
+}
+
 struct JiraClient: Sendable {
     let base: URL
     let authorization: String
@@ -425,7 +460,7 @@ struct JiraClient: Sendable {
     }
 
     func issue(_ key: String) async throws -> JiraIssue {
-        let fields = "summary,status,issuetype,priority,assignee,reporter,description,updated,parent"
+        let fields = "summary,status,issuetype,priority,assignee,reporter,description,updated,parent,attachment"
         let o = try json(try await request("/rest/api/2/issue/\(key)?fields=\(fields)&expand=renderedFields"))
         return Self.parseIssue(o, base: base)
     }
@@ -442,6 +477,40 @@ struct JiraClient: Sendable {
 
     func transition(_ key: String, to id: String) async throws {
         _ = try await request("/rest/api/2/issue/\(key)/transitions", method: "POST", body: ["transition": ["id": id]])
+    }
+
+    func data(at link: String) async throws -> Data {
+        let (data, response) = try await URLSession.shared.data(for: try attachmentRequest(link), delegate: JiraRedirectGuard())
+        try Self.check(response)
+        return data
+    }
+
+    func download(at link: String, to destination: URL) async throws {
+        let (temp, response) = try await URLSession.shared.download(for: try attachmentRequest(link), delegate: JiraRedirectGuard())
+        defer { try? FileManager.default.removeItem(at: temp) }
+        try Self.check(response)
+        let fm = FileManager.default
+        try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if fm.fileExists(atPath: destination.path) { try fm.removeItem(at: destination) }
+        try fm.moveItem(at: temp, to: destination)
+    }
+
+    private func attachmentRequest(_ link: String) throws -> URLRequest {
+        guard let url = URL(string: link), url.scheme == "https", url.host == base.host else {
+            throw APIError(message: "Attachment is not on this Jira site")
+        }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 120
+        req.setValue(authorization, forHTTPHeaderField: "Authorization")
+        req.setValue("no-check", forHTTPHeaderField: "X-Atlassian-Token")
+        return req
+    }
+
+    private static func check(_ response: URLResponse) throws {
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw APIError(message: status == 403 ? "No permission to open this attachment (403)" : "Jira \(status): couldn't load the attachment", status: status)
+        }
     }
 
     func comment(_ key: String, body: String) async throws {
@@ -469,7 +538,24 @@ struct JiraClient: Sendable {
             url: base.absoluteString + "/browse/" + key,
             updated: updated,
             parentKey: (f["parent"] as? [String: Any])?["key"] as? String,
-            parentSummary: ((f["parent"] as? [String: Any])?["fields"] as? [String: Any])?["summary"] as? String
+            parentSummary: ((f["parent"] as? [String: Any])?["fields"] as? [String: Any])?["summary"] as? String,
+            attachments: (f["attachment"] as? [[String: Any]] ?? []).compactMap(parseAttachment)
+        )
+    }
+
+    nonisolated static func parseAttachment(_ a: [String: Any]) -> JiraAttachment? {
+        let id = (a["id"] as? String) ?? (a["id"] as? Int).map(String.init)
+        guard let id, let content = a["content"] as? String else { return nil }
+        let created = (a["created"] as? String).flatMap { s in isoFormatter.date(from: s.replacingOccurrences(of: #"([+-]\d\d)(\d\d)$"#, with: "$1:$2", options: .regularExpression)) }
+        return JiraAttachment(
+            id: id,
+            filename: a["filename"] as? String ?? "attachment",
+            mimeType: a["mimeType"] as? String ?? "",
+            size: (a["size"] as? Int) ?? 0,
+            content: content,
+            thumbnail: a["thumbnail"] as? String,
+            author: (a["author"] as? [String: Any])?["displayName"] as? String,
+            created: created
         )
     }
 
