@@ -122,9 +122,12 @@ struct UsageOverlay: View {
                 }
             }
             if detailed {
-                breakdown
-                    .padding(12)
-                    .card(radius: 10, fill: .sySunken)
+                ScrollView {
+                    breakdown.padding(12)
+                }
+                .frame(maxHeight: 260)
+                .fixedSize(horizontal: false, vertical: true)
+                .card(radius: 10, fill: .sySunken)
             }
         }
         .padding(12)
@@ -209,7 +212,7 @@ struct UsageOverlay: View {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(c.kind == "free" ? Color.syLineStrong : TokenFormat.color(c.color, kind: c.kind))
                             .frame(width: 10, height: 10)
-                        Text(c.name + (c.kind == "deferred" ? " (deferred)" : ""))
+                        Text(c.kind == "deferred" && !c.name.localizedCaseInsensitiveContains("deferred") ? c.name + " (deferred)" : c.name)
                             .foregroundStyle(c.kind == "used" ? Color.syText : Color.syMuted)
                         Spacer()
                         Text(TokenFormat.short(c.tokens)).monospacedDigit().foregroundStyle(Color.syMuted)

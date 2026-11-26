@@ -366,18 +366,42 @@ final class SessionSeen {
         seen = (d.dictionary(forKey: Self.key) as? [String: Date]) ?? [:]
     }
 
+    private var forced = Set(UserDefaults.standard.stringArray(forKey: "agents.forcedUnread") ?? [])
+
     func isUnread(_ id: String, modified: Date) -> Bool {
-        modified > baseline && modified > (seen[id] ?? .distantPast).addingTimeInterval(2)
+        if forced.contains(id) { return true }
+        return modified > baseline && modified > (seen[id] ?? .distantPast).addingTimeInterval(2)
+    }
+
+    func markUnread(_ id: String) {
+        guard !id.isEmpty else { return }
+        forced.insert(id)
+        UserDefaults.standard.set(Array(forced), forKey: "agents.forcedUnread")
     }
 
     func mark(_ id: String) {
         guard !id.isEmpty else { return }
+        if forced.remove(id) != nil { UserDefaults.standard.set(Array(forced), forKey: "agents.forcedUnread") }
         if let last = seen[id], Date().timeIntervalSince(last) < 1 { return }
         seen[id] = Date()
         if seen.count > 600 {
             for (k, _) in seen.sorted(by: { $0.value < $1.value }).prefix(seen.count - 500) { seen[k] = nil }
         }
         UserDefaults.standard.set(seen, forKey: Self.key)
+    }
+}
+
+enum AgentGrouping: String, CaseIterable, Identifiable {
+    case folder, account, none
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .folder: return "Folder"
+        case .account: return "Account"
+        case .none: return "None"
+        }
     }
 }
 
@@ -388,12 +412,53 @@ final class AgentSessionPrefs {
     private(set) var pinned: [String]
     private(set) var titles: [String: String]
     private(set) var archived: Set<String>
+    private(set) var projectOrder: [String]
+    private(set) var detached: Set<String>
+    var grouping: AgentGrouping {
+        didSet { UserDefaults.standard.set(grouping.rawValue, forKey: "agents.grouping") }
+    }
 
     private init() {
         let d = UserDefaults.standard
         pinned = d.stringArray(forKey: "agents.pinned") ?? []
         titles = (d.dictionary(forKey: "agents.titles") as? [String: String]) ?? [:]
         archived = Set(d.stringArray(forKey: "agents.archived") ?? [])
+        projectOrder = d.stringArray(forKey: "agents.projectOrder") ?? []
+        detached = Set(d.stringArray(forKey: "agents.detached") ?? [])
+        grouping = AgentGrouping(rawValue: d.string(forKey: "agents.grouping") ?? "") ?? .folder
+    }
+
+    func ordered(_ projects: [ClaudeProject]) -> [ClaudeProject] {
+        guard !projectOrder.isEmpty else { return projects }
+        let rank = Dictionary(projectOrder.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        let fresh = projects.filter { rank[$0.id] == nil }
+        let known = projects.filter { rank[$0.id] != nil }.sorted { rank[$0.id]! < rank[$1.id]! }
+        return fresh + known
+    }
+
+    func move(_ id: String, by delta: Int, in visible: [ClaudeProject]) {
+        var order = ordered(visible).map(\.id)
+        guard let i = order.firstIndex(of: id) else { return }
+        let j = min(max(i + delta, 0), order.count - 1)
+        guard i != j else { return }
+        order.swapAt(i, j)
+        saveOrder(order)
+    }
+
+    func sortAlphabetically(_ visible: [ClaudeProject]) {
+        saveOrder(visible.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }.map(\.id))
+    }
+
+    private func saveOrder(_ order: [String]) {
+        projectOrder = order + projectOrder.filter { !order.contains($0) }
+        UserDefaults.standard.set(projectOrder, forKey: "agents.projectOrder")
+    }
+
+    func isDetached(_ id: String) -> Bool { detached.contains(id) }
+
+    func setDetached(_ id: String, _ value: Bool) {
+        if value { detached.insert(id) } else { detached.remove(id) }
+        UserDefaults.standard.set(Array(detached), forKey: "agents.detached")
     }
 
     func isPinned(_ id: String) -> Bool { pinned.contains(id) }

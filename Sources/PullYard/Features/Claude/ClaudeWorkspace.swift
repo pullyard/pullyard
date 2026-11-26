@@ -104,6 +104,7 @@ final class ClaudeTab: Identifiable {
     var terminalSleeping = false
     var terminalMemory = 0
     var unread = false
+    var environmentID: String?
     var exitCode: Int32?
     var startedAt = Date()
     let git: GitWorkingCopy
@@ -126,6 +127,15 @@ final class ClaudeTab: Identifiable {
     }
 
     var profile: ClaudeProfile? { ClaudeProfiles.shared.profile(configDir: configDir) }
+
+    var environment: AgentEnvironment? { AgentEnvironments.shared.environment(id: environmentID) }
+
+    func applyEnvironment(_ id: String?) {
+        environmentID = id
+        guard let id, let env = AgentEnvironments.shared.environment(id: id) else { return }
+        chat?.extraDirs = env.folders.filter { $0 != folder }
+        chat?.extraEnv = AgentEnvironments.shared.variables(for: id)
+    }
 
     var terminal: ClaudeTerminalView {
         if let t = _terminal { return t }
@@ -401,12 +411,12 @@ final class ClaudeWorkspace {
     }
 
     @discardableResult
-    func newSession(folder: String, prompt: String? = nil, name: String? = nil, mode: ClaudeMode? = nil, kind: ClaudeTabKind? = nil, profileID: String? = nil) -> ClaudeTab {
+    func newSession(folder: String, prompt: String? = nil, name: String? = nil, mode: ClaudeMode? = nil, kind: ClaudeTabKind? = nil, profileID: String? = nil, environmentID: String? = nil) -> ClaudeTab {
         let kind = kind ?? preferredKind
         let title = name ?? prompt.map { String($0.prefix(48)) } ?? "New session"
         let configDir = ClaudeProfiles.shared.profile(id: profileID)?.configDir ?? (profileID == nil ? ClaudeProfiles.shared.activeOverride : nil)
         if kind == .chat {
-            let tab = makeTab(folder: folder, kind: .chat, title: title, sessionId: "", configDir: configDir)
+            let tab = makeTab(folder: folder, kind: .chat, title: title, sessionId: "", configDir: configDir, environmentID: environmentID)
             startChat(tab, resume: nil, prompt: prompt, mode: mode)
             return tab
         }
@@ -414,7 +424,7 @@ final class ClaudeWorkspace {
         var args = ["--session-id", sessionId]
         if let name, !name.isEmpty { args += ["-n", name] }
         if let prompt, !prompt.isEmpty { args.append(ClaudeLauncher.positionalPrompt(prompt)) }
-        let tab = makeTab(folder: folder, kind: .terminal, title: title, sessionId: sessionId, configDir: configDir)
+        let tab = makeTab(folder: folder, kind: .terminal, title: title, sessionId: sessionId, configDir: configDir, environmentID: environmentID)
         launchTerminal(tab, extra: args, mode: mode)
         return tab
     }
@@ -428,7 +438,7 @@ final class ClaudeWorkspace {
         let kind = kind ?? preferredKind
         let owner = ClaudeProfiles.shared.profile(id: s.profileID)
         let configDir = owner.map(\.configDir) ?? ClaudeProfiles.shared.activeOverride
-        let tab = makeTab(folder: s.cwd, kind: kind, title: s.title, sessionId: fork ? "" : s.id, configDir: configDir)
+        let tab = makeTab(folder: s.cwd, kind: kind, title: fork ? s.title : AgentSessionPrefs.shared.title(s), sessionId: fork ? "" : s.id, configDir: configDir)
         if kind == .chat {
             tab.chat?.loadHistory(from: s.file)
             startChat(tab, resume: s.id, fork: fork, prompt: nil, mode: nil)
@@ -496,7 +506,7 @@ final class ClaudeWorkspace {
     func openInTerminal(_ tab: ClaudeTab) {
         guard !tab.sessionId.isEmpty else { return }
         tab.chat?.stop()
-        let t = makeTab(folder: tab.folder, kind: .terminal, title: tab.title, sessionId: tab.sessionId)
+        let t = makeTab(folder: tab.folder, kind: .terminal, title: tab.title, sessionId: tab.sessionId, configDir: .some(tab.configDir), environmentID: tab.environmentID)
         launchTerminal(t, extra: ["--resume", tab.sessionId])
         tabs.removeAll { $0.id == tab.id }
         selectedTabID = t.id
@@ -505,7 +515,7 @@ final class ClaudeWorkspace {
     func openInChat(_ tab: ClaudeTab) {
         guard !tab.sessionId.isEmpty else { return }
         if tab.terminalRunning { tab.terminal.terminate() }
-        let c = makeTab(folder: tab.folder, kind: .chat, title: tab.title, sessionId: tab.sessionId)
+        let c = makeTab(folder: tab.folder, kind: .chat, title: tab.title, sessionId: tab.sessionId, configDir: .some(tab.configDir), environmentID: tab.environmentID)
         if let file = sessionFile(tab.sessionId) { c.chat?.loadHistory(from: file) }
         startChat(c, resume: tab.sessionId, prompt: nil, mode: nil)
         tabs.removeAll { $0.id == tab.id }
@@ -586,6 +596,55 @@ final class ClaudeWorkspace {
         Task { await reloadProjects() }
     }
 
+    func trashAll(_ sessions: [ClaudeSessionInfo], in name: String) {
+        guard !sessions.isEmpty else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete all \(sessions.count) sessions in “\(name)”?"
+        alert.informativeText = "The conversation transcripts go to the Trash. Files the agents changed are not touched. You can put them back from the Trash."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        for s in sessions {
+            if let open = tab(forSession: s.id) { close(open) }
+            try? FileManager.default.trashItem(at: s.file, resultingItemURL: nil)
+        }
+        Task { await reloadProjects() }
+    }
+
+    func rename(_ tab: ClaudeTab, to title: String) {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        tab.title = t
+        if !tab.sessionId.isEmpty { AgentSessionPrefs.shared.rename(tab.sessionId, to: t) }
+        saveOpenTabs()
+    }
+
+    func markUnread(_ tab: ClaudeTab) {
+        if selectedTabID == tab.id { selectedTabID = tabs.first { $0.id != tab.id }?.id }
+        tab.unread = true
+        SessionSeen.shared.markUnread(tab.sessionId)
+    }
+
+    func newSession(in env: AgentEnvironment, profileID: String? = nil, kind: ClaudeTabKind? = nil) {
+        if let folder = env.startFolder, FileManager.default.fileExists(atPath: folder) {
+            newSession(folder: folder, kind: kind, profileID: profileID, environmentID: env.id)
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = "Start"
+        panel.message = "Choose the folder for a session in “\(env.name)”"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        newSession(folder: url.path, kind: kind, profileID: profileID, environmentID: env.id)
+    }
+
+    var orderedTabs: [ClaudeTab] {
+        let prefs = AgentSessionPrefs.shared
+        return tabs.filter { prefs.isPinned($0.sessionId) } + tabs.filter { !prefs.isPinned($0.sessionId) }
+    }
+
     func requestClose(_ tab: ClaudeTab) {
         if tab.state == .working || tab.state == .waiting {
             pendingClose = tab
@@ -631,8 +690,10 @@ final class ClaudeWorkspace {
         makeTab(folder: folder, kind: .chat, title: title, sessionId: "")
     }
 
-    private func makeTab(folder: String, kind: ClaudeTabKind, title: String, sessionId: String, configDir: String?? = .none) -> ClaudeTab {
+    private func makeTab(folder: String, kind: ClaudeTabKind, title: String, sessionId: String, configDir: String?? = .none, environmentID: String? = nil) -> ClaudeTab {
         let tab = ClaudeTab(folder: folder, kind: kind, title: title, sessionId: sessionId, git: git(for: folder), configDir: configDir)
+        tab.applyEnvironment(environmentID)
+        ClaudeTrust.mirror(folder: folder, configDir: tab.configDir)
         tab.restartChat = { [weak self, weak tab] in
             guard let self, let tab else { return }
             self.restart(tab)
@@ -694,11 +755,19 @@ final class ClaudeWorkspace {
         let kind: String
         let title: String
         let selected: Bool
+        var profileID: String?
+        var environmentID: String?
     }
 
     private struct SavedTabs: Codable {
         let profile: String
         let tabs: [SavedTab]
+    }
+
+    private static func holds(configDir: String, session id: String) -> Bool {
+        let root = URL(fileURLWithPath: configDir).appendingPathComponent("projects", isDirectory: true)
+        guard let dirs = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return false }
+        return dirs.contains { FileManager.default.fileExists(atPath: $0.appendingPathComponent(id + ".jsonl").path) }
     }
 
     private static let openTabsKey = "agents.openTabs"
@@ -709,7 +778,7 @@ final class ClaudeWorkspace {
     func saveOpenTabs() {
         guard Demo.folder == nil, restoredTabs || !tabs.isEmpty else { return }
         let saved = tabs.filter { !$0.sessionId.isEmpty }.map {
-            SavedTab(sessionId: $0.sessionId, folder: $0.folder, kind: $0.kind.rawValue, title: $0.title, selected: $0.id == selectedTabID)
+            SavedTab(sessionId: $0.sessionId, folder: $0.folder, kind: $0.kind.rawValue, title: $0.title, selected: $0.id == selectedTabID, profileID: $0.profile?.id, environmentID: $0.environmentID)
         }
         let payload = SavedTabs(profile: ClaudeProfiles.shared.activeID, tabs: saved)
         if let data = try? JSONEncoder().encode(payload) { UserDefaults.standard.set(data, forKey: Self.openTabsKey) }
@@ -720,16 +789,19 @@ final class ClaudeWorkspace {
         restoredTabs = true
         guard defaults.restoreTabs, Demo.folder == nil, tabs.isEmpty,
               let data = UserDefaults.standard.data(forKey: Self.openTabsKey),
-              let saved = try? JSONDecoder().decode(SavedTabs.self, from: data),
-              saved.profile == ClaudeProfiles.shared.activeID else { return }
+              let saved = try? JSONDecoder().decode(SavedTabs.self, from: data) else { return }
+        let profiles = ClaudeProfiles.shared
         var selected: UUID?
         for s in saved.tabs where FileManager.default.fileExists(atPath: s.folder) && tab(forSession: s.sessionId) == nil {
+            let preferred = [s.profileID, saved.profile].compactMap { profiles.profile(id: $0) }.filter { p in profiles.visible.contains { $0.id == p.id } }
+            let candidates = preferred + profiles.visible.filter { p in !preferred.contains { $0.id == p.id } }
+            guard let owner = candidates.first(where: { Self.holds(configDir: profiles.configDir(for: $0), session: s.sessionId) }) else { continue }
             let kind = ClaudeTabKind(rawValue: s.kind) ?? .chat
-            let tab = makeTab(folder: s.folder, kind: kind, title: s.title, sessionId: s.sessionId)
+            let tab = makeTab(folder: s.folder, kind: kind, title: s.title, sessionId: s.sessionId, configDir: .some(owner.configDir), environmentID: s.environmentID)
             if let chat = tab.chat {
                 chat.sessionId = s.sessionId
                 chat.sleeping = true
-                tab.pendingHistory = SessionRewind.sessionFile(id: s.sessionId, configDir: tab.configDir)
+                tab.pendingHistory = SessionRewind.sessionFile(id: s.sessionId, configDir: profiles.configDir(for: owner))
             } else {
                 tab.terminalSleeping = true
             }
@@ -745,6 +817,9 @@ final class ClaudeWorkspace {
         if let effort = defaults.effortArgument { args += ["--effort", effort] }
         if mode != .standard { args += ["--permission-mode", mode.rawValue] }
         args += StackNotesMCP.args
+        if let env = tab.environment {
+            for dir in env.folders where dir != tab.folder { args += ["--add-dir", dir] }
+        }
         args += extra
         let command = "exec claude " + args.map(ClaudeLauncher.shellQuote).joined(separator: " ")
         let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { FileManager.default.isExecutableFile(atPath: $0) ? $0 : nil } ?? "/bin/zsh"
@@ -759,6 +834,7 @@ final class ClaudeWorkspace {
             env.removeValue(forKey: key)
         }
         ClaudeProfiles.apply(tab.configDir, to: &env)
+        if let id = tab.environmentID { env.merge(AgentEnvironments.shared.variables(for: id)) { _, new in new } }
 
         tab.terminalRunning = true
         tab.exitCode = nil
