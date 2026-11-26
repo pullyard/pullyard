@@ -166,7 +166,15 @@ final class WhisperEngine {
         guard isReady, let folder = modelFolder else { throw WhisperError.notDownloaded }
         if let loading { return try await loading.value }
         let task = Task {
-            try await WhisperKit(WhisperKitConfig(modelFolder: folder.path, verbose: false, logLevel: .none, prewarm: true, load: true, download: false))
+            try await WhisperKit(WhisperKitConfig(
+                modelFolder: folder.path,
+                computeOptions: ModelComputeOptions(melCompute: .cpuAndGPU, audioEncoderCompute: .cpuAndGPU, textDecoderCompute: .cpuAndGPU),
+                verbose: false,
+                logLevel: .none,
+                prewarm: false,
+                load: true,
+                download: false
+            ))
         }
         loading = task
         do {
