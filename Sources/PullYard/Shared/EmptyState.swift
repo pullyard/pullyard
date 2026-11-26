@@ -43,6 +43,7 @@ struct BrandAurora: View {
             Circle().fill(Color.syAccent.opacity(0.08)).frame(width: 300).offset(x: 170, y: -40)
             Circle().fill(Color.syCoral.opacity(0.06)).frame(width: 260).offset(x: 20, y: 140)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .blur(radius: 70)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
