@@ -60,12 +60,20 @@ final class ChatQuickLook: NSResponder, QLPreviewPanelDataSource, QLPreviewPanel
         self.urls = urls
         start = min(max(index, 0), urls.count - 1)
         insert(into: NSApp.keyWindow ?? NSApp.mainWindow)
-        if (panel.dataSource as AnyObject?) === self {
-            panel.reloadData()
-            panel.currentPreviewItemIndex = start
-        } else {
+        if (panel.dataSource as AnyObject?) !== self {
             panel.updateController()
         }
+        // The panel picks its controller from the key window's responder chain. When that
+        // chain doesn't reach us (key window is a popover or sheet, the app isn't active, or
+        // another responder claims the panel first) it opens empty: "No items selected".
+        // Feed it directly so a click always shows the file.
+        if (panel.dataSource as AnyObject?) !== self {
+            panel.dataSource = self
+            panel.delegate = self
+        }
+        panel.reloadData()
+        panel.currentPreviewItemIndex = start
+        NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
     }
 
@@ -93,8 +101,8 @@ final class ChatQuickLook: NSResponder, QLPreviewPanelDataSource, QLPreviewPanel
     }
 
     override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
-        panel.dataSource = nil
-        panel.delegate = nil
+        if (panel.dataSource as AnyObject?) === self { panel.dataSource = nil }
+        if (panel.delegate as AnyObject?) === self { panel.delegate = nil }
         remove()
     }
 
