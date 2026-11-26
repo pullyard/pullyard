@@ -792,6 +792,7 @@ struct ChatItemView: View {
                 onCancelQueued: {
                     if let prompt = chat.cancelQueued(id), chat.draftText.isEmpty { chat.draftText = prompt }
                 },
+                onSendNow: { chat.sendNow(id) },
                 onEdit: canEdit ? { edit(id: id, text: text, replacement: $0) } : nil,
                 onFork: canEdit ? { edit(id: id, text: text, replacement: text, fork: true) } : nil
             )
@@ -832,6 +833,7 @@ struct UserBubble: View {
     let images: [ChatImage]
     var queued = false
     var onCancelQueued: (() -> Void)?
+    var onSendNow: (() -> Void)?
     var onEdit: ((String) -> Void)?
     var onFork: (() -> Void)?
     @State private var expanded = false
@@ -859,6 +861,12 @@ struct UserBubble: View {
                         Label("Queued — sends when Claude finishes", systemImage: "clock")
                             .font(.syCaption)
                             .foregroundStyle(Color.syMuted)
+                        if let onSendNow {
+                            Button("Send now", action: onSendNow)
+                                .buttonStyle(.link)
+                                .font(.syCaption.weight(.semibold))
+                                .help("Stop Claude's current turn and send this message right away")
+                        }
                         Button("Cancel") { onCancelQueued?() }
                             .buttonStyle(.link)
                             .font(.syCaption)

@@ -517,6 +517,20 @@ final class ChatSession {
         deliver(trimmed, images: images)
     }
 
+    func sendNow(_ id: String) {
+        guard let index = queuedPrompts.firstIndex(where: { $0.id == id }) else { return }
+        let prompt = queuedPrompts.remove(at: index)
+        queuedPrompts.insert(prompt, at: 0)
+        queuedIDs.removeAll { $0 == id }
+        queuedIDs.insert(id, at: 0)
+        if busy {
+            interrupt()
+        } else {
+            budgetPaused = false
+            flushQueue()
+        }
+    }
+
     func cancelQueued(_ id: String) -> String? {
         guard let index = queuedPrompts.firstIndex(where: { $0.id == id }) else { return nil }
         let prompt = queuedPrompts.remove(at: index)
