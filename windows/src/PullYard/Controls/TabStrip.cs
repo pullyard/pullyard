@@ -47,8 +47,13 @@ public sealed class TabStrip : StackPanel
         {
             var isSelected = spec.Id == selected;
             var content = Ui.H(6, Ui.Glyph(spec.Glyph, 12, isSelected ? "text" : "muted"), Ui.Text(spec.Title, 13, isSelected ? "text" : "muted", isSelected ? FontWeights.SemiBold : FontWeights.Normal));
-            if (spec.Badge is { } badge)
+            if (spec.Badge is { } chipText && spec.BadgeColor != "muted")
             {
+                content.Children.Add(Ui.StatusChip(chipText, spec.BadgeColor));
+            }
+            else if (spec.Badge is { } plain)
+            {
+                var badge = plain;
                 content.Children.Add(new Border
                 {
                     Background = isSelected ? Palette.Brush("accent", 0.16) : Palette.Brush("text", 0.08),

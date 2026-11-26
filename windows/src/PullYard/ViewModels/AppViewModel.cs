@@ -78,6 +78,7 @@ public sealed partial class AppViewModel : ObservableObject
     {
         var fallback = Section.Prs(PRFilter.ReviewRequested);
         if (NavMemoryOff) return fallback;
+        if (Settings.Shared.GetString(Keys.NavSection) is null) return Section.Overview;
         var key = NavigationMemory.NormalizeSection(Settings.Shared.GetString(Keys.NavSection), Section.AllKeys, fallback.Key, Section.Issues(IssueFilter.Assigned).Key);
         return key is null ? fallback : Section.FromKey(key) ?? fallback;
     }
@@ -85,7 +86,8 @@ public sealed partial class AppViewModel : ObservableObject
     partial void OnSectionChanged(Section? oldValue, Section newValue)
     {
         if (oldValue is null || oldValue == newValue) return;
-        if (oldValue.Kind != SectionKind.Claude) lastListSection = oldValue;
+        if (oldValue.Kind is not (SectionKind.Claude or SectionKind.Overview)) lastListSection = oldValue;
+        if (newValue.Kind == SectionKind.Search) return;
         if (!NavMemoryOff && Phase == Phase.LoggedIn && Settings.Shared.GetString(Keys.NavSection) != newValue.Key) Settings.Shared.Set(Keys.NavSection, newValue.Key);
     }
 
@@ -420,6 +422,7 @@ public sealed partial class AppViewModel : ObservableObject
         SectionKind.Notifications => ForgeCaps.HasInbox,
         SectionKind.Repos => ForgeCaps.Repositories,
         SectionKind.Claude => true,
+        SectionKind.Overview => true,
         _ => false
     };
 
@@ -655,6 +658,7 @@ public sealed partial class AppViewModel : ObservableObject
 
     private void Remember(Route route)
     {
+        if (route.Kind == RouteKind.PullRequest && route.Item is { } seen) QueueStore.Shared.MarkSeen(seen, DateTimeOffset.Now);
         recentRoutes.Remove(route);
         recentRoutes.Insert(0, route);
         if (recentRoutes.Count > 20) recentRoutes.RemoveAt(recentRoutes.Count - 1);
@@ -672,7 +676,7 @@ public sealed partial class AppViewModel : ObservableObject
     public void Open(Route route, bool push = false)
     {
         Remember(route);
-        if (Section.Kind == SectionKind.Claude)
+        if (Section.Kind is SectionKind.Claude or SectionKind.Overview)
         {
             var back = lastListSection is { } last && (Forge is null || ForgeSupports(last)) ? last : Section.Prs(PRFilter.Mine);
             Section = back;
@@ -909,6 +913,7 @@ public sealed partial class AppViewModel : ObservableObject
 
     public async Task RefreshBadges(bool live = false)
     {
+        if (!Demo.IsOn) PullYard.Views.JiraService.Connections.RefreshAllProjects(PullYard.Core.Jira.JiraConnections.ProjectsMaxAge).Forget();
         BadgesRefreshing = true;
         try
         {
@@ -962,10 +967,7 @@ public sealed partial class AppViewModel : ObservableObject
     public void SwitchClaudeProfile(string id)
     {
         if (id == ClaudeProfiles.Shared.ActiveId || ClaudeProfiles.Shared.Visible.All(p => p.Id != id)) return;
-        Claude.CloseAllForProfileSwitch();
         ClaudeProfiles.Shared.SetActive(id);
-        ClaudeUsageStore.Shared.Windows = new();
-        ClaudeUsageStore.Shared.Subscription = null;
         ClaudeAccountStore.Shared.Status = ClaudeAccountStatus.Checking;
         SwitchProfileRefresh().Forget();
     }
@@ -1000,8 +1002,12 @@ public sealed partial class AppViewModel : ObservableObject
 
     private async Task RemoveProfile(ClaudeProfile profile)
     {
+        Claude.CloseTabs(profile.ConfigDir);
+        ClaudeUsageStore.Shared.Forget(profile.ConfigDir);
         await ClaudeAccountStore.Shared.Logout(profile.ConfigDir);
         ClaudeProfiles.Shared.Remove(profile.Id);
+        Claude.AccountFilter = Claude.AccountFilter;
+        await Claude.ReloadProjects();
     }
 
     private async Task RefreshForgeBadges(IForgeClient forge)

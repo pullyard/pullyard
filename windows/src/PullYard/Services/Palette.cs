@@ -118,10 +118,10 @@ public static class Palette
         var type = key switch
         {
             "window" or "sidebar" or "list" or "panel" or "raised" or "overlay" or "sunken" or "bar" or "sub" or "code" or "button" => UIElementType.Window,
-            "dim" or "gutter" or "line" => UIElementType.GrayText,
+            "dim" or "gutter" or "line" or "harborLine" or "wake" => UIElementType.GrayText,
             "accent" or "sky" or "link" => UIElementType.Hotlight,
-            "selected" or "accentFill" or "greenFill" or "violetFill" or "redFill" or "slateFill" or "coralFill" => UIElementType.Highlight,
-            "onFill" => UIElementType.HighlightText,
+            "selected" or "accentFill" or "greenFill" or "violetFill" or "redFill" or "slateFill" or "coralFill" or "addWord" or "delWord" => UIElementType.Highlight,
+            "onFill" or "onCoral" => UIElementType.HighlightText,
             _ => UIElementType.WindowText
         };
         return SystemColor(type, alpha);

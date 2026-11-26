@@ -59,18 +59,29 @@ public sealed class SearchListView : ListPane
         List.ItemClick += OnItemClick;
         List.ContainerContentChanging += (_, e) =>
         {
-            if (!grouped && e.Item is SearchItem item && vm.Items.Count > 0 && ReferenceEquals(item, vm.Items[^1])) vm.LoadMore(Model.Api).Forget();
+            if (!grouped && e.Item is SearchItem item && vm.Items.Count > 0 && (ReferenceEquals(item, vm.Items[^1]) || ReferenceEquals(item, lastActive))) vm.LoadMore(Model.Api).Forget();
         };
         List.ContextRequested += OnContext;
         vm.PropertyChanged += OnVm;
         Model.PropertyChanged += OnModel;
-        Unloaded += (_, _) => Model.PropertyChanged -= OnModel;
+        Unloaded += (_, _) =>
+        {
+            Model.PropertyChanged -= OnModel;
+            QueueStore.Shared.Changed -= OnQueue;
+        };
         Loaded += (_, _) =>
         {
             Model.PropertyChanged -= OnModel;
             Model.PropertyChanged += OnModel;
+            QueueStore.Shared.Changed -= OnQueue;
+            QueueStore.Shared.Changed += OnQueue;
         };
     }
+
+    private SearchItem? lastActive;
+    private bool showSnoozed;
+
+    private void OnQueue() => DispatcherQueue.TryEnqueue(Render);
 
     private string Query => string.Join(" ", new[] { baseQuery, $"is:{kind}", stateFilter.Query(), "archived:false", sort.Query(), text }.Where(s => s.Length > 0));
 
@@ -191,7 +202,19 @@ public sealed class SearchListView : ListPane
         }
         else
         {
-            List.ItemsSource = vm.Items;
+            var queue = QueueStore.Shared;
+            var now = DateTimeOffset.Now;
+            var active = vm.Items.Where(i => queue.SnoozedUntil(i.Ref, now) is null).ToList();
+            var sleeping = vm.Items.Where(i => queue.SnoozedUntil(i.Ref, now) is not null).ToList();
+            lastActive = active.LastOrDefault();
+            if (sleeping.Count == 0) List.ItemsSource = vm.Items;
+            else
+            {
+                var rows = active.Cast<object>().ToList();
+                rows.Add(new SnoozedHeaderItem(sleeping.Count, showSnoozed));
+                if (showSnoozed) rows.AddRange(sleeping.Select(i => (object)new SnoozedSearchItem(i)));
+                List.ItemsSource = rows;
+            }
         }
         syncing = false;
         SyncSelection();
@@ -211,6 +234,7 @@ public sealed class SearchListView : ListPane
                 {
                     SearchItem s => s.Route,
                     GroupedSearchItem g => g.Item.Route,
+                    SnoozedSearchItem z => z.Item.Route,
                     _ => null
                 };
                 if (r == route)
@@ -231,6 +255,7 @@ public sealed class SearchListView : ListPane
         {
             SearchItem s => s.Route,
             GroupedSearchItem g => g.Item.Route,
+            SnoozedSearchItem z => z.Item.Route,
             _ => null
         };
         if (route is not null && route != Model.DetailRoot) Model.Select(route);
@@ -243,6 +268,11 @@ public sealed class SearchListView : ListPane
             if (!collapsed.Remove(h.Group.Id)) collapsed.Add(h.Group.Id);
             Render();
         }
+        else if (e.ClickedItem is SnoozedHeaderItem)
+        {
+            showSnoozed = !showSnoozed;
+            Render();
+        }
     }
 
     private void OnContext(UIElement sender, Microsoft.UI.Xaml.Input.ContextRequestedEventArgs args)
@@ -252,6 +282,7 @@ public sealed class SearchListView : ListPane
         {
             SearchItem s => s,
             GroupedSearchItem g => g.Item,
+            SnoozedSearchItem z => z.Item,
             _ => null
         };
         if (item is null) return;
@@ -266,6 +297,32 @@ public sealed class SearchListView : ListPane
             Ui.MenuItem(L.T("Menu_CopyLink", "Copy Link"), () => ShellView.Copied(item.Url, L.T("Toast_CopiedLink", "Copied link")), ""),
             Ui.MenuItem(L.T("Menu_CopyShortLink", "Copy Short Link"), () => ShellView.CopyShortLink(ShortLink.Of(item.Repository.NameWithOwner, item.Number)), "\uE8C8"));
         if (item.IsPR) menu.Items.Add(Ui.MenuItem(L.T("Menu_CopyCheckout", "Copy “gh pr checkout”"), () => CopyCommand($"gh pr checkout {item.Number} -R {item.Repository.NameWithOwner}"), ""));
+        var queue = QueueStore.Shared;
+        var now = DateTimeOffset.Now;
+        menu.Items.Insert(0, Ui.Separator());
+        menu.Items.Insert(0, Ui.MenuItem(L.T("Queue_MarkSeen", "Mark as Seen"), () => queue.MarkSeen(item.Ref, DateTimeOffset.Now), "\uE890", queue.HasNews(item.Ref, item.UpdatedAt)));
+        if (queue.SnoozedUntil(item.Ref, now) is { } until)
+        {
+            menu.Items.Insert(0, Ui.MenuItem(L.F("Queue_WakeUp", "Wake Up (snoozed until {0})", until.ToString("g", Fmt.Culture)), () => queue.Wake(item.Ref), "\uE706"));
+        }
+        else
+        {
+            var snooze = new MenuFlyoutSubItem { Text = L.T("Queue_Snooze", "Snooze"), Icon = new FontIcon { Glyph = "\uE708", FontFamily = Ui.Icons } };
+            foreach (var (preset, title) in new[]
+            {
+                (SnoozePreset.Hour, L.T("Queue_ForAnHour", "For an hour")),
+                (SnoozePreset.Tomorrow, L.T("Queue_Tomorrow", "Until tomorrow")),
+                (SnoozePreset.NextWeek, L.T("Queue_NextWeek", "Until next week"))
+            })
+            {
+                snooze.Items.Add(Ui.MenuItem(title, () =>
+                {
+                    queue.Snooze(item.Ref, QueueStore.At(preset, DateTimeOffset.Now));
+                    ShellView.Toast(L.F("Queue_Snoozed", "Snoozed {0}", ShortLink.Of(item.Ref)), false, L.T("Common_Undo", "Undo"), () => queue.Wake(item.Ref), "\uE708", "link");
+                }));
+            }
+            menu.Items.Insert(0, snooze);
+        }
         return menu;
     }
 
@@ -304,13 +361,22 @@ public sealed class NotificationsView : ListPane
             if (syncing) return;
             var n = List.SelectedItem as NotificationThread;
             selectedId = n?.Id;
-            if (n?.Route is { } r)
-            {
-                Model.Select(r);
-                if (n.Unread) MarkRead(n).Forget();
-            }
+            if (n?.Route is { } r) Model.Select(r);
             UpdateNotice();
         };
+        List.KeyDown += (_, e) =>
+        {
+            if (e.Key != Windows.System.VirtualKey.E || List.SelectedItem is not NotificationThread n) return;
+            if (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down)) return;
+            e.Handled = true;
+            MarkDone(n).Forget();
+        };
+        Loaded += (_, _) =>
+        {
+            NotificationRow.DoneRequested -= OnRowDone;
+            NotificationRow.DoneRequested += OnRowDone;
+        };
+        Unloaded += (_, _) => NotificationRow.DoneRequested -= OnRowDone;
         OnRowOpen(item =>
         {
             if (item is NotificationThread n) Open(n);
@@ -326,6 +392,11 @@ public sealed class NotificationsView : ListPane
                 ShortLink.Of(n.Route) is { } shortLink ? Ui.MenuItem(L.T("Menu_CopyShortLink", "Copy Short Link"), () => ShellView.CopyShortLink(shortLink)) : null);
             menu.ShowAt((FrameworkElement)args.OriginalSource);
         };
+    }
+
+    private void OnRowDone(NotificationThread n)
+    {
+        if (items.Any(i => i.Id == n.Id)) MarkDone(n).Forget();
     }
 
     protected override void OnAttached() => Load(true).Forget();
@@ -356,7 +427,7 @@ public sealed class NotificationsView : ListPane
                 return;
             }
             if (items.Count == 0 || loadedMode != mode) appear = RowAppearMode.Cascade;
-            items = fetched;
+            items = fetched.Where(i => !pendingDone.ContainsKey(i.Id)).ToList();
             loadedMode = mode;
             if (!showAll) Model.UnreadCount = items.Count;
         }
@@ -439,9 +510,37 @@ public sealed class NotificationsView : ListPane
         Render();
     }
 
+    private static readonly Dictionary<string, CancellationTokenSource> pendingDone = new();
+
     private async Task MarkDone(NotificationThread n)
     {
-        if (Model.Api is not { } api) return;
+        if (Model.Api is not { } api || pendingDone.ContainsKey(n.Id)) return;
+        var index = items.FindIndex(i => i.Id == n.Id);
+        if (index < 0) return;
+        var cancel = new CancellationTokenSource();
+        pendingDone[n.Id] = cancel;
+        items.RemoveAt(index);
+        if (n.Unread) Model.UnreadCount = Math.Max(0, Model.UnreadCount - 1);
+        if (selectedId == n.Id) selectedId = items.Count > index ? items[index].Id : items.LastOrDefault()?.Id;
+        Render();
+        if (selectedId is not null) List.Focus(FocusState.Programmatic);
+        ShellView.Toast(L.T("Notifications_MarkedDone", "Marked as done"), false, L.T("Common_Undo", "Undo"), () =>
+        {
+            cancel.Cancel();
+            pendingDone.Remove(n.Id);
+            items.Insert(Math.Min(index, items.Count), n);
+            if (n.Unread) Model.UnreadCount++;
+            Render();
+        }, "\uE73E", "green");
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), cancel.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+        pendingDone.Remove(n.Id);
         try
         {
             await api.MarkNotificationDone(n.Id);
@@ -449,9 +548,6 @@ public sealed class NotificationsView : ListPane
         catch
         {
         }
-        items.RemoveAll(i => i.Id == n.Id);
-        if (n.Unread) Model.UnreadCount = Math.Max(0, Model.UnreadCount - 1);
-        Render();
     }
 
     private async Task MarkAll()

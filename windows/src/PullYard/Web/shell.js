@@ -158,7 +158,7 @@
   }
 
   function stepHunk(delta) {
-    var hunks = document.querySelectorAll("section.file tr.hk");
+    var hunks = document.querySelectorAll("section.file tr.hk, section.file tr.hs");
     var top = headerHeight();
     var target = null;
     for (var i = 0; i < hunks.length; i++) {
