@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.pullyard.mobile</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>pullyard</string>
+			</array>
+		</dict>
+	</array>
+	<key>PYGitHubOAuthClientID</key>
+	<string>$(PY_GITHUB_CLIENT_ID)</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>ru</string>
+	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>PullYard listens while you dictate a message to the agent on your Mac.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>PullYard turns your dictation into text for the agent. Speech is recognized on this iPhone when possible.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>PullYard uses the camera to scan the pairing code shown by PullYard on your Mac.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>PullYard connects to PullYard on your Mac to start agent fixes and stream the chat.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_pullyard._tcp</string>
+	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.pullyard.pullrequest</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+		<key>UIImageName</key>
+		<string>LaunchLogo</string>
+		<key>UIImageRespectsSafeAreaInsets</key>
+		<false/>
+	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.pullyard.mobile.refresh</string>
+	</array>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+</dict>
+</plist>
