@@ -353,7 +353,7 @@ struct PYLinkBridge {
                 tab = open
             } else if let info = app.claude.sessionsByID[id] {
                 guard FileManager.default.fileExists(atPath: info.cwd) else { return fail("The folder of this session no longer exists on \(server.desktopName).") }
-                tab = app.claude.resume(info, kind: .chat)
+                tab = app.claude.resume(info, kind: .chat, asleep: false)
             } else {
                 return fail("This session isn't on \(server.desktopName) anymore.")
             }

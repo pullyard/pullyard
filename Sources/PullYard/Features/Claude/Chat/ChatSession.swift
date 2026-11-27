@@ -484,6 +484,7 @@ final class ChatSession {
         costBase = totalCost
         rollbacks.removeAll()
         for t in tools.values where t.status == .running { t.status = wasIntentional ? .done : .error }
+        for t in tools.values { Self.retireIfOrphaned(t) }
         if wasIntentional {
             sleeping = sessionId != nil
             pendingPermissions.removeAll()
@@ -1108,6 +1109,13 @@ final class ChatSession {
         return (Data(data), true)
     }
 
+    /// Marks a background command or sub-agent whose process has ended as stopped, so it no longer shows as working.
+    static func retireIfOrphaned(_ call: ChatToolCall) {
+        guard taskTools.contains(call.name), ChatTaskState(call).isActive else { return }
+        call.taskStatus = "stopped"
+        if call.status == .running { call.status = .done }
+    }
+
     func loadHistory(from file: URL, limit: Int = 600) {
         guard !historyLoading else { return }
         historyLoading = true
@@ -1120,7 +1128,11 @@ final class ChatSession {
     }
 
     func apply(_ history: ChatHistory) {
-        for case .tool(let c) in history.items { tools[c.id] = c }
+        for case .tool(let c) in history.items {
+            tools[c.id] = c
+            // A background task from an earlier process can't still be running: that process is gone.
+            if !running { Self.retireIfOrphaned(c) }
+        }
         var head = history.items
         if history.partial { head.insert(.notice(id: "older", text: "Showing the latest messages", isError: false), at: 0) }
         if !head.isEmpty, announceResume {

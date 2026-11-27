@@ -460,8 +460,11 @@ final class ClaudeWorkspace {
         return tab
     }
 
+    /// Opens a past session. A chat opens asleep by default: the history shows right away and the
+    /// `claude` process starts only when the user sends a message or presses Wake up.
+    /// Pass `asleep: false` when the caller sends something to it at once.
     @discardableResult
-    func resume(_ s: ClaudeSessionInfo, fork: Bool = false, kind: ClaudeTabKind? = nil) -> ClaudeTab {
+    func resume(_ s: ClaudeSessionInfo, fork: Bool = false, kind: ClaudeTabKind? = nil, asleep: Bool = true) -> ClaudeTab {
         if !fork, let open = tab(forSession: s.id) {
             selectedTabID = open.id
             return open
@@ -472,7 +475,12 @@ final class ClaudeWorkspace {
         let tab = makeTab(folder: s.cwd, kind: kind, title: fork ? s.title : AgentSessionPrefs.shared.title(s), sessionId: fork ? "" : s.id, configDir: configDir)
         if kind == .chat {
             tab.chat?.loadHistory(from: s.file)
-            startChat(tab, resume: s.id, fork: fork, prompt: nil, mode: nil)
+            if asleep, !fork, let chat = tab.chat {
+                chat.sessionId = s.id
+                chat.sleeping = true
+            } else {
+                startChat(tab, resume: s.id, fork: fork, prompt: nil, mode: nil)
+            }
         } else {
             var args = ["--resume", s.id]
             if fork { args.append("--fork-session") }
@@ -504,7 +512,7 @@ final class ClaudeWorkspace {
                 let index = tabs.firstIndex { $0.id == tab.id }
                 let new: ClaudeTab
                 if let info {
-                    new = resume(info.retitled(tab.title), kind: .chat)
+                    new = resume(info.retitled(tab.title), kind: .chat, asleep: keepOriginal)
                     new.chat?.announceResume = false
                     if filesChanged {
                         new.chat?.items.append(.notice(id: UUID().uuidString, text: keepOriginal ? "Forked — file changes made after this point are still on disk" : "Conversation rewound — file changes made after this point stay on disk", isError: false))

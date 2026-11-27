@@ -126,4 +126,19 @@ final class JiraTests: XCTestCase {
         XCTAssertEqual(JiraPromptDrafter.clean(raw), body.trimmingCharacters(in: .whitespaces))
         XCTAssertEqual(JiraPromptDrafter.clean("  plain prompt  "), "plain prompt")
     }
+
+    func testHaikuQuestionsAreParsed() {
+        let raw = """
+        Here you go {"status":"questions","findings":"use case returns early at a.dart:16","questions":[{"question":"Which actionType does the backend send for View integration?","why":"decides the branch","who":"backend","options":["dispatch","link"]},{"question":"","options":[]}]}
+        """
+        guard case .questions(let findings, let qs) = JiraPromptDrafter.outcome(raw) else { return XCTFail("expected questions") }
+        XCTAssertEqual(findings, "use case returns early at a.dart:16")
+        XCTAssertEqual(qs.count, 1)
+        XCTAssertEqual(qs[0].askLabel, "Ask backend")
+        XCTAssertEqual(qs[0].options, ["dispatch", "link"])
+        guard case .ready(let p) = JiraPromptDrafter.outcome(#"{"status":"ready","prompt":"Fix it"}"#) else { return XCTFail() }
+        XCTAssertEqual(p, "Fix it")
+        guard case .ready(let plain) = JiraPromptDrafter.outcome("Just a prompt") else { return XCTFail() }
+        XCTAssertEqual(plain, "Just a prompt")
+    }
 }

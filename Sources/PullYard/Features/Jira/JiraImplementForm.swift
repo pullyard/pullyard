@@ -23,6 +23,10 @@ struct JiraImplementForm: View {
     /// The prompt Haiku wrote last; the user's edits after it stop auto-redrafts.
     @State private var drafted: String?
     @State private var draftRun: JiraPromptDraftRun?
+    /// Haiku's open questions; while set, the form shows them instead of the prompt editor.
+    @State private var questions: [JiraDraftQuestion] = []
+    @State private var findings = ""
+    @State private var answers: [UUID: String] = [:]
     @AppStorage("jira.implement.autoDraft") private var autoDraft = true
 
     private static let profileKey = "jira.implement.profile"
@@ -69,6 +73,8 @@ struct JiraImplementForm: View {
             if app.claude.projects.isEmpty { await app.claude.reloadProjects(force: false) }
         }
         .task(id: folder) {
+            // The last project picked for this Jira project wins next time, even if no session was started.
+            if let folder { UserDefaults.standard.set(folder, forKey: Self.folderKey(projectKey)) }
             guard autoDraft, folder != nil, untouched else { return }
             draft()
         }
@@ -80,21 +86,31 @@ struct JiraImplementForm: View {
         prompt.isEmpty || prompt == Self.defaultPrompt(issue) || prompt == drafted
     }
 
-    private func draft() {
+    private func draft(followUp: JiraDraftFollowUp? = nil) {
         guard let folder else { return }
         draftRun?.cancel()
         let run = JiraPromptDraftRun()
         draftRun = run
         drafting = true
         draftError = nil
+        if followUp == nil { questions = []; answers = [:]; findings = "" }
         let configDir = ClaudeProfiles.shared.profile(id: profileID)?.configDir
         Task {
             do {
-                let text = try await run.run(issue: issue, folder: folder, configDir: configDir)
+                let outcome = try await run.run(issue: issue, folder: folder, configDir: configDir, followUp: followUp)
                 guard draftRun === run else { return }
                 withAnimation(Motion.fade) {
-                    prompt = text
-                    drafted = text
+                    switch outcome {
+                    case .ready(let text):
+                        questions = []
+                        prompt = text
+                        drafted = text
+                    case .questions(let found, let asked):
+                        // Keep what was already learned across rounds.
+                        findings = [findings, found].filter { !$0.isEmpty }.joined(separator: "\n")
+                        questions = asked
+                        answers = [:]
+                    }
                 }
             } catch is CancellationError {
             } catch {
@@ -105,6 +121,16 @@ struct JiraImplementForm: View {
                 draftRun = nil
             }
         }
+    }
+
+    /// Sends the answers back; unanswered questions go as "skipped" so Haiku lists them instead of guessing.
+    private func submitAnswers(skipAll: Bool = false) {
+        let pairs = questions.map { q -> (question: String, answer: String) in
+            let a = skipAll ? "" : (answers[q.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return (q.question, a.isEmpty ? "skipped" : a)
+        }
+        let previous = findings
+        draft(followUp: JiraDraftFollowUp(findings: previous, answers: pairs))
     }
 
     private func cancelDraft() {
@@ -326,7 +352,7 @@ struct JiraImplementForm: View {
                             .buttonStyle(JiraChipButtonStyle())
                             .help("Use the plain prompt built from the ticket")
                     }
-                    Button(action: draft) { Label(drafted == nil ? "Draft with Haiku" : "Redraft", systemImage: "sparkles") }
+                    Button { draft() } label: { Label(drafted == nil ? "Draft with Haiku" : "Redraft", systemImage: "sparkles") }
                         .buttonStyle(JiraChipButtonStyle())
                         .disabled(folder == nil)
                         .help("Haiku reads the project and the ticket, then writes a focused prompt. Cheap, read-only")
@@ -343,6 +369,12 @@ struct JiraImplementForm: View {
                     .foregroundStyle(Color.syAmber)
                     .lineLimit(2)
             }
+            if !questions.isEmpty && !drafting {
+                ScrollView { questionsCard }
+                    .frame(minHeight: 240, maxHeight: .infinity)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.black.opacity(0.22)))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.syViolet.opacity(0.45)))
+            } else {
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $prompt)
                     .font(.syCallout)
@@ -356,7 +388,40 @@ struct JiraImplementForm: View {
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.black.opacity(0.22)))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(drafting ? Color.syViolet.opacity(0.45) : Color.syLine))
             .frame(minHeight: 240, maxHeight: .infinity)
+            }
         }
+    }
+
+    private var answeredCount: Int {
+        questions.filter { !(answers[$0.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
+    }
+
+    private var questionsCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "questionmark.bubble.fill").font(.system(size: 18)).foregroundStyle(Color.syViolet)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Haiku needs \(questions.count == 1 ? "an answer" : "\(questions.count) answers") before writing the prompt")
+                        .font(.syBody.weight(.semibold)).foregroundStyle(Color.syText)
+                    Text("No guesses: answer what you know. Anything you skip goes to the agent as “verify first”.")
+                        .font(.syCaption).foregroundStyle(Color.syMuted)
+                }
+            }
+            ForEach(Array(questions.enumerated()), id: \.element.id) { i, q in
+                JiraQuestionCard(number: i + 1, question: q, answer: Binding(get: { answers[q.id] ?? "" }, set: { answers[q.id] = $0 }))
+            }
+            HStack(spacing: 10) {
+                Text("\(answeredCount) of \(questions.count) answered").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syMuted)
+                Spacer()
+                Button("Skip all") { submitAnswers(skipAll: true) }
+                    .buttonStyle(JiraChipButtonStyle())
+                    .help("Write the prompt now; every question goes to the agent as something to verify first")
+                Button { submitAnswers() } label: { Label("Write prompt", systemImage: "sparkles") }
+                    .buttonStyle(AgentGradientButtonStyle())
+                    .help("Haiku writes the prompt from what it found and your answers")
+            }
+        }
+        .padding(16)
     }
 
     private var draftingPlaceholder: some View {
@@ -598,5 +663,77 @@ private struct ImplementChoiceRow<Icon: View>: View {
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// One of Haiku's questions: pick an option or type an answer. "Ask backend" questions can be copied to forward.
+private struct JiraQuestionCard: View {
+    let number: Int
+    let question: JiraDraftQuestion
+    @Binding var answer: String
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(number)")
+                    .font(.syCaption.weight(.bold).monospacedDigit())
+                    .foregroundStyle(Color.syViolet)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(Color.syViolet.opacity(0.15)))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(question.question).font(.syBody.weight(.medium)).foregroundStyle(Color.syText).fixedSize(horizontal: false, vertical: true)
+                    if let why = question.why, !why.isEmpty {
+                        Text(why).font(.syCaption).foregroundStyle(Color.syMuted).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 6)
+                if let ask = question.askLabel {
+                    Button {
+                        copyToPasteboard(question.question)
+                        copied = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+                    } label: {
+                        Label(copied ? "Copied" : ask, systemImage: copied ? "checkmark" : "person.2.wave.2")
+                            .font(.syCaption2.weight(.semibold))
+                            .foregroundStyle(Color.syAmber)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Capsule().fill(Color.syAmber.opacity(0.14)))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy the question to send it on")
+                }
+            }
+            if !question.options.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(question.options, id: \.self) { option in
+                        let on = answer == option
+                        Button { answer = on ? "" : option } label: {
+                            HStack(spacing: 5) {
+                                if on { Image(systemName: "checkmark").font(.syCaption2.weight(.bold)) }
+                                Text(option).lineLimit(2).multilineTextAlignment(.leading)
+                            }
+                            .font(.syCallout)
+                            .foregroundStyle(on ? Color.white : Color.syText.opacity(0.88))
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(on ? Color.syViolet.opacity(0.85) : Color.syText.opacity(0.06)))
+                            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(on ? Color.clear : Color.syLine))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.leading, 28)
+            }
+            TextField(question.options.isEmpty ? "Your answer" : "Or type your own answer", text: $answer, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.syCallout)
+                .lineLimit(1...4)
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.black.opacity(0.25)))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.syLine))
+                .padding(.leading, 28)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.syText.opacity(0.03)))
     }
 }
