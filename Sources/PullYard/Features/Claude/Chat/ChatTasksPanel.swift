@@ -203,7 +203,7 @@ private struct ChatTaskRow: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(tooltip)
+                .hoverTip(tooltip)
                 .accessibilityValue(open ? "Expanded" : "Collapsed")
                 if ToolStopButton.shows(call) {
                     ToolStopButton(call: call, chat: chat)
