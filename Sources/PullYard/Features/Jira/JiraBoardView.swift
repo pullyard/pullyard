@@ -392,32 +392,40 @@ struct JiraBoardView: View {
         let shown = Array(ordered.prefix(JiraPeopleFilter.inline))
         let hidden = all.count - shown.count
         let hiddenSelected = assignees.subtracting(shown.map(\.name)).count
-        return HStack(spacing: -5) {
-            ForEach(shown) { person in
+        return HStack(spacing: -6) {
+            ForEach(Array(shown.enumerated()), id: \.element.id) { index, person in
                 let on = assignees.contains(person.name)
                 Button {
                     withAnimation(Motion.fade) { toggle(person.name) }
                 } label: {
-                    JiraPersonAvatar(person: person, size: 26)
-                        .overlay(Circle().strokeBorder(on ? Color.syAccent : Color.syPanel, lineWidth: 2))
+                    AvatarStackItem(selected: on) { JiraPersonAvatar(person: person, size: 26) }
                 }
                 .buttonStyle(.plain)
-                .zIndex(on ? 1 : 0)
-                .help(on ? "Hide \(person.name)'s issues filter" : "Only \(person.name)")
+                .zIndex(on ? 100 : Double(shown.count - index))
+                .help(on ? "Show everyone" : "Only \(person.name)")
                 .accessibilityLabel(person.name)
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
             if hidden > 0 || hasUnassigned {
                 Button { showPeople.toggle() } label: {
-                    Text(hidden > 0 ? "+\(hidden)" : "\u{2026}")
-                        .font(.syCaption.weight(.semibold).monospacedDigit())
+                    AvatarStackItem(selected: hiddenSelected > 0 || showPeople) {
+                        Group {
+                            if hidden > 0 {
+                                Text("+\(hidden)")
+                                    .font(.system(size: hidden >= 10 ? 10 : 11, weight: .semibold).monospacedDigit())
+                                    .minimumScaleFactor(0.7)
+                                    .lineLimit(1)
+                            } else {
+                                Image(systemName: "ellipsis").font(.system(size: 11, weight: .bold))
+                            }
+                        }
                         .foregroundStyle(Color.syText)
                         .frame(width: 26, height: 26)
-                        .background(Circle().fill(Color.syRaised))
-                        .overlay(Circle().strokeBorder(hiddenSelected > 0 || showPeople ? Color.syAccent : Color.syLineStrong, lineWidth: 2))
+                        .background(Circle().fill(Color.syText.opacity(0.12)))
+                    }
                 }
                 .buttonStyle(.plain)
-                .padding(.leading, 9)
+                .padding(.leading, 10)
                 .help("All assignees")
                 .accessibilityLabel("All assignees")
                 .popover(isPresented: $showPeople, arrowEdge: .bottom) {
@@ -867,15 +875,17 @@ struct JiraPeopleFilter: View {
             if on { selection.remove(key) } else { selection.insert(key) }
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: on ? "checkmark.square.fill" : "square")
-                    .foregroundStyle(on ? Color.syAccent : Color.syMuted)
-                    .font(.system(size: 15))
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(on ? Color.syAccent : Color.syDim)
+                    .font(.system(size: 16))
                 icon()
                 Text(title).font(.syBody).foregroundStyle(Color.syText).lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
             .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 8).fill(on ? Color.syAccent.opacity(0.12) : Color.clear))
+            .padding(.horizontal, 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(JiraPeopleRowStyle())
@@ -940,5 +950,25 @@ struct JiraBoardSkeleton: View {
         .scrollDisabled(true)
         .accessibilityElement()
         .accessibilityLabel("Loading board")
+    }
+}
+
+/// One circle in an overlapping avatar stack: a clean gap ring around the picture, accent when selected.
+struct AvatarStackItem<Content: View>: View {
+    var selected = false
+    var size: CGFloat = 26
+    @ViewBuilder let content: Content
+    @State private var hover = false
+
+    var body: some View {
+        content
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+            .padding(2)
+            .background(Circle().fill(selected ? Color.syAccent : Color.syPanel))
+            .scaleEffect(hover ? 1.08 : 1)
+            .animation(Motion.fade, value: hover)
+            .onHover { hover = $0 }
+            .contentShape(Circle())
     }
 }
