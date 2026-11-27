@@ -237,9 +237,7 @@ struct ChatComposer: View {
                 bottomBar
             }
             .padding(10)
-            .card(radius: 14)
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.syLineStrong))
-            .shadow(color: .black.opacity(0.06), radius: 14, y: 4)
+            .pyGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous), fallback: .syRaised)
             .padding(12)
         }
         .onChange(of: text) { updateCompletion() }
