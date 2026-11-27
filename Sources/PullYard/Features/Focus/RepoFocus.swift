@@ -165,16 +165,19 @@ struct FocusPicker: View {
     }
 
     private var ownerRow: some View {
-        FlowLayout(spacing: 4, lineSpacing: 4) {
-            OwnerChip(login: "All", avatar: nil, selected: owner == nil) { owner = nil }
-            ForEach(owners) { o in
-                OwnerChip(login: o.login, avatar: o.avatarUrl ?? "https://github.com/\(o.login).png?size=40", selected: owner == o.login) {
-                    owner = o.login
-                    Task { await loadOwner(o.login) }
+        ScrollView(.vertical, showsIndicators: false) {
+            FlowLayout(spacing: 4, lineSpacing: 4) {
+                OwnerChip(login: "All", avatar: nil, selected: owner == nil) { owner = nil }
+                ForEach(owners) { o in
+                    OwnerChip(login: o.login, avatar: o.avatarUrl ?? "https://github.com/\(o.login).png?size=40", selected: owner == o.login) {
+                        owner = o.login
+                        Task { await loadOwner(o.login) }
+                    }
                 }
             }
+            .padding(.horizontal, 12)
         }
-        .padding(.horizontal, 12)
+        .frame(height: 56)
         .padding(.bottom, 8)
     }
 
@@ -276,12 +279,6 @@ struct FocusPicker: View {
             .padding(.bottom, 8)
             if app.forge == nil {
                 ownerRow
-                if let owner, let err = ownerError[owner] {
-                    Label(err, systemImage: "exclamationmark.triangle.fill")
-                        .font(.syCaption).foregroundStyle(Color.syAmber).lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 14).padding(.bottom, 8)
-                }
             }
             Rectangle().fill(Color.syLine).frame(height: 1)
             ScrollView {
@@ -291,6 +288,12 @@ struct FocusPicker: View {
                             focus.toggle(typedRepo, account: account)
                             text = ""
                         }
+                    }
+                    if let owner, let err = ownerError[owner] {
+                        Label(err, systemImage: "exclamationmark.triangle.fill")
+                            .font(.syCaption).foregroundStyle(Color.syAmber)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
                     }
                     section("Focused", s.selected)
                     section("You’re involved", s.involved)

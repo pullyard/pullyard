@@ -58,7 +58,7 @@ struct AllPRsView: View {
                 Spacer()
             }
         }
-        .task(id: account) { await loadRepos() }
+        .task(id: account) { await loadRepos(); await loadOrgs() }
         .task(id: repo) { await loadAuthors() }
     }
 
@@ -126,7 +126,8 @@ struct AllPRsView: View {
 
     private var projectsPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            FlowLayout(spacing: 4, lineSpacing: 4) {
+            ScrollView(.vertical, showsIndicators: false) {
+                FlowLayout(spacing: 4, lineSpacing: 4) {
                     OwnerChip(login: "All", avatar: nil, selected: owner == nil) { owner = nil }
                     ForEach(owners) { o in
                         OwnerChip(login: o.login, avatar: o.avatarUrl ?? "https://github.com/\(o.login).png?size=40", selected: owner == o.login) {
@@ -134,12 +135,14 @@ struct AllPRsView: View {
                             Task { await loadOwner(o.login) }
                         }
                     }
+                }
+                .padding(.horizontal, 12)
             }
-            .padding(.horizontal, 12)
+            .frame(height: 64)
             .padding(.top, 10)
             if let owner, let err = ownerErrors[owner] {
                 Label(err, systemImage: "exclamationmark.triangle.fill")
-                    .font(.syCaption).foregroundStyle(Color.syAmber).lineLimit(3)
+                    .font(.syCaption).foregroundStyle(Color.syAmber).lineLimit(2)
                     .padding(.horizontal, 14).padding(.top, 6)
             }
             PickerPanel(title: owner.map { "PROJECTS · \($0.uppercased())" } ?? "PROJECTS", placeholder: "Filter, or owner/repo to add any",
@@ -152,12 +155,11 @@ struct AllPRsView: View {
                         },
                         isSelected: { pinned.contains($0) },
                         loading: (loadingRepos && repos.isEmpty) || (owner.map { loadingOwners.contains($0) && ownerRepos[$0] == nil } ?? false),
-                        width: 380, listHeight: 300, onAdd: addRepo) { id in
+                        width: 380, listHeight: 290, onAdd: addRepo) { id in
                 toggle(id)
             }
         }
-        .frame(width: 380)
-        .task { await loadOrgs() }
+        .frame(width: 380, height: 470, alignment: .top)
     }
 
     private func loadOrgs() async {
