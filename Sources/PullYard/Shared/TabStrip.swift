@@ -18,8 +18,6 @@ struct TabStrip<ID: Hashable>: View {
     @State private var available: CGFloat = 0
     @State private var fullWidth: CGFloat = 0
 
-    // Picks titles or icons-only from two measured widths. ViewThatFits did the same but re-measured
-    // both variants on every layout query of the parent stack, which made tab switches stutter.
     var body: some View {
         let titles = fullWidth == 0 || available == 0 || fullWidth <= available
         strip(titles: titles)

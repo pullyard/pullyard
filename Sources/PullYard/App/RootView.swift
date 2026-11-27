@@ -637,7 +637,8 @@ struct SidebarGroup<Content: View>: View {
                 .frame(maxWidth: .infinity)
                 .accessibilityHidden(true)
         } else {
-            let label = Text(rawTitle.uppercased())
+            let label = title
+                .textCase(.uppercase)
                 .font(.syCaption2.weight(.bold))
                 .tracking(0.8)
                 .foregroundStyle(Color.syDim)

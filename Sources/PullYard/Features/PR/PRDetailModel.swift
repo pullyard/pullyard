@@ -505,6 +505,7 @@ final class PRDetailModel {
         let newestFirst = ConversationOrder.newestFirst
         htmlGeneration += 1
         let generation = htmlGeneration
+        let scrollToken = scrollToLatestToken
         let box = UncheckedBox((pr, conflicts, repo))
         Task { [weak self] in
             let newHTML = await Task.detached(priority: .userInitiated) {
@@ -513,6 +514,7 @@ final class PRDetailModel {
             }.value
             guard let self, generation == self.htmlGeneration, newHTML != self.html else { return }
             self.html = newHTML
+            if self.scrollToLatestToken != scrollToken { self.scrollToLatestToken += 1 }
         }
     }
 

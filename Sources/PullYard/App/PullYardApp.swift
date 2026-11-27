@@ -126,7 +126,7 @@ struct PullYardApp: App {
         WindowGroup("Detail", for: Route.self) { $route in
             ThemedRoot {
                 if let route {
-                    WindowRootFrame(minWidth: 640, minHeight: 420) {
+                    WindowRootFrame(minWidth: 720, minHeight: 520) {
                         DetachedRouteWindow(route: route).environment(app)
                     }
                 }
