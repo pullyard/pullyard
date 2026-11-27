@@ -901,7 +901,9 @@ struct JiraIssueCard: View {
                 JiraMiniBoard(columns: columns, issueKey: issue.key,
                               current: columnIndex(issue.statusID, in: columns),
                               target: hoverTransition.flatMap { t in columnIndex(t.toID, in: columns) },
-                              targetName: hoverTransition?.to)
+                              targetName: hoverTransition?.to,
+                              currentColor: JiraStyle.statusColor(issue.statusCategory),
+                              targetColor: hoverTransition.map { JiraStyle.statusColor($0.toCategory) } ?? .syAgentAccent)
                     .padding(.horizontal, 4)
                     .padding(.top, 4)
                     .padding(.bottom, 6)
@@ -1150,6 +1152,8 @@ struct JiraMiniBoard: View {
     let current: Int?
     let target: Int?
     let targetName: String?
+    var currentColor: Color = .syText
+    var targetColor: Color = .syAgentAccent
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1161,14 +1165,14 @@ struct JiraMiniBoard: View {
             HStack(spacing: 5) {
                 Text(issueKey).font(.syCaption2.weight(.semibold).monospaced()).foregroundStyle(Color.syMuted)
                 if let current {
-                    Text(columns[current].name).font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syText.opacity(0.8))
+                    Text(columns[current].name).font(.syCaption2.weight(.semibold)).foregroundStyle(currentColor)
                 }
                 if let target, target != current {
-                    Image(systemName: "arrow.right").font(.syCaption2.weight(.bold)).foregroundStyle(Color.syAgentAccent)
-                    Text(columns[target].name).font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syAgentAccent)
+                    Image(systemName: "arrow.right").font(.syCaption2.weight(.bold)).foregroundStyle(targetColor)
+                    Text(columns[target].name).font(.syCaption2.weight(.semibold)).foregroundStyle(targetColor)
                 } else if targetName != nil, target == nil {
-                    Image(systemName: "arrow.right").font(.syCaption2.weight(.bold)).foregroundStyle(Color.syAgentAccent)
-                    Text("\(targetName ?? "") · not on this board").font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syAgentAccent)
+                    Image(systemName: "arrow.right").font(.syCaption2.weight(.bold)).foregroundStyle(targetColor)
+                    Text("\(targetName ?? "") · not on this board").font(.syCaption2.weight(.semibold)).foregroundStyle(targetColor)
                 } else {
                     Text("· hover a status to see where it goes").font(.syCaption2).foregroundStyle(Color.syDim)
                 }
@@ -1185,21 +1189,21 @@ struct JiraMiniBoard: View {
         return VStack(spacing: 4) {
             Text(column.name)
                 .font(.system(size: 8.5, weight: .semibold))
-                .foregroundStyle(isTarget ? Color.syAgentAccent : (isCurrent ? Color.syText : Color.syDim))
+                .foregroundStyle(isTarget ? targetColor : (isCurrent ? currentColor : Color.syDim))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity)
             ZStack {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(isTarget ? Color.syAgentAccent.opacity(0.12) : Color.syText.opacity(0.05))
+                    .fill(isTarget ? targetColor.opacity(0.12) : Color.syText.opacity(0.05))
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .strokeBorder(isTarget ? Color.syAgentAccent.opacity(0.6) : Color.syLine, style: StrokeStyle(lineWidth: 1, dash: isTarget ? [3, 2] : []))
+                    .strokeBorder(isTarget ? targetColor.opacity(0.6) : Color.syLine, style: StrokeStyle(lineWidth: 1, dash: isTarget ? [3, 2] : []))
                 VStack(spacing: 3) {
                     if isCurrent {
-                        card(Color.syText.opacity(moving ? 0.18 : 0.55))
+                        card(currentColor.opacity(moving ? 0.3 : 0.85))
                     }
                     if isTarget {
-                        card(Color.syAgentAccent)
+                        card(targetColor)
                     }
                     if !isCurrent && !isTarget {
                         RoundedRectangle(cornerRadius: 2).fill(Color.syText.opacity(0.06)).frame(height: 7).padding(.horizontal, 6)
