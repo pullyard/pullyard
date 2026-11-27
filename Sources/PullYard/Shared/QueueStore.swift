@@ -11,8 +11,23 @@ final class QueueStore {
     private static let sinceKey = "queue.since"
 
     private(set) var snoozed: [String: Date]
-    private(set) var seen: [String: Date]
+    @ObservationIgnored private(set) var seen: [String: Date]
+    @ObservationIgnored private var seenMarks: [String: SeenMark] = [:]
     private let since: Date
+
+    // One observable box per item, so marking a pull request seen redraws its row only.
+    @Observable
+    final class SeenMark {
+        var date: Date?
+        init(_ date: Date?) { self.date = date }
+    }
+
+    private func mark(_ key: String) -> SeenMark {
+        if let m = seenMarks[key] { return m }
+        let m = SeenMark(seen[key])
+        seenMarks[key] = m
+        return m
+    }
 
     private init() {
         let defaults = UserDefaults.standard
@@ -45,16 +60,20 @@ final class QueueStore {
     }
 
     func markSeen(_ ref: ItemRef) {
-        seen[Self.key(ref)] = Date()
+        let key = Self.key(ref)
+        let now = Date()
+        seen[key] = now
+        mark(key).date = now
         if seen.count > 600 {
             let keep = seen.sorted { $0.value > $1.value }.prefix(400)
             seen = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
+            seenMarks = seenMarks.filter { seen[$0.key] != nil }
         }
         save()
     }
 
     func hasNews(_ item: SearchItem) -> Bool {
-        if let last = seen[Self.key(item.ref)] { return item.updatedAt > last.addingTimeInterval(5) }
+        if let last = mark(Self.key(item.ref)).date { return item.updatedAt > last.addingTimeInterval(5) }
         return item.updatedAt > since
     }
 
