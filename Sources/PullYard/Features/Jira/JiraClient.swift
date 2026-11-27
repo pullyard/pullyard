@@ -20,6 +20,8 @@ struct JiraIssue: Identifiable, Equatable, Codable {
     var connectionID: String? = nil
     var statusID: String? = nil
     var labels: [String] = []
+    var created: Date? = nil
+    var reporterAvatar: String? = nil
 
     var siteBase: String {
         guard let r = url.range(of: "/browse/") else { return url }
@@ -552,7 +554,9 @@ struct JiraClient: Sendable {
             parentSummary: ((f["parent"] as? [String: Any])?["fields"] as? [String: Any])?["summary"] as? String,
             attachments: (f["attachment"] as? [[String: Any]] ?? []).compactMap(parseAttachment),
             statusID: status?["id"] as? String,
-            labels: f["labels"] as? [String] ?? []
+            labels: f["labels"] as? [String] ?? [],
+            created: (f["created"] as? String).flatMap(parseDate),
+            reporterAvatar: ((f["reporter"] as? [String: Any])?["avatarUrls"] as? [String: Any])?["48x48"] as? String
         )
     }
 
