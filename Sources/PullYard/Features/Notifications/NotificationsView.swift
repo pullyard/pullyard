@@ -31,6 +31,7 @@ struct NotificationsView: View {
                     NotificationRow(item: n, onDone: { requestDone(n) })
                         .rowAppear(n.id, rows)
                         .tag(n.id)
+                        .pyListRow(selected: selection == n.id)
                         .simultaneousGesture(TapGesture(count: 2).onEnded { open(n) })
                         .contextMenu {
                             if n.unread { Button("Mark as read") { Task { await markRead(n) } } }

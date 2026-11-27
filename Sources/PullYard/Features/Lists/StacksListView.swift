@@ -144,8 +144,7 @@ struct StacksListView: View {
             ForEach(model.entries.filter { RepoFocus.shared.includes($0.ref.repo.full, account: app.cacheAccount) }) { entry in
                 StackRow(entry: entry)
                     .tag(Route.pr(entry.ref))
-                    .listRowSeparator(.visible)
-                    .listRowSeparatorTint(Color.syLine)
+                    .pyListRow(selected: app.detailRoot == Route.pr(entry.ref))
             }
         }
         .overlay {

@@ -188,3 +188,42 @@ struct WindowRootFrame: Layout {
         }
     }
 }
+
+struct PYListRowBackground: View {
+    let selected: Bool
+    var accent: Color = .syAccent
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        ZStack {
+            Color.syList
+            shape
+                .fill(selected ? accent.opacity(scheme == .dark ? 0.20 : 0.12) : Color.syRaised.opacity(scheme == .dark ? 0.55 : 0.75))
+                .overlay(shape.strokeBorder(selected ? accent.opacity(0.5) : Color.syLine, lineWidth: 1))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+        }
+    }
+}
+
+struct PYListRow: ViewModifier {
+    let selected: Bool
+
+    func body(content: Content) -> some View {
+        if Theme.isBrand {
+            content
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(PYListRowBackground(selected: selected))
+                .listRowSeparator(.hidden)
+        } else {
+            content
+                .listRowSeparator(.visible)
+                .listRowSeparatorTint(Color.syLine)
+        }
+    }
+}
+
+extension View {
+    func pyListRow(selected: Bool) -> some View { modifier(PYListRow(selected: selected)) }
+}

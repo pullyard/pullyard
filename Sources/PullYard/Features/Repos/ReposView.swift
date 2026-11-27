@@ -31,6 +31,7 @@ struct ReposView: View {
                 RepoRow(repo: r)
                     .rowAppear(r.id, rows)
                     .tag(Route.repo(r.ref ?? RepoRef(owner: "", name: "")))
+                    .pyListRow(selected: r.ref.map { app.detailRoot == Route.repo($0) } ?? false)
                     .contextMenu {
                         Button("Open in browser") { openInBrowser(r.url) }
                         Button("Copy link") { copyToPasteboard(r.url) }

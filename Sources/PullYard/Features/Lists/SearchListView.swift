@@ -551,8 +551,7 @@ struct SearchListView: View {
         ItemRow(item: item, showRepo: !grouped)
             .rowAppear(item.id, model.rows)
             .tag(item.route)
-            .listRowSeparator(.visible)
-            .listRowSeparatorTint(Color.syLine)
+            .pyListRow(selected: app.detailRoot == item.route)
             .onAppear {
                 if !grouped, item.id == model.items.last?.id { Task { await model.loadMore(api: app.api) } }
             }

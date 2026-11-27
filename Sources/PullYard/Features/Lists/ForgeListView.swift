@@ -208,8 +208,7 @@ struct ForgeListView: View {
         ItemRow(item: item, showRepo: showRepo, numberPrefix: item.isPR ? app.provider.numberPrefix : "#")
             .rowAppear(item.id, model.rows)
             .tag(item.id)
-            .listRowSeparator(.visible)
-            .listRowSeparatorTint(Color.syLine)
+            .pyListRow(selected: app.forgeSelection?.id == item.id)
             .contextMenu { ForgeItemContextMenu(item: item) }
     }
 

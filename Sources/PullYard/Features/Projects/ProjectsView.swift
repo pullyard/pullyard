@@ -39,6 +39,7 @@ struct ProjectsListView: View {
                 .padding(.vertical, 4)
                 .rowAppear(p.id, rows)
                 .tag(Route.project(p.ref))
+                .pyListRow(selected: app.detailRoot == Route.project(p.ref))
                 .contextMenu { Button("Open in Browser") { openInBrowser(p.url) } }
             }
         }
