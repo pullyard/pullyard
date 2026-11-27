@@ -136,8 +136,10 @@ struct ForgeListView: View {
 
     private var visible: [SearchItem] {
         let q = text.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return model.items }
-        return model.items.filter {
+        let account = app.cacheAccount
+        let focused = model.items.filter { RepoFocus.shared.includes($0.repository.nameWithOwner, account: account) }
+        guard !q.isEmpty else { return focused }
+        return focused.filter {
             $0.title.lowercased().contains(q) || $0.repository.nameWithOwner.lowercased().contains(q) || ($0.author?.login.lowercased().contains(q) ?? false) || "\($0.number)" == q
         }
     }
@@ -153,6 +155,7 @@ struct ForgeListView: View {
             .labelsHidden()
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
+            FocusBanner()
             LoadingBar(active: model.loading && !model.items.isEmpty)
             Divider()
             List(selection: Binding(get: { app.forgeSelection?.id }, set: { id in app.forgeSelection = model.items.first { $0.id == id } })) {

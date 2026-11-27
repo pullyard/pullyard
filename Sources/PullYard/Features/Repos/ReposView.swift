@@ -18,10 +18,13 @@ struct ReposView: View {
     @State private var loadMoreError: String?
 
     private var visible: [RepoSummary] {
-        repos.filter { (!hideArchived || !$0.isArchived) && (text.isEmpty || $0.nameWithOwner.localizedCaseInsensitiveContains(text) || ($0.description ?? "").localizedCaseInsensitiveContains(text)) }
+        let account = app.cacheAccount
+        return repos.filter { RepoFocus.shared.includes($0.nameWithOwner, account: account) && (!hideArchived || !$0.isArchived) && (text.isEmpty || $0.nameWithOwner.localizedCaseInsensitiveContains(text) || ($0.description ?? "").localizedCaseInsensitiveContains(text)) }
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+        FocusBanner()
         List(selection: Binding(get: { app.detailRoot }, set: { app.select($0) })) {
             if let error, !repos.isEmpty { ListErrorNote(message: error) { await load() } }
             ForEach(visible) { r in
@@ -54,6 +57,7 @@ struct ReposView: View {
                     filter: text
                 ) { text = "" }
             }
+        }
         }
         .liveRefresh(updated: lastUpdated, refreshing: refreshing, error: repos.isEmpty ? nil : error) { await load() }
         .toolbarSearch(text: $text, prompt: "Filter repositories")

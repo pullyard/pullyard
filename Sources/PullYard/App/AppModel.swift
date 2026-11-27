@@ -275,6 +275,37 @@ final class AppModel {
     var myPRs: [SearchItem] = []
     var reviewRequestCount = 0 { didSet { DockBadge.set(reviews: reviewRequestCount) } }
     var myPRCount = 0
+    var focusCounts: (scope: String, reviews: Int, mine: Int)?
+
+    var sidebarReviewCount: Int {
+        guard let focused = currentFocusCounts else { return reviewRequestCount }
+        return focused.reviews
+    }
+
+    var sidebarMineCount: Int {
+        guard let focused = currentFocusCounts else { return myPRCount }
+        return focused.mine
+    }
+
+    private var currentFocusCounts: (scope: String, reviews: Int, mine: Int)? {
+        let account = cacheAccount
+        guard RepoFocus.shared.isActive(account) else { return nil }
+        if forge != nil {
+            let focus = RepoFocus.shared
+            return ("", reviewRequests.filter { focus.includes($0.repository.nameWithOwner, account: account) }.count, myPRs.filter { focus.includes($0.repository.nameWithOwner, account: account) }.count)
+        }
+        guard let counts = focusCounts, counts.scope == "\(account ?? "")|\(RepoFocus.shared.query(account))" else { return nil }
+        return counts
+    }
+
+    func refreshFocusCounts() async {
+        let account = cacheAccount
+        let query = RepoFocus.shared.query(account)
+        guard forge == nil, !query.isEmpty, let api, !Demo.isOn else { return }
+        let scope = "\(account ?? "")|\(query)"
+        guard let counts = try? await api.focusCounts(query), self.api === api, cacheAccount == account else { return }
+        focusCounts = (scope, counts.reviews, counts.mine)
+    }
     var unreadCount = 0
     var lastBadgeRefresh: Date?
     var syncError: String?
@@ -1117,6 +1148,7 @@ final class AppModel {
         }
         ActivityNotifier.shared.observe(account: cacheAccount, reviews: b?.rr.nodes, reviewTotal: b?.rr.issueCount ?? 0, mine: b?.mine.nodes)
         do { unreadCount = try await api.unreadNotificationCount(live: live) } catch { failure = failure ?? error }
+        await refreshFocusCounts()
         recordSync(failure)
     }
 

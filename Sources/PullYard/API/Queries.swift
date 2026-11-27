@@ -37,6 +37,13 @@ enum Q {
     }
     """ + badgeFragment
 
+    static let focusCounts = """
+    query FocusCounts($rr: String!, $mine: String!) {
+      rr: search(query: $rr, type: ISSUE, first: 0) { issueCount }
+      mine: search(query: $mine, type: ISSUE, first: 0) { issueCount }
+    }
+    """
+
     static let actor = "{ login avatarUrl }"
 
     static let commonTimeline = """

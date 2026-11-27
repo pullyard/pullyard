@@ -408,6 +408,9 @@ struct SidebarView: View {
             SidebarGroup("") {
                 SidebarItemList(group: "top", items: topItems)
             }
+            SidebarGroup("") {
+                FocusSidebarRow()
+            }
             let keys = layout.arrangedGroups(groupKeys)
             ForEach(keys, id: \.self) { key in
                 group(key)
@@ -416,6 +419,7 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .environment(\.sidebarCompact, compact)
+        .task(id: "\(RepoFocus.shared.query(app.cacheAccount))|\(app.cacheAccount ?? "")") { await app.refreshFocusCounts() }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
                 if !compact, app.forge == nil {
@@ -463,7 +467,7 @@ struct SidebarView: View {
     }
 
     private func prCount(_ f: PRFilter) -> Int {
-        f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0)
+        f == .reviewRequested ? app.sidebarReviewCount : (f == .mine ? app.sidebarMineCount : 0)
     }
 
     private var groupKeys: [String] {
