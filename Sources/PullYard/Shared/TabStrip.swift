@@ -50,13 +50,24 @@ struct TabStrip<ID: Hashable>: View {
                     .font(.syCallout.weight(selected ? .semibold : .regular))
                     .foregroundStyle(selected || hovered == item.id ? Color.syText : Color.syMuted)
                     .padding(.horizontal, titles ? 12 : 10)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 6)
+                    .background {
+                        if selected {
+                            Capsule()
+                                .fill(Color.syAccent.opacity(0.12))
+                                .matchedGeometryEffect(id: titles ? "pill" : "pill.compact", in: ns)
+                        } else if hovered == item.id {
+                            Capsule().fill(Color.syText.opacity(0.06))
+                        }
+                    }
+                    .padding(.vertical, 2)
                     .contentShape(Rectangle())
                     .overlay(alignment: .bottom) {
                         if selected {
                             Capsule()
                                 .fill(Color.syAccent)
-                                .frame(height: 2)
+                                .frame(width: 18, height: 3)
+                                .shadow(color: Color.syAccent.opacity(0.7), radius: 4)
                                 .matchedGeometryEffect(id: titles ? "underline" : "underline.compact", in: ns)
                         }
                     }
