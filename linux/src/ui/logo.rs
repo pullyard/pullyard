@@ -377,11 +377,8 @@ mod imp {
                     }
                 };
                 imp.elapsed.set((now - start) as f64 / 1_000_000.0);
-                let interval = if imp.mode.get() == Mode::Once { 0 } else { 30_000 };
-                if now - imp.last_draw.get() >= interval {
-                    imp.last_draw.set(now);
-                    w.queue_draw();
-                }
+                imp.last_draw.set(now);
+                w.queue_draw();
                 if imp.finished() {
                     imp.tick.borrow_mut().take();
                     w.queue_draw();

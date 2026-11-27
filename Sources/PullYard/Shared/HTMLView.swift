@@ -20,6 +20,7 @@ struct HTMLView: NSViewRepresentable {
         config.userContentController.add(WeakHandler(context.coordinator), name: "app")
         config.userContentController.addUserScript(WKUserScript(source: Self.topScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         config.preferences.isElementFullscreenEnabled = false
+        WebKitFrameRate.unlock(config.preferences)
         let view = PullWebView(frame: .zero, configuration: config)
         context.coordinator.webView = view
         view.navigationDelegate = context.coordinator
@@ -195,5 +196,29 @@ struct HTMLView: NSViewRepresentable {
             }
             parent.onAction(type, id)
         }
+    }
+}
+
+/// WebKit throttles page rendering updates (layout, paint, requestAnimationFrame)
+/// to about 60 fps unless this internal preference is cleared, which made the
+/// conversation and description pages feel stuck at 60 Hz on ProMotion and
+/// 120/144 Hz external displays. Safari exposes it as the "Prefer Page Rendering
+/// Updates near 60fps" feature flag. Looked up at runtime so a WebKit without it
+/// simply keeps its default.
+enum WebKitFrameRate {
+    private static let featureKey = "PreferPageRenderingUpdatesNear60FPSEnabled"
+
+    private static let feature: NSObject? = {
+        let list = NSSelectorFromString("_features")
+        guard let cls = WKPreferences.self as AnyObject as? NSObject.Type, cls.responds(to: list),
+              let features = cls.perform(list)?.takeUnretainedValue() as? [NSObject] else { return nil }
+        return features.first { $0.responds(to: NSSelectorFromString("key")) && ($0.value(forKey: "key") as? String) == featureKey }
+    }()
+
+    static func unlock(_ preferences: WKPreferences) {
+        let set = NSSelectorFromString("_setEnabled:forFeature:")
+        guard let feature, preferences.responds(to: set) else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, Bool, AnyObject) -> Void
+        unsafeBitCast(preferences.method(for: set), to: Setter.self)(preferences, set, false, feature)
     }
 }

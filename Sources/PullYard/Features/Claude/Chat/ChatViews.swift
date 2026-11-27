@@ -373,7 +373,7 @@ struct JumpToLatestButton: View {
                     .fill(Color.syRaised)
                     .shadow(color: .black.opacity(hover ? 0.32 : 0.2), radius: hover ? 14 : 9, y: hover ? 6 : 3)
                 let animate = !Motion.reduced && hover
-                TimelineView(.animation(minimumInterval: 1 / 60, paused: !animate)) { context in
+                TimelineView(.animation(minimumInterval: nil, paused: !animate)) { context in
                     let t = context.date.timeIntervalSince(start)
                     ZStack {
                         DiveLogo(time: animate ? t : nil)

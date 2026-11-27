@@ -20,7 +20,7 @@ enum ConversationHTML {
     private static func avatar(_ url: String?, size: Int = 32) -> String {
         guard let url else { return "<div class=\"avatar ph\"></div>" }
         let sep = url.contains("?") ? "&" : "?"
-        return "<img class=\"avatar\" src=\"\(esc(url))\(sep)s=\(size * 2)\" width=\"\(size)\" height=\"\(size)\">"
+        return "<img class=\"avatar\" src=\"\(esc(url))\(sep)s=\(size * 2)\" width=\"\(size)\" height=\"\(size)\" decoding=\"async\">"
     }
 
     private static func time(_ d: Date?) -> String {

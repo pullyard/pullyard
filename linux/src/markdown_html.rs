@@ -129,7 +129,7 @@ pub fn inline(text: &str, base: Option<&str>) -> String {
         if c == '!' && chars.get(i + 1) == Some(&'[') {
             if let Some((alt, url, next)) = link_at(&chars, i + 1) {
                 flush(&mut plain, &mut out);
-                out.push_str(&format!("<img src=\"{}\" alt=\"{}\">", esc(&absolute(&url, base)), esc(&alt)));
+                out.push_str(&format!("<img src=\"{}\" alt=\"{}\" loading=\"lazy\" decoding=\"async\">", esc(&absolute(&url, base)), esc(&alt)));
                 i = next;
                 continue;
             }
@@ -222,7 +222,7 @@ mod tests {
         assert!(html.contains("<h1>Title</h1>"), "{html}");
         assert!(html.contains(r#"<a href="https://gitlab.example.com/help">docs</a>"#), "{html}");
         assert!(html.contains("<code>code</code>"), "{html}");
-        assert!(html.contains(r#"<img src="https://gitlab.example.com/g/p/uploads/x.png" alt="shot">"#), "{html}");
+        assert!(html.contains(r#"<img src="https://gitlab.example.com/g/p/uploads/x.png" alt="shot" loading="lazy" decoding="async">"#), "{html}");
         assert!(html.contains(r#"<li><input type="checkbox" checked disabled> done</li>"#), "{html}");
         assert!(html.contains("let a = 1 &lt; 2"), "{html}");
         assert_eq!(inline("<script>", None), "&lt;script&gt;");

@@ -234,10 +234,8 @@
     var bar = document.getElementById("hbar");
     if (!bar || !bar.classList.contains("on") || !(e.target instanceof Element) || !e.target.closest("table.dt.nw")) return;
     var dx = e.deltaX || (e.shiftKey ? e.deltaY : 0);
-    if (!dx) return;
-    e.preventDefault();
-    bar.scrollLeft += dx;
-  }, { passive: false });
+    if (dx) bar.scrollLeft += dx;
+  }, { passive: true });
 
   window.addEventListener("resize", syncBar);
 

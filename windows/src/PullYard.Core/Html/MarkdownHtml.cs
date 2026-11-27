@@ -181,7 +181,7 @@ public static partial class MarkdownHtml
             }
             if (c == '!' && i + 1 < text.Length && text[i + 1] == '[' && Bracket(text, i + 1) is { } image)
             {
-                sb.Append($"<img src=\"{ConversationHtml.Esc(Absolute(image.Url, baseUrl))}\" alt=\"{ConversationHtml.Esc(image.Label)}\">");
+                sb.Append($"<img src=\"{ConversationHtml.Esc(Absolute(image.Url, baseUrl))}\" alt=\"{ConversationHtml.Esc(image.Label)}\" loading=\"lazy\" decoding=\"async\">");
                 i = image.End;
                 continue;
             }

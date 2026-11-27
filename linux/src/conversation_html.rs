@@ -20,7 +20,7 @@ fn avatar(url: Option<&str>, size: i32) -> String {
         None => "<div class=\"avatar ph\"></div>".into(),
         Some(url) => {
             let sep = if url.contains('?') { "&" } else { "?" };
-            format!("<img class=\"avatar\" src=\"{}{sep}s={}\" width=\"{size}\" height=\"{size}\">", esc(url), size * 2)
+            format!("<img class=\"avatar\" src=\"{}{sep}s={}\" width=\"{size}\" height=\"{size}\" decoding=\"async\">", esc(url), size * 2)
         }
     }
 }

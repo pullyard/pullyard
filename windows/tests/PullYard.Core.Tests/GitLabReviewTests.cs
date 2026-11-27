@@ -343,7 +343,7 @@ public class GitLabReviewTests
         Assert.Contains("<h1>Title</h1>", html);
         Assert.Contains("<a href=\"https://gitlab.example.com/help\">docs</a>", html);
         Assert.Contains("<code>code</code>", html);
-        Assert.Contains("<img src=\"https://gitlab.example.com/g/p/uploads/x.png\" alt=\"shot\">", html);
+        Assert.Contains("<img src=\"https://gitlab.example.com/g/p/uploads/x.png\" alt=\"shot\" loading=\"lazy\" decoding=\"async\">", html);
         Assert.Contains("<li><input type=\"checkbox\" checked disabled> done</li>", html);
         Assert.Contains("let a = 1 &lt; 2", html);
         Assert.Equal("&lt;script&gt;", MarkdownHtml.Inline("<script>"));
