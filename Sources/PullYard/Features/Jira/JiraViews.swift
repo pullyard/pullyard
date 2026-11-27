@@ -627,6 +627,8 @@ struct JiraIssueCard: View {
     var onClose: (() -> Void)?
     /// The full ticket is still loading: shows a shimmer where the description goes.
     var loadingDetails = false
+    /// Fields and description can be changed in place (the board's ticket view).
+    var editable = false
     var manual = false
     var onUnlink: () -> Void = {}
     var onHide: (() -> Void)?
@@ -640,6 +642,8 @@ struct JiraIssueCard: View {
     @State private var copied = false
     @State private var copiedKey = false
     @State private var statusOpen = false
+    @State private var editingDescription = false
+    @State private var hoverTransition: JiraTransition?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -692,8 +696,19 @@ struct JiraIssueCard: View {
                 }
             }
             Text(issue.summary).font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText).textSelection(.enabled)
-            meta
-            if !issue.description.isEmpty { description } else if loadingDetails { descriptionSkeleton }
+            if editable { JiraIssueFields(issue: issue, onChange: onChange) } else { meta }
+            if editingDescription {
+                JiraDescriptionEditor(issue: issue) {
+                    withAnimation(Motion.fade) { editingDescription = false }
+                } onChange: { onChange($0) }
+            } else if !issue.description.isEmpty {
+                description
+            } else if loadingDetails {
+                descriptionSkeleton
+            } else if editable {
+                Button { withAnimation(Motion.fade) { editingDescription = true } } label: { Label("Add description", systemImage: "text.badge.plus") }
+                    .buttonStyle(JiraChipButtonStyle())
+            }
             if !issue.attachments.isEmpty {
                 JiraAttachmentsSection(attachments: issue.attachments, connectionID: issue.connectionID)
             }
@@ -794,7 +809,16 @@ struct JiraIssueCard: View {
         let blocks = JiraDescriptionBlock.parse(issue.description)
         let long = blocks.count > 9 || issue.description.count > 600
         return VStack(alignment: .leading, spacing: 8) {
-            Text("DESCRIPTION").font(.syCaption2.weight(.semibold)).tracking(0.6).foregroundStyle(Color.syDim)
+            HStack {
+                Text("DESCRIPTION").font(.syCaption2.weight(.semibold)).tracking(0.6).foregroundStyle(Color.syDim)
+                Spacer()
+                if editable {
+                    Button { withAnimation(Motion.fade) { editingDescription = true } } label: { Label("Edit", systemImage: "pencil") }
+                        .buttonStyle(JiraChipButtonStyle())
+                        .controlSize(.small)
+                        .help("Edit the description in Jira")
+                }
+            }
             JiraDescriptionView(blocks: expanded || !long ? blocks : Array(blocks.prefix(8)))
                 .overlay(alignment: .bottom) {
                     if long && !expanded {
@@ -849,8 +873,40 @@ struct JiraIssueCard: View {
         .popover(isPresented: $statusOpen, arrowEdge: .bottom) { statusPanel }
     }
 
+    /// The board's columns when this ticket is on the board that is open, so the panel can show where a move lands.
+    private var boardColumns: [JiraBoardColumn] {
+        let model = JiraBoardModel.shared
+        guard model.connectionID == issue.connectionID, let sid = issue.statusID else { return [] }
+        let columns = model.snap.columns.filter { !$0.statusIDs.isEmpty }
+        return columns.contains(where: { $0.statusIDs.contains(sid) }) ? columns : []
+    }
+
+    private func columnIndex(_ statusID: String?, in columns: [JiraBoardColumn]) -> Int? {
+        guard let statusID else { return nil }
+        return columns.firstIndex { $0.statusIDs.contains(statusID) }
+    }
+
+    private var orderedTransitions: [JiraTransition] {
+        let columns = boardColumns
+        guard !columns.isEmpty else { return transitions }
+        return transitions.enumerated().sorted { a, b in
+            (columnIndex(a.element.toID, in: columns) ?? 1000 + a.offset) < (columnIndex(b.element.toID, in: columns) ?? 1000 + b.offset)
+        }.map(\.element)
+    }
+
     private var statusPanel: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        let columns = boardColumns
+        return VStack(alignment: .leading, spacing: 2) {
+            if !columns.isEmpty {
+                JiraMiniBoard(columns: columns, issueKey: issue.key,
+                              current: columnIndex(issue.statusID, in: columns),
+                              target: hoverTransition.flatMap { t in columnIndex(t.toID, in: columns) },
+                              targetName: hoverTransition?.to)
+                    .padding(.horizontal, 4)
+                    .padding(.top, 4)
+                    .padding(.bottom, 6)
+                Divider().padding(.bottom, 4)
+            }
             Text("STATUS")
                 .font(.syCaption2.weight(.semibold)).tracking(0.6).foregroundStyle(Color.syDim)
                 .padding(.horizontal, 10).padding(.top, 4).padding(.bottom, 2)
@@ -871,8 +927,11 @@ struct JiraIssueCard: View {
                     Text("No transitions available").font(.syCaption).foregroundStyle(Color.syMuted).padding(10)
                 }
             } else {
-                ForEach(transitions) { t in
-                    JiraStatusRow(name: t.to, detail: t.name == t.to ? nil : "via “\(t.name)”", category: t.toCategory, current: false) {
+                ForEach(orderedTransitions) { t in
+                    JiraStatusRow(name: t.to, detail: t.name == t.to ? nil : "via “\(t.name)”", category: t.toCategory, current: false,
+                                  onHover: { inside in
+                                      if inside { hoverTransition = t } else if hoverTransition?.id == t.id { hoverTransition = nil }
+                                  }) {
                         statusOpen = false
                         move(t)
                     }
@@ -880,7 +939,8 @@ struct JiraIssueCard: View {
             }
         }
         .padding(6)
-        .frame(width: 300)
+        .frame(width: columns.isEmpty ? 300 : min(620, max(340, CGFloat(columns.count) * 78 + 20)))
+        .onDisappear { hoverTransition = nil }
     }
 
     private func loadTransitions() async {
@@ -915,6 +975,7 @@ private struct JiraStatusRow: View {
     let detail: String?
     let category: String
     let current: Bool
+    var onHover: (Bool) -> Void = { _ in }
     let action: () -> Void
     @State private var hover = false
 
@@ -946,7 +1007,7 @@ private struct JiraStatusRow: View {
         }
         .buttonStyle(.plain)
         .allowsHitTesting(!current)
-        .onHover { hover = $0 }
+        .onHover { hover = $0; onHover($0) }
         .accessibilityAddTraits(current ? [.isSelected] : [])
     }
 }
@@ -1079,5 +1140,81 @@ struct JiraDescriptionView: View {
             .foregroundStyle(Color.syText.opacity(0.9))
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A tiny picture of the board: where the ticket is now and, while a status is hovered, where it would go.
+struct JiraMiniBoard: View {
+    let columns: [JiraBoardColumn]
+    let issueKey: String
+    let current: Int?
+    let target: Int?
+    let targetName: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                ForEach(Array(columns.enumerated()), id: \.offset) { i, column in
+                    lane(i, column)
+                }
+            }
+            HStack(spacing: 5) {
+                Text(issueKey).font(.syCaption2.weight(.semibold).monospaced()).foregroundStyle(Color.syMuted)
+                if let current {
+                    Text(columns[current].name).font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syText.opacity(0.8))
+                }
+                if let target, target != current {
+                    Image(systemName: "arrow.right").font(.syCaption2.weight(.bold)).foregroundStyle(Color.syAgentAccent)
+                    Text(columns[target].name).font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syAgentAccent)
+                } else if targetName != nil, target == nil {
+                    Image(systemName: "arrow.right").font(.syCaption2.weight(.bold)).foregroundStyle(Color.syAgentAccent)
+                    Text("\(targetName ?? "") · not on this board").font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syAgentAccent)
+                } else {
+                    Text("· hover a status to see where it goes").font(.syCaption2).foregroundStyle(Color.syDim)
+                }
+            }
+            .lineLimit(1)
+        }
+        .animation(Motion.fade, value: target)
+    }
+
+    private func lane(_ i: Int, _ column: JiraBoardColumn) -> some View {
+        let isCurrent = i == current
+        let isTarget = i == target && target != current
+        let moving = target != nil && target != current
+        return VStack(spacing: 4) {
+            Text(column.name)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(isTarget ? Color.syAgentAccent : (isCurrent ? Color.syText : Color.syDim))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity)
+            ZStack {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(isTarget ? Color.syAgentAccent.opacity(0.12) : Color.syText.opacity(0.05))
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(isTarget ? Color.syAgentAccent.opacity(0.6) : Color.syLine, style: StrokeStyle(lineWidth: 1, dash: isTarget ? [3, 2] : []))
+                VStack(spacing: 3) {
+                    if isCurrent {
+                        card(Color.syText.opacity(moving ? 0.18 : 0.55))
+                    }
+                    if isTarget {
+                        card(Color.syAgentAccent)
+                    }
+                    if !isCurrent && !isTarget {
+                        RoundedRectangle(cornerRadius: 2).fill(Color.syText.opacity(0.06)).frame(height: 7).padding(.horizontal, 6)
+                    }
+                }
+            }
+            .frame(height: 34)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func card(_ color: Color) -> some View {
+        RoundedRectangle(cornerRadius: 3, style: .continuous)
+            .fill(color)
+            .frame(height: 12)
+            .padding(.horizontal, 6)
     }
 }

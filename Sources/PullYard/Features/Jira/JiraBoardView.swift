@@ -819,7 +819,8 @@ struct JiraIssueOverlay: View {
                             flat: true,
                             onImplement: { withAnimation(Motion.fade) { implementing = true } },
                             onClose: onClose,
-                            loadingDetails: full == nil && error == nil
+                            loadingDetails: full == nil && error == nil,
+                            editable: true
                         ) { updated in
                             full = updated
                             onChange(updated)

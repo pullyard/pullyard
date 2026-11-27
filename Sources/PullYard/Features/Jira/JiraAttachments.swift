@@ -210,10 +210,10 @@ struct JiraAttachmentsSection: View {
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 132, maximum: 180), spacing: 10)], alignment: .leading, spacing: 10) {
                 ForEach(attachments) { a in
-                    JiraAttachmentTile(attachment: a, connectionID: connectionID, busy: opening == a.id) { open(a) }
+                    JiraAttachmentTile(attachment: a, connectionID: connectionID, busy: opening == a.id) { quickLook(a) }
                         .contextMenu {
-                            if a.isMedia { Button("View") { open(a) } }
                             Button("Quick Look") { quickLook(a) }
+                            if a.isMedia { Button("View in PullYard") { open(a) } }
                             Button("Open in Default App") { openExternally(a) }
                             Button("Show in Finder") { reveal(a) }
                         }

@@ -401,7 +401,7 @@ struct JiraClient: Sendable {
     let base: URL
     let authorization: String
 
-    private func request(_ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> Data {
+    func request(_ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> Data {
         guard let url = URL(string: base.absoluteString + path), url.host == base.host, url.scheme == "https" else {
             throw APIError(message: "Invalid Jira address")
         }
@@ -430,7 +430,7 @@ struct JiraClient: Sendable {
         return data
     }
 
-    private func json(_ data: Data) throws -> [String: Any] {
+    func json(_ data: Data) throws -> [String: Any] {
         guard let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
             throw APIError(message: "Jira sent a web page instead of data. Check the address: it should be just your site, like acme.atlassian.net.")
         }

@@ -110,4 +110,13 @@ final class JiraTests: XCTestCase {
         XCTAssertFalse(JiraDescriptionBlock.isHeading("The ID verification section should display the initial status until:"))
         XCTAssertFalse(JiraDescriptionBlock.isHeading("Just a sentence"))
     }
+
+    func testJiraUserWritesBackAccountIdOrName() {
+        let cloud = JiraUser.parse(["accountId": "abc", "displayName": "Rafael", "avatarUrls": ["48x48": "https://x/a.png"]])
+        XCTAssertEqual(cloud?.ref["accountId"] as? String, "abc")
+        XCTAssertEqual(cloud?.avatar, "https://x/a.png")
+        let server = JiraUser.parse(["name": "raff", "displayName": "Rafael"])
+        XCTAssertEqual(server?.ref["name"] as? String, "raff")
+        XCTAssertNil(JiraUser.parse(["accountId": "x"]))
+    }
 }
