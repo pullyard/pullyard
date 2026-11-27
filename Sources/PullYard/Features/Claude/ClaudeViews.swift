@@ -335,6 +335,7 @@ struct ClaudeProjectsColumn: View {
                     .accessibilityAddTraits(ws.selectedTabID == tab.id ? [.isButton, .isSelected] : .isButton)
                     .accessibilityAction { ws.selectedTabID = tab.id }
                     .contextMenu { AgentTabMenu(tab: tab, ws: ws) }
+                    .tabReorder(tab, ws: ws, vertical: true)
                     .transition(.opacity)
             }
         }
@@ -1472,8 +1473,9 @@ struct ClaudeTabBar: View {
         let ws = app.claude
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
-                ForEach(ws.orderedTabs) { tab in
+                ForEach(ws.barTabs) { tab in
                     ClaudeTabChip(tab: tab, selected: tab.id == ws.selectedTabID, pinned: AgentSessionPrefs.shared.isPinned(tab.sessionId))
+                        .tabReorder(tab, ws: ws, vertical: false)
                 }
                 Menu {
                     if let current = ws.selectedTab {
@@ -2672,6 +2674,7 @@ private struct ClaudeTabChip: View {
             }
             SessionStateGlyph(state: tab.state)
             Text(tab.title)
+                .italic(tab.peek)
                 .lineLimit(1)
                 .frame(maxWidth: 180, alignment: .leading)
                 .foregroundStyle(selected ? Color.syText : Color.syMuted)
@@ -2826,5 +2829,42 @@ struct AgentAccountFilter: View {
         }
         .buttonStyle(.plain)
         .help(id == nil ? "Sessions from all accounts" : "Only sessions from \(title). Double-click to open a project as \(title).")
+    }
+}
+
+extension View {
+    /// Drag a tab (in the tab bar or the Open list) onto another to move it there.
+    func tabReorder(_ tab: ClaudeTab, ws: ClaudeWorkspace, vertical: Bool) -> some View {
+        modifier(TabReorder(tab: tab, ws: ws, vertical: vertical))
+    }
+}
+
+private struct TabReorder: ViewModifier {
+    let tab: ClaudeTab
+    let ws: ClaudeWorkspace
+    let vertical: Bool
+    @State private var targeted = false
+    private static let prefix = "pullyard.tab|"
+
+    func body(content: Content) -> some View {
+        content
+            .draggable(Self.prefix + tab.id.uuidString) {
+                Text(tab.title).font(.syCallout).lineLimit(1).padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.syRaised))
+            }
+            .overlay(alignment: vertical ? .top : .leading) {
+                if targeted {
+                    Capsule().fill(Color.syAgentAccent)
+                        .frame(width: vertical ? nil : 2, height: vertical ? 2 : nil)
+                        .offset(x: vertical ? 0 : -3, y: vertical ? -1 : 0)
+                        .allowsHitTesting(false)
+                }
+            }
+            .dropDestination(for: String.self) { payloads, _ in
+                guard let raw = payloads.first, raw.hasPrefix(Self.prefix),
+                      let id = UUID(uuidString: String(raw.dropFirst(Self.prefix.count))) else { return false }
+                withAnimation(Motion.smooth) { ws.moveTab(id, onto: tab.id) }
+                return true
+            } isTargeted: { targeted = $0 }
     }
 }

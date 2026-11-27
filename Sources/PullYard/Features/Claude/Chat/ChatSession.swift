@@ -225,6 +225,8 @@ final class ChatSession {
     var createdPR: String?
     var turnStartedAt: Date?
     var sleeping = false
+    /// Called each time the process starts (a new chat, a wake, a resume).
+    @ObservationIgnored var onStart: (() -> Void)?
     @ObservationIgnored var lastActivity = Date()
     var memoryBytes = 0
     var expandedTools: Set<String> = []
@@ -459,6 +461,7 @@ final class ChatSession {
         stdin = inPipe.fileHandleForWriting
         running = true
         sleeping = false
+        onStart?()
         intentionalStop = false
         lastActivity = Date()
         lastError = nil

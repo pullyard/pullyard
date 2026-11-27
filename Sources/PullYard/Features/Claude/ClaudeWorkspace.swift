@@ -126,7 +126,12 @@ final class ClaudeTab: Identifiable {
         let dir = configDir ?? ClaudeProfiles.shared.activeOverride
         self.configDir = dir
         chat = kind == .chat ? ChatSession(folder: folder, configDir: dir) : nil
+        chat?.onStart = { [weak self] in self?.peek = false }
     }
+
+    /// Opened from history just to look at it, still asleep: kept out of the Open list and the saved
+    /// tabs until the session is woken (a message, or "Wake up"). Picking another past session replaces it.
+    var peek = false
 
     var profile: ClaudeProfile? { ClaudeProfiles.shared.profile(configDir: configDir) }
 
@@ -470,6 +475,9 @@ final class ClaudeWorkspace {
             return open
         }
         let kind = kind ?? preferredKind
+        if asleep, !fork {
+            for old in tabs where old.peek && !old.running { close(old) }
+        }
         let owner = ClaudeProfiles.shared.profile(id: s.profileID)
         let configDir = owner.map(\.configDir) ?? ClaudeProfiles.shared.activeOverride
         let tab = makeTab(folder: s.cwd, kind: kind, title: fork ? s.title : AgentSessionPrefs.shared.title(s), sessionId: fork ? "" : s.id, configDir: configDir)
@@ -478,6 +486,7 @@ final class ClaudeWorkspace {
             if asleep, !fork, let chat = tab.chat {
                 chat.sessionId = s.id
                 chat.sleeping = true
+                tab.peek = true
             } else {
                 startChat(tab, resume: s.id, fork: fork, prompt: nil, mode: nil)
             }
@@ -769,7 +778,18 @@ final class ClaudeWorkspace {
         newSession(folder: url.path, kind: kind, profileID: profileID, environmentID: env.id)
     }
 
-    var listedTabs: [ClaudeTab] { orderedTabs.filter { !$0.isDraft } }
+    var listedTabs: [ClaudeTab] { orderedTabs.filter { !$0.isDraft && !$0.peek } }
+
+    /// Tabs for the tab bar: a peeked session shows only while it is the one being looked at.
+    var barTabs: [ClaudeTab] { orderedTabs.filter { !$0.peek || $0.id == selectedTabID } }
+
+    /// Drag-and-drop: puts `id` where `target` is (after it when dragging right/down, before it otherwise).
+    func moveTab(_ id: UUID, onto target: UUID) {
+        guard id != target, let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target }) else { return }
+        let tab = tabs.remove(at: from)
+        tabs.insert(tab, at: to)
+        saveOpenTabs()
+    }
 
     var orderedTabs: [ClaudeTab] {
         let prefs = AgentSessionPrefs.shared
@@ -927,7 +947,7 @@ final class ClaudeWorkspace {
 
     func saveOpenTabs() {
         guard Demo.folder == nil, restoredTabs || !tabs.isEmpty else { return }
-        let saved = tabs.filter { !$0.sessionId.isEmpty }.map {
+        let saved = tabs.filter { !$0.sessionId.isEmpty && !$0.peek }.map {
             SavedTab(sessionId: $0.sessionId, folder: $0.folder, kind: $0.kind.rawValue, title: $0.title, selected: $0.id == selectedTabID, profileID: $0.profile?.id, environmentID: $0.environmentID)
         }
         let payload = SavedTabs(profile: ClaudeProfiles.shared.activeID, tabs: saved)
