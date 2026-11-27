@@ -298,6 +298,7 @@ struct JiraTab: View {
     @State private var open: Set<String> = []
     @State private var reload = 0
     @State private var lastUpdated: Date?
+    @State private var opened: JiraIssue?
     @Environment(AppModel.self) private var app
 
     static func keys(for pr: PullRequestDetail) -> [String] {
@@ -342,6 +343,18 @@ struct JiraTab: View {
             .animation(Motion.smooth, value: linking)
             .animation(Motion.smooth, value: open)
         }
+        .overlay {
+            if let issue = opened {
+                JiraIssueOverlay(issue: issue) {
+                    withAnimation(Motion.fade) { opened = nil }
+                } onChange: { updated in
+                    if let i = issues.firstIndex(where: { $0.key == updated.key }) { issues[i] = updated }
+                }
+                .id(issue.key)
+                .transition(.opacity)
+            }
+        }
+        .animation(Motion.fade, value: opened?.key)
         .task(id: "\(account.connections.map(\.id).joined())|\(keys.joined(separator: ","))|\(reload)") { await load(keys) }
         .onChange(of: app.refreshTick) {
             Task {
@@ -396,7 +409,7 @@ struct JiraTab: View {
     private func entry(_ key: String, primary: Bool, manual: Bool) -> some View {
         if let issue = issues.first(where: { $0.key == key }) {
             if primary || open.contains(key) {
-                JiraIssueCard(issue: issue, editable: true, manual: manual, onUnlink: { unlink(key) }, onHide: manual ? nil : { hide(key) }, onCollapse: primary ? nil : { open.remove(key) }) { updated in
+                JiraIssueCard(issue: issue, editable: true, manual: manual, onOpen: { withAnimation(Motion.fade) { opened = issue } }, onUnlink: { unlink(key) }, onHide: manual ? nil : { hide(key) }, onCollapse: primary ? nil : { open.remove(key) }) { updated in
                     if let i = issues.firstIndex(where: { $0.key == updated.key }) { issues[i] = updated }
                 }
             } else {
@@ -630,6 +643,8 @@ struct JiraIssueCard: View {
     /// Fields and description can be changed in place (the board's ticket view).
     var editable = false
     var manual = false
+    /// Makes the key and title open the full ticket view (the board's dialog).
+    var onOpen: (() -> Void)?
     var onUnlink: () -> Void = {}
     var onHide: (() -> Void)?
     var onCollapse: (() -> Void)?
@@ -664,6 +679,7 @@ struct JiraIssueCard: View {
             HStack(alignment: .center, spacing: 10) {
                 IconTile(systemImage: JiraStyle.typeIcon(issue.type), color: JiraStyle.typeColor(issue.type), size: 24)
                 Text(issue.key).font(.syCallout.weight(.semibold).monospaced()).foregroundStyle(Color.syText)
+                    .onTapGesture { onOpen?() }
                 if let type = issue.type { Text(type).font(.syCaption).foregroundStyle(Color.syMuted) }
                 if JiraConnections.shared.hasSeveral, let c = JiraConnections.shared.connection(issue.connectionID) {
                     Text(c.name)
@@ -676,6 +692,12 @@ struct JiraIssueCard: View {
                 }
                 Spacer()
                 statusMenu
+                if let onOpen {
+                    Button(action: onOpen) { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                        .buttonStyle(.borderless)
+                        .help("Open ticket")
+                        .accessibilityLabel("Open ticket")
+                }
                 if let onCollapse {
                     Button(action: onCollapse) { Image(systemName: "chevron.up") }
                         .buttonStyle(.borderless)
@@ -695,7 +717,11 @@ struct JiraIssueCard: View {
                     .accessibilityLabel("Close")
                 }
             }
-            Text(issue.summary).font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText).textSelection(.enabled)
+            if let onOpen {
+                JiraOpenTitle(text: issue.summary, action: onOpen)
+            } else {
+                Text(issue.summary).font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText).textSelection(.enabled)
+            }
             if editable { JiraIssueFields(issue: issue, onChange: onChange) } else { meta }
             if editingDescription {
                 JiraDescriptionEditor(issue: issue) {
@@ -1220,5 +1246,30 @@ struct JiraMiniBoard: View {
             .fill(color)
             .frame(height: 12)
             .padding(.horizontal, 6)
+    }
+}
+
+/// A ticket title that opens the full ticket view, underlined on hover.
+private struct JiraOpenTitle: View {
+    let text: String
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(text)
+                .font(.syTitle3.weight(.semibold))
+                .foregroundStyle(Color.syText)
+                .underline(hover, color: Color.syMuted)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            hover = inside
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+        .help("Open ticket")
     }
 }
