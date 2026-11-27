@@ -213,7 +213,7 @@ struct PYListRow: ViewModifier {
     func body(content: Content) -> some View {
         if Theme.isBrand {
             content
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 22))
                 .listRowBackground(PYListRowBackground(selected: selected))
                 .listRowSeparator(.hidden)
         } else {
