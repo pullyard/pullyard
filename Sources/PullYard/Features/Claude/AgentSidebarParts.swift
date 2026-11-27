@@ -6,11 +6,17 @@ struct AgentRowBackground: View {
     var focused = false
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 7, style: .continuous)
-            .fill(selected ? Color.syText.opacity(0.1) : (focused ? Color.syText.opacity(0.06) : Color.clear))
+        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+        let accent = Color.syAgentAccent
+        shape
+            .fill(selected
+                ? AnyShapeStyle(LinearGradient(colors: [accent.opacity(0.20), accent.opacity(0.07)], startPoint: .leading, endPoint: .trailing))
+                : AnyShapeStyle(focused ? Color.syText.opacity(0.06) : Color.clear))
             .overlay {
-                if focused && !selected {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Color.syLineStrong)
+                if selected {
+                    shape.strokeBorder(accent.opacity(0.28))
+                } else if focused {
+                    shape.strokeBorder(Color.syLineStrong)
                 }
             }
             .padding(.horizontal, 4)
@@ -313,8 +319,8 @@ struct AgentNewSessionRow: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 32)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hover ? Color.syText.opacity(0.07) : Color.syText.opacity(0.035)))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.syLine))
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.syAgentAccent.opacity(hover ? 0.16 : 0.09)))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.syAgentAccent.opacity(hover ? 0.4 : 0.22)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
