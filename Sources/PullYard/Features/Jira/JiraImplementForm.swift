@@ -13,6 +13,8 @@ struct JiraImplementForm: View {
     @State private var folder: String?
     @State private var profileID: String = ClaudeProfiles.shared.activeID
     @State private var mode: ClaudeMode = .plan
+    @State private var showProjects = false
+    @State private var showAccounts = false
 
     private static let profileKey = "jira.implement.profile"
     private static let modeKey = "jira.implement.mode"
@@ -91,21 +93,7 @@ struct JiraImplementForm: View {
     // MARK: Project and account
 
     private var projectCard: some View {
-        Menu {
-            if !projects.isEmpty {
-                Section("Recent projects") {
-                    ForEach(projects.prefix(30)) { p in
-                        Button {
-                            folder = p.path
-                        } label: {
-                            if p.path == folder { Label(p.name, systemImage: "checkmark") } else { Text(p.name) }
-                        }
-                    }
-                }
-            }
-            Divider()
-            Button("Choose Folder\u{2026}") { chooseFolder() }
-        } label: {
+        Button { showProjects.toggle() } label: {
             ImplementOptionCard(
                 caption: "Project",
                 title: folder.map { ($0 as NSString).lastPathComponent } ?? "Choose a project",
@@ -115,39 +103,63 @@ struct JiraImplementForm: View {
                 IconTile(systemImage: "folder.fill", color: .syCoral, size: 30)
             }
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
         .buttonStyle(.plain)
         .help(folder ?? "Choose the project folder")
+        .popover(isPresented: $showProjects, arrowEdge: .bottom) {
+            ImplementChoiceList(title: "Recent projects") {
+                ForEach(projects.prefix(30)) { p in
+                    ImplementChoiceRow(selected: p.path == folder, title: p.name, subtitle: (p.path as NSString).abbreviatingWithTildeInPath) {
+                        IconTile(systemImage: "folder.fill", color: .syCoral, size: 24)
+                    } action: {
+                        folder = p.path
+                        showProjects = false
+                    }
+                }
+                if projects.isEmpty {
+                    Text("No recent projects yet").font(.syCaption).foregroundStyle(Color.syMuted).padding(12)
+                }
+            } footer: {
+                Button {
+                    showProjects = false
+                    chooseFolder()
+                } label: {
+                    Label("Choose Folder\u{2026}", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.borderless)
+            }
+        }
     }
 
     private var accountCard: some View {
         let profiles = ClaudeProfiles.shared.visible
         let current = profiles.first { $0.id == profileID } ?? ClaudeProfiles.shared.active
-        return Menu {
-            ForEach(profiles) { p in
-                Button {
-                    profileID = p.id
-                } label: {
-                    let title = p.email.map { "\(p.label) · \($0)" } ?? p.label
-                    if p.id == profileID { Label(title, systemImage: "checkmark") } else { Text(title) }
-                }
-            }
-        } label: {
+        return Button { showAccounts.toggle() } label: {
             ImplementOptionCard(
                 caption: "Claude account",
                 title: current.label,
-                subtitle: current.email ?? current.plan ?? "Default account",
+                subtitle: [current.email, current.plan].compactMap { $0 }.joined(separator: " · ").nonEmpty ?? "Default account",
                 highlighted: false,
                 showsChevron: profiles.count > 1
             ) {
                 ProfileBadge(profile: current, size: 30)
             }
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
         .buttonStyle(.plain)
         .disabled(profiles.count < 2)
+        .popover(isPresented: $showAccounts, arrowEdge: .bottom) {
+            ImplementChoiceList(title: "Claude accounts") {
+                ForEach(profiles) { p in
+                    ImplementChoiceRow(selected: p.id == profileID, title: p.label, subtitle: [p.email, p.plan].compactMap { $0 }.joined(separator: " · ")) {
+                        ProfileBadge(profile: p, size: 24)
+                    } action: {
+                        profileID = p.id
+                        showAccounts = false
+                    }
+                }
+            } footer: {
+                EmptyView()
+            }
+        }
     }
 
     // MARK: Mode
@@ -355,5 +367,73 @@ struct AgentGradientButtonStyle: ButtonStyle {
             .shadow(color: Color.syCoral.opacity(enabled ? 0.35 : 0), radius: 8, y: 2)
             .contentShape(Capsule())
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
+    }
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
+}
+
+/// A popover list of choices for the implement form.
+private struct ImplementChoiceList<Rows: View, Footer: View>: View {
+    let title: String
+    @ViewBuilder let rows: Rows
+    @ViewBuilder let footer: Footer
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title.uppercased())
+                .font(.syCaption2.weight(.semibold))
+                .tracking(0.4)
+                .foregroundStyle(Color.syDim)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) { rows }
+                    .padding(6)
+            }
+            .frame(maxHeight: 380)
+            .fixedSize(horizontal: false, vertical: true)
+            if !(footer is EmptyView) {
+                Divider()
+                footer.padding(10)
+            }
+        }
+        .frame(width: 360)
+    }
+}
+
+private struct ImplementChoiceRow<Icon: View>: View {
+    let selected: Bool
+    let title: String
+    var subtitle = ""
+    @ViewBuilder let icon: Icon
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                icon
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.syCallout.weight(.medium)).foregroundStyle(Color.syText).lineLimit(1)
+                    if !subtitle.isEmpty {
+                        Text(subtitle).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                Spacer(minLength: 6)
+                if selected {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.syAccent)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.syAccent.opacity(0.12) : Color.syText.opacity(hover ? 0.06 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

@@ -158,27 +158,27 @@ final class JiraBoardModel {
         if sameColumn, before == nil, columnKeys.last == nil { return }
         if sameColumn, let before, let i = columnKeys.firstIndex(of: before), i > 0, columnKeys[i - 1] == key { return }
         let undo = snap.issues
-        reorder(key, before: before, after: after)
+        // Optimistic: the card lands in its new column and place at once, with a spinner,
+        // and goes back only if Jira refuses.
+        withAnimation(Motion.smooth) {
+            reorder(key, before: before, after: after)
+            if !sameColumn, let i = snap.issues.firstIndex(where: { $0.key == key }), let target = column.statusIDs.first {
+                snap.issues[i] = Self.with(snap.issues[i], status: column.name, category: issue.statusCategory, statusID: target)
+            }
+        }
         moving.insert(key)
         defer { moving.remove(key) }
         do {
             if !sameColumn {
                 let transitions = try await client.transitions(key)
                 guard let t = transitions.first(where: { $0.toID.map(column.statusIDs.contains) == true }) else {
-                    snap.issues = undo
+                    if id == connectionID { withAnimation(Motion.smooth) { snap.issues = undo } }
                     error = "\(key) can't move to \(column.name) from \(issue.status) — the workflow has no such transition."
                     return
                 }
                 try await client.transition(key, to: t.id)
                 guard id == connectionID, let i = snap.issues.firstIndex(where: { $0.key == key }) else { return }
-                let u = snap.issues[i]
-                snap.issues[i] = JiraIssue(key: u.key, summary: u.summary, status: t.to, statusCategory: t.toCategory,
-                                           type: u.type, priority: u.priority, assignee: u.assignee,
-                                           assigneeAvatar: u.assigneeAvatar, reporter: u.reporter,
-                                           description: u.description, url: u.url, updated: Date(),
-                                           parentKey: u.parentKey, parentSummary: u.parentSummary,
-                                           attachments: u.attachments, connectionID: u.connectionID,
-                                           statusID: t.toID, labels: u.labels)
+                snap.issues[i] = Self.with(snap.issues[i], status: t.to, category: t.toCategory, statusID: t.toID)
             }
             do {
                 try await client.rank(key, before: before, after: after)
@@ -188,9 +188,19 @@ final class JiraBoardModel {
             if id == connectionID { store(id) }
             error = nil
         } catch {
-            if id == connectionID, sameColumn { snap.issues = undo }
+            if id == connectionID { withAnimation(Motion.smooth) { snap.issues = undo } }
             self.error = error.localizedDescription
         }
+    }
+
+    private static func with(_ u: JiraIssue, status: String, category: String, statusID: String?) -> JiraIssue {
+        JiraIssue(key: u.key, summary: u.summary, status: status, statusCategory: category,
+                  type: u.type, priority: u.priority, assignee: u.assignee,
+                  assigneeAvatar: u.assigneeAvatar, reporter: u.reporter,
+                  description: u.description, url: u.url, updated: Date(),
+                  parentKey: u.parentKey, parentSummary: u.parentSummary,
+                  attachments: u.attachments, connectionID: u.connectionID,
+                  statusID: statusID, labels: u.labels)
     }
 
     /// Local, optimistic reorder so the card lands where it was dropped before Jira answers.
@@ -721,7 +731,6 @@ struct JiraIssueOverlay: View {
     @State private var full: JiraIssue?
     @State private var error: String?
     @State private var implementing = false
-    @State private var contentHeight: CGFloat = 300
 
     var body: some View {
         GeometryReader { geo in
@@ -768,36 +777,47 @@ struct JiraIssueOverlay: View {
             .frame(height: min(maxHeight, 860))
         } else {
             // Sized to the ticket, scrolling only when it is taller than the window.
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    JiraIssueCard(
-                        issue: full ?? issue,
-                        flat: true,
-                        onImplement: { withAnimation(Motion.fade) { implementing = true } },
-                        onClose: onClose
-                    ) { updated in
-                        full = updated
-                        onChange(updated)
+            FitHeightLayout(maxHeight: maxHeight) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        JiraIssueCard(
+                            issue: full ?? issue,
+                            flat: true,
+                            onImplement: { withAnimation(Motion.fade) { implementing = true } },
+                            onClose: onClose
+                        ) { updated in
+                            full = updated
+                            onChange(updated)
+                        }
+                        if let error {
+                            Label(error, systemImage: "exclamationmark.triangle.fill").font(.syCaption).foregroundStyle(Color.syRed)
+                                .padding(.horizontal, 18).padding(.bottom, 12)
+                        }
                     }
-                    if let error {
-                        Label(error, systemImage: "exclamationmark.triangle.fill").font(.syCaption).foregroundStyle(Color.syRed)
-                            .padding(.horizontal, 18).padding(.bottom, 12)
-                    }
+                    .padding(6)
                 }
-                .padding(6)
-                .background(GeometryReader { g in Color.clear.preference(key: JiraOverlayHeightKey.self, value: g.size.height) })
             }
-            .scrollIndicators(.automatic)
-            .frame(height: min(contentHeight, maxHeight))
-            .onPreferenceChange(JiraOverlayHeightKey.self) { contentHeight = $0 }
         }
     }
 }
 
-private struct JiraOverlayHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 300
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+/// Gives its one child (a ScrollView) the child's natural height, capped at `maxHeight`,
+/// so a short ticket gets a short panel and a long one scrolls.
+private struct FitHeightLayout: Layout {
+    let maxHeight: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        let width = proposal.width
+        let natural = child.sizeThatFits(ProposedViewSize(width: width, height: nil))
+        return CGSize(width: width ?? natural.width, height: min(natural.height, maxHeight))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+    }
 }
+
 
 struct JiraPerson: Identifiable, Hashable {
     let name: String
