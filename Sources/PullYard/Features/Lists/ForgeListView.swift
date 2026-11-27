@@ -153,11 +153,11 @@ struct ForgeListView: View {
             .pickerStyle(.segmented)
             .tint(Color.syAccentFill)
             .labelsHidden()
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
             FocusBanner()
             LoadingBar(active: model.loading && !model.items.isEmpty)
-            Divider()
             List(selection: Binding(get: { app.forgeSelection?.id }, set: { id in app.forgeSelection = model.items.first { $0.id == id } })) {
                 if kind.grouped {
                     ForEach(groups(items)) { group in

@@ -453,24 +453,21 @@ struct SearchListView: View {
                     }
                     .pickerStyle(.inline)
                 } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "arrow.up.arrow.down")
-                        Text(sort.short)
-                    }
-                    .font(.syCaption.weight(.medium))
+                    PYPillMenuLabel(icon: "arrow.up.arrow.down", title: sort.short)
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .pyPill()
                 .help("Sort: \(sort.title) · Density: \(density.title)")
                 .accessibilityLabel("Sort")
                 .accessibilityValue(sort.title)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
             FocusBanner()
             LoadingBar(active: model.loading && !model.showingCached && !model.items.isEmpty)
-            Divider()
             List(selection: Binding(get: { app.detailRoot }, set: { app.select($0) })) {
                 if grouped {
                     ForEach(model.groups) { group in
@@ -635,12 +632,7 @@ struct RepoGroupHeader: View {
                 Text(group.owner).font(.syCaption2).foregroundStyle(Color.syDim).lineLimit(1)
             }
             Spacer()
-            Text("\(group.items.count)")
-                .font(.syCaption2.weight(.semibold).monospacedDigit())
-                .foregroundStyle(color)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(Capsule().fill(color.opacity(0.14)))
+            PYCountBadge(count: group.items.count, tint: color)
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onToggle)
@@ -738,7 +730,7 @@ struct ItemRow: View {
         .padding(.vertical, density == .compact ? 2 : 4)
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
-        .hoverHighlight(radius: 7)
+        .hoverHighlight(radius: 10)
         .padding(.horizontal, -6)
         .help(item.title)
         .accessibilityElement(children: .ignore)

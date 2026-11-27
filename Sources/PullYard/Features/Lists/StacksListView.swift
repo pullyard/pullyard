@@ -184,7 +184,7 @@ private struct StackRow: View {
         let root = entry.tree.nodes[entry.tree.root]
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Image(systemName: "square.stack.3d.up.fill").foregroundStyle(Color.syIndigo)
+                IconTile(systemImage: "square.stack.3d.up.fill", color: .syIndigo, size: 22)
                 Text(root.map { "#\($0.number) \($0.title)" } ?? "").font(.syBody).fontWeight(.medium).lineLimit(1)
             }
             HStack(spacing: 5) {
@@ -200,8 +200,8 @@ private struct StackRow: View {
                 HStack(spacing: 3) {
                     ForEach(nodes) { n in
                         Capsule()
-                            .fill(n.status.color.opacity(entry.mine.contains(n.number) ? 0.9 : 0.4))
-                            .frame(width: 12, height: 5)
+                            .fill(n.status.color.opacity(entry.mine.contains(n.number) ? 0.9 : 0.4).gradient)
+                            .frame(width: 14, height: 6)
                             .help("#\(n.number) \(n.title) — \(n.status.title)")
                     }
                 }
