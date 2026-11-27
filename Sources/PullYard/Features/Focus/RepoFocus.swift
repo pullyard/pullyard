@@ -141,7 +141,67 @@ struct FocusPicker: View {
     @State private var accessible: [String] = []
     @State private var loading = false
     @State private var involved: [String] = []
+    @State private var owner: String?
+    @State private var orgs: [GitHubOwner] = []
+    @State private var ownerRepos: [String: [String]] = [:]
+    @State private var ownerError: [String: String] = [:]
+    @State private var loadingOwner: String?
     private var focus: RepoFocus { .shared }
+
+    /// You, your organizations, then other owners of repositories you can see.
+    private var owners: [GitHubOwner] {
+        var out: [GitHubOwner] = []
+        if let me = app.user { out.append(GitHubOwner(login: me.login, avatarUrl: me.avatarUrl)) }
+        for o in orgs where !out.contains(where: { $0.login.lowercased() == o.login.lowercased() }) { out.append(o) }
+        for repo in involved + accessible {
+            let login = String(repo.split(separator: "/").first ?? "")
+            if !login.isEmpty, !out.contains(where: { $0.login.lowercased() == login.lowercased() }) {
+                out.append(GitHubOwner(login: login, avatarUrl: nil))
+            }
+        }
+        return out
+    }
+
+    private var ownerRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                OwnerChip(login: "All", avatar: nil, selected: owner == nil) { owner = nil }
+                ForEach(owners) { o in
+                    OwnerChip(login: o.login, avatar: o.avatarUrl ?? "https://github.com/\(o.login).png?size=40", selected: owner == o.login) {
+                        owner = o.login
+                        Task { await loadOwner(o.login) }
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+        }
+        .padding(.bottom, 8)
+    }
+
+    private func loadOrgs() async {
+        guard orgs.isEmpty, app.forge == nil, let api = app.api else { return }
+        orgs = (try? await api.organizations()) ?? []
+    }
+
+    private func loadOwner(_ login: String) async {
+        guard ownerRepos[login] == nil, loadingOwner != login, let api = app.api else { return }
+        loadingOwner = login
+        defer { if loadingOwner == login { loadingOwner = nil } }
+        do {
+            var names: [String] = []
+            var after: String?
+            for _ in 0..<4 {
+                guard let page = try await api.ownerRepos(login, after: after) else { break }
+                names += page.nodes.filter { !$0.isArchived }.map(\.nameWithOwner)
+                guard page.pageInfo.hasNextPage, let next = page.pageInfo.endCursor else { break }
+                after = next
+            }
+            ownerRepos[login] = names
+            ownerError[login] = names.isEmpty ? "No repositories visible. If \(login) restricts third-party apps, grant PullYard access in GitHub (Settings → Applications)." : nil
+        } catch {
+            ownerError[login] = "\(error.localizedDescription). \(login) may need to grant PullYard access in GitHub (Settings → Applications)."
+        }
+    }
 
     private func involvedRepos() -> [String] {
         let items = app.reviewRequests + app.myPRs + SearchListModel.cachedItems + ForgeListModel.cachedItems
@@ -152,6 +212,7 @@ struct FocusPicker: View {
 
     private func matches(_ repo: String) -> Bool {
         let q = text.trimmingCharacters(in: .whitespaces)
+        if let owner, !repo.lowercased().hasPrefix(owner.lowercased() + "/") { return false }
         return q.isEmpty || repo.localizedCaseInsensitiveContains(q)
     }
 
@@ -160,7 +221,12 @@ struct FocusPicker: View {
         let chosen = Set(selected.map { $0.lowercased() })
         let inv = involved.filter { !chosen.contains($0.lowercased()) }
         let seen = chosen.union(inv.map { $0.lowercased() })
-        let other = accessible.filter { !seen.contains($0.lowercased()) }
+        var pool = accessible
+        if let owner, let extra = ownerRepos[owner] {
+            let have = Set(pool.map { $0.lowercased() })
+            pool += extra.filter { !have.contains($0.lowercased()) }
+        }
+        let other = pool.filter { !seen.contains($0.lowercased()) }
         return (selected.filter(matches), inv.filter(matches), other.filter(matches))
     }
 
@@ -208,6 +274,15 @@ struct FocusPicker: View {
             .background(RoundedRectangle(cornerRadius: Radius.m).fill(Color.syLine.opacity(0.7)))
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
+            if app.forge == nil {
+                ownerRow
+                if let owner, let err = ownerError[owner] {
+                    Label(err, systemImage: "exclamationmark.triangle.fill")
+                        .font(.syCaption).foregroundStyle(Color.syAmber).lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14).padding(.bottom, 8)
+                }
+            }
             Rectangle().fill(Color.syLine).frame(height: 1)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
@@ -219,8 +294,8 @@ struct FocusPicker: View {
                     }
                     section("Focused", s.selected)
                     section("You’re involved", s.involved)
-                    section(app.forge == nil ? "Your repositories" : "Other", s.other)
-                    if loading {
+                    section(app.forge == nil ? (owner.map { "\($0) repositories" } ?? "Your repositories") : "Other", s.other)
+                    if loading || (owner != nil && loadingOwner == owner) {
                         HStack(spacing: Space.s) {
                             PYLoader(size: 14)
                             Text("Loading repositories…").font(.syCaption).foregroundStyle(Color.syMuted)
@@ -255,9 +330,10 @@ struct FocusPicker: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
         }
-        .frame(width: 340)
+        .frame(width: 380)
         .task(id: app.cacheAccount) {
             involved = involvedRepos()
+            await loadOrgs()
             await loadAccessible()
         }
     }

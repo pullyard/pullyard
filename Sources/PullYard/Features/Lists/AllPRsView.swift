@@ -343,7 +343,7 @@ struct AllPRsView: View {
 }
 
 /// An owner (you or an organization) in the Projects panel's filter row.
-private struct OwnerChip: View {
+struct OwnerChip: View {
     let login: String
     let avatar: String?
     let selected: Bool
