@@ -719,11 +719,6 @@ struct SidebarItemList: View {
         let visible = layout.arranged(items, group: group)
         ForEach(visible) { item in
             SidebarRow(section: item.section, title: layout.title(for: item.section, default: item.title), icon: item.icon, color: item.color, count: item.count, group: item.group)
-                .draggable(SidebarDrag.row(group: group, id: item.id).payload) {
-                    Label(layout.title(for: item.section, default: item.title), systemImage: item.icon)
-                        .padding(6)
-                }
-                .sidebarDropTarget(group: group, keys: groupKeys, row: (item.id, visible))
                 .contextMenu {
                     Button("Rename\u{2026}") { layout.renaming = item }
                     if layout.hasCustomName(item.section) {
@@ -734,6 +729,10 @@ struct SidebarItemList: View {
                         Button("Reset Sidebar Order and Names") { withAnimation(Motion.fade) { layout.resetAll() } }
                     }
                 }
+        }
+        // The list's own drag-to-reorder: `.draggable` on a row inside a sidebar List never starts a drag.
+        .onMove { from, to in
+            withAnimation(Motion.smooth) { layout.move(in: group, visible: visible, from: from, to: to) }
         }
     }
 }
