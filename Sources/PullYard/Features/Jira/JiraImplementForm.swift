@@ -337,6 +337,12 @@ struct JiraImplementForm: View {
                     .help("Draft with Haiku as soon as a project is chosen")
                 Text("\(prompt.count) characters").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
             }
+            if let draftError {
+                Label("Haiku couldn't draft the prompt: \(draftError). The template is kept.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syAmber)
+                    .lineLimit(2)
+            }
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $prompt)
                     .font(.syCallout)
@@ -350,12 +356,6 @@ struct JiraImplementForm: View {
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.black.opacity(0.22)))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(drafting ? Color.syViolet.opacity(0.45) : Color.syLine))
             .frame(minHeight: 240, maxHeight: .infinity)
-            if let draftError {
-                Label("Haiku couldn't draft the prompt: \(draftError). The template is kept.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.syCaption)
-                    .foregroundStyle(Color.syAmber)
-                    .lineLimit(2)
-            }
         }
     }
 

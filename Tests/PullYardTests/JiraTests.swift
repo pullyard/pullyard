@@ -119,4 +119,11 @@ final class JiraTests: XCTestCase {
         XCTAssertEqual(server?.ref["name"] as? String, "raff")
         XCTAssertNil(JiraUser.parse(["accountId": "x"]))
     }
+
+    func testDrafterKeepsOnlyTheFencedPrompt() {
+        let body = String(repeating: "Fix the dead tap path and add tests. ", count: 4)
+        let raw = "Ticket URL is missing, fill it in.\n\n```\n\(body)\n```\nThat's it."
+        XCTAssertEqual(JiraPromptDrafter.clean(raw), body.trimmingCharacters(in: .whitespaces))
+        XCTAssertEqual(JiraPromptDrafter.clean("  plain prompt  "), "plain prompt")
+    }
 }

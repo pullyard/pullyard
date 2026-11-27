@@ -13,13 +13,13 @@ enum JiraPromptDrafter {
     - Where to look: the relevant files as repo-relative paths, one line each on why;
     - Likely cause or approach: your best guess, marked as a guess when unsure;
     - Done when: acceptance criteria and how to verify (tests to run or add).
-    Keep the ticket URL. Do not invent files you did not see.
+    Keep the ticket URL. Do not invent files you did not see. Spend at most about 10 tool calls looking.
     """
 
     static func arguments() -> [String] {
         ["-p", "--model", "haiku", "--output-format", "json",
          "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob",
-         "--max-turns", "14", "--strict-mcp-config", "--no-session-persistence",
+         "--max-turns", "30", "--strict-mcp-config", "--no-session-persistence",
          "--disable-slash-commands", "--append-system-prompt", instructions]
     }
 
@@ -27,13 +27,18 @@ enum JiraPromptDrafter {
         "Prepare the prompt for this ticket.\n\n" + String(JiraImplementForm.defaultPrompt(issue).prefix(8000))
     }
 
+    /// The prompt itself: the fenced block when Haiku wrapped it in one, else the whole reply.
     static func clean(_ raw: String) -> String {
-        var t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if t.hasPrefix("```") {
-            t = t.components(separatedBy: "\n").dropFirst().joined(separator: "\n")
-            if t.hasSuffix("```") { t = String(t.dropLast(3)) }
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let open = t.range(of: "```") {
+            let afterOpen = t[open.upperBound...]
+            let body = afterOpen.drop { $0 != "\n" }.dropFirst()
+            if let close = body.range(of: "```", options: .backwards) {
+                let inner = String(body[..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if inner.count > 80 { return inner }
+            }
         }
-        return t.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t
     }
 }
 

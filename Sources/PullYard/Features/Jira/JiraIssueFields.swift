@@ -110,7 +110,7 @@ struct JiraIssueFields: View {
                 save(.assignee) { try await $0.assign(issue.key, to: user) }
             }
         case .reporter:
-            JiraPeoplePicker(issueKey: issue.key, client: client, title: "REPORTER", current: info?.reporter, allowsNone: false) { user in
+            JiraPeoplePicker(issueKey: issue.key, client: client, title: "REPORTER", current: info?.reporter, allowsNone: false, assignable: false) { user in
                 open = nil
                 guard let user else { return }
                 save(.reporter) { try await $0.update(issue.key, fields: ["reporter": user.ref]) }
@@ -230,10 +230,12 @@ struct JiraPeoplePicker: View {
     let title: String
     let current: JiraUser?
     let allowsNone: Bool
+    var assignable = true
     let onPick: (JiraUser?) -> Void
     @State private var query = ""
     @State private var people: [JiraUser] = []
     @State private var loading = true
+    @State private var error: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -263,7 +265,9 @@ struct JiraPeoplePicker: View {
                             Avatar(url: p.avatar, size: 22)
                         } action: { onPick(p) }
                     }
-                    if !loading && people.isEmpty {
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill").font(.syCaption).foregroundStyle(Color.syRed).padding(10)
+                    } else if !loading && people.isEmpty {
                         Text("Nobody matches").font(.syCaption).foregroundStyle(Color.syMuted).padding(10)
                     }
                 }
@@ -277,7 +281,15 @@ struct JiraPeoplePicker: View {
             if !query.isEmpty { try? await Task.sleep(for: .milliseconds(250)) }
             guard !Task.isCancelled, let client else { return }
             loading = true
-            let found = (try? await client.users(for: issueKey, query: query)) ?? []
+            let found: [JiraUser]
+            do {
+                found = try await client.users(for: issueKey, query: query, assignable: assignable)
+                error = nil
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.error = error.localizedDescription
+                found = []
+            }
             guard !Task.isCancelled else { return }
             // The current person first, so it is easy to see who it is now.
             if let current, query.isEmpty, !found.contains(where: { $0.id == current.id }) {

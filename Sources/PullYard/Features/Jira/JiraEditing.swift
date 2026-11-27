@@ -8,6 +8,8 @@ struct JiraUser: Identifiable, Hashable, Sendable {
     let displayName: String
     let avatar: String?
     var email: String? = nil
+    /// "atlassian" for people; apps and bots have other types and are hidden from pickers.
+    var accountType: String? = nil
 
     var id: String { accountId ?? name ?? displayName }
 
@@ -19,7 +21,8 @@ struct JiraUser: Identifiable, Hashable, Sendable {
     nonisolated static func parse(_ o: [String: Any]?) -> JiraUser? {
         guard let o, let display = o["displayName"] as? String else { return nil }
         return JiraUser(accountId: o["accountId"] as? String, name: o["name"] as? String, displayName: display,
-                        avatar: (o["avatarUrls"] as? [String: Any])?["48x48"] as? String, email: o["emailAddress"] as? String)
+                        avatar: (o["avatarUrls"] as? [String: Any])?["48x48"] as? String, email: o["emailAddress"] as? String,
+                        accountType: o["accountType"] as? String)
     }
 }
 
@@ -73,12 +76,31 @@ extension JiraClient {
         return info
     }
 
-    /// People who can be assigned the issue, filtered by `query`.
-    func users(for key: String, query: String) async throws -> [JiraUser] {
+    /// People for the pickers. Assignee: who can be assigned the issue. Reporter: anyone on the site.
+    /// Jira Cloud rejects `username` (GDPR mode) and Server ignores `query`, so try one then the other.
+    func users(for key: String, query: String, assignable: Bool = true) async throws -> [JiraUser] {
         let q = Self.encode(query)
-        let data = try await request("/rest/api/2/user/assignable/search?issueKey=\(key)&query=\(q)&username=\(q)&maxResults=30")
-        let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
-        return list.compactMap(JiraUser.parse)
+        let paths: [String]
+        if assignable || query.isEmpty {
+            paths = ["/rest/api/2/user/assignable/search?issueKey=\(key)&query=\(q)&maxResults=40",
+                     "/rest/api/2/user/assignable/search?issueKey=\(key)&username=\(q)&maxResults=40"]
+        } else {
+            paths = ["/rest/api/2/user/search?query=\(q)&maxResults=40",
+                     "/rest/api/2/user/search?username=\(q)&maxResults=40"]
+        }
+        var lastError: Error?
+        for path in paths {
+            do {
+                let data = try await request(path)
+                let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+                let users = list.compactMap(JiraUser.parse).filter { ($0.accountType ?? "atlassian") == "atlassian" }
+                if users.isEmpty, path != paths.last, query.isEmpty == false { continue }
+                return users
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? APIError(message: "Couldn't search Jira people")
     }
 
     func update(_ key: String, fields: [String: Any]) async throws {

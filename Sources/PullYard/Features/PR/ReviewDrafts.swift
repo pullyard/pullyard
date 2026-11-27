@@ -136,6 +136,9 @@ enum ReviewDrafts {
             throw APIError(message: trimmed.isEmpty ? "The agent returned nothing" : String(trimmed.prefix(300)))
         }
         let result = obj["result"] as? String ?? ""
+        if obj["subtype"] as? String == "error_max_turns", result.isEmpty {
+            throw APIError(message: "the agent ran out of steps before answering")
+        }
         if obj["is_error"] as? Bool == true {
             throw APIError(message: result.isEmpty ? "The agent failed" : String(result.prefix(300)))
         }
