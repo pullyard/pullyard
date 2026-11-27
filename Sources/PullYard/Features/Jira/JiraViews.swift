@@ -619,6 +619,8 @@ struct JiraIssueRow: View {
 
 struct JiraIssueCard: View {
     let issue: JiraIssue
+    /// Drops the card's own background and border, for when it fills a sheet of the same colour.
+    var flat = false
     var manual = false
     var onUnlink: () -> Void = {}
     var onHide: (() -> Void)?
@@ -630,6 +632,7 @@ struct JiraIssueCard: View {
     @State private var error: String?
     @State private var expanded = false
     @State private var copied = false
+    @State private var copiedKey = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -686,6 +689,12 @@ struct JiraIssueCard: View {
                     copied = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
                 } label: { Label(copied ? "Copied" : "Copy link", systemImage: copied ? "checkmark" : "link") }
+                Button {
+                    copyToPasteboard(issue.key)
+                    copiedKey = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copiedKey = false }
+                } label: { Label(copiedKey ? "Copied" : "Copy \(issue.key)", systemImage: copiedKey ? "checkmark" : "number") }
+                    .help("Copy the ticket number")
                 Spacer()
                 if manual {
                     Button(role: .destructive, action: onUnlink) { Label("Unlink", systemImage: "link.badge.minus") }
@@ -700,8 +709,8 @@ struct JiraIssueCard: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.syRaised))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.syLine))
+        .background(RoundedRectangle(cornerRadius: 14).fill(flat ? Color.clear : Color.syRaised))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(flat ? Color.clear : Color.syLine))
         .onChange(of: issue.status) { transitions = [] }
     }
 

@@ -90,4 +90,34 @@ final class SidebarLayoutTests: XCTestCase {
         XCTAssertEqual(issue.labels, ["android", "ios"])
         XCTAssertEqual(JiraClient.encode("statusCategory != Done"), "statusCategory%20%21%3D%20Done")
     }
+
+    func testDropRowAndSection() {
+        let layout = SidebarLayout(defaults: defaults)
+        let list = items()
+        XCTAssertTrue(layout.drop(item: "repos", onto: "stacks", group: "code", visible: list))
+        XCTAssertEqual(layout.arranged(list, group: "code").map(\.id), ["projects", "stacks", "repos"])
+        XCTAssertTrue(layout.drop(item: "repos", onto: "projects", group: "code", visible: layout.arranged(list, group: "code")))
+        XCTAssertEqual(layout.arranged(list, group: "code").map(\.id), ["repos", "projects", "stacks"])
+        XCTAssertFalse(layout.drop(item: "repos", onto: "repos", group: "code", visible: list))
+
+        let keys = ["prs", "issues", "code", "jira"]
+        XCTAssertTrue(layout.drop(group: "jira", onto: "prs", visible: keys))
+        XCTAssertEqual(layout.arrangedGroups(keys), ["jira", "prs", "issues", "code"])
+    }
+
+    func testDragPayloadRoundTrips() {
+        XCTAssertEqual(SidebarDrag(payload: SidebarDrag.row(group: "prs", id: "prs/mine").payload), .row(group: "prs", id: "prs/mine"))
+        XCTAssertEqual(SidebarDrag(payload: SidebarDrag.section("jira").payload), .section("jira"))
+        XCTAssertNil(SidebarDrag(payload: "KRIS-740"))
+    }
+
+    func testJiraBoardSnapshotCodable() throws {
+        var snap = JiraBoardSnapshot()
+        snap.board = JiraBoard(id: 7, name: "KRISP board", type: "scrum", projectKey: "KRIS")
+        snap.columns = [JiraBoardColumn(name: "To Do", statusIDs: ["1"])]
+        snap.issues = [JiraIssue(key: "KRIS-1", summary: "s", status: "To Do", statusCategory: "new", type: "Bug", priority: nil, assignee: nil, assigneeAvatar: nil, reporter: nil, description: "", url: "https://x/browse/KRIS-1", updated: nil, statusID: "1", labels: ["ios"])]
+        snap.fetchedAt = Date(timeIntervalSince1970: 100)
+        let back = try JSONDecoder().decode(JiraBoardSnapshot.self, from: JSONEncoder().encode(snap))
+        XCTAssertEqual(back, snap)
+    }
 }

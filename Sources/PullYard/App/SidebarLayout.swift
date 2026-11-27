@@ -97,7 +97,31 @@ final class SidebarLayout {
         save(ids, group: group)
     }
 
+    /// Drag-and-drop: puts `id` where `target` is. Dragging down lands after the target, dragging up before it.
+    @discardableResult
+    func drop(item id: String, onto target: String, group: String, visible: [SidebarItem]) -> Bool {
+        var ids = visible.map(\.id)
+        guard id != target, let from = ids.firstIndex(of: id), let to = ids.firstIndex(of: target) else { return false }
+        ids.remove(at: from)
+        ids.insert(id, at: to)
+        save(ids, group: group)
+        return true
+    }
+
     // MARK: Sections
+
+    /// Drag-and-drop for whole sections, same rule as rows.
+    @discardableResult
+    func drop(group key: String, onto target: String, visible: [String]) -> Bool {
+        var keys = visible
+        guard key != target, let from = keys.firstIndex(of: key), let to = keys.firstIndex(of: target) else { return false }
+        keys.remove(at: from)
+        keys.insert(key, at: to)
+        let hidden = groupOrder.filter { !keys.contains($0) }
+        groupOrder = keys + hidden
+        defaults.set(groupOrder, forKey: Self.groupsKey)
+        return true
+    }
 
     /// Section keys in the user's order; sections never placed keep their default position after the placed ones.
     func arrangedGroups(_ keys: [String]) -> [String] {
@@ -138,5 +162,30 @@ final class SidebarLayout {
         let hidden = (order[group] ?? []).filter { !ids.contains($0) }
         order[group] = ids + hidden
         defaults.set(order, forKey: Self.orderKey)
+    }
+}
+
+/// What is being dragged in the sidebar, carried as a plain string so it works with `.draggable`.
+enum SidebarDrag: Equatable {
+    case row(group: String, id: String)
+    case section(String)
+
+    private static let prefix = "pullyard.sidebar|"
+
+    var payload: String {
+        switch self {
+        case .row(let group, let id): return Self.prefix + "row|\(group)|\(id)"
+        case .section(let key): return Self.prefix + "section|\(key)"
+        }
+    }
+
+    init?(payload: String) {
+        guard payload.hasPrefix(Self.prefix) else { return nil }
+        let parts = payload.dropFirst(Self.prefix.count).split(separator: "|", maxSplits: 2).map(String.init)
+        switch parts.first {
+        case "row" where parts.count == 3: self = .row(group: parts[1], id: parts[2])
+        case "section" where parts.count == 2: self = .section(parts[1])
+        default: return nil
+        }
     }
 }

@@ -1,79 +1,105 @@
 import SwiftUI
 
-/// Loads one Jira board (columns, active sprint and its issues) for one connection.
+/// What one Jira account's board looked like the last time it was fetched.
+struct JiraBoardSnapshot: Codable, Equatable {
+    var boards: [JiraBoard] = []
+    var board: JiraBoard?
+    var columns: [JiraBoardColumn] = []
+    var sprint: JiraSprint?
+    var issues: [JiraIssue] = []
+    var fetchedAt: Date?
+}
+
+/// Loads Jira boards per account. Every fetch is cached in memory and on disk, so switching
+/// accounts or coming back to the section shows the last board at once while a fresh fetch runs.
 @MainActor
 @Observable
 final class JiraBoardModel {
+    static let shared = JiraBoardModel()
     static let connectionKey = "jira.board.connection"
     static func boardKey(_ connection: String) -> String { "jira.board.selected.\(connection)" }
 
-    var connectionID: String? {
-        didSet {
-            guard connectionID != oldValue else { return }
-            UserDefaults.standard.set(connectionID, forKey: Self.connectionKey)
-            boards = []
-            board = nil
-            columns = []
-            issues = []
-            sprint = nil
-            error = nil
-        }
-    }
-
-    private(set) var boards: [JiraBoard] = []
-    private(set) var board: JiraBoard?
-    private(set) var columns: [JiraBoardColumn] = []
-    private(set) var sprint: JiraSprint?
-    private(set) var issues: [JiraIssue] = []
+    private(set) var connectionID: String?
+    private(set) var snap = JiraBoardSnapshot()
     private(set) var loading = false
-    private(set) var loadedOnce = false
     var error: String?
     var moving: Set<String> = []
 
-    init() {
+    @ObservationIgnored private var cache: [String: JiraBoardSnapshot] = [:]
+    @ObservationIgnored private var generation = 0
+    private let directory: URL
+
+    var boards: [JiraBoard] { snap.boards }
+    var board: JiraBoard? { snap.board }
+    var columns: [JiraBoardColumn] { snap.columns }
+    var sprint: JiraSprint? { snap.sprint }
+    var issues: [JiraIssue] { snap.issues }
+    var loadedOnce: Bool { snap.fetchedAt != nil }
+
+    init(directory: URL? = nil) {
+        self.directory = directory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("PullYard/jira-board", isDirectory: true)
         let saved = UserDefaults.standard.string(forKey: Self.connectionKey)
         let all = JiraConnections.shared.connections
-        connectionID = all.contains { $0.id == saved } ? saved : all.first?.id
+        let id = all.contains { $0.id == saved } ? saved : all.first?.id
+        connectionID = id
+        if let id { snap = cached(id) }
     }
 
     private var client: JiraClient? { JiraConnections.shared.client(for: connectionID) }
+
+    /// Switches account: shows that account's cached board right away; the caller fetches fresh data.
+    func select(_ id: String?) {
+        guard id != connectionID else { return }
+        if let current = connectionID { cache[current] = snap }
+        connectionID = id
+        UserDefaults.standard.set(id, forKey: Self.connectionKey)
+        snap = id.map(cached) ?? JiraBoardSnapshot()
+        error = nil
+        moving = []
+    }
 
     /// Keeps the selected connection valid when connections are added or removed in Settings.
     func syncConnections() {
         let all = JiraConnections.shared.connections
         if connectionID == nil || !all.contains(where: { $0.id == connectionID }) {
-            connectionID = all.first?.id
+            select(all.first?.id)
         }
     }
 
     func selectBoard(_ board: JiraBoard) async {
-        guard let id = connectionID else { return }
+        guard let id = connectionID, board.id != snap.board?.id else { return }
         UserDefaults.standard.set(board.id, forKey: Self.boardKey(id))
-        self.board = board
+        snap.board = board
+        snap.columns = []
+        snap.sprint = nil
+        snap.issues = []
         await loadBoard()
     }
 
-    func load() async {
+    /// Fetches the board list and the selected board again. Cached data stays on screen meanwhile.
+    func refresh() async {
         guard let client, let id = connectionID else { return }
+        generation += 1
+        let gen = generation
         loading = true
-        defer { loading = false; loadedOnce = true }
+        defer { if gen == generation { loading = false } }
         do {
-            if boards.isEmpty {
-                let list = try await client.boards()
-                guard id == connectionID else { return }
-                boards = list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            }
-            if board == nil {
-                let saved = UserDefaults.standard.integer(forKey: Self.boardKey(id))
-                let mine = Set(JiraConnections.shared.connection(id)?.projectKeys ?? [])
-                board = boards.first { $0.id == saved }
-                    ?? boards.first { $0.isScrum && $0.projectKey.map(mine.contains) == true }
-                    ?? boards.first { $0.isScrum }
-                    ?? boards.first
-            }
+            let list = try await client.boards()
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            guard id == connectionID else { return }
+            snap.boards = list
+            let saved = UserDefaults.standard.integer(forKey: Self.boardKey(id))
+            let mine = Set(JiraConnections.shared.connection(id)?.projectKeys ?? [])
+            snap.board = list.first { $0.id == snap.board?.id }
+                ?? list.first { $0.id == saved }
+                ?? list.first { $0.isScrum && $0.projectKey.map(mine.contains) == true }
+                ?? list.first { $0.isScrum }
+                ?? list.first
+            if snap.board == nil { snap.fetchedAt = Date(); store(id) }
             error = nil
         } catch {
-            if !(error is CancellationError) { self.error = error.localizedDescription }
+            if !(error is CancellationError), id == connectionID { self.error = error.localizedDescription }
             return
         }
         await loadBoard()
@@ -81,21 +107,27 @@ final class JiraBoardModel {
 
     func loadBoard() async {
         guard let client, let board, let id = connectionID else { return }
+        generation += 1
+        let gen = generation
         loading = true
-        defer { loading = false; loadedOnce = true }
+        defer { if gen == generation { loading = false } }
         do {
             async let cols = client.columns(board: board.id)
             let sprints: [JiraSprint] = board.isScrum ? ((try? await client.activeSprints(board: board.id)) ?? []) : []
             let current = sprints.first
             let list = try await client.boardIssues(board: board.id, sprint: current?.id)
             let loadedColumns = (try? await cols) ?? []
-            guard id == connectionID, board.id == self.board?.id else { return }
-            columns = loadedColumns.filter { !$0.statusIDs.isEmpty }
-            sprint = current
-            issues = list.map { var i = $0; i.connectionID = id; return i }
+            guard id == connectionID, board.id == snap.board?.id else { return }
+            if !loadedColumns.isEmpty || snap.columns.isEmpty {
+                snap.columns = loadedColumns.filter { !$0.statusIDs.isEmpty }
+            }
+            snap.sprint = current
+            snap.issues = list.map { var i = $0; i.connectionID = id; return i }
+            snap.fetchedAt = Date()
+            store(id)
             error = nil
         } catch {
-            if !(error is CancellationError) { self.error = error.localizedDescription }
+            if !(error is CancellationError), id == connectionID { self.error = error.localizedDescription }
         }
     }
 
@@ -117,7 +149,7 @@ final class JiraBoardModel {
 
     /// Moves an issue into a column by running the first workflow transition that lands in it.
     func move(_ key: String, to column: JiraBoardColumn) async {
-        guard let client, let index = issues.firstIndex(where: { $0.key == key }) else { return }
+        guard let client, let id = connectionID, let index = issues.firstIndex(where: { $0.key == key }) else { return }
         let issue = issues[index]
         if let status = issue.statusID, column.statusIDs.contains(status) { return }
         moving.insert(key)
@@ -129,17 +161,16 @@ final class JiraBoardModel {
                 return
             }
             try await client.transition(key, to: t.id)
-            if let i = issues.firstIndex(where: { $0.key == key }) {
-                var updated = issues[i]
-                updated = JiraIssue(key: updated.key, summary: updated.summary, status: t.to, statusCategory: t.toCategory,
-                                    type: updated.type, priority: updated.priority, assignee: updated.assignee,
-                                    assigneeAvatar: updated.assigneeAvatar, reporter: updated.reporter,
-                                    description: updated.description, url: updated.url, updated: Date(),
-                                    parentKey: updated.parentKey, parentSummary: updated.parentSummary,
-                                    attachments: updated.attachments, connectionID: updated.connectionID,
-                                    statusID: t.toID, labels: updated.labels)
-                issues[i] = updated
-            }
+            guard id == connectionID, let i = snap.issues.firstIndex(where: { $0.key == key }) else { return }
+            let u = snap.issues[i]
+            snap.issues[i] = JiraIssue(key: u.key, summary: u.summary, status: t.to, statusCategory: t.toCategory,
+                                       type: u.type, priority: u.priority, assignee: u.assignee,
+                                       assigneeAvatar: u.assigneeAvatar, reporter: u.reporter,
+                                       description: u.description, url: u.url, updated: Date(),
+                                       parentKey: u.parentKey, parentSummary: u.parentSummary,
+                                       attachments: u.attachments, connectionID: u.connectionID,
+                                       statusID: t.toID, labels: u.labels)
+            store(id)
             error = nil
         } catch {
             self.error = error.localizedDescription
@@ -147,23 +178,52 @@ final class JiraBoardModel {
     }
 
     func replace(_ issue: JiraIssue) {
-        guard let i = issues.firstIndex(where: { $0.key == issue.key }) else { return }
+        guard let id = connectionID, let i = snap.issues.firstIndex(where: { $0.key == issue.key }) else { return }
         var merged = issue
-        merged.connectionID = connectionID
-        if merged.labels.isEmpty { merged.labels = issues[i].labels }
-        issues[i] = merged
+        merged.connectionID = id
+        if merged.labels.isEmpty { merged.labels = snap.issues[i].labels }
+        if merged.statusID == nil { merged.statusID = snap.issues[i].statusID }
+        snap.issues[i] = merged
+        store(id)
     }
 
     var boardURL: String? {
         guard let board, let base = JiraConnections.shared.connection(connectionID)?.baseURL else { return nil }
         return base.absoluteString + "/secure/RapidBoard.jspa?rapidView=\(board.id)"
     }
+
+    // MARK: Cache
+
+    private func file(_ id: String) -> URL {
+        directory.appendingPathComponent("\(id.filter { $0.isLetter || $0.isNumber || $0 == "-" }).json")
+    }
+
+    private func cached(_ id: String) -> JiraBoardSnapshot {
+        if let hit = cache[id] { return hit }
+        guard let data = try? Data(contentsOf: file(id)),
+              let snapshot = try? JSONDecoder().decode(JiraBoardSnapshot.self, from: data) else { return JiraBoardSnapshot() }
+        cache[id] = snapshot
+        return snapshot
+    }
+
+    private func store(_ id: String) {
+        cache[id] = snap
+        let snapshot = snap
+        let url = file(id)
+        let dir = directory
+        Task.detached(priority: .utility) {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? data.write(to: url, options: .atomic)
+        }
+    }
 }
 
 struct JiraBoardView: View {
-    @State private var model = JiraBoardModel()
+    @State private var model = JiraBoardModel.shared
     @State private var search = ""
-    @State private var assignee: String?
+    @State private var assignees: Set<String> = []
+    @State private var showPeople = false
     @State private var opened: JiraIssue?
     @Environment(\.openSettings) private var openSettings
 
@@ -181,9 +241,9 @@ struct JiraBoardView: View {
                 }
             }
         }
-        .task(id: model.connectionID) { await model.load() }
+        .task(id: model.connectionID) { await model.refresh() }
         .onChange(of: connections.connections.map(\.id)) { _, _ in model.syncConnections() }
-        .onChange(of: model.connectionID) { _, _ in assignee = nil }
+        .onChange(of: model.connectionID) { _, _ in assignees = [] }
         .sheet(item: $opened) { issue in
             JiraBoardIssueSheet(issue: issue) { model.replace($0) }
         }
@@ -195,12 +255,12 @@ struct JiraBoardView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 if connections.hasSeveral {
-                    JiraAccountTabs(selection: $model.connectionID)
+                    JiraAccountTabs(selection: model.connectionID) { model.select($0) }
                         .frame(maxWidth: 480, alignment: .leading)
                 }
                 Spacer(minLength: 8)
                 if model.loading { WakeLoader() }
-                Button { Task { await model.loadBoard() } } label: { Image(systemName: "arrow.clockwise") }
+                Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless)
                     .help("Refresh")
                     .keyboardShortcut("r", modifiers: .command)
@@ -214,15 +274,25 @@ struct JiraBoardView: View {
             }
             HStack(spacing: 10) {
                 boardMenu
-                if let sprint = model.sprint {
-                    Label(sprint.name, systemImage: "arrow.triangle.2.circlepath")
-                        .font(.syCallout.weight(.medium))
-                        .foregroundStyle(Color.syMuted)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule().strokeBorder(Color.syLine))
-                        .help(sprint.endDate.map { "Ends \($0.formatted(date: .abbreviated, time: .omitted))" } ?? sprint.name)
+                Button {
+                    Task { await model.refresh() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .rotationEffect(.degrees(model.loading ? 360 : 0))
+                            .animation(model.loading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: model.loading)
+                        Text(model.sprint?.name ?? "Refresh")
+                    }
+                    .font(.syCallout.weight(.medium))
+                    .foregroundStyle(Color.syMuted)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Capsule().strokeBorder(Color.syLine))
+                    .contentShape(Capsule())
                 }
+                .buttonStyle(.plain)
+                .disabled(model.loading)
+                .help(refreshHelp)
                 Spacer(minLength: 8)
                 assigneeFilter
                 TextField("Search board", text: $search)
@@ -257,35 +327,81 @@ struct JiraBoardView: View {
         .help("Choose a board")
     }
 
+    private var refreshHelp: String {
+        var parts: [String] = []
+        if let end = model.sprint?.endDate { parts.append("Sprint ends \(end.formatted(date: .abbreviated, time: .omitted))") }
+        if let at = model.snap.fetchedAt { parts.append("Updated \(at.formatted(.relative(presentation: .named)))") }
+        parts.append("Click to refresh")
+        return parts.joined(separator: " · ")
+    }
+
     private func boardLabel(_ board: JiraBoard) -> String {
         [board.name, board.projectKey, board.type.capitalized].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
-    private var people: [(name: String, avatar: String?)] {
+    private var people: [JiraPerson] {
         var seen = Set<String>()
         return model.issues.compactMap { i in
             guard let n = i.assignee, seen.insert(n).inserted else { return nil }
-            return (n, i.assigneeAvatar)
-        }.sorted { $0.name < $1.name }
+            return JiraPerson(name: n, avatar: i.assigneeAvatar)
+        }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
+    private var hasUnassigned: Bool { model.issues.contains { $0.assignee == nil } }
+
     private var assigneeFilter: some View {
-        HStack(spacing: -4) {
-            ForEach(people, id: \.name) { person in
-                let on = assignee == person.name
+        let all = people
+        // Selected people come first so a choice made in the list stays visible.
+        let ordered = all.filter { assignees.contains($0.name) } + all.filter { !assignees.contains($0.name) }
+        let shown = Array(ordered.prefix(JiraPeopleFilter.inline))
+        let hidden = all.count - shown.count
+        let hiddenSelected = assignees.subtracting(shown.map(\.name)).count
+        return HStack(spacing: -5) {
+            ForEach(shown) { person in
+                let on = assignees.contains(person.name)
                 Button {
-                    withAnimation(Motion.fade) { assignee = on ? nil : person.name }
+                    withAnimation(Motion.fade) { toggle(person.name) }
                 } label: {
-                    Avatar(url: person.avatar, size: 24)
+                    JiraPersonAvatar(person: person, size: 26)
                         .overlay(Circle().strokeBorder(on ? Color.syAccent : Color.syPanel, lineWidth: 2))
-                        .zIndex(on ? 1 : 0)
                 }
                 .buttonStyle(.plain)
-                .help(on ? "Show everyone" : "Only \(person.name)")
+                .zIndex(on ? 1 : 0)
+                .help(on ? "Hide \(person.name)'s issues filter" : "Only \(person.name)")
                 .accessibilityLabel(person.name)
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
+            if hidden > 0 || hasUnassigned {
+                Button { showPeople.toggle() } label: {
+                    Text(hidden > 0 ? "+\(hidden)" : "\u{2026}")
+                        .font(.syCaption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(Color.syText)
+                        .frame(width: 26, height: 26)
+                        .background(Circle().fill(Color.syRaised))
+                        .overlay(Circle().strokeBorder(hiddenSelected > 0 || showPeople ? Color.syAccent : Color.syLineStrong, lineWidth: 2))
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 9)
+                .help("All assignees")
+                .accessibilityLabel("All assignees")
+                .popover(isPresented: $showPeople, arrowEdge: .bottom) {
+                    JiraPeopleFilter(people: all, unassigned: hasUnassigned, selection: $assignees)
+                }
+            }
+            if !assignees.isEmpty {
+                Button { withAnimation(Motion.fade) { assignees = [] } } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(Color.syDim)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 12)
+                .help("Clear assignee filter")
+                .accessibilityLabel("Clear assignee filter")
+            }
         }
+    }
+
+    private func toggle(_ name: String) {
+        if assignees.contains(name) { assignees.remove(name) } else { assignees.insert(name) }
     }
 
     // MARK: Columns
@@ -293,7 +409,7 @@ struct JiraBoardView: View {
     private var visibleIssues: [JiraIssue] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         return model.issues.filter { i in
-            (assignee == nil || i.assignee == assignee)
+            (assignees.isEmpty || assignees.contains(i.assignee ?? JiraPeopleFilter.unassigned))
                 && (q.isEmpty || i.key.lowercased().contains(q) || i.summary.lowercased().contains(q) || i.labels.contains { $0.lowercased().contains(q) })
         }
     }
@@ -346,7 +462,8 @@ struct JiraBoardView: View {
 
 /// One tab per Jira connection, like the Claude account tabs in Agents.
 struct JiraAccountTabs: View {
-    @Binding var selection: String?
+    let selection: String?
+    let onSelect: (String) -> Void
     @Namespace private var ns
 
     var body: some View {
@@ -354,7 +471,7 @@ struct JiraAccountTabs: View {
             ForEach(JiraConnections.shared.connections) { c in
                 let selected = selection == c.id
                 Button {
-                    withAnimation(Motion.smooth) { selection = c.id }
+                    withAnimation(Motion.smooth) { onSelect(c.id) }
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "ticket.fill").font(.system(size: 9, weight: .semibold)).foregroundStyle(Color.sySky)
@@ -542,17 +659,20 @@ struct JiraBoardIssueSheet: View {
             }
             .padding([.horizontal, .top], 14)
             ScrollView {
-                JiraIssueCard(issue: full ?? issue) { updated in
+                JiraIssueCard(issue: full ?? issue, flat: true) { updated in
                     full = updated
                     onChange(updated)
                 }
-                .padding(16)
+                .padding(.horizontal, 6)
+                .padding(.bottom, 6)
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle.fill").font(.syCaption).foregroundStyle(Color.syRed).padding(.horizontal, 16)
                 }
             }
         }
-        .frame(minWidth: 560, idealWidth: 640, minHeight: 420, idealHeight: 620)
+        .frame(minWidth: 820, idealWidth: 960, minHeight: 640, idealHeight: 820)
+        .background(Color.syRaised)
+        .presentationBackground(Color.syRaised)
         .task {
             guard let client = JiraConnections.shared.client(for: issue.connectionID) else { return }
             do {
@@ -563,5 +683,114 @@ struct JiraBoardIssueSheet: View {
                 self.error = error.localizedDescription
             }
         }
+    }
+}
+
+struct JiraPerson: Identifiable, Hashable {
+    let name: String
+    let avatar: String?
+    var id: String { name }
+
+    var initials: String {
+        let parts = name.split(whereSeparator: { $0 == " " || $0 == "." }).prefix(2)
+        return parts.compactMap(\.first).map { String($0).uppercased() }.joined()
+    }
+}
+
+struct JiraPersonAvatar: View {
+    let person: JiraPerson
+    var size: CGFloat = 24
+
+    var body: some View {
+        if person.avatar != nil {
+            Avatar(url: person.avatar, size: size)
+        } else {
+            Text(person.initials)
+                .font(.system(size: size * 0.4, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .frame(width: size, height: size)
+                .background(Circle().fill(Color.syIndigo))
+        }
+    }
+}
+
+/// The full assignee list behind the "+N" button: tick people to show only their issues.
+struct JiraPeopleFilter: View {
+    static let inline = 5
+    static let unassigned = "\u{0}unassigned"
+
+    let people: [JiraPerson]
+    let unassigned: Bool
+    @Binding var selection: Set<String>
+    @State private var query = ""
+
+    private var filtered: [JiraPerson] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        return q.isEmpty ? people : people.filter { $0.name.lowercased().contains(q) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if people.count > 8 {
+                TextField("Filter people", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .padding(10)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(filtered) { person in
+                        row(key: person.name, title: person.name) { JiraPersonAvatar(person: person, size: 26) }
+                    }
+                    if unassigned, query.isEmpty {
+                        row(key: Self.unassigned, title: "Unassigned") {
+                            Image(systemName: "person.crop.circle")
+                                .font(.system(size: 22))
+                                .foregroundStyle(Color.syMuted)
+                                .frame(width: 26, height: 26)
+                        }
+                    }
+                }
+                .padding(.vertical, 6)
+            }
+            .frame(maxHeight: 420)
+            if !selection.isEmpty {
+                Divider()
+                Button("Clear") { selection = [] }
+                    .buttonStyle(.borderless)
+                    .padding(10)
+            }
+        }
+        .frame(width: 300)
+    }
+
+    private func row<Icon: View>(key: String, title: String, @ViewBuilder icon: () -> Icon) -> some View {
+        let on = selection.contains(key)
+        return Button {
+            if on { selection.remove(key) } else { selection.insert(key) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: on ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(on ? Color.syAccent : Color.syMuted)
+                    .font(.system(size: 15))
+                icon()
+                Text(title).font(.syBody).foregroundStyle(Color.syText).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(JiraPeopleRowStyle())
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+private struct JiraPeopleRowStyle: ButtonStyle {
+    @State private var hover = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(Color.syText.opacity(configuration.isPressed ? 0.1 : hover ? 0.06 : 0))
+            .onHover { hover = $0 }
     }
 }

@@ -633,27 +633,57 @@ struct SidebarGroup<Content: View>: View {
                 .frame(maxWidth: .infinity)
                 .accessibilityHidden(true)
         } else {
-            title.font(.sySubheadline.weight(.semibold))
+            let label = title.font(.sySubheadline.weight(.semibold))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
-                .contextMenu {
-                    if let key { SidebarGroupMoveButtons(key: key, keys: groupKeys) }
-                }
+            if let key {
+                label
+                    .draggable(SidebarDrag.section(key).payload) {
+                        title.font(.sySubheadline.weight(.semibold)).padding(6)
+                    }
+                    .sidebarDropTarget(group: key, keys: groupKeys, row: nil)
+                    .help("Drag to reorder sections")
+            } else {
+                label
+            }
         }
     }
 }
 
-/// "Move Section Up / Down" for a sidebar group, shared by its header and its rows' menus.
-struct SidebarGroupMoveButtons: View {
-    let key: String
-    let keys: [String]
-    private var layout: SidebarLayout { .shared }
+extension View {
+    /// Accepts sidebar drags: a row from the same group lands at `row`, a section lands where `group` is.
+    func sidebarDropTarget(group: String, keys: [String], row: (id: String, visible: [SidebarItem])?) -> some View {
+        modifier(SidebarDropTarget(group: group, keys: keys, row: row))
+    }
+}
 
-    var body: some View {
-        Button("Move Section Up") { withAnimation(Motion.fade) { layout.moveGroup(key, by: -1, in: keys) } }
-            .disabled(!layout.canMoveGroup(key, by: -1, in: keys))
-        Button("Move Section Down") { withAnimation(Motion.fade) { layout.moveGroup(key, by: 1, in: keys) } }
-            .disabled(!layout.canMoveGroup(key, by: 1, in: keys))
+private struct SidebarDropTarget: ViewModifier {
+    let group: String
+    let keys: [String]
+    let row: (id: String, visible: [SidebarItem])?
+    @State private var targeted = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .top) {
+                if targeted {
+                    Capsule().fill(Color.syAccent).frame(height: 2).offset(y: -2).allowsHitTesting(false)
+                }
+            }
+            .dropDestination(for: String.self) { payloads, _ in
+                guard let drag = payloads.first.flatMap(SidebarDrag.init(payload:)) else { return false }
+                let layout = SidebarLayout.shared
+                var done = false
+                withAnimation(Motion.smooth) {
+                    switch drag {
+                    case .row(let from, let id):
+                        if from == group, let row { done = layout.drop(item: id, onto: row.id, group: group, visible: row.visible) }
+                    case .section(let key):
+                        done = layout.drop(group: key, onto: group, visible: keys)
+                    }
+                }
+                return done
+            } isTargeted: { targeted = $0 }
     }
 }
 
@@ -688,28 +718,21 @@ struct SidebarItemList: View {
         let visible = layout.arranged(items, group: group)
         ForEach(visible) { item in
             SidebarRow(section: item.section, title: layout.title(for: item.section, default: item.title), icon: item.icon, color: item.color, count: item.count, group: item.group)
+                .draggable(SidebarDrag.row(group: group, id: item.id).payload) {
+                    Label(layout.title(for: item.section, default: item.title), systemImage: item.icon)
+                        .padding(6)
+                }
+                .sidebarDropTarget(group: group, keys: groupKeys, row: (item.id, visible))
                 .contextMenu {
                     Button("Rename\u{2026}") { layout.renaming = item }
                     if layout.hasCustomName(item.section) {
                         Button("Restore \u{201C}\(item.title)\u{201D}") { layout.resetName(item.section) }
-                    }
-                    Divider()
-                    Button("Move Up") { withAnimation(Motion.fade) { layout.move(item, by: -1, in: group, visible: visible) } }
-                        .disabled(!layout.canMove(item, by: -1, in: visible))
-                    Button("Move Down") { withAnimation(Motion.fade) { layout.move(item, by: 1, in: group, visible: visible) } }
-                        .disabled(!layout.canMove(item, by: 1, in: visible))
-                    if groupKeys.contains(group) {
-                        Divider()
-                        SidebarGroupMoveButtons(key: group, keys: groupKeys)
                     }
                     if layout.isCustomised {
                         Divider()
                         Button("Reset Sidebar Order and Names") { withAnimation(Motion.fade) { layout.resetAll() } }
                     }
                 }
-        }
-        .onMove { source, destination in
-            layout.move(in: group, visible: visible, from: source, to: destination)
         }
     }
 }

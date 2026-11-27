@@ -1,6 +1,6 @@
 import Foundation
 
-struct JiraIssue: Identifiable, Equatable {
+struct JiraIssue: Identifiable, Equatable, Codable {
     var id: String { key }
     let key: String
     let summary: String
@@ -27,7 +27,7 @@ struct JiraIssue: Identifiable, Equatable {
     }
 }
 
-struct JiraAttachment: Identifiable, Equatable, Hashable, Sendable {
+struct JiraAttachment: Identifiable, Equatable, Hashable, Sendable, Codable {
     enum Kind: Equatable, Sendable { case image, video, other }
 
     let id: String
@@ -618,7 +618,7 @@ struct JiraClient: Sendable {
 
 // MARK: - Agile boards
 
-struct JiraBoard: Identifiable, Hashable, Sendable {
+struct JiraBoard: Identifiable, Hashable, Sendable, Codable {
     let id: Int
     let name: String
     let type: String
@@ -627,13 +627,13 @@ struct JiraBoard: Identifiable, Hashable, Sendable {
     var isScrum: Bool { type.lowercased() == "scrum" }
 }
 
-struct JiraBoardColumn: Identifiable, Hashable, Sendable {
+struct JiraBoardColumn: Identifiable, Hashable, Sendable, Codable {
     let name: String
     let statusIDs: [String]
     var id: String { name }
 }
 
-struct JiraSprint: Identifiable, Hashable, Sendable {
+struct JiraSprint: Identifiable, Hashable, Sendable, Codable {
     let id: Int
     let name: String
     let endDate: Date?
