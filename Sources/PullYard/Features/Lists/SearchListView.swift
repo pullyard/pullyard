@@ -402,6 +402,8 @@ struct SearchListView: View {
     let kind: String
     let baseQuery: String
     let grouped: Bool
+    /// The base query names its own repo, so the sidebar's repo focus must not widen it.
+    var ignoresFocus = false
     @Environment(AppModel.self) private var app
     @State private var model: SearchListModel
     @AppStorage private var stateFilter: StateFilter
@@ -413,7 +415,8 @@ struct SearchListView: View {
     @State private var showSnoozed = false
     private let memoryKey: String
 
-    init(title: String, kind: String, baseQuery: String, grouped: Bool = false) {
+    init(title: String, kind: String, baseQuery: String, grouped: Bool = false, ignoresFocus: Bool = false) {
+        self.ignoresFocus = ignoresFocus
         self.title = title
         self.kind = kind
         self.baseQuery = baseQuery
@@ -427,7 +430,7 @@ struct SearchListView: View {
     }
 
     private var query: String {
-        [baseQuery, "is:\(kind)", stateFilter.query, "archived:false", RepoFocus.shared.query(app.cacheAccount), sort.query, text]
+        [baseQuery, "is:\(kind)", stateFilter.query, "archived:false", ignoresFocus ? "" : RepoFocus.shared.query(app.cacheAccount), sort.query, text]
             .filter { !$0.isEmpty }.joined(separator: " ")
     }
 
@@ -468,7 +471,7 @@ struct SearchListView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            FocusBanner()
+            if !ignoresFocus { FocusBanner() }
             LoadingBar(active: model.loading && !model.showingCached && !model.items.isEmpty)
             Divider()
             List(selection: Binding(get: { app.detailRoot }, set: { app.select($0) })) {

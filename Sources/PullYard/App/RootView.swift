@@ -522,6 +522,7 @@ struct SidebarView: View {
         return PRFilter.allCases.map {
             SidebarItem(section: .prs($0), title: $0.title, icon: $0.tileIcon, color: $0.tint, count: prCount($0), group: title)
         } + [
+            SidebarItem(section: .allPRs, title: "All PRs", icon: "rectangle.stack.fill", color: .sySky, group: title),
             SidebarItem(section: .myPRsByRepo, title: "My PRs by project", icon: "folder.fill", color: .syCoral, group: title),
             SidebarItem(section: .stacks, title: "Stacks", icon: "square.stack.3d.up.fill", color: .syIndigo, group: title),
         ]
@@ -924,6 +925,8 @@ struct ContentColumn: View {
             SearchListView(title: f.title, kind: "pr", baseQuery: f.query).id("pr-\(f.rawValue)")
         case .myPRsByRepo:
             SearchListView(title: "My PRs by project", kind: "pr", baseQuery: PRFilter.mine.query, grouped: true).id("pr-mine-by-repo")
+        case .allPRs:
+            AllPRsView()
         case .stacks:
             StacksListView()
         case .issues(let f):

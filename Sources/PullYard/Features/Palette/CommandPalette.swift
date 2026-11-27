@@ -376,6 +376,7 @@ struct CommandPalette: View {
             for f in PRFilter.allCases {
                 out.append(destination(.prs(f), f.title, f.tileIcon, f.tint, group: "Pull requests", shortcut: shortcut(.prs(f))))
             }
+            out.append(destination(.allPRs, "All PRs", "rectangle.stack.fill", .sySky, group: "Pull requests"))
             out.append(destination(.myPRsByRepo, "My PRs by project", "folder.fill", .syCoral, group: "Pull requests"))
             out.append(destination(.stacks, "Stacks", "square.stack.3d.up.fill", .syIndigo, group: "Pull requests"))
             for f in IssueFilter.allCases {

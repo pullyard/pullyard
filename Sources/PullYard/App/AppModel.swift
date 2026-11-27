@@ -79,6 +79,7 @@ enum SidebarSection: Hashable {
     case notifications
     case prs(PRFilter)
     case myPRsByRepo
+    case allPRs
     case stacks
     case issues(IssueFilter)
     case repos
@@ -94,6 +95,7 @@ enum SidebarSection: Hashable {
         case .notifications: return "notifications"
         case .prs(let f): return "prs/\(f.rawValue)"
         case .myPRsByRepo: return "prs/byProject"
+        case .allPRs: return "prs/all"
         case .stacks: return "stacks"
         case .issues(let f): return "issues/\(f.rawValue)"
         case .repos: return "repos"
@@ -109,6 +111,7 @@ enum SidebarSection: Hashable {
         case ("overview", _): self = .overview
         case ("notifications", _): self = .notifications
         case ("prs", "byProject"): self = .myPRsByRepo
+        case ("prs", "all"): self = .allPRs
         case ("prs", let f?): self = .prs(PRFilter(rawValue: f) ?? .reviewRequested)
         case ("stacks", _): self = .stacks
         case ("issues", let f?): self = .issues(IssueFilter(rawValue: f) ?? .assigned)
@@ -889,6 +892,7 @@ final class AppModel {
             case ("projects", _): section = .projects
             case ("claude", _): section = .claude
             case ("prs", "byProject"): section = .myPRsByRepo
+            case ("prs", "all"): section = .allPRs
             case ("stacks", _): section = .stacks
             case ("prs", let f): section = .prs(f.flatMap(PRFilter.init(rawValue:)) ?? .reviewRequested)
             case ("issues", let f): section = .issues(f.flatMap(IssueFilter.init(rawValue:)) ?? .assigned)
