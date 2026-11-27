@@ -158,6 +158,7 @@ struct ForgeListView: View {
             .padding(.bottom, 6)
             FocusBanner()
             LoadingBar(active: model.loading && !model.items.isEmpty)
+            Divider()
             List(selection: Binding(get: { app.forgeSelection?.id }, set: { id in app.forgeSelection = model.items.first { $0.id == id } })) {
                 if kind.grouped {
                     ForEach(groups(items)) { group in

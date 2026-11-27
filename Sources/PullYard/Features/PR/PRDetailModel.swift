@@ -120,6 +120,7 @@ final class PRDetailModel {
     var scrollToLatestToken = 0
     var threadFocusToken = 0
     var conflicts: ConflictState?
+    @ObservationIgnored private var htmlGeneration = 0
     var showResolveConflicts = false
     @ObservationIgnored private var conflictsKey: String?
     @ObservationIgnored private var conflictScan: Task<Void, Never>?
@@ -499,8 +500,20 @@ final class PRDetailModel {
 
     func renderHTML() {
         guard let pr else { return }
-        let newHTML = ConversationHTML.render(pr: pr, conflicts: conflicts, repo: ref.repo)
-        if newHTML != html { html = newHTML }
+        let conflicts = conflicts
+        let repo = ref.repo
+        let newestFirst = ConversationOrder.newestFirst
+        htmlGeneration += 1
+        let generation = htmlGeneration
+        let box = UncheckedBox((pr, conflicts, repo))
+        Task { [weak self] in
+            let newHTML = await Task.detached(priority: .userInitiated) {
+                let (pr, conflicts, repo) = box.value
+                return ConversationHTML.render(pr: pr, conflicts: conflicts, repo: repo, newestFirst: newestFirst)
+            }.value
+            guard let self, generation == self.htmlGeneration, newHTML != self.html else { return }
+            self.html = newHTML
+        }
     }
 
     private func updateConflicts(_ pr: PullRequestDetail, force: Bool = false) {

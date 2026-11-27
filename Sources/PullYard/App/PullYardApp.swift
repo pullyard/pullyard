@@ -46,10 +46,11 @@ struct PullYardApp: App {
     var body: some Scene {
         Window("PullYard", id: "main") {
             ThemedRoot {
-                RootView()
-                    .environment(app)
-                    .frame(minWidth: 960, minHeight: 600)
-                    .onOpenURL { app.handle(url: $0) }
+                WindowRootFrame(minWidth: 960, minHeight: 600) {
+                    RootView()
+                        .environment(app)
+                        .onOpenURL { app.handle(url: $0) }
+                }
             }
         }
         .defaultSize(width: 1380, height: 860)
@@ -125,7 +126,9 @@ struct PullYardApp: App {
         WindowGroup("Detail", for: Route.self) { $route in
             ThemedRoot {
                 if let route {
-                    DetachedRouteWindow(route: route).environment(app)
+                    WindowRootFrame(minWidth: 640, minHeight: 420) {
+                        DetachedRouteWindow(route: route).environment(app)
+                    }
                 }
             }
         }

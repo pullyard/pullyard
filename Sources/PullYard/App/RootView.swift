@@ -264,7 +264,7 @@ struct DetailColumn: View {
                     .surface(.panel)
             } else {
                 NavigationStack(path: $app.detailPath) {
-                    Group {
+                    WindowRootFrame(minWidth: 320, minHeight: 240) {
                         if let root = app.detailRoot {
                             RouteView(route: root).id(root).transition(.routeSwap)
                         } else {
@@ -277,7 +277,9 @@ struct DetailColumn: View {
                             .transition(.opacity)
                         }
                     }
-                    .navigationDestination(for: Route.self) { RouteView(route: $0) }
+                    .navigationDestination(for: Route.self) { route in
+                        WindowRootFrame(minWidth: 320, minHeight: 240) { RouteView(route: route) }
+                    }
                 }
                 .surface(.panel)
             }
@@ -294,8 +296,10 @@ struct DetachedRouteWindow: View {
         Group {
             if app.phase == .loggedIn {
                 NavigationStack(path: $path) {
-                    RouteView(route: route, detached: true)
-                        .navigationDestination(for: Route.self) { RouteView(route: $0, detached: true) }
+                    WindowRootFrame(minWidth: 320, minHeight: 240) { RouteView(route: route, detached: true) }
+                        .navigationDestination(for: Route.self) { next in
+                            WindowRootFrame(minWidth: 320, minHeight: 240) { RouteView(route: next, detached: true) }
+                        }
                 }
             } else {
                 PYEmptyState(title: "PullYard is locked", message: "Open the main window to sign in or unlock.")

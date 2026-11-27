@@ -173,3 +173,18 @@ extension View {
             .pyGlassCapsule(interactive: interactive)
     }
 }
+
+struct WindowRootFrame: Layout {
+    var minWidth: CGFloat
+    var minHeight: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        CGSize(width: max(proposal.width ?? minWidth, minWidth), height: max(proposal.height ?? minHeight, minHeight))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for subview in subviews {
+            subview.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+        }
+    }
+}

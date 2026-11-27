@@ -15,13 +15,18 @@ struct TabStrip<ID: Hashable>: View {
     var shortcuts = false
     @Namespace private var ns
     @State private var hovered: ID?
+    @State private var available: CGFloat = 0
+    @State private var fullWidth: CGFloat = 0
 
+    // Picks titles or icons-only from two measured widths. ViewThatFits did the same but re-measured
+    // both variants on every layout query of the parent stack, which made tab switches stutter.
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            strip(titles: true)
-            strip(titles: false)
-        }
-        .animation(Motion.spring, value: selection)
+        let titles = fullWidth == 0 || available == 0 || fullWidth <= available
+        strip(titles: titles)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { available = $0 }
+            .onChange(of: items.map { "\($0.title)|\($0.badge ?? "")" }) { fullWidth = 0 }
+            .animation(Motion.spring, value: selection)
     }
 
     private func strip(titles: Bool) -> some View {
@@ -79,8 +84,9 @@ struct TabStrip<ID: Hashable>: View {
                 .accessibilityLabel(item.badgeLabel.map { "\(item.title), \($0)" } ?? item.badge.map { "\(item.title), \($0)" } ?? item.title)
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
-            Spacer(minLength: 0)
         }
+        .fixedSize()
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { if titles { fullWidth = $0 + 16 } }
         .padding(.horizontal, 8)
     }
 }

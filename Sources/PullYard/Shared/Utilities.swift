@@ -585,3 +585,49 @@ func isCancellation(_ error: Error) -> Bool {
     let ns = error as NSError
     return ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled
 }
+
+struct UncheckedBox<Value>: @unchecked Sendable {
+    let value: Value
+    init(_ value: Value) { self.value = value }
+}
+
+private struct DeckActiveKey: LayoutValueKey { static let defaultValue = false }
+private struct DeckIDKey: LayoutValueKey { static let defaultValue: AnyHashable? = nil }
+
+extension View {
+    func deckPage<ID: Hashable>(_ id: ID, active: Bool) -> some View {
+        layoutValue(key: DeckIDKey.self, value: AnyHashable(id)).layoutValue(key: DeckActiveKey.self, value: active)
+    }
+}
+
+// Stacks pages that stay alive while hidden. The deck always takes exactly the proposed size and
+// never asks pages for theirs, so a hidden page can't stretch the window; a hidden page keeps the
+// size it last had on screen, so resizing the visible one doesn't re-lay-out the others.
+struct PageDeck: Layout {
+    func makeCache(subviews: Subviews) -> [AnyHashable: CGSize] { [:] }
+    func updateCache(_ cache: inout [AnyHashable: CGSize], subviews: Subviews) {}
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout [AnyHashable: CGSize]) -> CGSize {
+        if let w = proposal.width, let h = proposal.height, w.isFinite, h.isFinite { return CGSize(width: w, height: h) }
+        let active = subviews.first { $0[DeckActiveKey.self] } ?? subviews.first
+        let fit = active?.sizeThatFits(proposal) ?? .zero
+        let w = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? fit.width
+        let h = proposal.height.flatMap { $0.isFinite ? $0 : nil } ?? fit.height
+        return CGSize(width: w, height: h)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout [AnyHashable: CGSize]) {
+        for subview in subviews {
+            let id = subview[DeckIDKey.self]
+            var size = bounds.size
+            if subview[DeckActiveKey.self] {
+                if let id { cache[id] = size }
+            } else if let id, let kept = cache[id] {
+                size = kept
+            } else if let id {
+                cache[id] = size
+            }
+            subview.place(at: bounds.origin, proposal: ProposedViewSize(size))
+        }
+    }
+}

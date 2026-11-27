@@ -468,6 +468,7 @@ struct SearchListView: View {
             .padding(.bottom, 6)
             FocusBanner()
             LoadingBar(active: model.loading && !model.showingCached && !model.items.isEmpty)
+            Divider()
             List(selection: Binding(get: { app.detailRoot }, set: { app.select($0) })) {
                 if grouped {
                     ForEach(model.groups) { group in

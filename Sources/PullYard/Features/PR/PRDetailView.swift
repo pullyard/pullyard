@@ -92,12 +92,12 @@ struct PRDetailContent: View {
             }
             .background { PYBackdrop(tints: [pr.visualState.color, .syAccent], base: .clear, strength: 1.2).equatable() }
             Divider()
-            ZStack {
+            PageDeck {
                 ForEach(PRTab.allCases) { tab in
                     if model.visitedTabs.contains(tab), tab != .stack || model.tab == .stack {
                         tabContent(tab)
+                            .deckPage(tab, active: model.tab == tab)
                             .opacity(model.tab == tab ? 1 : 0)
-                            .animation(Motion.fade, value: model.tab)
                             .allowsHitTesting(model.tab == tab)
                             .disabled(model.tab != tab)
                             .accessibilityHidden(model.tab != tab)
@@ -105,6 +105,7 @@ struct PRDetailContent: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
         }
         .transaction(value: headerCollapsed) { $0.animation = nil }
         .onChange(of: model.tab) { expandedOverride = false }
