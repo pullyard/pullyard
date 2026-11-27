@@ -11,6 +11,11 @@ struct AllPRsView: View {
     @State private var loadingRepos = false
     @State private var loadingAuthors = false
     @State private var showProjects = false
+    @State private var owner: String?
+    @State private var orgs: [GitHubOwner] = []
+    @State private var ownerRepos: [String: [RepoSummary]] = [:]
+    @State private var ownerErrors: [String: String] = [:]
+    @State private var loadingOwners: Set<String> = []
     @State private var showAuthors = false
     @State private var error: String?
 
@@ -88,21 +93,100 @@ struct AllPRsView: View {
             }
             .buttonStyle(.plain)
             .help("Choose which projects show up here")
-            .popover(isPresented: $showProjects, arrowEdge: .bottom) {
-                PickerPanel(title: "PROJECTS", placeholder: "Filter, or owner/repo to add any", items: pinned.filter { p in !repos.contains { $0.nameWithOwner == p } }.map { name in
-                    PickerPanel.Item(id: name, title: Self.short(name), subtitle: name, avatar: Self.ownerAvatar(name), icon: nil)
-                } + repos.map { r in
-                    PickerPanel.Item(id: r.nameWithOwner, title: Self.short(r.nameWithOwner), subtitle: r.nameWithOwner,
-                                     avatar: Self.ownerAvatar(r.nameWithOwner), icon: nil,
-                                     trailing: r.pullRequests.totalCount > 0 ? "\(r.pullRequests.totalCount)" : nil)
-                }, isSelected: { pinned.contains($0) }, loading: loadingRepos && repos.isEmpty, onAdd: addRepo) { id in
-                    toggle(id)
-                }
-            }
+            .popover(isPresented: $showProjects, arrowEdge: .bottom) { projectsPanel }
         }
         .padding(4)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.syText.opacity(0.03)))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.syLine))
+    }
+
+    // MARK: Projects panel
+
+    /// Owners to filter by: you, then your organizations, then anyone else whose repos you see.
+    private var owners: [GitHubOwner] {
+        var out: [GitHubOwner] = []
+        if let me = app.user { out.append(GitHubOwner(login: me.login, avatarUrl: me.avatarUrl)) }
+        for o in orgs where !out.contains(where: { $0.login == o.login }) { out.append(o) }
+        for r in repos {
+            let login = String(r.nameWithOwner.split(separator: "/").first ?? "")
+            if !login.isEmpty, !out.contains(where: { $0.login.lowercased() == login.lowercased() }) {
+                out.append(GitHubOwner(login: login, avatarUrl: nil))
+            }
+        }
+        return out
+    }
+
+    private var panelRepos: [RepoSummary] {
+        guard let owner else { return repos }
+        if let loaded = ownerRepos[owner] { return loaded }
+        return repos.filter { $0.nameWithOwner.lowercased().hasPrefix(owner.lowercased() + "/") }
+    }
+
+    private var projectsPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    OwnerChip(login: "All", avatar: nil, selected: owner == nil) { owner = nil }
+                    ForEach(owners) { o in
+                        OwnerChip(login: o.login, avatar: o.avatarUrl ?? "https://github.com/\(o.login).png?size=40", selected: owner == o.login) {
+                            owner = o.login
+                            Task { await loadOwner(o.login) }
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+            }
+            .padding(.top, 10)
+            if let owner, let err = ownerErrors[owner] {
+                Label(err, systemImage: "exclamationmark.triangle.fill")
+                    .font(.syCaption).foregroundStyle(Color.syAmber).lineLimit(3)
+                    .padding(.horizontal, 14).padding(.top, 6)
+            }
+            PickerPanel(title: owner.map { "PROJECTS · \($0.uppercased())" } ?? "PROJECTS", placeholder: "Filter, or owner/repo to add any",
+                        items: (owner == nil ? pinned.filter { p in !repos.contains { $0.nameWithOwner == p } } : []).map { name in
+                            PickerPanel.Item(id: name, title: Self.short(name), subtitle: name, avatar: Self.ownerAvatar(name), icon: nil)
+                        } + panelRepos.map { r in
+                            PickerPanel.Item(id: r.nameWithOwner, title: Self.short(r.nameWithOwner), subtitle: r.nameWithOwner,
+                                             avatar: Self.ownerAvatar(r.nameWithOwner), icon: nil,
+                                             trailing: r.pullRequests.totalCount > 0 ? "\(r.pullRequests.totalCount)" : nil)
+                        },
+                        isSelected: { pinned.contains($0) },
+                        loading: (loadingRepos && repos.isEmpty) || (owner.map { loadingOwners.contains($0) && ownerRepos[$0] == nil } ?? false),
+                        width: 380, onAdd: addRepo) { id in
+                toggle(id)
+            }
+        }
+        .frame(width: 380)
+        .task { await loadOrgs() }
+    }
+
+    private func loadOrgs() async {
+        guard orgs.isEmpty, let api = app.api else { return }
+        orgs = (try? await api.organizations()) ?? []
+    }
+
+    private func loadOwner(_ login: String) async {
+        guard ownerRepos[login] == nil, !loadingOwners.contains(login), let api = app.api else { return }
+        loadingOwners.insert(login)
+        defer { loadingOwners.remove(login) }
+        do {
+            var all: [RepoSummary] = []
+            var after: String?
+            for _ in 0..<4 {
+                guard let page = try await api.ownerRepos(login, after: after) else { break }
+                all += page.nodes
+                guard page.pageInfo.hasNextPage, let next = page.pageInfo.endCursor else { break }
+                after = next
+            }
+            ownerRepos[login] = all.filter { !$0.isArchived }
+            if all.isEmpty {
+                ownerErrors[login] = "No repositories visible. If \(login) restricts third-party apps, grant PullYard access in GitHub (Settings → Applications)."
+            } else {
+                ownerErrors[login] = nil
+            }
+        } catch {
+            ownerErrors[login] = "\(login): \(error.localizedDescription). The organization may need to grant PullYard access in GitHub (Settings → Applications)."
+        }
     }
 
     // MARK: Author
@@ -258,6 +342,33 @@ struct AllPRsView: View {
     }
 }
 
+/// An owner (you or an organization) in the Projects panel's filter row.
+private struct OwnerChip: View {
+    let login: String
+    let avatar: String?
+    let selected: Bool
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if let avatar { Avatar(url: avatar, size: 16) } else { Image(systemName: "square.grid.2x2").font(.syCaption) }
+                Text(login).lineLimit(1)
+            }
+            .font(.syCaption.weight(selected ? .semibold : .regular))
+            .foregroundStyle(selected ? Color.syText : Color.syMuted)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(selected ? Color.syRaised : (hover ? Color.syText.opacity(0.06) : Color.clear)))
+            .overlay(Capsule().strokeBorder(selected ? Color.syLineStrong : Color.syLine))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+    }
+}
+
 /// One project in the All PRs bar, styled like the account switcher.
 private struct ProjectSegment: View {
     let repo: String
@@ -314,6 +425,7 @@ struct PickerPanel: View {
     let items: [Item]
     let isSelected: (String) -> Bool
     var loading = false
+    var width: CGFloat = 320
     /// When set, typing `owner/repo` offers to add it; returns an error to show, or nil.
     var onAdd: ((String) async -> String?)? = nil
     let onPick: (String) -> Void
@@ -398,7 +510,7 @@ struct PickerPanel: View {
             .fixedSize(horizontal: false, vertical: true)
         }
         .padding(6)
-        .frame(width: 320)
+        .frame(width: width)
     }
 }
 
