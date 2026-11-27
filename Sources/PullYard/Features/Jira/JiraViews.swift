@@ -939,7 +939,7 @@ struct JiraIssueCard: View {
             }
         }
         .padding(6)
-        .frame(width: columns.isEmpty ? 300 : min(620, max(340, CGFloat(columns.count) * 78 + 20)))
+        .frame(width: columns.isEmpty ? 270 : min(500, max(290, CGFloat(columns.count) * 62 + 16)))
         .onDisappear { hoverTransition = nil }
     }
 
@@ -984,7 +984,7 @@ private struct JiraStatusRow: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Circle().fill(color).frame(width: 8, height: 8)
-                    .frame(width: 26, height: 26)
+                    .frame(width: 22, height: 22)
                     .background(Circle().fill(color.opacity(current ? 0.18 : 0.1)))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(name)
@@ -1001,7 +1001,7 @@ private struct JiraStatusRow: View {
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.vertical, 2)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hover && !current ? Color.syText.opacity(0.07) : Color.clear))
             .contentShape(Rectangle())
         }
@@ -1184,7 +1184,7 @@ struct JiraMiniBoard: View {
         let moving = target != nil && target != current
         return VStack(spacing: 4) {
             Text(column.name)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 8.5, weight: .semibold))
                 .foregroundStyle(isTarget ? Color.syAgentAccent : (isCurrent ? Color.syText : Color.syDim))
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -1206,7 +1206,7 @@ struct JiraMiniBoard: View {
                     }
                 }
             }
-            .frame(height: 34)
+            .frame(height: 26)
         }
         .frame(maxWidth: .infinity)
     }
