@@ -396,7 +396,7 @@ struct JiraTab: View {
     private func entry(_ key: String, primary: Bool, manual: Bool) -> some View {
         if let issue = issues.first(where: { $0.key == key }) {
             if primary || open.contains(key) {
-                JiraIssueCard(issue: issue, manual: manual, onUnlink: { unlink(key) }, onHide: manual ? nil : { hide(key) }, onCollapse: primary ? nil : { open.remove(key) }) { updated in
+                JiraIssueCard(issue: issue, editable: true, manual: manual, onUnlink: { unlink(key) }, onHide: manual ? nil : { hide(key) }, onCollapse: primary ? nil : { open.remove(key) }) { updated in
                     if let i = issues.firstIndex(where: { $0.key == updated.key }) { issues[i] = updated }
                 }
             } else {
