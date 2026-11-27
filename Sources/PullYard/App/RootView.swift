@@ -752,8 +752,7 @@ struct SidebarRow: View {
 
     var body: some View {
         let selected = app.section == section
-        Button { app.section = section } label: {
-            Group {
+        Group {
                 if compact {
                     SidebarIcon(systemImage: icon, color: color)
                         .frame(maxWidth: .infinity)
@@ -796,8 +795,10 @@ struct SidebarRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: Radius.m - 1))
             }
             .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        // A tap gesture, not a Button: a Button swallows the mouse-down and the row could not be dragged to reorder.
+        .onTapGesture { app.section = section }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { app.section = section }
         .onHover { hovering = $0 }
         .animation(Motion.fade, value: selected)
         .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))

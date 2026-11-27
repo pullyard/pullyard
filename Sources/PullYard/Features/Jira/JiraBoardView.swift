@@ -273,9 +273,16 @@ struct JiraBoardView: View {
         .task(id: model.connectionID) { await model.refresh() }
         .onChange(of: connections.connections.map(\.id)) { _, _ in model.syncConnections() }
         .onChange(of: model.connectionID) { _, _ in assignees = [] }
-        .sheet(item: $opened) { issue in
-            JiraBoardIssueSheet(issue: issue) { model.replace($0) }
+        .overlay {
+            if let issue = opened {
+                JiraIssueOverlay(issue: issue) {
+                    withAnimation(Motion.fade) { opened = nil }
+                } onChange: { model.replace($0) }
+                .id(issue.key)
+                .transition(.opacity)
+            }
         }
+        .animation(Motion.fade, value: opened?.key)
     }
 
     // MARK: Header
@@ -600,8 +607,7 @@ struct JiraBoardCard: View {
     @State private var hover = false
 
     var body: some View {
-        Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 10) {
                 Text(issue.summary)
                     .font(.syBody)
                     .foregroundStyle(Color.syText)
@@ -637,10 +643,12 @@ struct JiraBoardCard: View {
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.syRaised))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(hover ? Color.syLineStrong : Color.syLine))
-            .contentShape(Rectangle())
+            .contentShape(RoundedRectangle(cornerRadius: 10))
             .opacity(busy ? 0.6 : 1)
-        }
-        .buttonStyle(.plain)
+        // A tap gesture, not a Button: a Button swallows the mouse-down and the card could not be dragged.
+        .onTapGesture(perform: onOpen)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: "Open", onOpen)
         .onHover { hover = $0 }
         .help("\(issue.key) · \(issue.status)")
         .contextMenu {
@@ -690,30 +698,38 @@ private struct FlowLabels: View {
     }
 }
 
-/// Full ticket for a board card: loads description and attachments, and lets the status be changed.
-struct JiraBoardIssueSheet: View {
+/// Full ticket for a board card, shown over the board. Clicking outside or pressing Esc closes it.
+struct JiraIssueOverlay: View {
     let issue: JiraIssue
+    let onClose: () -> Void
     let onChange: (JiraIssue) -> Void
     @State private var full: JiraIssue?
     @State private var error: String?
     @State private var implementing = false
-    @Environment(\.dismiss) private var dismiss
+    @State private var contentHeight: CGFloat = 300
 
     var body: some View {
-        Group {
-            if implementing {
-                JiraImplementForm(issue: full ?? issue) {
-                    withAnimation(Motion.fade) { implementing = false }
-                } onStarted: {
-                    dismiss()
-                }
-            } else {
-                details
+        GeometryReader { geo in
+            let maxHeight = max(320, geo.size.height - 64)
+            ZStack {
+                Color.black.opacity(0.45)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onClose)
+                    .accessibilityLabel("Close")
+                    .accessibilityAddTraits(.isButton)
+                panel(maxHeight: maxHeight)
+                    .frame(width: min(920, geo.size.width - 64))
+                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.syRaised))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.syLineStrong))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(color: .black.opacity(0.45), radius: 30, y: 12)
             }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
-        .frame(minWidth: 820, idealWidth: 960, minHeight: 640, idealHeight: 820)
-        .background(Color.syRaised)
-        .presentationBackground(Color.syRaised)
+        .background {
+            Button("Close", action: onClose).keyboardShortcut(.cancelAction).hidden()
+        }
         .task {
             guard let client = JiraConnections.shared.client(for: issue.connectionID) else { return }
             do {
@@ -725,6 +741,47 @@ struct JiraBoardIssueSheet: View {
             }
         }
     }
+
+    @ViewBuilder
+    private func panel(maxHeight: CGFloat) -> some View {
+        if implementing {
+            JiraImplementForm(issue: full ?? issue) {
+                withAnimation(Motion.fade) { implementing = false }
+            } onStarted: {
+                onClose()
+            }
+            .frame(height: min(maxHeight, 860))
+        } else {
+            // Sized to the ticket, scrolling only when it is taller than the window.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    JiraIssueCard(
+                        issue: full ?? issue,
+                        flat: true,
+                        onImplement: { withAnimation(Motion.fade) { implementing = true } },
+                        onClose: onClose
+                    ) { updated in
+                        full = updated
+                        onChange(updated)
+                    }
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill").font(.syCaption).foregroundStyle(Color.syRed)
+                            .padding(.horizontal, 18).padding(.bottom, 12)
+                    }
+                }
+                .padding(6)
+                .background(GeometryReader { g in Color.clear.preference(key: JiraOverlayHeightKey.self, value: g.size.height) })
+            }
+            .scrollIndicators(.automatic)
+            .frame(height: min(contentHeight, maxHeight))
+            .onPreferenceChange(JiraOverlayHeightKey.self) { contentHeight = $0 }
+        }
+    }
+}
+
+private struct JiraOverlayHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 300
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 struct JiraPerson: Identifiable, Hashable {
@@ -833,29 +890,6 @@ private struct JiraPeopleRowStyle: ButtonStyle {
         configuration.label
             .background(Color.syText.opacity(configuration.isPressed ? 0.1 : hover ? 0.06 : 0))
             .onHover { hover = $0 }
-    }
-}
-
-private extension JiraBoardIssueSheet {
-    var details: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
-            }
-            .padding([.horizontal, .top], 14)
-            ScrollView {
-                JiraIssueCard(issue: full ?? issue, flat: true, onImplement: { withAnimation(Motion.fade) { implementing = true } }) { updated in
-                    full = updated
-                    onChange(updated)
-                }
-                .padding(.horizontal, 6)
-                .padding(.bottom, 6)
-                if let error {
-                    Label(error, systemImage: "exclamationmark.triangle.fill").font(.syCaption).foregroundStyle(Color.syRed).padding(.horizontal, 16)
-                }
-            }
-        }
     }
 }
 

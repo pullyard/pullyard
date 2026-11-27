@@ -623,6 +623,8 @@ struct JiraIssueCard: View {
     var flat = false
     /// Shows "Implement with agent" when set.
     var onImplement: (() -> Void)?
+    /// Shows a close button in the header when set.
+    var onClose: (() -> Void)?
     var manual = false
     var onUnlink: () -> Void = {}
     var onHide: (() -> Void)?
@@ -673,6 +675,18 @@ struct JiraIssueCard: View {
                         .help("Collapse")
                         .accessibilityLabel("Collapse")
                 }
+                if let onClose {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.syCaption.weight(.bold))
+                            .foregroundStyle(Color.syMuted)
+                            .frame(width: 26, height: 26)
+                            .background(Circle().fill(Color.syText.opacity(0.07)))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Close (Esc)")
+                    .accessibilityLabel("Close")
+                }
             }
             Text(issue.summary).font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText).textSelection(.enabled)
             meta
@@ -697,12 +711,15 @@ struct JiraIssueCard: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copiedKey = false }
                 } label: { Label(copiedKey ? "Copied" : "Copy \(issue.key)", systemImage: copiedKey ? "checkmark" : "number") }
                     .help("Copy the ticket number")
-                if let onImplement {
-                    Button(action: onImplement) { Label("Implement with agent", systemImage: "sparkles") }
-                        .buttonStyle(.borderedProminent)
-                        .help("Start a Claude session that implements this ticket")
-                }
                 Spacer()
+                if let onImplement {
+                    Button(action: onImplement) {
+                        Label("Implement with agent", systemImage: "sparkles")
+                    }
+                    .buttonStyle(AgentGradientButtonStyle())
+                    .controlSize(.regular)
+                    .help("Start a Claude session that implements this ticket")
+                }
                 if manual {
                     Button(role: .destructive, action: onUnlink) { Label("Unlink", systemImage: "link.badge.minus") }
                         .buttonStyle(.borderless)
