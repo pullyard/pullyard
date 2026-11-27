@@ -2359,6 +2359,18 @@ struct AgentBranchMenu: View {
     @State private var hover = false
 
     var body: some View {
+        Group {
+            content
+        }
+        // Follow the agent when it moves into another worktree of this repo.
+        .task(id: tab.chat?.items.count ?? 0) {
+            try? await Task.sleep(for: .milliseconds(400))
+            await app.claude.followActiveWorktree(tab)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         let git = tab.git
         if git.isRepo, let branch = git.branch {
             Menu {
@@ -2377,7 +2389,10 @@ struct AgentBranchMenu: View {
                     Button("Copy Branch Name") { copyToPasteboard(branch) }
                 }
                 if let worktree = git.worktree {
-                    Button("Reveal Worktree “\(worktree)” in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: tab.folder)]) }
+                    Button("Reveal Worktree “\(worktree)” in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: git.path)]) }
+                }
+                if tab.followsOtherWorktree {
+                    Button("Show Session Folder") { tab.follow(app.claude.git(for: tab.folder)) }
                 }
                 if let pr {
                     Button("Open Pull Request #\(pr.number)") {
@@ -2423,7 +2438,9 @@ struct AgentBranchMenu: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .onHover { hover = $0 }
-            .help(branch + (git.worktree.map { " · worktree " + $0 } ?? "") + (pr.map { " · #\($0.number)" } ?? ""))
+            .help(branch + (git.worktree.map { " · worktree " + $0 } ?? "") + (tab.followsOtherWorktree ? " · the agent is working here, not in the session folder" : "") + (pr.map { " · #\($0.number)" } ?? ""))
+        } else {
+            Color.clear.frame(width: 0, height: 0)
         }
     }
 

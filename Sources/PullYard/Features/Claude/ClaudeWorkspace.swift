@@ -107,7 +107,9 @@ final class ClaudeTab: Identifiable {
     var environmentID: String?
     var exitCode: Int32?
     var startedAt = Date()
-    let git: GitWorkingCopy
+    /// The working copy the header, changes and PR views show. It starts as the session folder and
+    /// follows the agent into another worktree of the same repo (see `followActiveWorktree`).
+    private(set) var git: GitWorkingCopy
     let chat: ChatSession?
     let configDir: String?
     @ObservationIgnored private var _terminal: ClaudeTerminalView?
@@ -127,6 +129,14 @@ final class ClaudeTab: Identifiable {
     }
 
     var profile: ClaudeProfile? { ClaudeProfiles.shared.profile(configDir: configDir) }
+
+    /// True when the agent works in a worktree other than the folder the session started in.
+    var followsOtherWorktree: Bool { git.path != folder }
+
+    func follow(_ copy: GitWorkingCopy) {
+        guard copy !== git else { return }
+        git = copy
+    }
 
     var environment: AgentEnvironment? { AgentEnvironments.shared.environment(id: environmentID) }
 

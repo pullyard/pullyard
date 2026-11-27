@@ -14,10 +14,14 @@ struct JiraImplementForm: View {
     @State private var profileID: String = ClaudeProfiles.shared.activeID
     @State private var mode: ClaudeMode = .plan
     @State private var showProjects = false
+    @State private var useWorktree = false
+    @State private var starting = false
+    @State private var startError: String?
     @State private var showAccounts = false
 
     private static let profileKey = "jira.implement.profile"
     private static let modeKey = "jira.implement.mode"
+    private static let worktreeKey = "jira.implement.worktree"
     private static func folderKey(_ project: String) -> String { "jira.implement.folder.\(project)" }
 
     private var projectKey: String { JiraConnections.projectKey(of: issue.key) }
@@ -39,6 +43,7 @@ struct JiraImplementForm: View {
                     accountCard
                 }
                 modePicker
+                worktreeToggle
                 promptEditor
             }
             .padding(24)
@@ -54,6 +59,7 @@ struct JiraImplementForm: View {
                 profileID = saved
             }
             if let saved = UserDefaults.standard.string(forKey: Self.modeKey).flatMap(ClaudeMode.init(rawValue:)) { mode = saved }
+            useWorktree = UserDefaults.standard.bool(forKey: Self.worktreeKey)
             if app.claude.projects.isEmpty { await app.claude.reloadProjects(force: false) }
         }
     }
@@ -213,6 +219,40 @@ struct JiraImplementForm: View {
         }
     }
 
+    // MARK: Worktree
+
+    private var worktreeToggle: some View {
+        Button {
+            withAnimation(Motion.fade) { useWorktree.toggle() }
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: useWorktree ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 16))
+                    .foregroundStyle(useWorktree ? Color.syAccent : Color.syDim)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.stack.3d.up").font(.syCaption)
+                        Text("Work in a new git worktree").font(.syCallout.weight(.semibold))
+                    }
+                    .foregroundStyle(Color.syText)
+                    Text(useWorktree
+                         ? "A separate checkout on a new claude/\(SessionWorktree.slug(issue.key + " " + issue.summary))-… branch, so your current work stays untouched."
+                         : "The agent works right in \(folder.map { ($0 as NSString).lastPathComponent } ?? "the project folder"), on whatever is checked out there.")
+                        .font(.syCaption)
+                        .foregroundStyle(Color.syMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(useWorktree ? Color.syAccent.opacity(0.08) : Color.syText.opacity(0.04)))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(useWorktree ? Color.syAccent.opacity(0.5) : Color.syLine))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(useWorktree ? .isSelected : [])
+    }
+
     // MARK: Prompt
 
     private var promptEditor: some View {
@@ -245,7 +285,7 @@ struct JiraImplementForm: View {
     // MARK: Footer
 
     private var canStart: Bool {
-        folder != nil && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        folder != nil && !starting && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var footer: some View {
@@ -256,7 +296,12 @@ struct JiraImplementForm: View {
             .buttonStyle(.borderless)
             .keyboardShortcut(.cancelAction)
             Spacer()
-            if folder == nil {
+            if let startError {
+                Label(startError, systemImage: "exclamationmark.triangle.fill").font(.syCaption).foregroundStyle(Color.syRed).lineLimit(2)
+            } else if starting {
+                WakeLoader()
+                Text("Creating worktree\u{2026}").font(.syCaption).foregroundStyle(Color.syMuted)
+            } else if folder == nil {
                 Text("Choose a project to start").font(.syCaption).foregroundStyle(Color.syMuted)
             } else {
                 Text("⌘↩").font(.syCaption.monospaced()).foregroundStyle(Color.syDim)
@@ -283,18 +328,39 @@ struct JiraImplementForm: View {
     }
 
     private func start() {
-        guard let folder else { return }
-        let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let folder, !starting else { return }
+        var text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let defaults = UserDefaults.standard
         defaults.set(folder, forKey: Self.folderKey(projectKey))
         defaults.set(profileID, forKey: Self.profileKey)
         defaults.set(mode.rawValue, forKey: Self.modeKey)
-        let claude = app.claude
-        claude.newSession(folder: folder, prompt: text, name: "\(issue.key) \(issue.summary)", mode: mode, profileID: profileID)
-        // Show the account the session runs under, so it is visible in its project's section.
-        if claude.accountFilter != nil { claude.accountFilter = profileID }
-        onStarted()
-        app.section = .claude
+        defaults.set(useWorktree, forKey: Self.worktreeKey)
+        let name = "\(issue.key) \(issue.summary)"
+        Task {
+            var workFolder = folder
+            if useWorktree {
+                starting = true
+                startError = nil
+                let created = await SessionWorktree.create(from: folder, title: name)
+                starting = false
+                switch created {
+                case .success(let path):
+                    workFolder = path
+                    text += "\n\nYou are already in a dedicated git worktree for this ticket; work and commit here."
+                case .failure(let error):
+                    startError = "Couldn't create a worktree: \(error.localizedDescription)"
+                    return
+                }
+            } else {
+                text += "\n\nWork directly in this checkout. Do not create a separate git worktree."
+            }
+            let claude = app.claude
+            claude.newSession(folder: workFolder, prompt: text, name: name, mode: mode, profileID: profileID)
+            // Show the account the session runs under, so it is visible in its project's section.
+            if claude.accountFilter != nil { claude.accountFilter = profileID }
+            onStarted()
+            app.section = .claude
+        }
     }
 
     static func defaultPrompt(_ issue: JiraIssue) -> String {
