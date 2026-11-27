@@ -396,18 +396,14 @@ struct RouteView: View {
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var app
+    @State private var layout = SidebarLayout.shared
+    @State private var renameText = ""
     var compact = false
 
     var body: some View {
         List {
             SidebarGroup("") {
-                if app.forge == nil {
-                    SidebarRow(section: .overview, title: "Overview", icon: "square.grid.2x2.fill", color: .syAccent)
-                    SidebarRow(section: .notifications, title: "Notifications", icon: "bell.fill", color: .syAmber, count: app.unreadCount)
-                } else if let inbox = app.forgeCaps.inboxTitle {
-                    SidebarRow(section: .notifications, title: inbox, icon: "bell.fill", color: .syAmber, count: app.unreadCount)
-                }
-                SidebarRow(section: .claude, title: "Agents", icon: "terminal.fill", color: .syCoral, count: app.claude.attentionCount > 0 ? app.claude.attentionCount : app.claude.tabs.filter(\.running).count)
+                SidebarItemList(group: "top", items: topItems)
             }
             if app.forge != nil {
                 forgeSections
@@ -428,29 +424,68 @@ struct SidebarView: View {
                 userFooter
             }
         }
+        .alert("Rename \u{201C}\(layout.renaming?.title ?? "")\u{201D}", isPresented: Binding(
+            get: { layout.renaming != nil },
+            set: { if !$0 { layout.renaming = nil } }
+        )) {
+            TextField("Name", text: $renameText)
+            Button("Rename") {
+                if let item = layout.renaming {
+                    layout.rename(item.section, to: renameText, default: item.title)
+                }
+                layout.renaming = nil
+            }
+            .keyboardShortcut(.defaultAction)
+            Button("Cancel", role: .cancel) { layout.renaming = nil }
+        } message: {
+            Text("Leave empty to use the original name.")
+        }
+        .onChange(of: layout.renaming?.id) { _, _ in
+            if let item = layout.renaming {
+                renameText = layout.title(for: item.section, default: item.title)
+            }
+        }
+    }
+
+    private var topItems: [SidebarItem] {
+        var out: [SidebarItem] = []
+        if app.forge == nil {
+            out.append(SidebarItem(section: .overview, title: "Overview", icon: "square.grid.2x2.fill", color: .syAccent))
+            out.append(SidebarItem(section: .notifications, title: "Notifications", icon: "bell.fill", color: .syAmber, count: app.unreadCount))
+        } else if let inbox = app.forgeCaps.inboxTitle {
+            out.append(SidebarItem(section: .notifications, title: inbox, icon: "bell.fill", color: .syAmber, count: app.unreadCount))
+        }
+        out.append(SidebarItem(section: .claude, title: "Agents", icon: "terminal.fill", color: .syCoral, count: app.claude.attentionCount > 0 ? app.claude.attentionCount : app.claude.tabs.filter(\.running).count))
+        return out
+    }
+
+    private func prCount(_ f: PRFilter) -> Int {
+        f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0)
     }
 
     @ViewBuilder
     private var forgeSections: some View {
         let caps = app.forgeCaps
-        SidebarGroup(app.provider.requestsTitle) {
-            ForEach(caps.pullFilters) { f in
-                SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0), group: app.provider.requestsTitle)
-            }
-            if caps.pullFilters.contains(.mine) {
-                SidebarRow(section: .myPRsByRepo, title: "My \(app.provider.requestShort)s by project", icon: "folder.fill", color: .syCoral)
-            }
+        let prsTitle = app.provider.requestsTitle
+        SidebarGroup(prsTitle) {
+            SidebarItemList(group: "prs", items: caps.pullFilters.map {
+                SidebarItem(section: .prs($0), title: $0.title, icon: $0.tileIcon, color: $0.tint, count: prCount($0), group: prsTitle)
+            } + (caps.pullFilters.contains(.mine) ? [
+                SidebarItem(section: .myPRsByRepo, title: "My \(app.provider.requestShort)s by project", icon: "folder.fill", color: .syCoral, group: prsTitle),
+            ] : []))
         }
         if !caps.issueFilters.isEmpty {
             SidebarGroup("Issues", collapsible: true) {
-                ForEach(caps.issueFilters) { f in
-                    SidebarRow(section: .issues(f), title: f.title, icon: f.tileIcon, color: f.tint, group: "Issues")
-                }
+                SidebarItemList(group: "issues", items: caps.issueFilters.map {
+                    SidebarItem(section: .issues($0), title: $0.title, icon: $0.tileIcon, color: $0.tint, group: "Issues")
+                })
             }
         }
         if caps.repositories {
             SidebarGroup("Code") {
-                SidebarRow(section: .repos, title: app.provider.repositoriesTitle, icon: "book.closed.fill", color: .syTeal)
+                SidebarItemList(group: "code", items: [
+                    SidebarItem(section: .repos, title: app.provider.repositoriesTitle, icon: "book.closed.fill", color: .syTeal, group: "Code"),
+                ])
             }
         }
     }
@@ -458,20 +493,23 @@ struct SidebarView: View {
     @ViewBuilder
     private var gitHubSections: some View {
         SidebarGroup("Pull requests") {
-            ForEach(PRFilter.allCases) { f in
-                SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0), group: "Pull requests")
-            }
-            SidebarRow(section: .myPRsByRepo, title: "My PRs by project", icon: "folder.fill", color: .syCoral)
-            SidebarRow(section: .stacks, title: "Stacks", icon: "square.stack.3d.up.fill", color: .syIndigo)
+            SidebarItemList(group: "prs", items: PRFilter.allCases.map {
+                SidebarItem(section: .prs($0), title: $0.title, icon: $0.tileIcon, color: $0.tint, count: prCount($0), group: "Pull requests")
+            } + [
+                SidebarItem(section: .myPRsByRepo, title: "My PRs by project", icon: "folder.fill", color: .syCoral, group: "Pull requests"),
+                SidebarItem(section: .stacks, title: "Stacks", icon: "square.stack.3d.up.fill", color: .syIndigo, group: "Pull requests"),
+            ])
         }
         SidebarGroup("Issues", collapsible: true) {
-            ForEach(IssueFilter.allCases) { f in
-                SidebarRow(section: .issues(f), title: f.title, icon: f.tileIcon, color: f.tint, group: "Issues")
-            }
+            SidebarItemList(group: "issues", items: IssueFilter.allCases.map {
+                SidebarItem(section: .issues($0), title: $0.title, icon: $0.tileIcon, color: $0.tint, group: "Issues")
+            })
         }
         SidebarGroup("Code") {
-            SidebarRow(section: .repos, title: "Repositories", icon: "book.closed.fill", color: .syTeal)
-            SidebarRow(section: .projects, title: "Projects", icon: "rectangle.split.3x1.fill", color: .syIndigo)
+            SidebarItemList(group: "code", items: [
+                SidebarItem(section: .repos, title: "Repositories", icon: "book.closed.fill", color: .syTeal, group: "Code"),
+                SidebarItem(section: .projects, title: "Projects", icon: "rectangle.split.3x1.fill", color: .syIndigo, group: "Code"),
+            ])
         }
     }
 
@@ -581,6 +619,38 @@ extension EnvironmentValues {
     var sidebarCompact: Bool {
         get { self[SidebarCompactKey.self] }
         set { self[SidebarCompactKey.self] = newValue }
+    }
+}
+
+/// The rows of one sidebar group, in the user's order, with drag-to-reorder and a rename menu.
+struct SidebarItemList: View {
+    let group: String
+    let items: [SidebarItem]
+    @State private var layout = SidebarLayout.shared
+
+    var body: some View {
+        let visible = layout.arranged(items, group: group)
+        ForEach(visible) { item in
+            SidebarRow(section: item.section, title: layout.title(for: item.section, default: item.title), icon: item.icon, color: item.color, count: item.count, group: item.group)
+                .contextMenu {
+                    Button("Rename\u{2026}") { layout.renaming = item }
+                    if layout.hasCustomName(item.section) {
+                        Button("Restore \u{201C}\(item.title)\u{201D}") { layout.resetName(item.section) }
+                    }
+                    Divider()
+                    Button("Move Up") { withAnimation(Motion.fade) { layout.move(item, by: -1, in: group, visible: visible) } }
+                        .disabled(!layout.canMove(item, by: -1, in: visible))
+                    Button("Move Down") { withAnimation(Motion.fade) { layout.move(item, by: 1, in: group, visible: visible) } }
+                        .disabled(!layout.canMove(item, by: 1, in: visible))
+                    if layout.isCustomised {
+                        Divider()
+                        Button("Reset Sidebar Order and Names") { withAnimation(Motion.fade) { layout.resetAll() } }
+                    }
+                }
+        }
+        .onMove { source, destination in
+            layout.move(in: group, visible: visible, from: source, to: destination)
+        }
     }
 }
 

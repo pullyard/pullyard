@@ -334,7 +334,8 @@ struct CommandPalette: View {
     }
 
     private func destination(_ section: SidebarSection, _ title: String, _ icon: String, _ color: Color, group: String, shortcut: String? = nil) -> PaletteCommand {
-        PaletteCommand(id: "go-\(title)-\(group)", section: .goTo, icon: icon, tint: color, title: title, detail: group, shortcut: shortcut, keywords: "go open show") {
+        let shown = SidebarLayout.shared.title(for: section, default: title)
+        return PaletteCommand(id: "go-\(title)-\(group)", section: .goTo, icon: icon, tint: color, title: shown, detail: group, shortcut: shortcut, keywords: shown == title ? "go open show" : "go open show \(title)") {
             app.section = section
         }
     }
