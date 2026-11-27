@@ -117,7 +117,7 @@ final class PRDetailModel {
     var interdiffRebased = false
     @ObservationIgnored private var interdiffKey: String?
     var html = ""
-    var scrollToBottomToken = 0
+    var scrollToLatestToken = 0
     var threadFocusToken = 0
     var conflicts: ConflictState?
     var showResolveConflicts = false
@@ -497,7 +497,7 @@ final class PRDetailModel {
         }
     }
 
-    private func renderHTML() {
+    func renderHTML() {
         guard let pr else { return }
         let newHTML = ConversationHTML.render(pr: pr, conflicts: conflicts, repo: ref.repo)
         if newHTML != html { html = newHTML }
@@ -785,7 +785,7 @@ final class PRDetailModel {
     func comment(_ body: String) async -> Bool {
         guard let pr else { return false }
         let ok = await run { try await backend.comment(ref, pr: pr, body: body) }
-        if ok { scrollToBottomToken += 1 }
+        if ok { scrollToLatestToken += 1 }
         return ok
     }
 
@@ -798,7 +798,7 @@ final class PRDetailModel {
             pending = []
             summaryDraft = ""
             restoredDrafts = false
-            scrollToBottomToken += 1
+            scrollToLatestToken += 1
             saveDraftsNow()
         }
         return ok
