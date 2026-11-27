@@ -13,6 +13,7 @@ struct FixWithClaudeSheet: View {
     @AppStorage("claudeTarget.v2") private var target: ClaudeTarget = .app
     @AppStorage("claudeMode") private var mode: ClaudePermissionMode = .standard
     @AppStorage("agentFix.isolatedWorktree") private var isolate = true
+    @State private var worktreePath: String?
     @AppStorage("agentFix.profile") private var profileID = ""
     @State private var launching = false
     @State private var found: FoundFixPrompt?
@@ -80,7 +81,7 @@ struct FixWithClaudeSheet: View {
             .onChange(of: options.push) { _, push in if !push { options.replyAndResolve = false } }
             promptEditor
             ClaudeFolderRow(repo: model.ref.repo, folder: $folder, detecting: detecting)
-            ClaudeWorktreeRow(folder: folder, number: pr.number, target: target, isolate: $isolate)
+            ClaudeWorktreeRow(folder: folder, number: pr.number, target: target, isolate: $isolate, worktreePath: $worktreePath)
             if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
             ClaudeLaunchRow(target: $target, mode: $mode, profileID: Binding(get: { ClaudeProfiles.shared.profile(id: profileID).map { p in ClaudeProfiles.shared.visible.contains(p) ? p.id : ClaudeProfiles.shared.activeID } ?? ClaudeProfiles.shared.activeID }, set: { profileID = $0 }), canLaunch: !launching && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (target == .copy || folder != nil) && !(source == .ci && (ciLoading || ciSelected.isEmpty)), onLaunch: launch)
         }
@@ -327,7 +328,7 @@ struct FixWithClaudeSheet: View {
         Task {
             defer { launching = false }
             do {
-                let tab = try await ClaudeLauncher.startForPR(app: app, prompt: prompt, folder: folder, isolate: isolate, pr: pr, repo: model.ref.repo, target: target, mode: mode, name: name, profileID: ClaudeProfiles.shared.profile(id: profileID).flatMap { ClaudeProfiles.shared.visible.contains($0) ? $0.id : nil })
+                let tab = try await ClaudeLauncher.startForPR(app: app, prompt: prompt, folder: folder, isolate: isolate, worktreePath: worktreePath, pr: pr, repo: model.ref.repo, target: target, mode: mode, name: name, profileID: ClaudeProfiles.shared.profile(id: profileID).flatMap { ClaudeProfiles.shared.visible.contains($0) ? $0.id : nil })
                 if source == .ci, target != .copy {
                     app.claude.ciFixes[model.ref] = CIFixLaunch(tabID: tab?.id, target: target, headOid: pr.headRefOid, at: Date())
                 }

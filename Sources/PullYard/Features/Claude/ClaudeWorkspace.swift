@@ -133,6 +133,9 @@ final class ClaudeTab: Identifiable {
     /// True when the agent works in a worktree other than the folder the session started in.
     var followsOtherWorktree: Bool { git.path != folder }
 
+    /// Set when the user picked a worktree in the branch panel; auto-follow leaves the header alone then.
+    var pinnedWorktree: String?
+
     func follow(_ copy: GitWorkingCopy) {
         guard copy !== git else { return }
         git = copy

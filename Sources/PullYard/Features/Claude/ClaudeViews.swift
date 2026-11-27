@@ -2359,6 +2359,7 @@ struct AgentBranchMenu: View {
     @State private var hover = false
     @State private var open = false
     @State private var query = ""
+    @State private var worktrees: [GitWorktreeEntry] = []
 
     var body: some View {
         Group {
@@ -2431,6 +2432,34 @@ struct AgentBranchMenu: View {
                 .padding(.top, 4)
                 .padding(.bottom, 2)
             BranchPanelRow(name: branch == "HEAD" ? "Detached HEAD" : branch, detail: git.worktree.map { "worktree · \($0)" } ?? "checked out", current: true) {}
+            if worktrees.count > 1 {
+                Divider().padding(.vertical, 4)
+                HStack {
+                    Text("WORKTREE")
+                        .font(.syCaption2.weight(.semibold))
+                        .tracking(0.6)
+                        .foregroundStyle(Color.syDim)
+                    Spacer()
+                    Text(working ? "agent is working" : "the agent works where you pick").font(.syCaption2).foregroundStyle(Color.syDim)
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 2)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(worktrees) { w in
+                            let here = ActiveWorktree.standard(w.path) == ActiveWorktree.standard(git.path)
+                            BranchPanelRow(icon: w.isMain ? "folder" : "square.stack.3d.up",
+                                           name: w.isMain ? "\(w.name) · main checkout" : w.name,
+                                           detail: (w.branch ?? "detached HEAD") + " · " + w.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"),
+                                           current: here, disabled: working) {
+                                close { app.claude.pinWorktree(tab, to: w) }
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 200)
+                .fixedSize(horizontal: false, vertical: true)
+            }
             if others.count > 0 {
                 Divider().padding(.vertical, 4)
                 HStack {
@@ -2476,7 +2505,7 @@ struct AgentBranchMenu: View {
                 }
             }
             if tab.followsOtherWorktree {
-                PanelActionRow(icon: "arrow.uturn.backward", title: "Show session folder") { close { tab.follow(app.claude.git(for: tab.folder)) } }
+                PanelActionRow(icon: "arrow.uturn.backward", title: "Show session folder") { close { tab.pinnedWorktree = nil; tab.follow(app.claude.git(for: tab.folder)) } }
             }
             if let pr {
                 Divider().padding(.vertical, 4)
@@ -2496,8 +2525,12 @@ struct AgentBranchMenu: View {
             }
         }
         .padding(6)
-        .frame(width: 340)
+        .frame(width: 360)
         .onDisappear { query = "" }
+        .task {
+            let dir = tab.folder
+            worktrees = await Task.detached(priority: .userInitiated) { GitWorktreeEntry.list(in: dir) }.value
+        }
     }
 
     private func close(_ action: @escaping () -> Void) {
@@ -2534,6 +2567,7 @@ struct AgentBranchMenu: View {
 }
 
 private struct BranchPanelRow: View {
+    var icon = "arrow.triangle.branch"
     let name: String
     let detail: String?
     let current: Bool
@@ -2544,7 +2578,7 @@ private struct BranchPanelRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: "arrow.triangle.branch")
+                Image(systemName: icon)
                     .font(.syCallout.weight(current ? .semibold : .regular))
                     .foregroundStyle(current ? Color.syAgentAccent : Color.syMuted)
                     .frame(width: 26, height: 26)
