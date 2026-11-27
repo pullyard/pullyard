@@ -4,7 +4,7 @@ import SwiftUI
 extension View {
     /// A dark bubble with the full text, shown above the view after the pointer rests on it for `delay`.
     /// Unlike `.help`, it appears fast, wraps up to a few lines, and floats over scroll views and clipping.
-    func hoverTip(_ text: String?, delay: TimeInterval = 0.3) -> some View {
+    func hoverTip(_ text: String?, delay: TimeInterval = 2) -> some View {
         background(HoverTipAnchor(text: text, delay: delay))
     }
 }
@@ -26,7 +26,7 @@ private struct HoverTipAnchor: NSViewRepresentable {
 
 final class TipTrackingView: NSView {
     var text: String?
-    var delay: TimeInterval = 0.3
+    var delay: TimeInterval = 2
     private var pending: DispatchWorkItem?
     private(set) var isShowing = false
     private var monitor: Any?
