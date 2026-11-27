@@ -89,11 +89,13 @@ struct AllPRsView: View {
             .buttonStyle(.plain)
             .help("Choose which projects show up here")
             .popover(isPresented: $showProjects, arrowEdge: .bottom) {
-                PickerPanel(title: "PROJECTS", placeholder: "Filter projects", items: repos.map { r in
+                PickerPanel(title: "PROJECTS", placeholder: "Filter, or owner/repo to add any", items: pinned.filter { p in !repos.contains { $0.nameWithOwner == p } }.map { name in
+                    PickerPanel.Item(id: name, title: Self.short(name), subtitle: name, avatar: Self.ownerAvatar(name), icon: nil)
+                } + repos.map { r in
                     PickerPanel.Item(id: r.nameWithOwner, title: Self.short(r.nameWithOwner), subtitle: r.nameWithOwner,
                                      avatar: Self.ownerAvatar(r.nameWithOwner), icon: nil,
                                      trailing: r.pullRequests.totalCount > 0 ? "\(r.pullRequests.totalCount)" : nil)
-                }, isSelected: { pinned.contains($0) }, loading: loadingRepos && repos.isEmpty) { id in
+                }, isSelected: { pinned.contains($0) }, loading: loadingRepos && repos.isEmpty, onAdd: addRepo) { id in
                     toggle(id)
                 }
             }
@@ -179,6 +181,31 @@ struct AllPRsView: View {
             if repo == nil { select(repo: id) }
         }
         UserDefaults.standard.set(pinned, forKey: pinnedKey)
+    }
+
+    /// Adds a repository by name (`owner/repo` or a GitHub link), for ones outside your own list,
+    /// like another organization's. Returns an error to show, or nil when added.
+    private func addRepo(_ text: String) async -> String? {
+        guard let ref = Self.parseRepo(text) else { return "Type it as owner/repo" }
+        guard let api = app.api else { return "Not signed in" }
+        do {
+            guard let info = try await api.repoInfo(ref) else { return "\(ref.full) not found, or this account has no access" }
+            let name = info.nameWithOwner
+            if !pinned.contains(name) { toggle(name) }
+            select(repo: name)
+            return nil
+        } catch {
+            return "\(ref.full): \(error.localizedDescription)"
+        }
+    }
+
+    static func parseRepo(_ text: String) -> RepoRef? {
+        var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        t = t.replacingOccurrences(of: "github.com:", with: "github.com/")
+        if let r = t.range(of: "github.com/") { t = String(t[r.upperBound...]) }
+        let parts = t.split(separator: "/").map(String.init).filter { !$0.isEmpty }
+        guard parts.count >= 2, !parts[0].contains(" "), !parts[1].contains(" ") else { return nil }
+        return RepoRef(owner: parts[0], name: parts[1].replacingOccurrences(of: ".git", with: ""))
     }
 
     private func loadRepos() async {
@@ -287,8 +314,17 @@ struct PickerPanel: View {
     let items: [Item]
     let isSelected: (String) -> Bool
     var loading = false
+    /// When set, typing `owner/repo` offers to add it; returns an error to show, or nil.
+    var onAdd: ((String) async -> String?)? = nil
     let onPick: (String) -> Void
     @State private var query = ""
+    @State private var adding = false
+    @State private var addError: String?
+
+    private var addCandidate: String? {
+        guard onAdd != nil, let ref = AllPRsView.parseRepo(query) else { return nil }
+        return items.contains { $0.id.lowercased() == ref.full.lowercased() } ? nil : ref.full
+    }
 
     private var shown: [Item] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -301,6 +337,13 @@ struct PickerPanel: View {
             Text(title).font(.syCaption2.weight(.semibold)).tracking(0.6).foregroundStyle(Color.syDim)
                 .padding(.horizontal, 10).padding(.top, 4).padding(.bottom, 2)
             TextField(placeholder, text: $query)
+                .onSubmit {
+                    if addCandidate != nil, let onAdd, !adding, let candidate = addCandidate {
+                        adding = true
+                        Task { addError = await onAdd(candidate); adding = false; if addError == nil { query = "" } }
+                    }
+                }
+                .onChange(of: query) { _, _ in addError = nil }
                 .textFieldStyle(.roundedBorder)
                 .controlSize(.small)
                 .padding(.horizontal, 8)
@@ -315,10 +358,38 @@ struct PickerPanel: View {
                         }
                         .padding(10)
                     }
+                    if let candidate = addCandidate {
+                        Button {
+                            guard let onAdd, !adding else { return }
+                            adding = true
+                            addError = nil
+                            Task {
+                                addError = await onAdd(candidate)
+                                adding = false
+                                if addError == nil { query = "" }
+                            }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Group {
+                                    if adding { ProgressView().controlSize(.small) } else { Image(systemName: "plus.circle.fill").foregroundStyle(Color.syAgentAccent) }
+                                }
+                                .frame(width: 24, height: 24)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("Add \(candidate)").font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
+                                    Text(addError ?? "Any repository you can see, from any organization")
+                                        .font(.syCaption).foregroundStyle(addError == nil ? Color.syMuted : Color.syRed).lineLimit(2)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                     ForEach(shown) { item in
                         PickerPanelRow(item: item, selected: isSelected(item.id)) { onPick(item.id) }
                     }
-                    if !loading && shown.isEmpty {
+                    if !loading && shown.isEmpty && addCandidate == nil {
                         Text("Nothing matches").font(.syCaption).foregroundStyle(Color.syMuted).padding(10)
                     }
                 }
