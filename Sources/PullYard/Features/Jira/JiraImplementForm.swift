@@ -18,6 +18,12 @@ struct JiraImplementForm: View {
     @State private var starting = false
     @State private var startError: String?
     @State private var showAccounts = false
+    @State private var drafting = false
+    @State private var draftError: String?
+    /// The prompt Haiku wrote last; the user's edits after it stop auto-redrafts.
+    @State private var drafted: String?
+    @State private var draftRun: JiraPromptDraftRun?
+    @AppStorage("jira.implement.autoDraft") private var autoDraft = true
 
     private static let profileKey = "jira.implement.profile"
     private static let modeKey = "jira.implement.mode"
@@ -62,6 +68,49 @@ struct JiraImplementForm: View {
             useWorktree = UserDefaults.standard.bool(forKey: Self.worktreeKey)
             if app.claude.projects.isEmpty { await app.claude.reloadProjects(force: false) }
         }
+        .task(id: folder) {
+            guard autoDraft, folder != nil, untouched else { return }
+            draft()
+        }
+        .onDisappear { draftRun?.cancel() }
+    }
+
+    /// True while the prompt is still what PullYard or Haiku wrote, so redrafting loses nothing.
+    private var untouched: Bool {
+        prompt.isEmpty || prompt == Self.defaultPrompt(issue) || prompt == drafted
+    }
+
+    private func draft() {
+        guard let folder else { return }
+        draftRun?.cancel()
+        let run = JiraPromptDraftRun()
+        draftRun = run
+        drafting = true
+        draftError = nil
+        let configDir = ClaudeProfiles.shared.profile(id: profileID)?.configDir
+        Task {
+            do {
+                let text = try await run.run(issue: issue, folder: folder, configDir: configDir)
+                guard draftRun === run else { return }
+                withAnimation(Motion.fade) {
+                    prompt = text
+                    drafted = text
+                }
+            } catch is CancellationError {
+            } catch {
+                if draftRun === run { draftError = error.localizedDescription }
+            }
+            if draftRun === run {
+                drafting = false
+                draftRun = nil
+            }
+        }
+    }
+
+    private func cancelDraft() {
+        draftRun?.cancel()
+        draftRun = nil
+        drafting = false
     }
 
     // MARK: Header
@@ -257,35 +306,83 @@ struct JiraImplementForm: View {
 
     private var promptEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 10) {
                 Text("Prompt").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
-                Spacer()
-                if prompt != Self.defaultPrompt(issue) {
-                    Button {
-                        prompt = Self.defaultPrompt(issue)
-                    } label: {
-                        Label("Reset", systemImage: "arrow.counterclockwise").font(.syCaption)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Rebuild the prompt from the ticket")
+                if drafted != nil, prompt == drafted, !drafting {
+                    Label("Written by Haiku from the code", systemImage: "sparkles")
+                        .font(.syCaption2.weight(.semibold))
+                        .foregroundStyle(Color.syViolet)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Capsule().fill(Color.syViolet.opacity(0.12)))
                 }
+                Spacer()
+                if drafting {
+                    Button("Cancel", action: cancelDraft)
+                        .buttonStyle(JiraChipButtonStyle())
+                        .controlSize(.small)
+                } else {
+                    if prompt != Self.defaultPrompt(issue) {
+                        Button { prompt = Self.defaultPrompt(issue) } label: { Label("Template", systemImage: "arrow.counterclockwise") }
+                            .buttonStyle(JiraChipButtonStyle())
+                            .help("Use the plain prompt built from the ticket")
+                    }
+                    Button(action: draft) { Label(drafted == nil ? "Draft with Haiku" : "Redraft", systemImage: "sparkles") }
+                        .buttonStyle(JiraChipButtonStyle())
+                        .disabled(folder == nil)
+                        .help("Haiku reads the project and the ticket, then writes a focused prompt. Cheap, read-only")
+                }
+                Toggle("Auto", isOn: $autoDraft)
+                    .toggleStyle(.checkbox)
+                    .font(.syCaption)
+                    .help("Draft with Haiku as soon as a project is chosen")
                 Text("\(prompt.count) characters").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
             }
-            TextEditor(text: $prompt)
-                .font(.syCallout)
-                .lineSpacing(2)
-                .scrollContentBackground(.hidden)
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.black.opacity(0.22)))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.syLine))
-                .frame(minHeight: 240, maxHeight: .infinity)
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $prompt)
+                    .font(.syCallout)
+                    .lineSpacing(2)
+                    .scrollContentBackground(.hidden)
+                    .padding(12)
+                    .opacity(drafting ? 0 : 1)
+                    .disabled(drafting)
+                if drafting { draftingPlaceholder }
+            }
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.black.opacity(0.22)))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(drafting ? Color.syViolet.opacity(0.45) : Color.syLine))
+            .frame(minHeight: 240, maxHeight: .infinity)
+            if let draftError {
+                Label("Haiku couldn't draft the prompt: \(draftError). The template is kept.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syAmber)
+                    .lineLimit(2)
+            }
         }
+    }
+
+    private var draftingPlaceholder: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                WakeLoader()
+                Text("Haiku is reading \(folder.map { ($0 as NSString).lastPathComponent } ?? "the project") and \(issue.key)\u{2026}")
+                    .font(.syCallout.weight(.medium))
+                    .foregroundStyle(Color.syText.opacity(0.85))
+            }
+            ShimmerBar(width: 320, height: 12)
+            ShimmerBar(height: 12)
+            ShimmerBar(height: 12)
+            ShimmerBar(width: 260, height: 12)
+            ShimmerBar(width: 200, height: 12).padding(.top, 8)
+            ShimmerBar(height: 12)
+            ShimmerBar(width: 340, height: 12)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: Footer
 
     private var canStart: Bool {
-        folder != nil && !starting && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        folder != nil && !starting && !drafting && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var footer: some View {

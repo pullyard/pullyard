@@ -94,4 +94,20 @@ final class JiraTests: XCTestCase {
         let html = "<p>PR 2 of 2 for</p><div class=\"table-wrap\"><table><tbody><tr><td>\n  <a href=\"x\">COM-1563</a>\n</td><td>\n\n DONE \n</td></tr></tbody></table></div><p>&nbsp;</p><p>Next</p>"
         XCTAssertEqual(JiraClient.plainText(html), "PR 2 of 2 for\nCOM-1563 · DONE\n\nNext")
     }
+
+    func testListsEndBeforeTheNextHeading() {
+        let html = "<p><b>Precondition:</b></p><ul><li>New account</li><li>No attempt</li></ul><p><strong>Steps to Reproduce:</strong></p><ol><li>Open <code>app</code></li></ol>"
+        let text = JiraClient.plainText(html)
+        XCTAssertEqual(text, "**Precondition:**\n\n• New account\n• No attempt\n**Steps to Reproduce:**\n\n• Open `app`")
+        XCTAssertEqual(JiraDescriptionBlock.parse(text), [
+            .heading("Precondition:"), .bullet("New account"), .bullet("No attempt"),
+            .gap, .heading("Steps to Reproduce:"), .bullet("Open `app`")
+        ])
+    }
+
+    func testDescriptionHeadingsNeedToBeShort() {
+        XCTAssertTrue(JiraDescriptionBlock.isHeading("Expected Result:"))
+        XCTAssertFalse(JiraDescriptionBlock.isHeading("The ID verification section should display the initial status until:"))
+        XCTAssertFalse(JiraDescriptionBlock.isHeading("Just a sentence"))
+    }
 }

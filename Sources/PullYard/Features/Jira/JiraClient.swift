@@ -582,8 +582,11 @@ struct JiraClient: Sendable {
         var s = collapseWhitespace(html)
         let rules: [(String, String)] = [
             ("(?i)<br\\s*/?>", "\n"),
-            ("(?i)</(p|div|h[1-6]|tr|table|blockquote|pre)>", "\n"),
+            ("(?i)</(p|div|h[1-6]|tr|table|blockquote|pre|ul|ol)>", "\n"),
+            ("(?i)<(h[1-6])[^>]*>", "\n"),
             ("(?i)<li[^>]*>", "\n• "),
+            ("(?i)</?(strong|b)(\\s[^>]*)?>", "**"),
+            ("(?i)</?code(\\s[^>]*)?>", "`"),
             ("(?i)</t[dh]>", " · "),
             ("(?i)<[^>]+>", "")
         ]
@@ -600,7 +603,9 @@ struct JiraClient: Sendable {
             return l
         }
         var out: [String] = []
-        for line in lines {
+        for var line in lines {
+            line = line.replacingOccurrences(of: "****", with: "").replacingOccurrences(of: "** **", with: " ")
+            if line == "**" || line == "`" { line = "" }
             if line.isEmpty, out.last?.isEmpty ?? true { continue }
             out.append(line)
         }

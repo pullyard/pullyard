@@ -791,22 +791,28 @@ struct JiraIssueCard: View {
     }
 
     private var description: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Description").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syDim)
-            Text(issue.description)
-                .font(.syCallout)
-                .foregroundStyle(Color.syText.opacity(0.9))
-                .textSelection(.enabled)
-                .lineLimit(expanded ? nil : 6)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if issue.description.count > 320 || issue.description.split(separator: "\n").count > 6 {
+        let blocks = JiraDescriptionBlock.parse(issue.description)
+        let long = blocks.count > 9 || issue.description.count > 600
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("DESCRIPTION").font(.syCaption2.weight(.semibold)).tracking(0.6).foregroundStyle(Color.syDim)
+            JiraDescriptionView(blocks: expanded || !long ? blocks : Array(blocks.prefix(8)))
+                .overlay(alignment: .bottom) {
+                    if long && !expanded {
+                        LinearGradient(colors: [Color.sySunken.opacity(0), Color.sySunken], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 36)
+                            .allowsHitTesting(false)
+                    }
+                }
+            if long {
                 Button(expanded ? "Show less" : "Show more") { withAnimation(Motion.smooth) { expanded.toggle() } }
                     .buttonStyle(.link)
-                    .font(.syCaption)
+                    .font(.syCallout)
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.sySunken))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.sySunken))
     }
 
     private var descriptionSkeleton: some View {
@@ -991,5 +997,87 @@ struct JiraChipButtonStyle: ButtonStyle {
                 configuration.title
             }
         }
+    }
+}
+
+/// A Jira description split into what it reads as: headings ("Steps to Reproduce:"), bullets and paragraphs.
+enum JiraDescriptionBlock: Equatable {
+    case heading(String)
+    case bullet(String)
+    case paragraph(String)
+    case gap
+
+    static func parse(_ text: String) -> [JiraDescriptionBlock] {
+        var blocks: [JiraDescriptionBlock] = []
+        for raw in text.components(separatedBy: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty {
+                if let last = blocks.last, last != .gap { blocks.append(.gap) }
+                continue
+            }
+            if line.hasPrefix("• ") || line.hasPrefix("- ") || line.hasPrefix("* ") {
+                blocks.append(.bullet(String(line.dropFirst(2))))
+            } else if isHeading(line) {
+                if let last = blocks.last, last != .gap { blocks.append(.gap) }
+                blocks.append(.heading(line.replacingOccurrences(of: "**", with: "")))
+            } else {
+                blocks.append(.paragraph(line))
+            }
+        }
+        // A gap right after a heading only pushes its content away.
+        var out: [JiraDescriptionBlock] = []
+        for b in blocks {
+            if b == .gap, case .heading = out.last { continue }
+            out.append(b)
+        }
+        while out.last == .gap { out.removeLast() }
+        return out
+    }
+
+    static func isHeading(_ line: String) -> Bool {
+        let plain = line.replacingOccurrences(of: "**", with: "").trimmingCharacters(in: .whitespaces)
+        guard !plain.isEmpty, plain.count <= 48 else { return false }
+        if plain.hasSuffix(":") { return true }
+        return line.hasPrefix("**") && line.hasSuffix("**") && line.count > 4
+    }
+}
+
+struct JiraDescriptionView: View {
+    let blocks: [JiraDescriptionBlock]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                switch block {
+                case .heading(let t):
+                    Text(t)
+                        .font(.syBody.weight(.semibold))
+                        .foregroundStyle(Color.syText)
+                        .padding(.top, 2)
+                case .bullet(let t):
+                    HStack(alignment: .firstTextBaseline, spacing: 9) {
+                        Circle().fill(Color.syMuted).frame(width: 5, height: 5).alignmentGuide(.firstTextBaseline) { $0[.bottom] + 4 }
+                        rich(t)
+                    }
+                    .padding(.leading, 4)
+                case .paragraph(let t):
+                    rich(t)
+                case .gap:
+                    Color.clear.frame(height: 6)
+                }
+            }
+        }
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func rich(_ t: String) -> some View {
+        let attributed = (try? AttributedString(markdown: t, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(t)
+        return Text(attributed)
+            .font(.syBody)
+            .lineSpacing(3)
+            .foregroundStyle(Color.syText.opacity(0.9))
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
