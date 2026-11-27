@@ -28,26 +28,22 @@ struct SettingsView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        TabView(selection: $tab) {
-            generalForm
-                .tabItem { Label("General", systemImage: "gearshape") }
-                .tag("general")
-            accountsForm
-                .tabItem { Label("Accounts", systemImage: "person.crop.circle") }
-                .tag("accounts")
-            AgentSettingsForm()
-                .tabItem { Label("Agents", systemImage: "terminal") }
-                .tag("agents")
-            integrationsForm
-                .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
-                .tag("integrations")
-            PYLinkSettingsView()
-                .tabItem { Label("iPhone", systemImage: "iphone") }
-                .tag("iphone")
-            advancedForm
-                .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
-                .tag("advanced")
+        VStack(spacing: 0) {
+            SettingsTabBar(selection: $tab)
+            Group {
+                switch tab {
+                case "accounts": accountsForm
+                case "agents": AgentSettingsForm()
+                case "integrations": integrationsForm
+                case "iphone": PYLinkSettingsView()
+                case "advanced": advancedForm
+                default: generalForm
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .background { PYBackdrop(tints: [SettingsTab.tint(tab), .syAccent]).equatable() }
+        .background(SettingsWindowChrome())
         .tint(Color.syAccentFill)
         .task { await ClaudeAccountStore.shared.refresh() }
         .sheet(isPresented: $showAddProfile) { AddClaudeProfileSheet().environment(app) }
@@ -556,5 +552,92 @@ struct SavedPromptRow: View {
         guard !body.isEmpty else { return }
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
         PromptLibrary.shared.update(SavedPrompt(id: prompt.id, title: name.isEmpty ? PromptLibrary.title(for: body) : name, text: body))
+    }
+}
+
+enum SettingsTab {
+    static let all: [(id: String, title: String, icon: String, tint: Color)] = [
+        ("general", "General", "gearshape.fill", .sySlate),
+        ("accounts", "Accounts", "person.crop.circle.fill", .sySky),
+        ("agents", "Agents", "terminal.fill", .syCoral),
+        ("integrations", "Integrations", "puzzlepiece.extension.fill", .syViolet),
+        ("iphone", "iPhone", "iphone", .syGreen),
+        ("advanced", "Advanced", "wrench.and.screwdriver.fill", .syAmber)
+    ]
+
+    static func tint(_ id: String) -> Color {
+        all.first { $0.id == id }?.tint ?? .syAccent
+    }
+}
+
+struct SettingsTabBar: View {
+    @Binding var selection: String
+    @Namespace private var ns
+    @State private var hovered: String?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(SettingsTab.all, id: \.id) { tab in
+                let selected = selection == tab.id || (tab.id == "general" && !SettingsTab.all.contains { $0.id == selection })
+                Button {
+                    withAnimation(Motion.snappy) { selection = tab.id }
+                } label: {
+                    VStack(spacing: 5) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(tab.tint)
+                            .frame(width: 30, height: 30)
+                            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(tab.tint.opacity(selected ? 0.22 : 0.14)))
+                        Text(tab.title)
+                            .font(.syCaption.weight(selected ? .semibold : .medium))
+                            .foregroundStyle(selected ? Color.syText : Color.syMuted)
+                            .lineLimit(1)
+                    }
+                    .frame(width: 78)
+                    .padding(.vertical, 8)
+                    .background {
+                        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        if selected {
+                            shape
+                                .fill(LinearGradient(colors: [tab.tint.opacity(0.20), tab.tint.opacity(0.08)], startPoint: .top, endPoint: .bottom))
+                                .overlay(shape.strokeBorder(tab.tint.opacity(0.30), lineWidth: 1))
+                                .matchedGeometryEffect(id: "selected", in: ns)
+                        } else if hovered == tab.id {
+                            shape.fill(Color.syHover)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { h in hovered = h ? tab.id : (hovered == tab.id ? nil : hovered) }
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.syLine).frame(height: 1) }
+    }
+}
+
+struct SettingsWindowChrome: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { Self.apply(view.window) }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async { Self.apply(view.window) }
+    }
+
+    private static func apply(_ window: NSWindow?) {
+        guard let window else { return }
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.styleMask.insert(.fullSizeContentView)
+        window.toolbar = nil
+        if Theme.isBrand { window.backgroundColor = .syWindow }
     }
 }
