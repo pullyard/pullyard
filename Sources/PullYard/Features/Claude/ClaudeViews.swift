@@ -2571,7 +2571,8 @@ private struct BranchPanelRow: View {
             .opacity(disabled ? 0.45 : 1)
         }
         .buttonStyle(.plain)
-        .disabled(current || disabled)
+        .disabled(disabled)
+        .allowsHitTesting(!current)
         .onHover { hover = $0 }
         .accessibilityAddTraits(current ? [.isSelected] : [])
     }
