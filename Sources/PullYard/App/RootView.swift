@@ -404,7 +404,9 @@ struct SidebarView: View {
     var compact = false
 
     var body: some View {
-        List {
+        // Clicks go through the list's own selection, not a tap gesture on each row: a gesture
+        // takes the mouse-down, and then the list can only start a reorder drag from the row's edge.
+        List(selection: Binding(get: { app.section }, set: { if let s = $0 { app.section = s } })) {
             SidebarGroup("") {
                 SidebarItemList(group: "top", items: topItems)
             }
@@ -418,6 +420,7 @@ struct SidebarView: View {
             .environment(\.sidebarGroupKeys, keys)
         }
         .listStyle(.sidebar)
+        .background(SidebarHighlightOff())
         .environment(\.sidebarCompact, compact)
         .task(id: "\(RepoFocus.shared.query(app.cacheAccount))|\(app.cacheAccount ?? "")") { await app.refreshFocusCounts() }
         .safeAreaInset(edge: .bottom) {
@@ -795,8 +798,8 @@ struct SidebarRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: Radius.m - 1))
             }
             .contentShape(Rectangle())
-        // A tap gesture, not a Button: a Button swallows the mouse-down and the row could not be dragged to reorder.
-        .onTapGesture { app.section = section }
+        // Selected through the sidebar List's selection (see SidebarView), so the whole row can be dragged to reorder.
+        .tag(section)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { app.section = section }
         .onHover { hovering = $0 }
@@ -1171,6 +1174,40 @@ private struct EdgePanelContent: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .surface(.list)
             }
+        }
+    }
+}
+
+/// Turns off the sidebar table's own selection highlight; rows draw their own.
+private struct SidebarHighlightOff: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let v = Probe()
+        return v
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? Probe)?.apply()
+    }
+
+    private final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            apply()
+            DispatchQueue.main.async { [weak self] in self?.apply() }
+        }
+
+        func apply() {
+            guard let root = window?.contentView ?? superview else { return }
+            for table in Self.tables(in: root) where table.style == .sourceList || table.enclosingScrollView?.frame.width ?? 0 < 420 {
+                table.selectionHighlightStyle = .none
+            }
+        }
+
+        private static func tables(in view: NSView) -> [NSTableView] {
+            var out: [NSTableView] = []
+            if let t = view as? NSTableView { out.append(t) }
+            for sub in view.subviews { out += tables(in: sub) }
+            return out
         }
     }
 }
