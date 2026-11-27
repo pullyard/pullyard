@@ -107,10 +107,12 @@ struct AllPRsView: View {
         var out: [GitHubOwner] = []
         if let me = app.user { out.append(GitHubOwner(login: me.login, avatarUrl: me.avatarUrl)) }
         for o in orgs where !out.contains(where: { $0.login == o.login }) { out.append(o) }
-        for r in repos {
+        var others = 0
+        for r in repos where others < 6 {
             let login = String(r.nameWithOwner.split(separator: "/").first ?? "")
             if !login.isEmpty, !out.contains(where: { $0.login.lowercased() == login.lowercased() }) {
                 out.append(GitHubOwner(login: login, avatarUrl: nil))
+                others += 1
             }
         }
         return out
@@ -124,8 +126,7 @@ struct AllPRsView: View {
 
     private var projectsPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
+            FlowLayout(spacing: 4, lineSpacing: 4) {
                     OwnerChip(login: "All", avatar: nil, selected: owner == nil) { owner = nil }
                     ForEach(owners) { o in
                         OwnerChip(login: o.login, avatar: o.avatarUrl ?? "https://github.com/\(o.login).png?size=40", selected: owner == o.login) {
@@ -133,9 +134,8 @@ struct AllPRsView: View {
                             Task { await loadOwner(o.login) }
                         }
                     }
-                }
-                .padding(.horizontal, 12)
             }
+            .padding(.horizontal, 12)
             .padding(.top, 10)
             if let owner, let err = ownerErrors[owner] {
                 Label(err, systemImage: "exclamationmark.triangle.fill")
@@ -152,7 +152,7 @@ struct AllPRsView: View {
                         },
                         isSelected: { pinned.contains($0) },
                         loading: (loadingRepos && repos.isEmpty) || (owner.map { loadingOwners.contains($0) && ownerRepos[$0] == nil } ?? false),
-                        width: 380, onAdd: addRepo) { id in
+                        width: 380, listHeight: 300, onAdd: addRepo) { id in
                 toggle(id)
             }
         }
@@ -426,6 +426,8 @@ struct PickerPanel: View {
     let isSelected: (String) -> Bool
     var loading = false
     var width: CGFloat = 320
+    /// A fixed list height, so the popover keeps its size while the content changes.
+    var listHeight: CGFloat? = nil
     /// When set, typing `owner/repo` offers to add it; returns an error to show, or nil.
     var onAdd: ((String) async -> String?)? = nil
     let onPick: (String) -> Void
@@ -506,8 +508,9 @@ struct PickerPanel: View {
                     }
                 }
             }
-            .frame(maxHeight: 340)
-            .fixedSize(horizontal: false, vertical: true)
+            .frame(height: listHeight)
+            .frame(maxHeight: listHeight ?? 340)
+            .fixedSize(horizontal: false, vertical: listHeight == nil)
         }
         .padding(6)
         .frame(width: width)

@@ -153,28 +153,28 @@ struct FocusPicker: View {
         var out: [GitHubOwner] = []
         if let me = app.user { out.append(GitHubOwner(login: me.login, avatarUrl: me.avatarUrl)) }
         for o in orgs where !out.contains(where: { $0.login.lowercased() == o.login.lowercased() }) { out.append(o) }
-        for repo in involved + accessible {
+        var others = 0
+        for repo in involved + accessible where others < 6 {
             let login = String(repo.split(separator: "/").first ?? "")
             if !login.isEmpty, !out.contains(where: { $0.login.lowercased() == login.lowercased() }) {
                 out.append(GitHubOwner(login: login, avatarUrl: nil))
+                others += 1
             }
         }
         return out
     }
 
     private var ownerRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                OwnerChip(login: "All", avatar: nil, selected: owner == nil) { owner = nil }
-                ForEach(owners) { o in
-                    OwnerChip(login: o.login, avatar: o.avatarUrl ?? "https://github.com/\(o.login).png?size=40", selected: owner == o.login) {
-                        owner = o.login
-                        Task { await loadOwner(o.login) }
-                    }
+        FlowLayout(spacing: 4, lineSpacing: 4) {
+            OwnerChip(login: "All", avatar: nil, selected: owner == nil) { owner = nil }
+            ForEach(owners) { o in
+                OwnerChip(login: o.login, avatar: o.avatarUrl ?? "https://github.com/\(o.login).png?size=40", selected: owner == o.login) {
+                    owner = o.login
+                    Task { await loadOwner(o.login) }
                 }
             }
-            .padding(.horizontal, 12)
         }
+        .padding(.horizontal, 12)
         .padding(.bottom, 8)
     }
 
