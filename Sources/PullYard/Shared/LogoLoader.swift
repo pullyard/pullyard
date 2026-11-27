@@ -180,7 +180,7 @@ struct LogoDrawOn: View {
         if Motion.reduced || done {
             PullYardLogoMark(progress: 1, size: size)
         } else {
-            TimelineView(.animation(minimumInterval: 1 / 60)) { context in
+            TimelineView(.animation) { context in
                 let t = min(1, context.date.timeIntervalSince(start) / duration)
                 PullYardLogoMark(progress: (1 - cos(t * .pi)) / 2, size: size)
             }

@@ -174,13 +174,8 @@ fn sync_ticking(area: &gtk::DrawingArea, state: &State) {
     if state.tick.borrow().is_some() {
         return;
     }
-    let last = Cell::new(0i64);
-    let id = area.add_tick_callback(move |area, clock| {
-        let now = clock.frame_time();
-        if now - last.get() >= 33_000 {
-            last.set(now);
-            area.queue_draw();
-        }
+    let id = area.add_tick_callback(move |area, _| {
+        area.queue_draw();
         glib::ControlFlow::Continue
     });
     *state.tick.borrow_mut() = Some(id);

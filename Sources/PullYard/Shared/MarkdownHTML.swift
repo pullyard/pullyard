@@ -49,7 +49,7 @@ enum MarkdownHTML {
         for run in attributed.runs {
             let raw = String(attributed[run.range].characters)
             if let image = run.imageURL {
-                out += "<img src=\"\(ConversationHTML.esc(absolute(image.absoluteString, base: base)))\" alt=\"\(ConversationHTML.esc(raw))\">"
+                out += "<img src=\"\(ConversationHTML.esc(absolute(image.absoluteString, base: base)))\" alt=\"\(ConversationHTML.esc(raw))\" loading=\"lazy\" decoding=\"async\">"
                 continue
             }
             var html = ConversationHTML.esc(raw).replacingOccurrences(of: "\n", with: "<br>")

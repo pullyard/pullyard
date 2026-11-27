@@ -67,7 +67,7 @@ fn spans_for(ext: &str, code: &str) -> Spans {
     let spans: Spans = Rc::new(syntax::tokens(code, ext));
     SPANS.with(|c| {
         let mut c = c.borrow_mut();
-        if c.len() > 4000 {
+        if c.len() > 20_000 {
             c.clear();
         }
         c.insert(key, spans.clone());

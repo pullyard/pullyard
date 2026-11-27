@@ -758,11 +758,11 @@ impl SearchList {
     }
 
     fn signature(&self, items: &[SearchItem]) -> String {
+        // Relative times ("3 min ago") roll over almost every live tick. Putting
+        // each one in the signature rebuilt every row about once a minute, which
+        // stalled scrolling; refresh them on a five minute bucket instead.
         let mut sig = serde_json::to_string(items).unwrap_or_default();
-        for item in items {
-            sig.push('|');
-            sig.push_str(&crate::util::rel(Some(item.updated_at)));
-        }
+        sig.push_str(&format!("|{}", Utc::now().timestamp() / 300));
         if self.grouped {
             let mut collapsed: Vec<String> = self.collapsed.borrow().iter().cloned().collect();
             collapsed.sort();

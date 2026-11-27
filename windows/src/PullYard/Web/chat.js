@@ -194,7 +194,7 @@
     var bottom = atBottom();
     if (up && !bottom) stick = false;
     else if (down && bottom) stick = true;
-    readAnchor = stick ? null : anchor();
+    scheduleAnchor();
     if (was && !stick) awayCount = items.length;
     if (stick) awayCount = null;
     updateJump();
@@ -233,11 +233,32 @@
     }, 900);
   }
 
+  var anchorFrame = 0;
+  function scheduleAnchor() {
+    if (stick) {
+      if (anchorFrame) cancelAnimationFrame(anchorFrame);
+      anchorFrame = 0;
+      readAnchor = null;
+      return;
+    }
+    if (anchorFrame) return;
+    anchorFrame = requestAnimationFrame(function () {
+      anchorFrame = 0;
+      readAnchor = stick ? null : anchor();
+    });
+  }
+
+  var jumpState = "";
+  var jumpEl = null;
   function updateJump() {
     var b = document.getElementById("jump");
     if (!b) return;
     var show = !stick && !jumping && items.length > 0;
     var fresh = show && awayCount != null ? Math.max(0, items.length - awayCount) : 0;
+    var state = show + "|" + fresh;
+    if (state === jumpState && b === jumpEl) return;
+    jumpState = state;
+    jumpEl = b;
     b.classList.toggle("show", show);
     b.classList.toggle("fresh", fresh > 0);
     b.tabIndex = show ? 0 : -1;

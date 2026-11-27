@@ -352,7 +352,7 @@ final class GitLabReviewTests: XCTestCase {
         XCTAssertTrue(html.contains("<h1>Title</h1>"), html)
         XCTAssertTrue(html.contains(#"<a href="https://gitlab.example.com/help">docs</a>"#), html)
         XCTAssertTrue(html.contains("<code>code</code>"), html)
-        XCTAssertTrue(html.contains(#"<img src="https://gitlab.example.com/g/p/uploads/x.png" alt="shot">"#), html)
+        XCTAssertTrue(html.contains(#"<img src="https://gitlab.example.com/g/p/uploads/x.png" alt="shot" loading="lazy" decoding="async">"#), html)
         XCTAssertTrue(html.contains(#"<li><input type="checkbox" checked disabled> done</li>"#), html)
         XCTAssertTrue(html.contains("let a = 1 &lt; 2"), html)
         XCTAssertEqual(MarkdownHTML.inline("<script>"), "&lt;script&gt;")

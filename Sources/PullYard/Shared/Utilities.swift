@@ -207,15 +207,27 @@ struct Avatar: View {
     var size: CGFloat = 20
     var ring = false
 
+    @State private var loaded: (url: URL, image: NSImage)?
+
     var body: some View {
-        AsyncImage(url: resolved) { image in
-            image.resizable().interpolation(.medium)
-        } placeholder: {
-            Circle().fill(.quaternary)
+        let url = resolved
+        let image = loaded.flatMap { $0.url == url ? $0.image : nil } ?? url.flatMap(AvatarCache.shared.cached)
+        Group {
+            if let image {
+                Image(nsImage: image).resizable().interpolation(.medium)
+            } else {
+                Circle().fill(.quaternary)
+            }
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
         .overlay { if ring { Circle().strokeBorder(Color.syLineStrong, lineWidth: 0.5) } }
+        .task(id: url) {
+            guard let url, image == nil else { return }
+            if let fetched = await AvatarCache.shared.image(for: url, pixels: Int(size * 2)), !Task.isCancelled {
+                loaded = (url, fetched)
+            }
+        }
     }
 
     private var resolved: URL? {
@@ -388,7 +400,7 @@ struct DrawnLogoMark: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 60, paused: done)) { context in
+        TimelineView(.animation(minimumInterval: nil, paused: done)) { context in
             PullYardLogoMark(progress: done ? 1 : eased(context.date.timeIntervalSince(start) / duration), size: size)
         }
         .task {

@@ -166,7 +166,7 @@ input[type=text]:focus{border-color:var(--accent)}
 @keyframes pop{from{transform:scale(.4)}to{transform:scale(1)}}
 @media (prefers-reduced-motion:reduce){.jump,.acts{transition:none}.jump:hover .halo,.jump.fresh .halo,.badge.pop{animation:none}}
 #dock{position:fixed;left:0;right:0;bottom:0;z-index:4}
-#dock.on{background:var(--raised);backdrop-filter:blur(14px);border-top:1px solid var(--border)}
+#dock.on{background:var(--raised);border-top:1px solid var(--border)}
 .todobar{max-width:960px;margin:0 auto;padding:0 20px}
 .todohead{display:flex;align-items:center;gap:8px;width:100%;padding:7px 0;border:0;background:none;color:var(--fg);font:13px "Segoe UI",sans-serif;cursor:pointer;text-align:left}
 .todohead .count{font-size:12px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}

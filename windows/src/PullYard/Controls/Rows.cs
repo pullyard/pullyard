@@ -24,7 +24,10 @@ public abstract class CodeRow : ContentControl
         IsTabStop = false;
         DataContextChanged += (_, e) =>
         {
-            Content = e.NewValue is null ? null : Build(e.NewValue);
+            if (ReferenceEquals(e.NewValue, shown) && Content is not null) return;
+            shown = e.NewValue;
+            Content = null;
+            Content = e.NewValue is null ? null : Realize(e.NewValue);
             ApplyName();
         };
         Loaded += (_, _) =>
@@ -43,11 +46,46 @@ public abstract class CodeRow : ContentControl
     }
 
     private bool ticking;
+    private object? shown;
+
+    // ListView recycles containers while scrolling, and rebuilding a row's whole
+    // element tree on every recycle ran on the UI thread mid-scroll. Rows whose
+    // items are immutable keep the tree they built, so scrolling back to an item
+    // just re-parents it.
+    private sealed class Built
+    {
+        public UIElement? Ui;
+        public CodeRow? Owner;
+        public int Minute;
+    }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, Built> Trees = new();
+    private static int minuteStamp;
+
+    protected virtual bool CachesTree => false;
+
+    private UIElement? Realize(object item)
+    {
+        if (!CachesTree) return Build(item);
+        if (Trees.TryGetValue(item, out var built) && built.Minute == minuteStamp && built.Ui is not null
+            && (built.Owner is null || ReferenceEquals(built.Owner, this) || !ReferenceEquals(built.Owner.shown, item)))
+        {
+            if (built.Owner is { } previous && !ReferenceEquals(previous, this) && ReferenceEquals(previous.Content, built.Ui)) previous.Content = null;
+            built.Owner = this;
+            return built.Ui;
+        }
+        var ui = Build(item);
+        Trees.AddOrUpdate(item, new Built { Ui = ui, Owner = this, Minute = minuteStamp });
+        return ui;
+    }
 
     private void Rebuild()
     {
         if (DataContext is not { } item) return;
-        Content = Build(item);
+        Content = null;
+        var ui = Build(item);
+        if (CachesTree) Trees.AddOrUpdate(item, new Built { Ui = ui, Owner = this, Minute = minuteStamp });
+        Content = ui;
         ApplyName();
     }
 
@@ -59,6 +97,8 @@ public abstract class CodeRow : ContentControl
         while (parent is not null && parent is not SelectorItem) parent = VisualTreeHelper.GetParent(parent);
         if (parent is SelectorItem container) AutomationProperties.SetName(container, name);
     }
+
+    internal static void NextMinute() => minuteStamp++;
 
     protected abstract UIElement? Build(object item);
 
@@ -77,7 +117,11 @@ public static class RelativeClock
             minute += value;
             if (timer is not null) return;
             timer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
-            timer.Tick += (_, _) => minute?.Invoke();
+            timer.Tick += (_, _) =>
+            {
+                CodeRow.NextMinute();
+                minute?.Invoke();
+            };
             timer.Start();
         }
         remove => minute -= value;
@@ -93,6 +137,8 @@ public sealed class GroupHeaderItem
 public sealed class FeedRow : CodeRow
 {
     public static bool ShowRepoDefault { get; set; } = true;
+
+    protected override bool CachesTree => true;
 
     protected override UIElement? Build(object item) => item switch
     {
