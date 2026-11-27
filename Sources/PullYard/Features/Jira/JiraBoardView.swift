@@ -272,7 +272,9 @@ struct JiraBoardView: View {
         }
         .task(id: model.connectionID) { await model.refresh() }
         .onChange(of: connections.connections.map(\.id)) { _, _ in model.syncConnections() }
-        .onChange(of: model.connectionID) { _, _ in assignees = [] }
+        .onAppear { assignees = JiraBoardFilter.load(model.connectionID) }
+        .onChange(of: model.connectionID) { _, id in assignees = JiraBoardFilter.load(id) }
+        .onChange(of: assignees) { _, value in JiraBoardFilter.save(value, for: model.connectionID) }
         .overlay {
             if let issue = opened {
                 JiraIssueOverlay(issue: issue) {
@@ -377,10 +379,15 @@ struct JiraBoardView: View {
 
     private var people: [JiraPerson] {
         var seen = Set<String>()
-        return model.issues.compactMap { i in
+        var list = model.issues.compactMap { i -> JiraPerson? in
             guard let n = i.assignee, seen.insert(n).inserted else { return nil }
             return JiraPerson(name: n, avatar: i.assigneeAvatar)
-        }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+        // Keep a selected person (e.g. you, with nothing on this board yet) in the list so the filter can be undone.
+        for name in assignees where name != JiraPeopleFilter.unassigned && !seen.contains(name) {
+            list.append(JiraPerson(name: name, avatar: nil))
+        }
+        return list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     private var hasUnassigned: Bool { model.issues.contains { $0.assignee == nil } }
@@ -970,5 +977,24 @@ struct AvatarStackItem<Content: View>: View {
             .animation(Motion.fade, value: hover)
             .onHover { hover = $0 }
             .contentShape(Circle())
+    }
+}
+
+/// The board's assignee filter per Jira account. With nothing saved it starts as "only me" —
+/// the user the account was connected with — and after that it remembers the last choice.
+enum JiraBoardFilter {
+    static func key(_ connection: String) -> String { "jira.board.assignees.\(connection)" }
+
+    @MainActor
+    static func load(_ connection: String?, defaults: UserDefaults = .standard) -> Set<String> {
+        guard let connection else { return [] }
+        if let saved = defaults.stringArray(forKey: key(connection)) { return Set(saved) }
+        guard let me = JiraConnections.shared.connection(connection)?.displayName, !me.isEmpty else { return [] }
+        return [me]
+    }
+
+    static func save(_ value: Set<String>, for connection: String?, defaults: UserDefaults = .standard) {
+        guard let connection else { return }
+        defaults.set(value.sorted(), forKey: key(connection))
     }
 }
