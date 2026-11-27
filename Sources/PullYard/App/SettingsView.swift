@@ -42,7 +42,7 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background { PYBackdrop(tints: [SettingsTab.tint(tab), .syAccent]).equatable() }
+        .background(Theme.isBrand ? Color.syPanel : Color.clear)
         .background(SettingsWindowChrome())
         .tint(Color.syAccentFill)
         .task { await ClaudeAccountStore.shared.refresh() }
@@ -556,56 +556,39 @@ struct SavedPromptRow: View {
 }
 
 enum SettingsTab {
-    static let all: [(id: String, title: String, icon: String, tint: Color)] = [
-        ("general", "General", "gearshape.fill", .sySlate),
-        ("accounts", "Accounts", "person.crop.circle.fill", .sySky),
-        ("agents", "Agents", "terminal.fill", .syCoral),
-        ("integrations", "Integrations", "puzzlepiece.extension.fill", .syViolet),
-        ("iphone", "iPhone", "iphone", .syGreen),
-        ("advanced", "Advanced", "wrench.and.screwdriver.fill", .syAmber)
+    static let all: [(id: String, title: String, icon: String)] = [
+        ("general", "General", "gearshape"),
+        ("accounts", "Accounts", "person.crop.circle"),
+        ("agents", "Agents", "terminal"),
+        ("integrations", "Integrations", "puzzlepiece.extension"),
+        ("iphone", "iPhone", "iphone"),
+        ("advanced", "Advanced", "wrench.and.screwdriver")
     ]
-
-    static func tint(_ id: String) -> Color {
-        all.first { $0.id == id }?.tint ?? .syAccent
-    }
 }
 
 struct SettingsTabBar: View {
     @Binding var selection: String
-    @Namespace private var ns
     @State private var hovered: String?
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             ForEach(SettingsTab.all, id: \.id) { tab in
                 let selected = selection == tab.id || (tab.id == "general" && !SettingsTab.all.contains { $0.id == selection })
                 Button {
-                    withAnimation(Motion.snappy) { selection = tab.id }
+                    selection = tab.id
                 } label: {
-                    VStack(spacing: 5) {
+                    VStack(spacing: 4) {
                         Image(systemName: tab.icon)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(tab.tint)
-                            .frame(width: 30, height: 30)
-                            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(tab.tint.opacity(selected ? 0.22 : 0.14)))
+                            .font(.system(size: 17, weight: .regular))
+                            .frame(height: 22)
                         Text(tab.title)
-                            .font(.syCaption.weight(selected ? .semibold : .medium))
-                            .foregroundStyle(selected ? Color.syText : Color.syMuted)
+                            .font(.syCaption.weight(selected ? .semibold : .regular))
                             .lineLimit(1)
                     }
-                    .frame(width: 78)
-                    .padding(.vertical, 8)
-                    .background {
-                        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        if selected {
-                            shape
-                                .fill(LinearGradient(colors: [tab.tint.opacity(0.20), tab.tint.opacity(0.08)], startPoint: .top, endPoint: .bottom))
-                                .overlay(shape.strokeBorder(tab.tint.opacity(0.30), lineWidth: 1))
-                                .matchedGeometryEffect(id: "selected", in: ns)
-                        } else if hovered == tab.id {
-                            shape.fill(Color.syHover)
-                        }
-                    }
+                    .foregroundStyle(selected ? Color.syAccent : Color.syMuted)
+                    .frame(width: 80)
+                    .padding(.vertical, 7)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.syText.opacity(selected ? 0.08 : hovered == tab.id ? 0.04 : 0)))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -614,30 +597,42 @@ struct SettingsTabBar: View {
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
         .overlay(alignment: .bottom) { Rectangle().fill(Color.syLine).frame(height: 1) }
     }
 }
 
 struct SettingsWindowChrome: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { Self.apply(view.window) }
-        return view
-    }
+    func makeNSView(context: Context) -> ChromeView { ChromeView() }
+    func updateNSView(_ view: ChromeView, context: Context) { view.apply() }
 
-    func updateNSView(_ view: NSView, context: Context) {
-        DispatchQueue.main.async { Self.apply(view.window) }
-    }
+    final class ChromeView: NSView {
+        private var observers: [NSObjectProtocol] = []
 
-    private static func apply(_ window: NSWindow?) {
-        guard let window else { return }
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        window.styleMask.insert(.fullSizeContentView)
-        window.toolbar = nil
-        if Theme.isBrand { window.backgroundColor = .syWindow }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers = []
+            guard let window else { return }
+            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification, NSWindow.didUpdateNotification] {
+                observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.apply() }
+                })
+            }
+            apply()
+        }
+
+        deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+
+        func apply() {
+            guard let window else { return }
+            if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
+            if window.titleVisibility != .hidden { window.titleVisibility = .hidden }
+            if !window.styleMask.contains(.fullSizeContentView) { window.styleMask.insert(.fullSizeContentView) }
+            if window.toolbar != nil { window.toolbar = nil }
+            if Theme.isBrand, window.backgroundColor != .syWindow { window.backgroundColor = .syWindow }
+        }
     }
 }
