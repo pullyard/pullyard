@@ -8,6 +8,9 @@ struct JiraBoardSnapshot: Codable, Equatable {
     var sprint: JiraSprint?
     var issues: [JiraIssue] = []
     var fetchedAt: Date?
+    /// The connected Jira user, so "you" is in the people filter even with nothing assigned.
+    var meName: String?
+    var meAvatar: String?
 }
 
 /// Loads Jira boards per account. Every fetch is cached in memory and on disk, so switching
@@ -35,6 +38,10 @@ final class JiraBoardModel {
     var sprint: JiraSprint? { snap.sprint }
     var issues: [JiraIssue] { snap.issues }
     var loadedOnce: Bool { snap.fetchedAt != nil }
+    var me: JiraPerson? {
+        let name = snap.meName ?? JiraConnections.shared.connection(connectionID)?.displayName
+        return name.map { JiraPerson(name: $0, avatar: snap.meAvatar) }
+    }
 
     init(directory: URL? = nil) {
         self.directory = directory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -85,9 +92,15 @@ final class JiraBoardModel {
         loading = true
         defer { if gen == generation { loading = false } }
         do {
+            async let who = try? client.me()
             let list = try await client.boards()
                 .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            let me = await who
             guard id == connectionID else { return }
+            if let me {
+                snap.meName = me.name
+                snap.meAvatar = me.avatar
+            }
             snap.boards = list
             let saved = UserDefaults.standard.integer(forKey: Self.boardKey(id))
             let mine = Set(JiraConnections.shared.connection(id)?.projectKeys ?? [])
@@ -282,9 +295,12 @@ struct JiraBoardView: View {
         }
         .task(id: model.connectionID) { await model.refresh() }
         .onChange(of: connections.connections.map(\.id)) { _, _ in model.syncConnections() }
-        .onAppear { assignees = JiraBoardFilter.load(model.connectionID) }
-        .onChange(of: model.connectionID) { _, id in assignees = JiraBoardFilter.load(id) }
-        .onChange(of: assignees) { _, value in JiraBoardFilter.save(value, for: model.connectionID) }
+        .onAppear { assignees = JiraBoardFilter.load(model.connectionID, me: model.me?.name) }
+        .onChange(of: model.connectionID) { _, id in assignees = JiraBoardFilter.load(id, me: model.me?.name) }
+        .onChange(of: model.me?.name) { _, name in
+            // "Only me" by default, as soon as we know who "me" is; a saved choice wins.
+            if !JiraBoardFilter.hasSaved(model.connectionID), let name { assignees = [name] }
+        }
         .overlay {
             if let issue = opened {
                 JiraIssueOverlay(issue: issue) {
@@ -387,17 +403,23 @@ struct JiraBoardView: View {
         [board.name, board.projectKey, board.type.capitalized].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
+    /// Everyone with an issue on the board, you first (even with nothing assigned), then by name.
     private var people: [JiraPerson] {
         var seen = Set<String>()
         var list = model.issues.compactMap { i -> JiraPerson? in
             guard let n = i.assignee, seen.insert(n).inserted else { return nil }
             return JiraPerson(name: n, avatar: i.assigneeAvatar)
         }
-        // Keep a selected person (e.g. you, with nothing on this board yet) in the list so the filter can be undone.
-        for name in assignees where name != JiraPeopleFilter.unassigned && !seen.contains(name) {
+        for name in assignees where name != JiraPeopleFilter.unassigned && !seen.contains(name) && name != model.me?.name {
             list.append(JiraPerson(name: name, avatar: nil))
         }
-        return list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        list.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        if let me = model.me {
+            let mine = list.first { $0.name == me.name }
+            list.removeAll { $0.name == me.name }
+            list.insert(JiraPerson(name: me.name, avatar: me.avatar ?? mine?.avatar), at: 0)
+        }
+        return list
     }
 
     private var hasUnassigned: Bool { model.issues.contains { $0.assignee == nil } }
@@ -438,7 +460,8 @@ struct JiraBoardView: View {
                         }
                         .foregroundStyle(Color.syText)
                         .frame(width: 26, height: 26)
-                        .background(Circle().fill(Color.syText.opacity(0.12)))
+                        .background(Circle().fill(Color.syRaised))
+                        .overlay(Circle().strokeBorder(Color.syLineStrong))
                     }
                 }
                 .buttonStyle(.plain)
@@ -446,11 +469,14 @@ struct JiraBoardView: View {
                 .help("All assignees")
                 .accessibilityLabel("All assignees")
                 .popover(isPresented: $showPeople, arrowEdge: .bottom) {
-                    JiraPeopleFilter(people: all, unassigned: hasUnassigned, selection: $assignees)
+                    JiraPeopleFilter(people: all, me: model.me?.name, unassigned: hasUnassigned, selection: Binding(
+                        get: { assignees },
+                        set: { setAssignees($0) }
+                    ))
                 }
             }
             if !assignees.isEmpty {
-                Button { withAnimation(Motion.fade) { assignees = [] } } label: {
+                Button { withAnimation(Motion.fade) { setAssignees([]) } } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(Color.syDim)
                 }
                 .buttonStyle(.plain)
@@ -462,7 +488,15 @@ struct JiraBoardView: View {
     }
 
     private func toggle(_ name: String) {
-        if assignees.contains(name) { assignees.remove(name) } else { assignees.insert(name) }
+        var next = assignees
+        if next.contains(name) { next.remove(name) } else { next.insert(name) }
+        setAssignees(next)
+    }
+
+    /// A choice the user made: applied and remembered for this Jira account.
+    private func setAssignees(_ value: Set<String>) {
+        assignees = value
+        JiraBoardFilter.save(value, for: model.connectionID)
     }
 
     // MARK: Columns
@@ -853,6 +887,7 @@ struct JiraPeopleFilter: View {
     static let unassigned = "\u{0}unassigned"
 
     let people: [JiraPerson]
+    var me: String?
     let unassigned: Bool
     @Binding var selection: Set<String>
     @State private var query = ""
@@ -872,7 +907,7 @@ struct JiraPeopleFilter: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(filtered) { person in
-                        row(key: person.name, title: person.name) { JiraPersonAvatar(person: person, size: 26) }
+                        row(key: person.name, title: person.name, note: person.name == me ? "you" : nil) { JiraPersonAvatar(person: person, size: 26) }
                     }
                     if unassigned, query.isEmpty {
                         row(key: Self.unassigned, title: "Unassigned") {
@@ -896,7 +931,7 @@ struct JiraPeopleFilter: View {
         .frame(width: 300)
     }
 
-    private func row<Icon: View>(key: String, title: String, @ViewBuilder icon: () -> Icon) -> some View {
+    private func row<Icon: View>(key: String, title: String, note: String? = nil, @ViewBuilder icon: () -> Icon) -> some View {
         let on = selection.contains(key)
         return Button {
             if on { selection.remove(key) } else { selection.insert(key) }
@@ -907,6 +942,14 @@ struct JiraPeopleFilter: View {
                     .font(.system(size: 16))
                 icon()
                 Text(title).font(.syBody).foregroundStyle(Color.syText).lineLimit(1)
+                if let note {
+                    Text(note)
+                        .font(.syCaption2.weight(.semibold))
+                        .foregroundStyle(Color.syAccent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.syAccent.opacity(0.14)))
+                }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
@@ -1003,14 +1046,18 @@ struct AvatarStackItem<Content: View>: View {
 /// The board's assignee filter per Jira account. With nothing saved it starts as "only me" —
 /// the user the account was connected with — and after that it remembers the last choice.
 enum JiraBoardFilter {
-    static func key(_ connection: String) -> String { "jira.board.assignees.\(connection)" }
+    static func key(_ connection: String) -> String { "jira.board.assignees.v2.\(connection)" }
 
-    @MainActor
-    static func load(_ connection: String?, defaults: UserDefaults = .standard) -> Set<String> {
+    static func load(_ connection: String?, me: String?, defaults: UserDefaults = .standard) -> Set<String> {
         guard let connection else { return [] }
         if let saved = defaults.stringArray(forKey: key(connection)) { return Set(saved) }
-        guard let me = JiraConnections.shared.connection(connection)?.displayName, !me.isEmpty else { return [] }
+        guard let me, !me.isEmpty else { return [] }
         return [me]
+    }
+
+    static func hasSaved(_ connection: String?, defaults: UserDefaults = .standard) -> Bool {
+        guard let connection else { return false }
+        return defaults.object(forKey: key(connection)) != nil
     }
 
     static func save(_ value: Set<String>, for connection: String?, defaults: UserDefaults = .standard) {

@@ -128,4 +128,13 @@ final class SidebarLayoutTests: XCTestCase {
         XCTAssertTrue(prompt.contains("https://x/browse/COM-2224"))
         XCTAssertTrue(prompt.contains("Description:\nGoal: CarPlay"))
     }
+
+    func testBoardFilterDefaultsToMeThenRemembers() {
+        XCTAssertEqual(JiraBoardFilter.load("c1", me: "Rafael Azatyan", defaults: defaults), ["Rafael Azatyan"])
+        XCTAssertFalse(JiraBoardFilter.hasSaved("c1", defaults: defaults))
+        JiraBoardFilter.save([], for: "c1", defaults: defaults)
+        XCTAssertTrue(JiraBoardFilter.hasSaved("c1", defaults: defaults))
+        XCTAssertEqual(JiraBoardFilter.load("c1", me: "Rafael Azatyan", defaults: defaults), [])
+        XCTAssertEqual(JiraBoardFilter.load("c2", me: nil, defaults: defaults), [])
+    }
 }

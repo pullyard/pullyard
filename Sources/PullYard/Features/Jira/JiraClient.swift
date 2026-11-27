@@ -457,6 +457,13 @@ struct JiraClient: Sendable {
         }
     }
 
+    /// The signed-in Jira user: display name and avatar.
+    func me() async throws -> (name: String, avatar: String?) {
+        let o = try json(try await request("/rest/api/2/myself"))
+        let name = o["displayName"] as? String ?? o["name"] as? String ?? "Jira"
+        return (name, (o["avatarUrls"] as? [String: Any])?["48x48"] as? String)
+    }
+
     func myself() async throws -> String {
         let o = try json(try await request("/rest/api/2/myself"))
         return o["displayName"] as? String ?? o["name"] as? String ?? "Jira"
