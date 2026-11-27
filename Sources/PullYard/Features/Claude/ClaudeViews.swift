@@ -2357,6 +2357,8 @@ struct AgentBranchMenu: View {
     var style: Style = .full
     @Environment(AppModel.self) private var app
     @State private var hover = false
+    @State private var open = false
+    @State private var query = ""
 
     var body: some View {
         Group {
@@ -2373,42 +2375,20 @@ struct AgentBranchMenu: View {
     private var content: some View {
         let git = tab.git
         if git.isRepo, let branch = git.branch {
-            Menu {
-                Section("Switch branch") {
-                    ForEach(git.localBranches.prefix(20), id: \.self) { b in
-                        Button { switchTo(b) } label: {
-                            if b == branch { Label(b, systemImage: "checkmark") } else { Text(b) }
-                        }
-                        .disabled(b == branch || tab.state == .working)
-                    }
-                }
-                Button("New Branch…") { newBranch() }
-                    .disabled(tab.state == .working)
-                Divider()
-                if branch != "HEAD" {
-                    Button("Copy Branch Name") { copyToPasteboard(branch) }
-                }
-                if let worktree = git.worktree {
-                    Button("Reveal Worktree “\(worktree)” in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: git.path)]) }
-                }
-                if tab.followsOtherWorktree {
-                    Button("Show Session Folder") { tab.follow(app.claude.git(for: tab.folder)) }
-                }
-                if let pr {
-                    Button("Open Pull Request #\(pr.number)") {
-                        if let r = GitHubURL.parse(pr.url) { app.section = .prs(.mine); app.open(r) }
-                    }
-                    if !git.changes.isEmpty {
-                        Button("Commit and Push with Agent") { app.claude.send(AgentShip.commitPrompt(pr: pr.number), to: tab) }
-                            .disabled(tab.state == .working)
-                    }
-                } else if branch != "HEAD", let remote = git.remote {
-                    Button(remote.kind == .gitlab ? "Open Merge Request with Agent" : "Open Pull Request with Agent") {
-                        app.claude.send(AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: !git.changes.isEmpty, ahead: git.ahead, remote: remote), to: tab)
-                    }
-                    .disabled(tab.state == .working)
-                }
-            } label: {
+            Button { open.toggle() } label: {
+                label(branch: branch, git: git)
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+            .onHover { hover = $0 }
+            .help(branch + (git.worktree.map { " · worktree " + $0 } ?? "") + (tab.followsOtherWorktree ? " · the agent is working here, not in the session folder" : "") + (pr.map { " · #\($0.number)" } ?? ""))
+            .popover(isPresented: $open, arrowEdge: .bottom) { panel(branch: branch, git: git) }
+        } else {
+            Color.clear.frame(width: 0, height: 0)
+        }
+    }
+
+    private func label(branch: String, git: GitWorkingCopy) -> some View {
                 HStack(spacing: 5) {
                     Image(systemName: "arrow.triangle.branch").imageScale(.small)
                     if style != .minimal {
@@ -2431,17 +2411,98 @@ struct AgentBranchMenu: View {
                 .foregroundStyle(Color.syMuted)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.syText.opacity(hover ? 0.08 : 0.04)))
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.syText.opacity(hover || open ? 0.08 : 0.04)))
+                .contentShape(Rectangle())
+    }
+
+    // MARK: Popover
+
+    private func panel(branch: String, git: GitWorkingCopy) -> some View {
+        let working = tab.state == .working
+        let others = git.localBranches.filter { $0 != branch }
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let shown = q.isEmpty ? others : others.filter { $0.lowercased().contains(q) }
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("BRANCH")
+                .font(.syCaption2.weight(.semibold))
+                .tracking(0.6)
+                .foregroundStyle(Color.syDim)
+                .padding(.horizontal, 10)
+                .padding(.top, 4)
+                .padding(.bottom, 2)
+            BranchPanelRow(name: branch == "HEAD" ? "Detached HEAD" : branch, detail: git.worktree.map { "worktree · \($0)" } ?? "checked out", current: true) {}
+            if others.count > 0 {
+                Divider().padding(.vertical, 4)
+                HStack {
+                    Text("SWITCH BRANCH")
+                        .font(.syCaption2.weight(.semibold))
+                        .tracking(0.6)
+                        .foregroundStyle(Color.syDim)
+                    Spacer()
+                    if working { Text("agent is working").font(.syCaption2).foregroundStyle(Color.syDim) }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 2)
+                if others.count > 8 {
+                    TextField("Filter branches", text: $query)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 4)
+                }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(shown.prefix(40), id: \.self) { b in
+                            BranchPanelRow(name: b, detail: nil, current: false, disabled: working) {
+                                close { switchTo(b) }
+                            }
+                        }
+                        if shown.isEmpty {
+                            Text("No branch matches").font(.syCaption).foregroundStyle(Color.syMuted).padding(10)
+                        }
+                    }
+                }
+                .frame(maxHeight: 260)
+                .fixedSize(horizontal: false, vertical: true)
             }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .onHover { hover = $0 }
-            .help(branch + (git.worktree.map { " · worktree " + $0 } ?? "") + (tab.followsOtherWorktree ? " · the agent is working here, not in the session folder" : "") + (pr.map { " · #\($0.number)" } ?? ""))
-        } else {
-            Color.clear.frame(width: 0, height: 0)
+            Divider().padding(.vertical, 4)
+            PanelActionRow(icon: "plus", title: "New branch…", disabled: working) { close { newBranch() } }
+            if branch != "HEAD" {
+                PanelActionRow(icon: "doc.on.doc", title: "Copy branch name") { close { copyToPasteboard(branch) } }
+            }
+            if let worktree = git.worktree {
+                PanelActionRow(icon: "folder", title: "Reveal “\(worktree)” in Finder") {
+                    close { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: git.path)]) }
+                }
+            }
+            if tab.followsOtherWorktree {
+                PanelActionRow(icon: "arrow.uturn.backward", title: "Show session folder") { close { tab.follow(app.claude.git(for: tab.folder)) } }
+            }
+            if let pr {
+                Divider().padding(.vertical, 4)
+                PanelActionRow(icon: "arrow.triangle.pull", title: "Open pull request #\(pr.number)") {
+                    close { if let r = GitHubURL.parse(pr.url) { app.section = .prs(.mine); app.open(r) } }
+                }
+                if !git.changes.isEmpty {
+                    PanelActionRow(icon: "arrow.up.circle", title: "Commit and push with agent", disabled: working) {
+                        close { app.claude.send(AgentShip.commitPrompt(pr: pr.number), to: tab) }
+                    }
+                }
+            } else if branch != "HEAD", let remote = git.remote {
+                Divider().padding(.vertical, 4)
+                PanelActionRow(icon: "arrow.triangle.pull", title: remote.kind == .gitlab ? "Open merge request with agent" : "Open pull request with agent", disabled: working) {
+                    close { app.claude.send(AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: !git.changes.isEmpty, ahead: git.ahead, remote: remote), to: tab) }
+                }
+            }
         }
+        .padding(6)
+        .frame(width: 340)
+        .onDisappear { query = "" }
+    }
+
+    private func close(_ action: @escaping () -> Void) {
+        open = false
+        DispatchQueue.main.async(execute: action)
     }
 
     private func switchTo(_ branch: String, create: Bool = false) {
@@ -2469,6 +2530,50 @@ struct AgentBranchMenu: View {
         let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         switchTo(name, create: true)
+    }
+}
+
+private struct BranchPanelRow: View {
+    let name: String
+    let detail: String?
+    let current: Bool
+    var disabled = false
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.syCallout.weight(current ? .semibold : .regular))
+                    .foregroundStyle(current ? Color.syAgentAccent : Color.syMuted)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(current ? Color.syAgentAccent.opacity(0.14) : Color.clear))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name)
+                        .font(.syCallout.weight(current ? .semibold : .regular))
+                        .foregroundStyle(Color.syText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let detail {
+                        Text(detail).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                Spacer(minLength: 6)
+                if current {
+                    Image(systemName: "checkmark").font(.syCaption.weight(.bold)).foregroundStyle(Color.syAgentAccent).frame(width: 14)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, current ? 6 : 2)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hover && !current && !disabled ? Color.syText.opacity(0.07) : Color.clear))
+            .contentShape(Rectangle())
+            .opacity(disabled ? 0.45 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(current || disabled)
+        .onHover { hover = $0 }
+        .accessibilityAddTraits(current ? [.isSelected] : [])
     }
 }
 

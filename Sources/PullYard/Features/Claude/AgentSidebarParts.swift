@@ -251,11 +251,12 @@ private struct AccountPanelRow: View {
     }
 }
 
-private struct PanelActionRow: View {
+struct PanelActionRow: View {
     let icon: String
     let title: String
     var checked = false
     var destructive = false
+    var disabled = false
     let action: () -> Void
     @State private var hover = false
 
@@ -280,10 +281,12 @@ private struct PanelActionRow: View {
             }
             .padding(.horizontal, 8)
             .frame(height: 28)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hover ? Color.syText.opacity(0.07) : Color.clear))
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hover && !disabled ? Color.syText.opacity(0.07) : Color.clear))
             .contentShape(Rectangle())
+            .opacity(disabled ? 0.45 : 1)
         }
         .buttonStyle(.plain)
+        .disabled(disabled)
         .onHover { hover = $0 }
     }
 }
