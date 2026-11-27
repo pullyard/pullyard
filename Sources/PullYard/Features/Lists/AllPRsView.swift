@@ -126,8 +126,7 @@ struct AllPRsView: View {
 
     private var projectsPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ScrollView(.vertical, showsIndicators: false) {
-                FlowLayout(spacing: 4, lineSpacing: 4) {
+            FlowLayout(spacing: 4, lineSpacing: 4) {
                     OwnerChip(login: "All", avatar: nil, selected: owner == nil) { owner = nil }
                     ForEach(owners) { o in
                         OwnerChip(login: o.login, avatar: o.avatarUrl ?? "https://github.com/\(o.login).png?size=40", selected: owner == o.login) {
@@ -135,16 +134,9 @@ struct AllPRsView: View {
                             Task { await loadOwner(o.login) }
                         }
                     }
-                }
-                .padding(.horizontal, 12)
             }
-            .frame(height: 64)
+            .padding(.horizontal, 12)
             .padding(.top, 10)
-            if let owner, let err = ownerErrors[owner] {
-                Label(err, systemImage: "exclamationmark.triangle.fill")
-                    .font(.syCaption).foregroundStyle(Color.syAmber).lineLimit(2)
-                    .padding(.horizontal, 14).padding(.top, 6)
-            }
             PickerPanel(title: owner.map { "PROJECTS · \($0.uppercased())" } ?? "PROJECTS", placeholder: "Filter, or owner/repo to add any",
                         items: (owner == nil ? pinned.filter { p in !repos.contains { $0.nameWithOwner == p } } : []).map { name in
                             PickerPanel.Item(id: name, title: Self.short(name), subtitle: name, avatar: Self.ownerAvatar(name), icon: nil)
@@ -155,16 +147,18 @@ struct AllPRsView: View {
                         },
                         isSelected: { pinned.contains($0) },
                         loading: (loadingRepos && repos.isEmpty) || (owner.map { loadingOwners.contains($0) && ownerRepos[$0] == nil } ?? false),
-                        width: 380, listHeight: 290, onAdd: addRepo) { id in
+                        width: 380, listHeight: 300, notice: owner.flatMap { ownerErrors[$0] }, onAdd: addRepo) { id in
                 toggle(id)
             }
         }
-        .frame(width: 380, height: 470, alignment: .top)
+        .frame(width: 380)
     }
 
     private func loadOrgs() async {
-        guard orgs.isEmpty, let api = app.api else { return }
-        orgs = (try? await api.organizations()) ?? []
+        if let cached = OrgCache.orgs[account] { orgs = cached }
+        guard let api = app.api, let fresh = try? await api.organizations() else { return }
+        OrgCache.orgs[account] = fresh
+        orgs = fresh
     }
 
     private func loadOwner(_ login: String) async {
@@ -430,6 +424,8 @@ struct PickerPanel: View {
     var width: CGFloat = 320
     /// A fixed list height, so the popover keeps its size while the content changes.
     var listHeight: CGFloat? = nil
+    /// A warning shown at the top of the list (inside it, so the panel keeps its size).
+    var notice: String? = nil
     /// When set, typing `owner/repo` offers to add it; returns an error to show, or nil.
     var onAdd: ((String) async -> String?)? = nil
     let onPick: (String) -> Void
@@ -473,6 +469,12 @@ struct PickerPanel: View {
                             ShimmerBar(width: 200, height: 12)
                         }
                         .padding(10)
+                    }
+                    if let notice {
+                        Label(notice, systemImage: "exclamationmark.triangle.fill")
+                            .font(.syCaption).foregroundStyle(Color.syAmber)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 8).padding(.vertical, 6)
                     }
                     if let candidate = addCandidate {
                         Button {
@@ -564,4 +566,11 @@ private struct PickerPanelRow: View {
         .buttonStyle(.plain)
         .onHover { hover = $0 }
     }
+}
+
+/// Organizations per account, kept for the app's lifetime so pickers open at their final size.
+@MainActor
+enum OrgCache {
+    static var orgs: [String: [GitHubOwner]] = [:]
+    static var repos: [String: [String]] = [:]
 }

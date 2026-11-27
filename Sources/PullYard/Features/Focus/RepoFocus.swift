@@ -165,8 +165,7 @@ struct FocusPicker: View {
     }
 
     private var ownerRow: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            FlowLayout(spacing: 4, lineSpacing: 4) {
+        FlowLayout(spacing: 4, lineSpacing: 4) {
                 OwnerChip(login: "All", avatar: nil, selected: owner == nil) { owner = nil }
                 ForEach(owners) { o in
                     OwnerChip(login: o.login, avatar: o.avatarUrl ?? "https://github.com/\(o.login).png?size=40", selected: owner == o.login) {
@@ -174,16 +173,17 @@ struct FocusPicker: View {
                         Task { await loadOwner(o.login) }
                     }
                 }
-            }
-            .padding(.horizontal, 12)
         }
-        .frame(height: 56)
+        .padding(.horizontal, 12)
         .padding(.bottom, 8)
     }
 
     private func loadOrgs() async {
-        guard orgs.isEmpty, app.forge == nil, let api = app.api else { return }
-        orgs = (try? await api.organizations()) ?? []
+        let key = app.cacheAccount ?? "_"
+        if let cached = OrgCache.orgs[key] { orgs = cached }
+        guard app.forge == nil, let api = app.api, let fresh = try? await api.organizations() else { return }
+        OrgCache.orgs[key] = fresh
+        orgs = fresh
     }
 
     private func loadOwner(_ login: String) async {
@@ -336,8 +336,11 @@ struct FocusPicker: View {
         .frame(width: 380)
         .task(id: app.cacheAccount) {
             involved = involvedRepos()
+            if let cached = OrgCache.repos[app.cacheAccount ?? "_"] { accessible = cached }
+            if let cached = OrgCache.orgs[app.cacheAccount ?? "_"] { orgs = cached }
             await loadOrgs()
             await loadAccessible()
+            OrgCache.repos[app.cacheAccount ?? "_"] = accessible
         }
     }
 
