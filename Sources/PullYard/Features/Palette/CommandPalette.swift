@@ -385,6 +385,7 @@ struct CommandPalette: View {
             out.append(destination(.projects, "Projects", "rectangle.split.3x1.fill", .syIndigo, group: "Code", shortcut: shortcut(.projects)))
         }
         out.append(destination(.claude, "Agents", "terminal.fill", .syCoral, group: "AI", shortcut: shortcut(.claude)))
+        out.append(destination(.jira, "Board", "rectangle.split.3x1.fill", .sySky, group: "Jira"))
         out.append(PaletteCommand(id: "go-settings", section: .goTo, icon: "gearshape.fill", tint: .sySlate, title: "Settings", detail: "PullYard", shortcut: "⌘,", keywords: "preferences") {
             openSettings()
         })

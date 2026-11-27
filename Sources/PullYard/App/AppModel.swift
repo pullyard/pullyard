@@ -84,8 +84,9 @@ enum SidebarSection: Hashable {
     case repos
     case projects
     case claude
+    case jira
 
-    var isFullWidth: Bool { self == .claude || self == .overview }
+    var isFullWidth: Bool { self == .claude || self == .overview || self == .jira }
 
     var storageKey: String {
         switch self {
@@ -98,6 +99,7 @@ enum SidebarSection: Hashable {
         case .repos: return "repos"
         case .projects: return "projects"
         case .claude: return "claude"
+        case .jira: return "jira"
         }
     }
 
@@ -113,6 +115,7 @@ enum SidebarSection: Hashable {
         case ("repos", _): self = .repos
         case ("projects", _): self = .projects
         case ("claude", _): self = .claude
+        case ("jira", _): self = .jira
         default: return nil
         }
     }
@@ -1136,7 +1139,7 @@ final class AppModel {
         case .issues(let f)?: return forgeCaps.issueFilters.contains(f)
         case .notifications?: return forgeCaps.hasInbox
         case .repos?: return forgeCaps.repositories
-        case .claude?: return true
+        case .claude?, .jira?: return true
         default: return false
         }
     }

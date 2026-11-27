@@ -18,6 +18,8 @@ struct JiraIssue: Identifiable, Equatable {
     var parentSummary: String? = nil
     var attachments: [JiraAttachment] = []
     var connectionID: String? = nil
+    var statusID: String? = nil
+    var labels: [String] = []
 
     var siteBase: String {
         guard let r = url.range(of: "/browse/") else { return url }
@@ -53,6 +55,7 @@ struct JiraTransition: Identifiable, Equatable {
     let name: String
     let to: String
     let toCategory: String
+    var toID: String? = nil
 }
 
 enum JiraKeys {
@@ -471,7 +474,8 @@ struct JiraClient: Sendable {
             guard let id = t["id"] as? String, let name = t["name"] as? String else { return nil }
             let to = t["to"] as? [String: Any]
             return JiraTransition(id: id, name: name, to: to?["name"] as? String ?? name,
-                                  toCategory: ((to?["statusCategory"] as? [String: Any])?["key"] as? String) ?? "")
+                                  toCategory: ((to?["statusCategory"] as? [String: Any])?["key"] as? String) ?? "",
+                                  toID: to?["id"] as? String)
         }
     }
 
@@ -539,7 +543,9 @@ struct JiraClient: Sendable {
             updated: updated,
             parentKey: (f["parent"] as? [String: Any])?["key"] as? String,
             parentSummary: ((f["parent"] as? [String: Any])?["fields"] as? [String: Any])?["summary"] as? String,
-            attachments: (f["attachment"] as? [[String: Any]] ?? []).compactMap(parseAttachment)
+            attachments: (f["attachment"] as? [[String: Any]] ?? []).compactMap(parseAttachment),
+            statusID: status?["id"] as? String,
+            labels: f["labels"] as? [String] ?? []
         )
     }
 
@@ -607,5 +613,104 @@ struct JiraClient: Sendable {
         }
         out += ns.substring(from: last).replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         return out
+    }
+}
+
+// MARK: - Agile boards
+
+struct JiraBoard: Identifiable, Hashable, Sendable {
+    let id: Int
+    let name: String
+    let type: String
+    let projectKey: String?
+
+    var isScrum: Bool { type.lowercased() == "scrum" }
+}
+
+struct JiraBoardColumn: Identifiable, Hashable, Sendable {
+    let name: String
+    let statusIDs: [String]
+    var id: String { name }
+}
+
+struct JiraSprint: Identifiable, Hashable, Sendable {
+    let id: Int
+    let name: String
+    let endDate: Date?
+}
+
+extension JiraClient {
+    static let boardIssueFields = "summary,status,issuetype,priority,assignee,updated,labels,parent"
+
+    func boards() async throws -> [JiraBoard] {
+        var out: [JiraBoard] = []
+        var start = 0
+        while true {
+            let o = try json(try await request("/rest/agile/1.0/board?startAt=\(start)&maxResults=50"))
+            let values = o["values"] as? [[String: Any]] ?? []
+            out += values.compactMap { v in
+                guard let id = v["id"] as? Int, let name = v["name"] as? String else { return nil }
+                return JiraBoard(id: id, name: name, type: v["type"] as? String ?? "",
+                                 projectKey: (v["location"] as? [String: Any])?["projectKey"] as? String)
+            }
+            start += values.count
+            if values.isEmpty || o["isLast"] as? Bool == true || start >= 1000 { break }
+        }
+        return out
+    }
+
+    func columns(board: Int) async throws -> [JiraBoardColumn] {
+        let o = try json(try await request("/rest/agile/1.0/board/\(board)/configuration"))
+        let columns = (o["columnConfig"] as? [String: Any])?["columns"] as? [[String: Any]] ?? []
+        return columns.compactMap { c in
+            guard let name = c["name"] as? String else { return nil }
+            let ids = (c["statuses"] as? [[String: Any]] ?? []).compactMap { ($0["id"] as? String) ?? ($0["id"] as? Int).map(String.init) }
+            return JiraBoardColumn(name: name, statusIDs: ids)
+        }
+    }
+
+    func activeSprints(board: Int) async throws -> [JiraSprint] {
+        let o = try json(try await request("/rest/agile/1.0/board/\(board)/sprint?state=active"))
+        return (o["values"] as? [[String: Any]] ?? []).compactMap { v in
+            guard let id = v["id"] as? Int, let name = v["name"] as? String else { return nil }
+            let end = (v["endDate"] as? String).flatMap { JiraClient.parseDate($0) }
+            return JiraSprint(id: id, name: name, endDate: end)
+        }
+    }
+
+    /// Issues on a board: the sprint's issues for a scrum board, or open and recently finished ones for kanban.
+    func boardIssues(board: Int, sprint: Int?) async throws -> [JiraIssue] {
+        let path: String
+        if let sprint {
+            path = "/rest/agile/1.0/board/\(board)/sprint/\(sprint)/issue"
+        } else {
+            path = "/rest/agile/1.0/board/\(board)/issue"
+        }
+        var query = "fields=\(Self.boardIssueFields)"
+        if sprint == nil {
+            query += "&jql=" + Self.encode("statusCategory != Done OR updated >= -14d")
+        }
+        var out: [JiraIssue] = []
+        var start = 0
+        while true {
+            let o = try json(try await request("\(path)?\(query)&startAt=\(start)&maxResults=100"))
+            let issues = o["issues"] as? [[String: Any]] ?? []
+            out += issues.map { Self.parseIssue($0, base: base) }
+            start += issues.count
+            let total = o["total"] as? Int ?? out.count
+            if issues.isEmpty || start >= total || start >= 1000 { break }
+        }
+        return out
+    }
+
+    nonisolated static func encode(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    nonisolated static func parseDate(_ s: String) -> Date? {
+        let fixed = s.replacingOccurrences(of: #"([+-]\d\d)(\d\d)$"#, with: "$1:$2", options: .regularExpression)
+        return isoFormatter.date(from: fixed) ?? ISO8601DateFormatter().date(from: fixed)
     }
 }

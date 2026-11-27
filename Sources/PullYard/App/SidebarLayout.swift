@@ -24,10 +24,12 @@ final class SidebarLayout {
 
     private static let orderKey = "sidebar.order"
     private static let namesKey = "sidebar.names"
+    private static let groupsKey = "sidebar.groupOrder"
 
     private let defaults: UserDefaults
     private(set) var order: [String: [String]]
     private(set) var names: [String: String]
+    private(set) var groupOrder: [String]
 
     /// The row being renamed; the sidebar shows a rename prompt while it is set.
     var renaming: SidebarItem?
@@ -36,6 +38,7 @@ final class SidebarLayout {
         self.defaults = defaults
         order = defaults.dictionary(forKey: Self.orderKey) as? [String: [String]] ?? [:]
         names = defaults.dictionary(forKey: Self.namesKey) as? [String: String] ?? [:]
+        groupOrder = defaults.stringArray(forKey: Self.groupsKey) ?? []
     }
 
     // MARK: Names
@@ -94,11 +97,38 @@ final class SidebarLayout {
         save(ids, group: group)
     }
 
-    var isCustomised: Bool { !order.isEmpty || !names.isEmpty }
+    // MARK: Sections
+
+    /// Section keys in the user's order; sections never placed keep their default position after the placed ones.
+    func arrangedGroups(_ keys: [String]) -> [String] {
+        guard !groupOrder.isEmpty else { return keys }
+        let rank = Dictionary(groupOrder.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        return keys.enumerated().sorted { lhs, rhs in
+            (rank[lhs.element] ?? groupOrder.count + lhs.offset) < (rank[rhs.element] ?? groupOrder.count + rhs.offset)
+        }.map(\.element)
+    }
+
+    func canMoveGroup(_ key: String, by delta: Int, in visible: [String]) -> Bool {
+        guard let i = visible.firstIndex(of: key) else { return false }
+        return visible.indices.contains(i + delta)
+    }
+
+    func moveGroup(_ key: String, by delta: Int, in visible: [String]) {
+        var keys = visible
+        guard let i = keys.firstIndex(of: key), keys.indices.contains(i + delta) else { return }
+        keys.swapAt(i, i + delta)
+        let hidden = groupOrder.filter { !keys.contains($0) }
+        groupOrder = keys + hidden
+        defaults.set(groupOrder, forKey: Self.groupsKey)
+    }
+
+    var isCustomised: Bool { !order.isEmpty || !names.isEmpty || !groupOrder.isEmpty }
 
     func resetAll() {
         order = [:]
         names = [:]
+        groupOrder = []
+        defaults.removeObject(forKey: Self.groupsKey)
         defaults.removeObject(forKey: Self.orderKey)
         defaults.removeObject(forKey: Self.namesKey)
     }

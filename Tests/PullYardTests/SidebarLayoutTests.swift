@@ -57,4 +57,37 @@ final class SidebarLayoutTests: XCTestCase {
         layout.resetAll()
         XCTAssertFalse(layout.isCustomised)
     }
+
+    func testGroupOrderMovesAndPersists() {
+        let layout = SidebarLayout(defaults: defaults)
+        let keys = ["prs", "issues", "code", "jira"]
+        XCTAssertEqual(layout.arrangedGroups(keys), keys)
+        XCTAssertFalse(layout.canMoveGroup("prs", by: -1, in: keys))
+        layout.moveGroup("jira", by: -1, in: keys)
+        layout.moveGroup("jira", by: -1, in: layout.arrangedGroups(keys))
+        XCTAssertEqual(layout.arrangedGroups(keys), ["prs", "jira", "issues", "code"])
+        XCTAssertEqual(SidebarLayout(defaults: defaults).arrangedGroups(keys), ["prs", "jira", "issues", "code"])
+        // A provider without Issues keeps the rest of the order.
+        XCTAssertEqual(layout.arrangedGroups(["prs", "code", "jira"]), ["prs", "jira", "code"])
+    }
+
+    func testJiraSectionStorageKeyRoundTrips() {
+        XCTAssertEqual(SidebarSection(storageKey: SidebarSection.jira.storageKey), .jira)
+        XCTAssertTrue(SidebarSection.jira.isFullWidth)
+    }
+
+    func testJiraIssueParsesStatusIDAndLabels() {
+        let raw: [String: Any] = [
+            "key": "KRIS-740",
+            "fields": [
+                "summary": "Rapid redials",
+                "status": ["id": "10003", "name": "Code review", "statusCategory": ["key": "indeterminate"]],
+                "labels": ["android", "ios"],
+            ],
+        ]
+        let issue = JiraClient.parseIssue(raw, base: URL(string: "https://acme.atlassian.net")!)
+        XCTAssertEqual(issue.statusID, "10003")
+        XCTAssertEqual(issue.labels, ["android", "ios"])
+        XCTAssertEqual(JiraClient.encode("statusCategory != Done"), "statusCategory%20%21%3D%20Done")
+    }
 }

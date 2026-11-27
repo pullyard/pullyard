@@ -130,7 +130,7 @@ struct AppShell: View {
     static let railWidth: CGFloat = 60
 
     private var compact: Bool { windowWidth > 0 && windowWidth < Self.compactBelow }
-    private var showsList: Bool { !(app.section == .overview && app.forge == nil) }
+    private var showsList: Bool { !(app.section == .overview && app.forge == nil) && app.section != .jira }
     private var sidebarWidth: CGFloat { compact ? Self.railWidth : CGFloat(sidebarStored) }
     private var effectiveListWidth: CGFloat { compact ? min(CGFloat(listWidth), 320) : CGFloat(listWidth) }
 
@@ -188,7 +188,7 @@ struct SplitAppShell: View {
     @AppStorage("agents.sidebarHidden") private var hidden = false
     @State private var visibility: NavigationSplitViewVisibility = .all
 
-    private var showsList: Bool { !(app.section == .overview && app.forge == nil) }
+    private var showsList: Bool { !(app.section == .overview && app.forge == nil) && app.section != .jira }
 
     var body: some View {
         Group {
@@ -253,6 +253,9 @@ struct DetailColumn: View {
         Group {
             if app.section == .claude {
                 ClaudeWorkspaceView()
+                    .surface(.panel)
+            } else if app.section == .jira {
+                JiraBoardView()
                     .surface(.panel)
             } else if app.section == .overview, app.forge == nil {
                 OverviewView()
@@ -405,11 +408,11 @@ struct SidebarView: View {
             SidebarGroup("") {
                 SidebarItemList(group: "top", items: topItems)
             }
-            if app.forge != nil {
-                forgeSections
-            } else {
-                gitHubSections
+            let keys = layout.arrangedGroups(groupKeys)
+            ForEach(keys, id: \.self) { key in
+                group(key)
             }
+            .environment(\.sidebarGroupKeys, keys)
         }
         .listStyle(.sidebar)
         .environment(\.sidebarCompact, compact)
@@ -463,54 +466,71 @@ struct SidebarView: View {
         f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0)
     }
 
-    @ViewBuilder
-    private var forgeSections: some View {
-        let caps = app.forgeCaps
-        let prsTitle = app.provider.requestsTitle
-        SidebarGroup(prsTitle) {
-            SidebarItemList(group: "prs", items: caps.pullFilters.map {
-                SidebarItem(section: .prs($0), title: $0.title, icon: $0.tileIcon, color: $0.tint, count: prCount($0), group: prsTitle)
-            } + (caps.pullFilters.contains(.mine) ? [
-                SidebarItem(section: .myPRsByRepo, title: "My \(app.provider.requestShort)s by project", icon: "folder.fill", color: .syCoral, group: prsTitle),
-            ] : []))
-        }
-        if !caps.issueFilters.isEmpty {
-            SidebarGroup("Issues", collapsible: true) {
-                SidebarItemList(group: "issues", items: caps.issueFilters.map {
-                    SidebarItem(section: .issues($0), title: $0.title, icon: $0.tileIcon, color: $0.tint, group: "Issues")
-                })
-            }
-        }
-        if caps.repositories {
-            SidebarGroup("Code") {
-                SidebarItemList(group: "code", items: [
-                    SidebarItem(section: .repos, title: app.provider.repositoriesTitle, icon: "book.closed.fill", color: .syTeal, group: "Code"),
-                ])
-            }
-        }
+    private var groupKeys: [String] {
+        guard app.forge != nil else { return ["prs", "issues", "code", "jira"] }
+        var keys = ["prs"]
+        if !app.forgeCaps.issueFilters.isEmpty { keys.append("issues") }
+        if app.forgeCaps.repositories { keys.append("code") }
+        keys.append("jira")
+        return keys
     }
 
     @ViewBuilder
-    private var gitHubSections: some View {
-        SidebarGroup("Pull requests") {
-            SidebarItemList(group: "prs", items: PRFilter.allCases.map {
-                SidebarItem(section: .prs($0), title: $0.title, icon: $0.tileIcon, color: $0.tint, count: prCount($0), group: "Pull requests")
-            } + [
-                SidebarItem(section: .myPRsByRepo, title: "My PRs by project", icon: "folder.fill", color: .syCoral, group: "Pull requests"),
-                SidebarItem(section: .stacks, title: "Stacks", icon: "square.stack.3d.up.fill", color: .syIndigo, group: "Pull requests"),
-            ])
+    private func group(_ key: String) -> some View {
+        switch key {
+        case "prs":
+            let title = app.forge != nil ? app.provider.requestsTitle : "Pull requests"
+            SidebarGroup(title, key: key) {
+                SidebarItemList(group: key, items: prItems(title))
+            }
+        case "issues":
+            SidebarGroup("Issues", key: key, collapsible: true) {
+                SidebarItemList(group: key, items: (app.forge != nil ? app.forgeCaps.issueFilters : IssueFilter.allCases).map {
+                    SidebarItem(section: .issues($0), title: $0.title, icon: $0.tileIcon, color: $0.tint, group: "Issues")
+                })
+            }
+        case "code":
+            SidebarGroup("Code", key: key) {
+                SidebarItemList(group: key, items: codeItems)
+            }
+        case "jira":
+            SidebarGroup("Jira", key: key) {
+                SidebarItemList(group: key, items: [
+                    SidebarItem(section: .jira, title: "Board", icon: "rectangle.split.3x1.fill", color: .sySky, group: "Jira"),
+                ])
+            }
+        default:
+            EmptyView()
         }
-        SidebarGroup("Issues", collapsible: true) {
-            SidebarItemList(group: "issues", items: IssueFilter.allCases.map {
-                SidebarItem(section: .issues($0), title: $0.title, icon: $0.tileIcon, color: $0.tint, group: "Issues")
-            })
+    }
+
+    private func prItems(_ title: String) -> [SidebarItem] {
+        if app.forge != nil {
+            let caps = app.forgeCaps
+            var out = caps.pullFilters.map {
+                SidebarItem(section: .prs($0), title: $0.title, icon: $0.tileIcon, color: $0.tint, count: prCount($0), group: title)
+            }
+            if caps.pullFilters.contains(.mine) {
+                out.append(SidebarItem(section: .myPRsByRepo, title: "My \(app.provider.requestShort)s by project", icon: "folder.fill", color: .syCoral, group: title))
+            }
+            return out
         }
-        SidebarGroup("Code") {
-            SidebarItemList(group: "code", items: [
-                SidebarItem(section: .repos, title: "Repositories", icon: "book.closed.fill", color: .syTeal, group: "Code"),
-                SidebarItem(section: .projects, title: "Projects", icon: "rectangle.split.3x1.fill", color: .syIndigo, group: "Code"),
-            ])
+        return PRFilter.allCases.map {
+            SidebarItem(section: .prs($0), title: $0.title, icon: $0.tileIcon, color: $0.tint, count: prCount($0), group: title)
+        } + [
+            SidebarItem(section: .myPRsByRepo, title: "My PRs by project", icon: "folder.fill", color: .syCoral, group: title),
+            SidebarItem(section: .stacks, title: "Stacks", icon: "square.stack.3d.up.fill", color: .syIndigo, group: title),
+        ]
+    }
+
+    private var codeItems: [SidebarItem] {
+        if app.forge != nil {
+            return [SidebarItem(section: .repos, title: app.provider.repositoriesTitle, icon: "book.closed.fill", color: .syTeal, group: "Code")]
         }
+        return [
+            SidebarItem(section: .repos, title: "Repositories", icon: "book.closed.fill", color: .syTeal, group: "Code"),
+            SidebarItem(section: .projects, title: "Projects", icon: "rectangle.split.3x1.fill", color: .syIndigo, group: "Code"),
+        ]
     }
 
     @ViewBuilder
@@ -556,12 +576,15 @@ struct SidebarGroup<Content: View>: View {
     let title: Text
     let rawTitle: String
     let collapsible: Bool
+    let key: String?
     @ViewBuilder let content: Content
     @AppStorage private var expanded: Bool
+    @Environment(\.sidebarGroupKeys) private var groupKeys
 
-    init(_ title: String, collapsible: Bool = false, @ViewBuilder content: () -> Content) {
+    init(_ title: String, key: String? = nil, collapsible: Bool = false, @ViewBuilder content: () -> Content) {
         self.title = Text(title)
         self.rawTitle = title
+        self.key = key
         self.collapsible = collapsible
         self.content = content()
         _expanded = AppStorage(wrappedValue: true, "sidebar.expanded.\(title)")
@@ -607,7 +630,26 @@ struct SidebarGroup<Content: View>: View {
                 .accessibilityHidden(true)
         } else {
             title.font(.sySubheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .contextMenu {
+                    if let key { SidebarGroupMoveButtons(key: key, keys: groupKeys) }
+                }
         }
+    }
+}
+
+/// "Move Section Up / Down" for a sidebar group, shared by its header and its rows' menus.
+struct SidebarGroupMoveButtons: View {
+    let key: String
+    let keys: [String]
+    private var layout: SidebarLayout { .shared }
+
+    var body: some View {
+        Button("Move Section Up") { withAnimation(Motion.fade) { layout.moveGroup(key, by: -1, in: keys) } }
+            .disabled(!layout.canMoveGroup(key, by: -1, in: keys))
+        Button("Move Section Down") { withAnimation(Motion.fade) { layout.moveGroup(key, by: 1, in: keys) } }
+            .disabled(!layout.canMoveGroup(key, by: 1, in: keys))
     }
 }
 
@@ -615,10 +657,19 @@ private struct SidebarCompactKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct SidebarGroupKeysKey: EnvironmentKey {
+    static let defaultValue: [String] = []
+}
+
 extension EnvironmentValues {
     var sidebarCompact: Bool {
         get { self[SidebarCompactKey.self] }
         set { self[SidebarCompactKey.self] = newValue }
+    }
+
+    var sidebarGroupKeys: [String] {
+        get { self[SidebarGroupKeysKey.self] }
+        set { self[SidebarGroupKeysKey.self] = newValue }
     }
 }
 
@@ -627,6 +678,7 @@ struct SidebarItemList: View {
     let group: String
     let items: [SidebarItem]
     @State private var layout = SidebarLayout.shared
+    @Environment(\.sidebarGroupKeys) private var groupKeys
 
     var body: some View {
         let visible = layout.arranged(items, group: group)
@@ -642,6 +694,10 @@ struct SidebarItemList: View {
                         .disabled(!layout.canMove(item, by: -1, in: visible))
                     Button("Move Down") { withAnimation(Motion.fade) { layout.move(item, by: 1, in: group, visible: visible) } }
                         .disabled(!layout.canMove(item, by: 1, in: visible))
+                    if groupKeys.contains(group) {
+                        Divider()
+                        SidebarGroupMoveButtons(key: group, keys: groupKeys)
+                    }
                     if layout.isCustomised {
                         Divider()
                         Button("Reset Sidebar Order and Names") { withAnimation(Motion.fade) { layout.resetAll() } }
@@ -850,7 +906,7 @@ struct ContentColumn: View {
             ProjectsListView()
         case .claude:
             ClaudeProjectsColumn()
-        case .overview:
+        case .overview, .jira:
             Color.clear
         case nil:
             Text("Select a section").foregroundStyle(Color.syMuted)
