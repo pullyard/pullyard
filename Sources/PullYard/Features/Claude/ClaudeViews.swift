@@ -1195,7 +1195,18 @@ struct OpenTabRow: View {
         .padding(.vertical, 5)
         .padding(.leading, 2)
         .frame(minHeight: 28)
-        .help(tab.state.help)
+        .hoverTip(activityTip)
+    }
+
+    /// The session's state and what the agent is doing right now (or did last).
+    private var activityTip: String {
+        var lines = [tab.title, tab.state.title]
+        if let chat = tab.chat, let last = chat.items.last(where: { if case .tool = $0 { return true }; return false }),
+           case .tool(let call) = last {
+            let verb = call.status == .running ? "Now: " : "Last: "
+            lines[1] += " · " + verb + ToolGrouping.title(call, folder: tab.folder)
+        }
+        return lines.joined(separator: "\n")
     }
 }
 

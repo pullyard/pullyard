@@ -133,6 +133,15 @@ enum ToolGrouping {
         return String(line)
     }
 
+    /// What the call does, in full, for the hover bubble: the description and the whole command or target.
+    static func tip(_ call: ChatToolCall, folder: String) -> String {
+        let title = title(call, folder: folder)
+        guard call.name == "Bash", let command = (call.input["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty else {
+            return title
+        }
+        return command == title ? command : title + "\n" + command
+    }
+
     static func title(_ call: ChatToolCall, folder: String) -> String {
         let i = call.input
         let path = { (key: String) in ToolPresentation.relative(i[key] as? String ?? "", folder) }
@@ -321,6 +330,7 @@ struct ToolRowView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityValue(open ? "Expanded" : "Collapsed")
+                .hoverTip(open ? nil : ToolGrouping.tip(call, folder: folder))
                 if ToolStopButton.shows(call) {
                     ToolStopButton(call: call, chat: chat)
                 }
