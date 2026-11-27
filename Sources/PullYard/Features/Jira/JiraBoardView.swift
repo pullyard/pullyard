@@ -445,10 +445,14 @@ struct JiraBoardView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let error = model.error, model.issues.isEmpty {
+        if model.issues.isEmpty, model.error == nil, model.loading || !model.loadedOnce {
+            JiraBoardSkeleton(columns: model.columns.map(\.name))
+        } else if let error = model.error, model.issues.isEmpty {
             PYEmptyState(title: "Couldn't load the board", message: error, aurora: false)
         } else if model.loadedOnce, model.boards.isEmpty {
             PYEmptyState(title: "No boards", message: "This Jira account has no boards you can see.", aurora: false)
+        } else if model.issues.isEmpty, model.columns.isEmpty {
+            PYEmptyState(title: "Nothing on this board", message: model.board?.isScrum == true ? "There is no active sprint, or it has no issues." : "This board has no open issues.", aurora: false)
         } else {
             VStack(spacing: 0) {
                 if let error = model.error {
@@ -852,5 +856,55 @@ private extension JiraBoardIssueSheet {
                 }
             }
         }
+    }
+}
+
+/// Placeholder columns and cards shown while a board loads for the first time.
+struct JiraBoardSkeleton: View {
+    var columns: [String] = []
+
+    var body: some View {
+        let names = columns.isEmpty ? Array(repeating: "", count: 5) : columns
+        ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(Array(names.enumerated()), id: \.offset) { index, name in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Group {
+                            if name.isEmpty {
+                                ShimmerBar(width: 90, height: 12)
+                            } else {
+                                Text(name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syMuted)
+                            }
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        ForEach(0..<max(1, 4 - index % 3), id: \.self) { card in
+                            VStack(alignment: .leading, spacing: 8) {
+                                ShimmerBar(height: 11)
+                                ShimmerBar(width: card % 2 == 0 ? 170 : 120, height: 11)
+                                HStack(spacing: 6) {
+                                    ShimmerBar(width: 64, height: 10)
+                                    Spacer()
+                                    Circle().fill(Color.syLine).frame(width: 22, height: 22)
+                                }
+                                .padding(.top, 4)
+                            }
+                            .padding(12)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(Color.syRaised))
+                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syLine))
+                        }
+                    }
+                    .padding(8)
+                    .frame(width: 270, alignment: .top)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.syText.opacity(0.035)))
+                }
+            }
+            .padding(16)
+            .frame(maxHeight: .infinity, alignment: .top)
+        }
+        .scrollDisabled(true)
+        .accessibilityElement()
+        .accessibilityLabel("Loading board")
     }
 }
