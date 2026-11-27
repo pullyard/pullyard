@@ -625,6 +625,8 @@ struct JiraIssueCard: View {
     var onImplement: (() -> Void)?
     /// Shows a close button in the header when set.
     var onClose: (() -> Void)?
+    /// The full ticket is still loading: shows a shimmer where the description goes.
+    var loadingDetails = false
     var manual = false
     var onUnlink: () -> Void = {}
     var onHide: (() -> Void)?
@@ -637,6 +639,7 @@ struct JiraIssueCard: View {
     @State private var expanded = false
     @State private var copied = false
     @State private var copiedKey = false
+    @State private var statusOpen = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -690,7 +693,7 @@ struct JiraIssueCard: View {
             }
             Text(issue.summary).font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText).textSelection(.enabled)
             meta
-            if !issue.description.isEmpty { description }
+            if !issue.description.isEmpty { description } else if loadingDetails { descriptionSkeleton }
             if !issue.attachments.isEmpty {
                 JiraAttachmentsSection(attachments: issue.attachments, connectionID: issue.connectionID)
             }
@@ -700,16 +703,19 @@ struct JiraIssueCard: View {
             Divider()
             HStack(spacing: 8) {
                 Button { openInBrowser(issue.url) } label: { Label("Open in Jira", systemImage: "arrow.up.right.square") }
+                    .buttonStyle(JiraChipButtonStyle())
                 Button {
                     copyToPasteboard(issue.url)
                     copied = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
                 } label: { Label(copied ? "Copied" : "Copy link", systemImage: copied ? "checkmark" : "link") }
+                    .buttonStyle(JiraChipButtonStyle(done: copied))
                 Button {
                     copyToPasteboard(issue.key)
                     copiedKey = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copiedKey = false }
                 } label: { Label(copiedKey ? "Copied" : "Copy \(issue.key)", systemImage: copiedKey ? "checkmark" : "number") }
+                    .buttonStyle(JiraChipButtonStyle(done: copiedKey))
                     .help("Copy the ticket number")
                 Spacer()
                 if let onImplement {
@@ -803,23 +809,30 @@ struct JiraIssueCard: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.sySunken))
     }
 
+    private var descriptionSkeleton: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Description").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syDim)
+            ShimmerBar(width: 120, height: 11)
+            ShimmerBar(height: 11)
+            ShimmerBar(height: 11)
+            ShimmerBar(width: 260, height: 11)
+            ShimmerBar(width: 200, height: 11)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.sySunken))
+        .accessibilityLabel("Loading ticket details")
+    }
+
     private var statusMenu: some View {
-        Menu {
-            if transitions.isEmpty {
-                Text(loadingTransitions ? "Loading…" : "No transitions available")
-            } else {
-                Section("Move to") {
-                    ForEach(transitions) { t in
-                        Button { move(t) } label: { Text(t.name == t.to ? t.name : "\(t.name) → \(t.to)") }
-                    }
-                }
-            }
+        Button {
+            statusOpen.toggle()
+            if transitions.isEmpty, !loadingTransitions { Task { await loadTransitions() } }
         } label: {
             JiraStatusPill(status: issue.status, category: issue.statusCategory, chevron: true, busy: moving)
+                .contentShape(Capsule())
         }
-        .menuStyle(.button)
         .buttonStyle(.plain)
-        .menuIndicator(.hidden)
         .fixedSize()
         .onHover { inside in
             guard inside, transitions.isEmpty, !loadingTransitions else { return }
@@ -827,6 +840,41 @@ struct JiraIssueCard: View {
         }
         .disabled(moving)
         .help("Change status")
+        .popover(isPresented: $statusOpen, arrowEdge: .bottom) { statusPanel }
+    }
+
+    private var statusPanel: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("STATUS")
+                .font(.syCaption2.weight(.semibold)).tracking(0.6).foregroundStyle(Color.syDim)
+                .padding(.horizontal, 10).padding(.top, 4).padding(.bottom, 2)
+            JiraStatusRow(name: issue.status, detail: "current", category: issue.statusCategory, current: true) {}
+            Divider().padding(.vertical, 4)
+            Text("MOVE TO")
+                .font(.syCaption2.weight(.semibold)).tracking(0.6).foregroundStyle(Color.syDim)
+                .padding(.horizontal, 10).padding(.bottom, 2)
+            if transitions.isEmpty {
+                if loadingTransitions {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ShimmerBar(width: 180, height: 12)
+                        ShimmerBar(width: 220, height: 12)
+                        ShimmerBar(width: 150, height: 12)
+                    }
+                    .padding(10)
+                } else {
+                    Text("No transitions available").font(.syCaption).foregroundStyle(Color.syMuted).padding(10)
+                }
+            } else {
+                ForEach(transitions) { t in
+                    JiraStatusRow(name: t.to, detail: t.name == t.to ? nil : "via “\(t.name)”", category: t.toCategory, current: false) {
+                        statusOpen = false
+                        move(t)
+                    }
+                }
+            }
+        }
+        .padding(6)
+        .frame(width: 300)
     }
 
     private func loadTransitions() async {
@@ -852,6 +900,96 @@ struct JiraIssueCard: View {
                 self.error = error.localizedDescription
             }
             moving = false
+        }
+    }
+}
+
+private struct JiraStatusRow: View {
+    let name: String
+    let detail: String?
+    let category: String
+    let current: Bool
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        let color = JiraStyle.statusColor(category)
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Circle().fill(color).frame(width: 8, height: 8)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(color.opacity(current ? 0.18 : 0.1)))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name)
+                        .font(.syCallout.weight(current ? .semibold : .regular))
+                        .foregroundStyle(Color.syText)
+                        .lineLimit(1)
+                    if let detail {
+                        Text(detail).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 6)
+                if current {
+                    Image(systemName: "checkmark").font(.syCaption.weight(.bold)).foregroundStyle(Color.syAgentAccent).frame(width: 14)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hover && !current ? Color.syText.opacity(0.07) : Color.clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .allowsHitTesting(!current)
+        .onHover { hover = $0 }
+        .accessibilityAddTraits(current ? [.isSelected] : [])
+    }
+}
+
+/// Quiet rounded button for the ticket's secondary actions: subtle fill, brighter on hover, green after copying.
+struct JiraChipButtonStyle: ButtonStyle {
+    var done = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        ChipBody(configuration: configuration, done: done)
+    }
+
+    private struct ChipBody: View {
+        let configuration: ButtonStyleConfiguration
+        let done: Bool
+        @State private var hover = false
+        @Environment(\.isEnabled) private var enabled
+
+        var body: some View {
+            let tint = done ? Color.syGreen : Color.syText
+            configuration.label
+                .labelStyle(ChipLabelStyle())
+                .font(.syCallout.weight(.medium))
+                .foregroundStyle(done ? Color.syGreen : (hover ? Color.syText : Color.syText.opacity(0.85)))
+                .padding(.horizontal, 12)
+                .frame(height: 30)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(tint.opacity(configuration.isPressed ? 0.16 : (hover || done ? 0.1 : 0.05)))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(tint.opacity(hover || done ? 0.22 : 0.1))
+                )
+                .scaleEffect(configuration.isPressed ? 0.97 : 1)
+                .opacity(enabled ? 1 : 0.5)
+                .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .onHover { hover = $0 }
+                .animation(Motion.fade, value: hover)
+                .animation(Motion.fade, value: done)
+        }
+    }
+
+    private struct ChipLabelStyle: LabelStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            HStack(spacing: 6) {
+                configuration.icon.font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                configuration.title
+            }
         }
     }
 }
