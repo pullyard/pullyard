@@ -96,7 +96,7 @@ struct LoginView: View {
                                 } label: {
                                     Label("Sign in with GitHub", systemImage: "arrow.up.forward.app").frame(maxWidth: .infinity)
                                 }
-                                .buttonStyle(.borderedProminent)
+                                .pyGlassButton(prominent: true)
                                 .controlSize(.large)
                                 .disabled(deviceStarting)
                             }
@@ -112,7 +112,7 @@ struct LoginView: View {
                             } label: {
                                 Label(provider == .gitlab ? "Sign in with glab" : "Sign in with gh", systemImage: "terminal").frame(maxWidth: .infinity)
                             }
-                            .buttonStyle(.borderedProminent)
+                            .pyGlassButton(prominent: true)
                             .controlSize(.large)
                             .disabled(effectiveHost.isEmpty || busy)
                         }
@@ -131,7 +131,7 @@ struct LoginView: View {
                                 .textFieldStyle(.roundedBorder)
                                 .onSubmit(loginWithToken)
                             Button("Sign in", action: loginWithToken)
-                                .buttonStyle(.borderedProminent)
+                                .pyGlassButton(prominent: true)
                                 .disabled(!canSubmitToken || busy)
                         }
                         if let url = provider.tokenCreateURL(host: effectiveHost) {
@@ -241,7 +241,7 @@ struct LoginView: View {
                     copyToPasteboard(device.userCode)
                     openInBrowser(device.verificationUri)
                 }
-                .buttonStyle(.borderedProminent)
+                .pyGlassButton(prominent: true)
                 WakeLoader()
                 Spacer(minLength: 0)
                 Button("Cancel") {
@@ -273,7 +273,7 @@ struct LoginView: View {
         VStack(alignment: .leading, spacing: 8, content: content)
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .card(radius: 12)
+            .pyCardSurface(radius: 14)
     }
 
     private func cardTitle(_ title: String, icon: String, color: Color) -> some View {
@@ -417,7 +417,7 @@ private struct WelcomeFeatures: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .card(radius: 12)
+                .pyCardSurface(radius: 14)
                 .accessibilityElement(children: .combine)
                 .welcomeStage((1.5 + Double(index) * 0.1) * pace)
             }

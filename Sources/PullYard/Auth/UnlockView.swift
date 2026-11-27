@@ -42,7 +42,7 @@ struct UnlockView: View {
                         .onChange(of: pin) { pin = String(pin.filter(\.isNumber).prefix(AccountLock.pinLength.upperBound)) }
                         .disabled(waiting)
                     Button("Unlock", action: submit)
-                        .buttonStyle(.borderedProminent)
+                        .pyGlassButton(prominent: true)
                         .disabled(!AccountLock.isValidPIN(pin) || waiting)
                         .keyboardShortcut(.defaultAction)
                 }
@@ -176,7 +176,7 @@ struct SetPINSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Set PIN", action: save)
-                    .buttonStyle(.borderedProminent)
+                    .pyGlassButton(prominent: true)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!AccountLock.isValidPIN(pin) || confirm.isEmpty)
             }
