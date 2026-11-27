@@ -633,7 +633,11 @@ struct SidebarGroup<Content: View>: View {
                 .frame(maxWidth: .infinity)
                 .accessibilityHidden(true)
         } else {
-            let label = title.font(.sySubheadline.weight(.semibold))
+            let label = Text(rawTitle.uppercased())
+                .font(.syCaption2.weight(.bold))
+                .tracking(0.8)
+                .foregroundStyle(Color.syDim)
+                .padding(.top, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             if let key {
