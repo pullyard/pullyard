@@ -147,33 +147,62 @@ final class JiraBoardModel {
         }
     }
 
-    /// Moves an issue into a column by running the first workflow transition that lands in it.
-    func move(_ key: String, to column: JiraBoardColumn) async {
-        guard let client, let id = connectionID, let index = issues.firstIndex(where: { $0.key == key }) else { return }
-        let issue = issues[index]
-        if let status = issue.statusID, column.statusIDs.contains(status) { return }
+    /// Drops an issue on a column, before another card (`before`) or at the end of the column.
+    /// A new column runs the first workflow transition that lands in it; the place in the column
+    /// is saved as the issue's rank in Jira.
+    func move(_ key: String, to column: JiraBoardColumn, before: String? = nil) async {
+        guard let client, let id = connectionID, let issue = issues.first(where: { $0.key == key }), before != key else { return }
+        let sameColumn = issue.statusID.map(column.statusIDs.contains) == true
+        let columnKeys = issues.filter { $0.statusID.map(column.statusIDs.contains) == true && $0.key != key }.map(\.key)
+        let after = before == nil ? columnKeys.last : nil
+        if sameColumn, before == nil, columnKeys.last == nil { return }
+        if sameColumn, let before, let i = columnKeys.firstIndex(of: before), i > 0, columnKeys[i - 1] == key { return }
+        let undo = snap.issues
+        reorder(key, before: before, after: after)
         moving.insert(key)
         defer { moving.remove(key) }
         do {
-            let transitions = try await client.transitions(key)
-            guard let t = transitions.first(where: { $0.toID.map(column.statusIDs.contains) == true }) else {
-                error = "\(key) can't move to \(column.name) from \(issue.status) — the workflow has no such transition."
-                return
+            if !sameColumn {
+                let transitions = try await client.transitions(key)
+                guard let t = transitions.first(where: { $0.toID.map(column.statusIDs.contains) == true }) else {
+                    snap.issues = undo
+                    error = "\(key) can't move to \(column.name) from \(issue.status) — the workflow has no such transition."
+                    return
+                }
+                try await client.transition(key, to: t.id)
+                guard id == connectionID, let i = snap.issues.firstIndex(where: { $0.key == key }) else { return }
+                let u = snap.issues[i]
+                snap.issues[i] = JiraIssue(key: u.key, summary: u.summary, status: t.to, statusCategory: t.toCategory,
+                                           type: u.type, priority: u.priority, assignee: u.assignee,
+                                           assigneeAvatar: u.assigneeAvatar, reporter: u.reporter,
+                                           description: u.description, url: u.url, updated: Date(),
+                                           parentKey: u.parentKey, parentSummary: u.parentSummary,
+                                           attachments: u.attachments, connectionID: u.connectionID,
+                                           statusID: t.toID, labels: u.labels)
             }
-            try await client.transition(key, to: t.id)
-            guard id == connectionID, let i = snap.issues.firstIndex(where: { $0.key == key }) else { return }
-            let u = snap.issues[i]
-            snap.issues[i] = JiraIssue(key: u.key, summary: u.summary, status: t.to, statusCategory: t.toCategory,
-                                       type: u.type, priority: u.priority, assignee: u.assignee,
-                                       assigneeAvatar: u.assigneeAvatar, reporter: u.reporter,
-                                       description: u.description, url: u.url, updated: Date(),
-                                       parentKey: u.parentKey, parentSummary: u.parentSummary,
-                                       attachments: u.attachments, connectionID: u.connectionID,
-                                       statusID: t.toID, labels: u.labels)
-            store(id)
+            do {
+                try await client.rank(key, before: before, after: after)
+            } catch where !sameColumn {
+                // The status changed; a board that isn't ranked just keeps Jira's order.
+            }
+            if id == connectionID { store(id) }
             error = nil
         } catch {
+            if id == connectionID, sameColumn { snap.issues = undo }
             self.error = error.localizedDescription
+        }
+    }
+
+    /// Local, optimistic reorder so the card lands where it was dropped before Jira answers.
+    private func reorder(_ key: String, before: String?, after: String?) {
+        guard let from = snap.issues.firstIndex(where: { $0.key == key }) else { return }
+        let moved = snap.issues.remove(at: from)
+        if let before, let to = snap.issues.firstIndex(where: { $0.key == before }) {
+            snap.issues.insert(moved, at: to)
+        } else if let after, let to = snap.issues.firstIndex(where: { $0.key == after }) {
+            snap.issues.insert(moved, at: to + 1)
+        } else {
+            snap.issues.append(moved)
         }
     }
 
@@ -434,8 +463,8 @@ struct JiraBoardView: View {
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 12) {
                         ForEach(model.grouped(visibleIssues), id: \.column.id) { entry in
-                            JiraBoardColumnView(column: entry.column, issues: entry.issues, moving: model.moving, canDrop: !model.columns.isEmpty) { opened = $0 } onDrop: { key in
-                                Task { await model.move(key, to: entry.column) }
+                            JiraBoardColumnView(column: entry.column, issues: entry.issues, moving: model.moving, canDrop: !model.columns.isEmpty) { opened = $0 } onDrop: { key, before in
+                                Task { await model.move(key, to: entry.column, before: before) }
                             }
                         }
                     }
@@ -510,8 +539,10 @@ struct JiraBoardColumnView: View {
     let moving: Set<String>
     let canDrop: Bool
     let onOpen: (JiraIssue) -> Void
-    let onDrop: (String) -> Void
+    /// Dragged key, and the card it was dropped on (nil: the column's empty space, i.e. the end).
+    let onDrop: (String, String?) -> Void
     @State private var targeted = false
+    @State private var targetCard: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -527,6 +558,18 @@ struct JiraBoardColumnView: View {
                     ForEach(issues) { issue in
                         JiraBoardCard(issue: issue, busy: moving.contains(issue.key)) { onOpen(issue) }
                             .draggable(issue.key)
+                            .overlay(alignment: .top) {
+                                if targetCard == issue.key {
+                                    Capsule().fill(Color.syAccent).frame(height: 3).offset(y: -5.5).allowsHitTesting(false)
+                                }
+                            }
+                            .dropDestination(for: String.self) { keys, _ in
+                                guard canDrop, let key = keys.first, key != issue.key else { return false }
+                                onDrop(key, issue.key)
+                                return true
+                            } isTargeted: { on in
+                                if on { targetCard = issue.key } else if targetCard == issue.key { targetCard = nil }
+                            }
                     }
                 }
                 .padding(.bottom, 8)
@@ -540,7 +583,7 @@ struct JiraBoardColumnView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(targeted ? Color.syAccent : Color.clear, lineWidth: 1.5))
         .dropDestination(for: String.self) { keys, _ in
             guard canDrop, let key = keys.first else { return false }
-            onDrop(key)
+            onDrop(key, nil)
             return true
         } isTargeted: { targeted = canDrop && $0 }
     }
@@ -649,25 +692,19 @@ struct JiraBoardIssueSheet: View {
     let onChange: (JiraIssue) -> Void
     @State private var full: JiraIssue?
     @State private var error: String?
+    @State private var implementing = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
-            }
-            .padding([.horizontal, .top], 14)
-            ScrollView {
-                JiraIssueCard(issue: full ?? issue, flat: true) { updated in
-                    full = updated
-                    onChange(updated)
+        Group {
+            if implementing {
+                JiraImplementForm(issue: full ?? issue) {
+                    withAnimation(Motion.fade) { implementing = false }
+                } onStarted: {
+                    dismiss()
                 }
-                .padding(.horizontal, 6)
-                .padding(.bottom, 6)
-                if let error {
-                    Label(error, systemImage: "exclamationmark.triangle.fill").font(.syCaption).foregroundStyle(Color.syRed).padding(.horizontal, 16)
-                }
+            } else {
+                details
             }
         }
         .frame(minWidth: 820, idealWidth: 960, minHeight: 640, idealHeight: 820)
@@ -792,5 +829,28 @@ private struct JiraPeopleRowStyle: ButtonStyle {
         configuration.label
             .background(Color.syText.opacity(configuration.isPressed ? 0.1 : hover ? 0.06 : 0))
             .onHover { hover = $0 }
+    }
+}
+
+private extension JiraBoardIssueSheet {
+    var details: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            .padding([.horizontal, .top], 14)
+            ScrollView {
+                JiraIssueCard(issue: full ?? issue, flat: true, onImplement: { withAnimation(Motion.fade) { implementing = true } }) { updated in
+                    full = updated
+                    onChange(updated)
+                }
+                .padding(.horizontal, 6)
+                .padding(.bottom, 6)
+                if let error {
+                    Label(error, systemImage: "exclamationmark.triangle.fill").font(.syCaption).foregroundStyle(Color.syRed).padding(.horizontal, 16)
+                }
+            }
+        }
     }
 }

@@ -621,6 +621,8 @@ struct JiraIssueCard: View {
     let issue: JiraIssue
     /// Drops the card's own background and border, for when it fills a sheet of the same colour.
     var flat = false
+    /// Shows "Implement with agent" when set.
+    var onImplement: (() -> Void)?
     var manual = false
     var onUnlink: () -> Void = {}
     var onHide: (() -> Void)?
@@ -695,6 +697,11 @@ struct JiraIssueCard: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copiedKey = false }
                 } label: { Label(copiedKey ? "Copied" : "Copy \(issue.key)", systemImage: copiedKey ? "checkmark" : "number") }
                     .help("Copy the ticket number")
+                if let onImplement {
+                    Button(action: onImplement) { Label("Implement with agent", systemImage: "sparkles") }
+                        .buttonStyle(.borderedProminent)
+                        .help("Start a Claude session that implements this ticket")
+                }
                 Spacer()
                 if manual {
                     Button(role: .destructive, action: onUnlink) { Label("Unlink", systemImage: "link.badge.minus") }

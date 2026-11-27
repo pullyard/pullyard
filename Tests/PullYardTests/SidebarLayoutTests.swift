@@ -120,4 +120,12 @@ final class SidebarLayoutTests: XCTestCase {
         let back = try JSONDecoder().decode(JiraBoardSnapshot.self, from: JSONEncoder().encode(snap))
         XCTAssertEqual(back, snap)
     }
+
+    func testImplementPromptCarriesTicket() {
+        let issue = JiraIssue(key: "COM-2224", summary: "Add CarPlay", status: "To Do", statusCategory: "new", type: "Task", priority: "Medium", assignee: nil, assigneeAvatar: nil, reporter: nil, description: "Goal: CarPlay", url: "https://x/browse/COM-2224", updated: nil)
+        let prompt = JiraImplementForm.defaultPrompt(issue)
+        XCTAssertTrue(prompt.hasPrefix("Implement Jira ticket COM-2224: Add CarPlay"))
+        XCTAssertTrue(prompt.contains("https://x/browse/COM-2224"))
+        XCTAssertTrue(prompt.contains("Description:\nGoal: CarPlay"))
+    }
 }

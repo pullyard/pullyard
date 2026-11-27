@@ -703,6 +703,13 @@ extension JiraClient {
         return out
     }
 
+    /// Changes an issue's rank (its place in board order): before `before`, or after `after`.
+    func rank(_ key: String, before: String? = nil, after: String? = nil) async throws {
+        var body: [String: Any] = ["issues": [key]]
+        if let before { body["rankBeforeIssue"] = before } else if let after { body["rankAfterIssue"] = after } else { return }
+        _ = try await request("/rest/agile/1.0/issue/rank", method: "PUT", body: body)
+    }
+
     nonisolated static func encode(_ value: String) -> String {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._~")
