@@ -157,10 +157,10 @@
 		435E8F2A21391A7806B96123 /* KeyboardDismisser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDismisser.swift; sourceTree = "<group>"; };
 		492802CE69238D7B67870B90 /* LinkClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkClient.swift; sourceTree = "<group>"; };
 		4E906B2E7B97FCF8016A2F05 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
-		4FEA9E8ED657C416009BF3B6 /* PullYardWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PullYardWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		4FEA9E8ED657C416009BF3B6 /* PullYardWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PullYardWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		50FC49B8614CEC06A877D59E /* AgentsHome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsHome.swift; sourceTree = "<group>"; };
 		5540DD8A1EFE9214A4C8EBAE /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
-		665A39E542BD09746979B213 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		665A39E542BD09746979B213 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		674809AA8E4123FA4CFAF63B /* AgentAttachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentAttachments.swift; sourceTree = "<group>"; };
 		6D854E33B7127DD7D9C8A882 /* AgentTurnSummaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTurnSummaryTests.swift; sourceTree = "<group>"; };
 		74E2AA9BE3CE7453E864C018 /* CredentialVaultTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialVaultTests.swift; sourceTree = "<group>"; };
@@ -186,9 +186,9 @@
 		AA0C66F8D185CD5194B079AE /* CIActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CIActivity.swift; sourceTree = "<group>"; };
 		AC50A581502EF04854200F81 /* DemoData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoData.swift; sourceTree = "<group>"; };
 		B6D80172FDB710BD8881905F /* PullRequestDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PullRequestDetailView.swift; sourceTree = "<group>"; };
-		BAA821B14496A8A2E7564C1D /* PullYardShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PullYardShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		BAA821B14496A8A2E7564C1D /* PullYardShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PullYardShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		BEFCC7B897348C70330D0FFB /* IslandGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandGeometryTests.swift; sourceTree = "<group>"; };
-		BF51D71B18FDD71AD5E3A9A7 /* PullYardMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PullYardMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		BF51D71B18FDD71AD5E3A9A7 /* PullYardMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PullYardMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C19694612AE062E76BC181B6 /* AgentActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivity.swift; sourceTree = "<group>"; };
 		CDA54E3ED6B7AF977D609157 /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		CE425C9086597B1189109F0E /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
@@ -455,8 +455,6 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
-				TargetAttributes = {
-				};
 			};
 			buildConfigurationList = 0BE45CE00F09378E19B9937C /* Build configuration list for PBXProject "PullYardMobile" */;
 			developmentRegion = en;
@@ -631,6 +629,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Support/PullYardWidget.entitlements;
+				DEVELOPMENT_TEAM = T5S7X9CM2J;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Support/Widget-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = PullYard;
@@ -721,6 +720,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Support/PullYardShare.entitlements;
+				DEVELOPMENT_TEAM = T5S7X9CM2J;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Support/Share-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = PullYard;
@@ -742,9 +742,18 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Support/PullYardMobile.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = T5S7X9CM2J;
 				INFOPLIST_FILE = Support/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = PullYard;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSCameraUsageDescription = "PullYard uses the camera to scan the pairing code shown by PullYard on your Mac.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "PullYard connects to PullYard on your Mac to start agent fixes and stream the chat.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "PullYard listens while you dictate a message to the agent on your Mac.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "PullYard turns your dictation into text for the agent. Speech is recognized on this iPhone when possible.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -759,6 +768,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Support/PullYardShare.entitlements;
+				DEVELOPMENT_TEAM = T5S7X9CM2J;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Support/Share-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = PullYard;
@@ -878,9 +888,18 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Support/PullYardMobile.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = T5S7X9CM2J;
 				INFOPLIST_FILE = Support/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = PullYard;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSCameraUsageDescription = "PullYard uses the camera to scan the pairing code shown by PullYard on your Mac.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "PullYard connects to PullYard on your Mac to start agent fixes and stream the chat.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "PullYard listens while you dictate a message to the agent on your Mac.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "PullYard turns your dictation into text for the agent. Speech is recognized on this iPhone when possible.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -895,6 +914,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Support/PullYardWidget.entitlements;
+				DEVELOPMENT_TEAM = T5S7X9CM2J;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Support/Widget-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = PullYard;
