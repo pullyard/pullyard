@@ -36,6 +36,31 @@ struct DictationWave: View {
     }
 }
 
+struct DictationLevels: View {
+    let levels: [Double]
+    var active = true
+
+    var body: some View {
+        GeometryReader { geo in
+            let count = max(levels.count, 1)
+            let gap: CGFloat = 3
+            let width = max(2, (geo.size.width - gap * CGFloat(count - 1)) / CGFloat(count))
+            HStack(alignment: .center, spacing: gap) {
+                ForEach(Array(levels.enumerated()), id: \.offset) { index, value in
+                    let age = Double(index) / Double(count)
+                    Capsule()
+                        .fill(LinearGradient(colors: [.syViolet, .sySky, .syCoral], startPoint: .bottom, endPoint: .top))
+                        .frame(width: width, height: max(3, geo.size.height * (active ? value : 0.06)))
+                        .opacity(active ? 0.35 + 0.65 * age : 0.4)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(.linear(duration: 0.08), value: levels)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 struct DictationBar: View {
     let recorder: WhisperRecorder
     let onStop: () -> Void
@@ -44,45 +69,59 @@ struct DictationBar: View {
 
     var body: some View {
         let recording = recorder.phase == .recording
-        HStack(spacing: 10) {
-            Circle()
-                .fill(recording ? Color.syRed : Color.syMuted)
-                .frame(width: 8, height: 8)
-                .opacity(recording ? 1 : 0.6)
-            Group {
-                if recording {
-                    Text(timerInterval: started...Date.distantFuture, countsDown: false)
-                        .monospacedDigit()
-                } else {
-                    Text("Transcribing…")
-                }
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.syRed.opacity(recording ? 0.18 : 0))
+                    .frame(width: 30, height: 30)
+                    .scaleEffect(recording ? 1 + recorder.level * 0.55 : 1)
+                    .animation(.easeOut(duration: 0.12), value: recorder.level)
+                Image(systemName: recording ? "mic.fill" : "waveform")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(recording ? Color.syRed : Color.syMuted)
             }
-            .font(.syCaption.weight(.medium))
-            .foregroundStyle(Color.syMuted)
-            .frame(width: 84, alignment: .leading)
-            DictationWave(level: recorder.level, active: recording)
-                .frame(height: 26)
+            .frame(width: 34, height: 34)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(recording ? (recorder.level > 0.25 ? "Listening…" : "Speak now") : "Transcribing…")
+                    .font(.syCallout.weight(.semibold))
+                    .foregroundStyle(Color.syText)
+                Group {
+                    if recording {
+                        Text(timerInterval: started...Date.distantFuture, countsDown: false).monospacedDigit()
+                    } else {
+                        Text("Turning speech into text")
+                    }
+                }
+                .font(.syCaption)
+                .foregroundStyle(Color.syMuted)
+            }
+            .frame(width: 110, alignment: .leading)
+            DictationLevels(levels: recorder.levels, active: recording)
+                .frame(height: 30)
                 .frame(maxWidth: .infinity)
             if recording {
                 Button("Cancel", action: onCancel)
                     .buttonStyle(.borderless)
                     .foregroundStyle(Color.syMuted)
                     .keyboardShortcut(.cancelAction)
+                    .help("Discard the recording (Esc)")
                 Button(action: onStop) {
-                    Label("Done", systemImage: "checkmark")
+                    Label("Done", systemImage: "return")
                         .labelStyle(.titleAndIcon)
                 }
                 .pyGlassButton(prominent: true)
-                .help("Stop and transcribe")
+                .keyboardShortcut(.defaultAction)
+                .help("Stop and transcribe (↩)")
             } else {
-                PYLoader(size: 12, label: "Transcribing")
+                PYLoader(size: 14, label: "Transcribing")
             }
         }
         .font(.syCaption)
         .controlSize(.small)
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.syText.opacity(0.05)))
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.syRed.opacity(recording ? 0.06 : 0.03)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(recording ? Color.syRed.opacity(0.25) : Color.syLine))
         .onAppear { started = Date() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(recording ? "Recording your voice" : "Transcribing")

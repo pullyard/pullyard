@@ -439,7 +439,12 @@ struct ChatComposer: View {
         case .idle:
             whisper.prewarm()
             Task {
-                do { try await recorder.start() } catch { dictationError = error.localizedDescription }
+                do {
+                    try await recorder.start()
+                    focusToken += 1
+                } catch {
+                    dictationError = error.localizedDescription
+                }
             }
         case .recording:
             let samples = recorder.stop()
@@ -532,6 +537,11 @@ struct ChatComposer: View {
     }
 
     private func submit() {
+        if recorder.phase == .recording {
+            dictate()
+            return
+        }
+        if recorder.phase == .transcribing { return }
         if completion != nil, let item = completionItems[safe: selected] {
             accept(item)
             return
@@ -549,6 +559,7 @@ struct ChatComposer: View {
 
     private func handleKey(_ e: NSEvent) -> Bool {
         if e.keyCode == 53 {
+            if recorder.phase == .recording { recorder.cancel(); return true }
             if completion != nil { completion = nil; return true }
             if chat.busy { chat.interrupt(); return true }
             return false
