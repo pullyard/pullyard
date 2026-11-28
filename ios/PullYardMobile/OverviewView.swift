@@ -166,7 +166,7 @@ struct OverviewView: View {
                 Spacer()
                 Button("All") { model.selectedTab = .projects }.mobileFont(size: 14, weight: .semibold)
             }
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal, showsIndicators: false) { Group {
                 HStack(spacing: 10) {
                     ForEach(model.pinnedProjects, id: \.self) { repo in
                         NavigationLink(value: Route.project(repo)) {
@@ -188,7 +188,7 @@ struct OverviewView: View {
                         .buttonStyle(.pyPlain)
                     }
                 }
-            }
+            }.background(HorizontalOnly()) }
         }
     }
 

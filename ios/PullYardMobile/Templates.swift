@@ -34,7 +34,7 @@ struct TemplatesBar: View {
     @State private var managing = false
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal, showsIndicators: false) { Group {
             HStack(spacing: 8) {
                 ForEach(templates) { template in
                     Button { pick(template) } label: {
@@ -59,7 +59,7 @@ struct TemplatesBar: View {
                 .buttonStyle(.pyPlain)
                 .accessibilityLabel("Edit reply templates")
             }
-        }
+        }.background(HorizontalOnly()) }
         .sheet(isPresented: $managing, onDismiss: { templates = TemplateStore.load() }) {
             NavigationStack { TemplatesManagerView() }.pySheetStyle()
         }

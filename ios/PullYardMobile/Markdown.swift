@@ -267,7 +267,7 @@ private struct MarkdownBlockView: View {
             .background(MobileTheme.sunken, in: RoundedRectangle(cornerRadius: PYRadius.small))
             .clipShape(RoundedRectangle(cornerRadius: PYRadius.small))
         case let .table(rows):
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal, showsIndicators: false) { Group {
                 Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
                     ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
                         GridRow {
@@ -279,7 +279,7 @@ private struct MarkdownBlockView: View {
                     }
                 }
                 .padding(12)
-            }
+            }.background(HorizontalOnly()) }
             .background(MobileTheme.sunken, in: RoundedRectangle(cornerRadius: PYRadius.small))
         case let .image(alt, url):
             AsyncImage(url: url) { phase in
@@ -346,9 +346,9 @@ struct CodeBlockView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
             Divider().overlay(MobileTheme.line)
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal, showsIndicators: false) { Group {
                 Text(code).mobileFont(size: 13, design: .monospaced).foregroundStyle(MobileTheme.ink).textSelection(.enabled).padding(12)
-            }
+            }.background(HorizontalOnly()) }
         }
         .background(MobileTheme.sunken, in: RoundedRectangle(cornerRadius: PYRadius.small))
         .overlay(RoundedRectangle(cornerRadius: PYRadius.small).stroke(MobileTheme.line))
@@ -361,7 +361,7 @@ struct DiffHunkView: View {
 
     var body: some View {
         let lines = Array(hunk.components(separatedBy: "\n").filter { !$0.hasPrefix("@@") }.suffix(maxLines))
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal, showsIndicators: false) { Group {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                     Text(line.isEmpty ? " " : line)
@@ -373,7 +373,7 @@ struct DiffHunkView: View {
                 }
             }
             .padding(.vertical, 6)
-        }
+        }.background(HorizontalOnly()) }
         .background(MobileTheme.sunken, in: RoundedRectangle(cornerRadius: PYRadius.small))
         .accessibilityLabel("Code context")
     }
