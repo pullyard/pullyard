@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
+    @AppStorage(SplitAppShell.flagKey) private var nativeSplit = false
     @AppStorage("pollInterval") private var pollInterval = 30.0
     @AppStorage("oauthClientID") private var clientID = ""
     @AppStorage(Theme.styleKey) private var themeStyle = ThemeStyle.pullyard.rawValue
@@ -18,30 +19,32 @@ struct SettingsView: View {
     @State private var tokenFailed = false
     @State private var refreshingToken = false
     @AppStorage("clipboard.watch") private var watchClipboard = true
+    @AppStorage(ListDensity.key) private var density: ListDensity = .roomy
     @AppStorage("settings.tab") private var tab = "general"
     @AppStorage(SessionCost.budgetKey) private var sessionBudget = 0.0
     @AppStorage(Updater.autoCheckKey) private var autoCheckUpdates = true
+    @AppStorage(Updater.devChannelKey) private var devUpdates = false
     @AppStorage(Diagnostics.enabledKey) private var diagnosticsEnabled = false
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        TabView(selection: $tab) {
-            generalForm
-                .tabItem { Label("General", systemImage: "gearshape") }
-                .tag("general")
-            accountsForm
-                .tabItem { Label("Accounts", systemImage: "person.crop.circle") }
-                .tag("accounts")
-            AgentSettingsForm()
-                .tabItem { Label("Agents", systemImage: "terminal") }
-                .tag("agents")
-            integrationsForm
-                .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
-                .tag("integrations")
-            advancedForm
-                .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
-                .tag("advanced")
+        VStack(spacing: 0) {
+            SettingsTabBar(selection: $tab)
+            Group {
+                switch tab {
+                case "accounts": accountsForm
+                case "agents": AgentSettingsForm()
+                case "integrations": integrationsForm
+                case "iphone": PYLinkSettingsView()
+                case "advanced": advancedForm
+                default: generalForm
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .background(Theme.isBrand ? Color.syPanel : Color.clear)
+        .background(SettingsWindowChrome())
+        .tint(Color.syAccentFill)
         .task { await ClaudeAccountStore.shared.refresh() }
         .sheet(isPresented: $showAddProfile) { AddClaudeProfileSheet().environment(app) }
         .sheet(isPresented: $showLicenses) { LicensesSheet() }
@@ -79,6 +82,11 @@ struct SettingsView: View {
                     }
                 }
                 .help("Also ⌘+ and ⌘− in the main window")
+                Picker("List density", selection: $density) {
+                    ForEach(ListDensity.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .help("How much each pull request row shows")
                 Toggle("Show PullYard in the menu bar", isOn: Binding(get: { app.showMenuBar }, set: { app.showMenuBar = $0 }))
             } header: {
                 SettingsHeader(title: "Appearance", icon: "paintpalette.fill", color: .syViolet)
@@ -108,10 +116,22 @@ struct SettingsView: View {
                 SettingsHeader(title: "Refresh", icon: "arrow.clockwise", color: .syGreen)
             }
             NotificationSettingsSection()
+            DictationSettingsSection()
             Section {
                 Toggle("Check for updates automatically", isOn: $autoCheckUpdates)
+                Toggle(isOn: $devUpdates) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Dev updates")
+                        Text("For developers: every push to the dev branch is built on GitHub, downloaded in the background and announced with a notification. Dev builds can be unstable.")
+                            .font(.syCaption)
+                            .foregroundStyle(Color.syMuted)
+                    }
+                }
+                .onChange(of: devUpdates) { _, _ in
+                    Task { await Updater.shared.check(userInitiated: false) }
+                }
                 HStack {
-                    Text("Current version \(Updater.shared.currentVersion)")
+                    Text("Current version \(Updater.shared.currentDisplayVersion)")
                         .foregroundStyle(Color.syMuted)
                     Spacer()
                     Button("Check Now") {
@@ -198,7 +218,7 @@ struct SettingsView: View {
                         HStack {
                             Button("Sign out of Claude Code", role: .destructive) { confirmClaudeLogout = true }
                             Spacer()
-                            if loggingOut { ProgressView().controlSize(.small) }
+                            if loggingOut { PYLoader(size: 16) }
                         }
                         .disabled(loggingOut)
                     case .notInstalled:
@@ -225,7 +245,7 @@ struct SettingsView: View {
                         .font(.syCaption)
                         .foregroundStyle(Color.syMuted)
                 } header: {
-                    SettingsHeader(title: "Claude Code", icon: "terminal.fill", color: .syCoral)
+                    SettingsHeader(title: "Agents", icon: "terminal.fill", color: .syCoral)
                 }
             }
         }
@@ -239,6 +259,11 @@ struct SettingsView: View {
                 JiraConnectForm()
             } header: {
                 SettingsHeader(title: "Jira", icon: "ticket", color: .sySky)
+            }
+            Section {
+                JiraAttachmentCacheSection()
+            } header: {
+                SettingsHeader(title: "Jira attachments", icon: "paperclip", color: .syViolet)
             }
         }
         .formStyle(.grouped)
@@ -261,6 +286,14 @@ struct SettingsView: View {
                 SettingsHeader(title: "Diagnostics", icon: "gauge.with.dots.needle.33percent", color: .sySky)
             }
             Section {
+                Toggle("Native split view", isOn: $nativeSplit)
+                Text("Uses the macOS split view for the sidebar, list and detail. On macOS 26 the sidebar becomes glass. The narrow icon rail is not available in this mode. Experimental.")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+            } header: {
+                SettingsHeader(title: "Window layout", icon: "sidebar.left", color: .syViolet)
+            }
+            Section {
                 TextField("Client ID", text: $clientID)
             } header: {
                 SettingsHeader(title: "GitHub OAuth app (advanced)", icon: "key.fill", color: .syAmber)
@@ -280,6 +313,21 @@ struct SettingsView: View {
                 SettingsHeader(title: "Support PullYard", icon: "heart.fill", color: .syCoral)
             }
             Section {
+                HStack(spacing: 14) {
+                    DrawnLogoMark(key: "settings-about", size: 56)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PullYard")
+                            .font(.system(size: TextZoom.shared.size(22), weight: .semibold, design: .serif))
+                            .foregroundStyle(Color.syText)
+                        Text("Version \(Updater.shared.currentVersion)")
+                            .font(.syCaption.monospacedDigit())
+                            .foregroundStyle(Color.syMuted)
+                            .textSelection(.enabled)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+                .accessibilityElement(children: .combine)
                 Text(Legal.disclaimer)
                     .font(.syCaption)
                     .foregroundStyle(Color.syMuted)
@@ -504,5 +552,87 @@ struct SavedPromptRow: View {
         guard !body.isEmpty else { return }
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
         PromptLibrary.shared.update(SavedPrompt(id: prompt.id, title: name.isEmpty ? PromptLibrary.title(for: body) : name, text: body))
+    }
+}
+
+enum SettingsTab {
+    static let all: [(id: String, title: String, icon: String)] = [
+        ("general", "General", "gearshape"),
+        ("accounts", "Accounts", "person.crop.circle"),
+        ("agents", "Agents", "terminal"),
+        ("integrations", "Integrations", "puzzlepiece.extension"),
+        ("iphone", "iPhone", "iphone"),
+        ("advanced", "Advanced", "wrench.and.screwdriver")
+    ]
+}
+
+struct SettingsTabBar: View {
+    @Binding var selection: String
+    @State private var hovered: String?
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(SettingsTab.all, id: \.id) { tab in
+                let selected = selection == tab.id || (tab.id == "general" && !SettingsTab.all.contains { $0.id == selection })
+                Button {
+                    selection = tab.id
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 17, weight: .regular))
+                            .frame(height: 22)
+                        Text(tab.title)
+                            .font(.syCaption.weight(selected ? .semibold : .regular))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(selected ? Color.syAccent : Color.syMuted)
+                    .frame(width: 80)
+                    .padding(.vertical, 7)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.syText.opacity(selected ? 0.08 : hovered == tab.id ? 0.04 : 0)))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { h in hovered = h ? tab.id : (hovered == tab.id ? nil : hovered) }
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.syLine).frame(height: 1) }
+    }
+}
+
+struct SettingsWindowChrome: NSViewRepresentable {
+    func makeNSView(context: Context) -> ChromeView { ChromeView() }
+    func updateNSView(_ view: ChromeView, context: Context) { view.apply() }
+
+    final class ChromeView: NSView {
+        private var observers: [NSObjectProtocol] = []
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers = []
+            guard let window else { return }
+            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification, NSWindow.didUpdateNotification] {
+                observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.apply() }
+                })
+            }
+            apply()
+        }
+
+        deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+
+        func apply() {
+            guard let window else { return }
+            if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
+            if window.titleVisibility != .hidden { window.titleVisibility = .hidden }
+            if !window.styleMask.contains(.fullSizeContentView) { window.styleMask.insert(.fullSizeContentView) }
+            if window.toolbar != nil { window.toolbar = nil }
+            if Theme.isBrand, window.backgroundColor != .syWindow { window.backgroundColor = .syWindow }
+        }
     }
 }

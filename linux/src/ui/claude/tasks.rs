@@ -171,11 +171,11 @@ impl TasksPanel {
                 if let Some(start) = call.started_at.get() {
                     line.append(&label_with(&duration(start.elapsed()), &["sy-muted", "sy-small"]));
                 }
-                line.append(&spinner(12));
+                line.append(&wake_spinner(12));
             }
             TaskState::Stopping => {
                 line.append(&label_with("Stopping…", &["sy-muted", "sy-small"]));
-                line.append(&spinner(12));
+                line.append(&wake_spinner(12));
             }
             TaskState::Failed => line.append(&label_with("Failed", &["fg-red", "sy-small", "sy-bold"])),
             TaskState::Stopped => line.append(&label_with("Stopped", &["sy-muted", "sy-small"])),

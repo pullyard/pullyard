@@ -76,6 +76,7 @@ final class ClaudeAccountStore {
         }
         if case .unknown = status { status = .checking }
         let env = Self.environment()
+        let checkedID = ClaudeProfiles.shared.activeID
         let result = await Task.detached(priority: .userInitiated) { () -> [String: Any]? in
             let p = Process()
             p.executableURL = URL(fileURLWithPath: bin)
@@ -89,13 +90,14 @@ final class ClaudeAccountStore {
             p.waitUntilExit()
             return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         }.value
+        guard checkedID == ClaudeProfiles.shared.activeID else { return }
         lastChecked = Date()
         guard let json = result else {
             status = .loggedOut
             return
         }
         if json["loggedIn"] as? Bool == true {
-            if !Demo.isOn { ClaudeProfiles.shared.updateCachedInfo(email: json["email"] as? String, plan: (json["subscriptionType"] as? String)?.capitalized) }
+            if !Demo.isOn { ClaudeProfiles.shared.updateCachedInfo(email: json["email"] as? String, plan: (json["subscriptionType"] as? String)?.capitalized, org: json["orgName"] as? String) }
             status = .loggedIn(ClaudeAccountInfo(
                 email: Demo.isOn ? Demo.email : json["email"] as? String,
                 orgName: Demo.isOn ? nil : json["orgName"] as? String,
@@ -293,7 +295,7 @@ struct ClaudeAuthView: View {
                 Button("Copy command") { copyToPasteboard(Self.installCommand) }
                 Button("Docs") { openInBrowser("https://code.claude.com/docs/en/setup") }
                 Spacer()
-                Button("Check again") { Task { await store.refresh(force: true) } }.buttonStyle(.borderedProminent).tint(.syAgentAccent)
+                Button("Check again") { Task { await store.refresh(force: true) } }.buttonStyle(.borderedProminent).tint(.syAgentFill)
             }
         }
     }
@@ -306,7 +308,7 @@ struct ClaudeAuthView: View {
             if store.loggingIn {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
+                        PYLoader(size: 16)
                         Text("Confirm the sign-in in your browser…")
                     }
                     if let url = store.fallbackURL {
@@ -336,7 +338,7 @@ struct ClaudeAuthView: View {
                         Label("Sign in with browser", systemImage: "person.badge.key")
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.syAgentAccent)
+                    .tint(.syAgentFill)
                     .controlSize(.large)
                     .keyboardShortcut(.defaultAction)
                 }

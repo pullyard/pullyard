@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SwiftUI
 
 enum GitHubURL {
@@ -190,6 +191,16 @@ enum VisualState {
         }
     }
 
+    var compactIcon: String {
+        switch self {
+        case .draft: return "pencil"
+        case .closed: return "xmark"
+        case .completed: return "checkmark"
+        case .notPlanned: return "minus"
+        default: return icon
+        }
+    }
+
     var title: String {
         switch self {
         case .open, .issueOpen: return "Open"
@@ -202,20 +213,82 @@ enum VisualState {
     }
 }
 
+@MainActor
+enum AvatarImages {
+    private static let cache: NSCache<NSURL, NSImage> = {
+        let c = NSCache<NSURL, NSImage>()
+        c.countLimit = 800
+        return c
+    }()
+    private static var inFlight: [URL: Task<CGImage?, Never>] = [:]
+    private static var failed: [URL: Date] = [:]
+
+    static func cached(_ url: URL) -> NSImage? { cache.object(forKey: url as NSURL) }
+
+    static func load(_ url: URL, pixels: Int) async -> NSImage? {
+        if let hit = cached(url) { return hit }
+        if let at = failed[url], Date().timeIntervalSince(at) < 300 { return nil }
+        let task = inFlight[url] ?? Task.detached(priority: .utility) { () -> CGImage? in
+            guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return nil }
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: max(pixels, 16),
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true
+            ]
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        }
+        inFlight[url] = task
+        let cg = await task.value
+        inFlight[url] = nil
+        guard let cg else {
+            failed[url] = Date()
+            return nil
+        }
+        if let hit = cached(url) { return hit }
+        let image = NSImage(cgImage: cg, size: NSSize(width: CGFloat(cg.width) / 2, height: CGFloat(cg.height) / 2))
+        cache.setObject(image, forKey: url as NSURL)
+        return image
+    }
+}
+
 struct Avatar: View {
     let url: String?
     var size: CGFloat = 20
     var ring = false
+    @State private var loaded: Loaded?
+
+    private struct Loaded {
+        let url: URL
+        let image: NSImage
+    }
 
     var body: some View {
-        AsyncImage(url: resolved) { image in
-            image.resizable().interpolation(.medium)
-        } placeholder: {
-            Circle().fill(.quaternary)
+        let resolved = resolved
+        Group {
+            if let image = image(for: resolved) {
+                Image(nsImage: image).resizable().interpolation(.medium)
+            } else {
+                Circle().fill(.quaternary)
+            }
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
         .overlay { if ring { Circle().strokeBorder(Color.syLineStrong, lineWidth: 0.5) } }
+        .task(id: resolved) {
+            guard let resolved, AvatarImages.cached(resolved) == nil else { return }
+            if let image = await AvatarImages.load(resolved, pixels: Int(size * 2)) {
+                loaded = Loaded(url: resolved, image: image)
+            }
+        }
+    }
+
+    private func image(for url: URL?) -> NSImage? {
+        guard let url else { return nil }
+        if let loaded, loaded.url == url { return loaded.image }
+        return AvatarImages.cached(url)
     }
 
     private var resolved: URL? {
@@ -234,7 +307,7 @@ struct StateBadge: View {
 
     var body: some View {
         if compact {
-            Image(systemName: state.icon)
+            Image(systemName: state.compactIcon)
                 .font(.syIcon(11))
                 .foregroundStyle(state.color)
                 .frame(width: 22, height: 22)
@@ -274,9 +347,61 @@ struct CIIcon: View {
 
     var body: some View {
         switch state {
-        case "SUCCESS": Image(systemName: "checkmark").foregroundStyle(Color.ghGreen).help("Checks passed").accessibilityLabel("Checks passed")
-        case "FAILURE", "ERROR": Image(systemName: "xmark").foregroundStyle(Color.ghRed).help("Checks failed").accessibilityLabel("Checks failed")
-        case "PENDING", "EXPECTED": Image(systemName: "circle.dotted").foregroundStyle(Color.ghYellow).help("Checks running").accessibilityLabel("Checks running")
+        case "SUCCESS": Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.ghGreen).help("Checks passed").accessibilityLabel("Checks passed")
+        case "FAILURE", "ERROR": Image(systemName: "xmark.circle.fill").foregroundStyle(Color.ghRed).help("Checks failed").accessibilityLabel("Checks failed")
+        case "PENDING", "EXPECTED": Image(systemName: "circle.dashed").foregroundStyle(Color.ghYellow).help("Checks running").accessibilityLabel("Checks running")
+        default: EmptyView()
+        }
+    }
+}
+
+struct StatusChip: View {
+    let text: String
+    var icon: String?
+    var color: Color = .syMuted
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            if let icon {
+                Image(systemName: icon).font(.syIcon(10)).accessibilityHidden(true)
+            }
+            Text(text).lineLimit(1).monospacedDigit()
+        }
+        .font(.sy(size: 11, weight: .semibold))
+        .foregroundStyle(color)
+        .padding(.horizontal, 6)
+        .frame(height: TextZoom.shared.size(18))
+        .background(Capsule().fill(color.opacity(hovering ? 0.2 : (scheme == .dark ? 0.18 : 0.12))))
+        .overlay { if contrast == .increased { Capsule().strokeBorder(color, lineWidth: 1) } }
+        .fixedSize()
+        .onHover { hovering = $0 }
+    }
+}
+
+struct CIChip: View {
+    let state: String?
+
+    var body: some View {
+        switch state {
+        case "SUCCESS": StatusChip(text: "Passing", icon: "checkmark.circle.fill", color: .ghGreen).help("All checks passed")
+        case "FAILURE", "ERROR": StatusChip(text: "Failing", icon: "xmark.circle.fill", color: .ghRed).help("Some checks failed")
+        case "PENDING", "EXPECTED": StatusChip(text: "Running", icon: "circle.dashed", color: .syAmberInk).help("Checks are running")
+        default: EmptyView()
+        }
+    }
+}
+
+struct ReviewChip: View {
+    let decision: String?
+
+    var body: some View {
+        switch decision {
+        case "APPROVED": StatusChip(text: "Approved", icon: "checkmark.seal.fill", color: .ghGreen)
+        case "CHANGES_REQUESTED": StatusChip(text: "Changes requested", icon: "exclamationmark.bubble.fill", color: .ghRed)
+        case "REVIEW_REQUIRED": Image(systemName: "eye").font(.syCaption).foregroundStyle(Color.syMuted).help("Review required").accessibilityLabel("Review required")
         default: EmptyView()
         }
     }
@@ -326,16 +451,9 @@ struct ErrorStateView: View {
 }
 
 struct LoadingView: View {
-    @State private var visible = false
-
     var body: some View {
-        PullYardLoader(size: 48)
-            .opacity(visible ? 1 : 0)
+        PYLoader(style: .block, size: 48)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .task {
-                try? await Task.sleep(nanoseconds: 180_000_000)
-                withAnimation(Motion.fade) { visible = true }
-            }
     }
 }
 
@@ -369,6 +487,7 @@ struct ComposerBox: View {
         }
         .frame(minHeight: minHeight)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.sySunken))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.syLine))
     }
 }
 
@@ -389,7 +508,7 @@ struct DrawnLogoMark: View {
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 60, paused: done)) { context in
-            PullYardLogoMark(progress: done ? 1 : eased(context.date.timeIntervalSince(start) / duration), size: size)
+            PullYardLogoMark(progress: done ? 1 : Motion.easeInOut(context.date.timeIntervalSince(start) / duration), size: size)
         }
         .task {
             guard !done else { return }
@@ -401,11 +520,6 @@ struct DrawnLogoMark: View {
             try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
             done = true
         }
-    }
-
-    private func eased(_ x: Double) -> Double {
-        let t = min(1, max(0, x))
-        return t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
     }
 }
 
@@ -516,7 +630,7 @@ struct CommentSendButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if busy { ProgressView().controlSize(.small) }
+                if busy { PYLoader(size: 16) }
                 Text(busy ? "Sending…" : "Comment")
             }
         }
@@ -533,4 +647,50 @@ func isCancellation(_ error: Error) -> Bool {
     if let u = error as? URLError, u.code == .cancelled { return true }
     let ns = error as NSError
     return ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled
+}
+
+struct UncheckedBox<Value>: @unchecked Sendable {
+    let value: Value
+    init(_ value: Value) { self.value = value }
+}
+
+private struct DeckActiveKey: LayoutValueKey { static let defaultValue = false }
+private struct DeckIDKey: LayoutValueKey { static let defaultValue: AnyHashable? = nil }
+
+extension View {
+    func deckPage<ID: Hashable>(_ id: ID, active: Bool) -> some View {
+        layoutValue(key: DeckIDKey.self, value: AnyHashable(id)).layoutValue(key: DeckActiveKey.self, value: active)
+    }
+}
+
+// Stacks pages that stay alive while hidden. The deck always takes exactly the proposed size and
+// never asks pages for theirs, so a hidden page can't stretch the window; a hidden page keeps the
+// size it last had on screen, so resizing the visible one doesn't re-lay-out the others.
+struct PageDeck: Layout {
+    func makeCache(subviews: Subviews) -> [AnyHashable: CGSize] { [:] }
+    func updateCache(_ cache: inout [AnyHashable: CGSize], subviews: Subviews) {}
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout [AnyHashable: CGSize]) -> CGSize {
+        if let w = proposal.width, let h = proposal.height, w.isFinite, h.isFinite { return CGSize(width: w, height: h) }
+        let active = subviews.first { $0[DeckActiveKey.self] } ?? subviews.first
+        let fit = active?.sizeThatFits(proposal) ?? .zero
+        let w = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? fit.width
+        let h = proposal.height.flatMap { $0.isFinite ? $0 : nil } ?? fit.height
+        return CGSize(width: w, height: h)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout [AnyHashable: CGSize]) {
+        for subview in subviews {
+            let id = subview[DeckIDKey.self]
+            var size = bounds.size
+            if subview[DeckActiveKey.self] {
+                if let id { cache[id] = size }
+            } else if let id, let kept = cache[id] {
+                size = kept
+            } else if let id {
+                cache[id] = size
+            }
+            subview.place(at: bounds.origin, proposal: ProposedViewSize(size))
+        }
+    }
 }

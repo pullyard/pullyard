@@ -37,7 +37,7 @@ struct UpdateView: View {
                 Text(title)
                     .font(.syTitle3.weight(.semibold))
                     .foregroundStyle(Color.syText)
-                Text("You have \(updater.currentVersion)")
+                Text("You have \(updater.currentDisplayVersion)")
                     .foregroundStyle(Color.syMuted)
                 if let release = updater.release, let date = release.publishedAt, showsRelease {
                     Text(Fmt.full.string(from: date))
@@ -52,7 +52,7 @@ struct UpdateView: View {
             }
             Spacer(minLength: 0)
             if updater.state == .checking || updater.state == .installing {
-                ProgressView().controlSize(.small)
+                PYLoader(size: 16)
             }
         }
     }
@@ -61,18 +61,18 @@ struct UpdateView: View {
         switch updater.state {
         case .idle, .checking: return "Checking for updates…"
         case .upToDate: return "You're up to date"
-        case .failed: return updater.release.map { "PullYard \($0.version) is available" } ?? "Couldn't check for updates"
+        case .failed: return updater.release.map { "PullYard \($0.displayVersion) is available" } ?? "Couldn't check for updates"
         case .installing: return "Preparing update…"
-        case .readyToRelaunch: return "PullYard \(updater.release?.version ?? "") is ready to install"
+        case .readyToRelaunch: return "PullYard \(updater.release?.displayVersion ?? "") is ready to install"
         case .available, .downloading:
-            return "PullYard \(updater.release?.version ?? "") is available"
+            return "PullYard \(updater.release?.displayVersion ?? "") is available"
         }
     }
 
     private var showsRelease: Bool {
         switch updater.state {
         case .idle, .checking, .upToDate: return false
-        case .failed: return updater.release.map { Updater.compare($0.version, updater.currentVersion) == .orderedDescending } ?? false
+        case .failed: return updater.release.map { updater.isNewer($0) } ?? false
         default: return true
         }
     }
@@ -91,7 +91,7 @@ struct UpdateView: View {
                         }
                     }
                 } else if updater.state == .upToDate {
-                    Text("PullYard \(updater.currentVersion) is the newest version available.")
+                    Text("PullYard \(updater.currentDisplayVersion) is the newest version available.")
                         .foregroundStyle(Color.syMuted)
                 } else {
                     Color.clear.frame(height: 1)

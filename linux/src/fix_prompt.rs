@@ -121,6 +121,23 @@ pub fn build(pr: &PullRequestDetail, repo: &RepoRef, threads: &[&ReviewThread], 
     out
 }
 
+pub fn tickets(issues: &[crate::jira::JiraIssue]) -> String {
+    if issues.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\n## Linked Jira tickets\n");
+    for issue in issues {
+        out.push_str(&format!("\n**{}** — {} ({})\n{}\n", issue.key, issue.summary, issue.status, issue.url));
+        let description = issue.description.trim();
+        if !description.is_empty() {
+            let short = if description.chars().count() > 1200 { format!("{}…", description.chars().take(1200).collect::<String>()) } else { description.to_string() };
+            out.push_str(&short.split('\n').map(|l| format!("> {l}")).collect::<Vec<_>>().join("\n"));
+            out.push('\n');
+        }
+    }
+    out
+}
+
 fn find_ci(hay: &str, needle: &str) -> Option<(usize, usize)> {
     let lower = hay.to_lowercase();
     let n = needle.to_lowercase();
@@ -198,6 +215,16 @@ pub fn wrap(found: &FoundFixPrompt, pr: &PullRequestDetail, options: &FixOptions
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prompt_lists_tickets_with_quoted_descriptions() {
+        let issue = crate::jira::parse_issue(&serde_json::json!({ "key": "WEB-1", "fields": { "summary": "Login", "status": { "name": "To Do" }, "description": "line one\nline two" } }), "https://acme.atlassian.net");
+        let text = tickets(&[issue]);
+        assert!(text.starts_with("\n## Linked Jira tickets\n"));
+        assert!(text.contains("**WEB-1** — Login (To Do)\nhttps://acme.atlassian.net/browse/WEB-1\n"));
+        assert!(text.contains("> line one\n> line two\n"));
+        assert_eq!(tickets(&[]), "");
+    }
 
     #[test]
     fn extracts_markers() {

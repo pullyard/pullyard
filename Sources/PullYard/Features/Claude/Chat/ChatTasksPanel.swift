@@ -33,6 +33,14 @@ enum ChatTaskState {
 extension ChatSession {
     static let taskTools: Set<String> = ["Bash", "Agent", "Task"]
 
+    /// A command or sub-agent is still running in the background after the turn ended.
+    var hasRunningTasks: Bool {
+        items.contains { item in
+            guard case .tool(let call) = item, Self.taskTools.contains(call.name) else { return false }
+            return ChatTaskState(call).isActive
+        }
+    }
+
     var taskCalls: [ChatToolCall] {
         items.compactMap { item in
             guard case .tool(let call) = item, Self.taskTools.contains(call.name) else { return nil }
@@ -43,7 +51,7 @@ extension ChatSession {
 
 struct ChatTasksPanel: View {
     let chat: ChatSession
-    @State private var showFinished = true
+    @AppStorage("agents.tasks.showFinished") private var showFinished = true
     @State private var expanded: Set<String> = []
 
     var body: some View {
@@ -52,13 +60,7 @@ struct ChatTasksPanel: View {
         let finished = calls.filter { !ChatTaskState($0).isActive }
         Group {
             if calls.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "terminal").font(.syLargeTitle).foregroundStyle(Color.syDim)
-                    Text("Commands and agents Claude runs will show up here")
-                        .font(.syCallout).foregroundStyle(Color.syMuted).multilineTextAlignment(.center)
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                InspectorEmptyState(icon: "terminal", title: "No tasks yet", message: "Commands and sub-agents the agent runs will show up here, live.")
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
@@ -86,7 +88,11 @@ struct ChatTasksPanel: View {
             withAnimation(Motion.fade) { showFinished.toggle() }
         } label: {
             HStack(spacing: 4) {
-                Text(title).font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                Text(title)
+                    .font(.sy(size: 10, weight: .semibold))
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+                    .foregroundStyle(Color.syMuted)
                 if collapsible {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
@@ -143,6 +149,19 @@ private struct ChatTaskRow: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    /// Full name and command for the hover tooltip; the row truncates both.
+    private var tooltip: String {
+        var lines = [title]
+        if isAgent {
+            if let type = call.string("subagent_type") { lines.append(type) }
+        } else if !command.isEmpty, command != title {
+            let shown = command.count > 600 ? String(command.prefix(600)) + "…" : command
+            lines.append(shown)
+        }
+        if call.backgrounded { lines.append("Runs in the background") }
+        return lines.joined(separator: "\n\n")
+    }
+
     private var output: String? {
         if let s = call.structured {
             let out = [s["stdout"] as? String, s["stderr"] as? String].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
@@ -184,6 +203,7 @@ private struct ChatTaskRow: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .hoverTip(tooltip, delay: 0.3)
                 .accessibilityValue(open ? "Expanded" : "Collapsed")
                 if ToolStopButton.shows(call) {
                     ToolStopButton(call: call, chat: chat)
@@ -218,12 +238,12 @@ private struct ChatTaskRow: View {
                             .foregroundStyle(Color.syMuted)
                     }
                 }
-                ProgressView().controlSize(.mini)
+                PYLoader(size: 12)
             }
         case .stopping:
             HStack(spacing: 6) {
                 Text("Stopping…").font(.syCaption).foregroundStyle(Color.syMuted)
-                ProgressView().controlSize(.mini)
+                PYLoader(size: 12)
             }
         case .failed:
             Text("Failed").font(.syCaption.weight(.medium)).foregroundStyle(Color.syRed)

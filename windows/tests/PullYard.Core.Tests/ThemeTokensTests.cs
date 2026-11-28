@@ -28,10 +28,10 @@ public class ThemeTokensTests
     [Fact]
     public void LinesUseTheSpecifiedOpacity()
     {
-        Assert.Equal(0x141A2333u, ThemeTokens.Resolve("line", false, false));
-        Assert.Equal(0x1AA0AEC4u, ThemeTokens.Resolve("line", false, true));
-        Assert.Equal(0x261A2333u, ThemeTokens.Resolve("lineStrong", false, false));
-        Assert.Equal(0x2EA0AEC4u, ThemeTokens.Resolve("lineStrong", false, true));
+        Assert.Equal(0x1F1A2333u, ThemeTokens.Resolve("line", false, false));
+        Assert.Equal(0x24A0AEC4u, ThemeTokens.Resolve("line", false, true));
+        Assert.Equal(0x331A2333u, ThemeTokens.Resolve("lineStrong", false, false));
+        Assert.Equal(0x38A0AEC4u, ThemeTokens.Resolve("lineStrong", false, true));
         Assert.Equal(0x0F000000u, ThemeTokens.Resolve("line", true, false));
         Assert.Equal(0x28FFFFFFu, ThemeTokens.Resolve("lineStrong", true, true));
     }

@@ -783,11 +783,66 @@ public sealed partial class PRDetailViewModel : ObservableObject
         return true;
     }
 
+    public Dictionary<string, string> FullFiles { get; } = new();
+    private string? fullFilesOid;
+
+    private void SyncFullFiles()
+    {
+        var oid = Pr?.HeadRefOid;
+        if (fullFilesOid == oid) return;
+        fullFilesOid = oid;
+        FullFiles.Clear();
+    }
+
+    public async Task ShowFullFile(string path)
+    {
+        if (Pr is not { } pr || Api is not { } api) return;
+        SyncFullFiles();
+        var oid = pr.HeadRefOid.Length > 0 ? pr.HeadRefOid : $"refs/pull/{Ref.Number}/head";
+        try
+        {
+            var data = await api.RawFile(Ref.Repo, oid, path);
+            if (data is null)
+            {
+                ActionError = L.F("Files_FullFileMissing", "Couldn’t load {0} at the pull request head", path);
+                return;
+            }
+            var text = System.Text.Encoding.UTF8.GetString(data);
+            if (!DiffExpand.CanExpand(text))
+            {
+                ActionError = L.F("Files_FullFileTooLarge", "{0} is too large to show in full", path);
+                return;
+            }
+            SyncFullFiles();
+            FullFiles[path] = text;
+            DiffVersion++;
+        }
+        catch (Exception e)
+        {
+            ActionError = e.Message;
+        }
+    }
+
+    public void ShowChangesOnly(string path)
+    {
+        if (FullFiles.Remove(path)) DiffVersion++;
+    }
+
+    public string? LineText(DiffAnchor anchor)
+    {
+        var file = Files.FirstOrDefault(f => f.Id == anchor.Path);
+        var line = file?.Lines.FirstOrDefault(l => l.AnchorLine == anchor.Line && l.AnchorSide == anchor.Side && l.Kind is DiffLineKind.Add or DiffLineKind.Context);
+        return line?.Text;
+    }
+
     public DiffRenderOptions RenderOptions(string filter, bool wrap = true, bool split = false)
     {
         var interdiff = DiffScope == DiffScope.SinceReview;
+        SyncFullFiles();
         return new()
         {
+            ShowFullFile = !interdiff && Api is not null,
+            FullFiles = interdiff ? null : FullFiles,
             Wrap = wrap,
             Split = split,
             Review = true,
@@ -990,14 +1045,28 @@ public sealed partial class PRDetailViewModel : ObservableObject
         return failures;
     }
 
+    public (string Repo, string Branch, string Sha)? DeletedBranch { get; private set; }
+
     public async Task<bool> Merge(string method, string? title, string? body, bool deleteBranch)
     {
         if (Pr is not { } pr) return false;
+        DeletedBranch = null;
         string? branchError = null;
         var ok = await Run(stack: true, op: async () => branchError = await Backend.Merge(Ref, pr, method, title, body, deleteBranch));
         if (ok && branchError is not null) ActionError = L.F("Merge_BranchNotDeleted", "Merged, but the branch {0} couldn’t be deleted: {1}", pr.HeadRefName, branchError);
+        else if (ok && deleteBranch && Api is not null && pr.HeadRepository?.NameWithOwner is { } head && pr.HeadRefOid.Length > 0) DeletedBranch = (head, pr.HeadRefName, pr.HeadRefOid);
         return ok;
     }
+
+    public async Task<bool> RestoreBranch()
+    {
+        if (DeletedBranch is not { } deleted || Api is not { } api) return false;
+        var ok = await Run(() => api.RestoreBranch(deleted.Repo, deleted.Branch, deleted.Sha));
+        if (ok) DeletedBranch = null;
+        return ok;
+    }
+
+    public SearchItem? NextReview => AppViewModel.Shared.ReviewRequests.FirstOrDefault(i => i.Ref != Ref);
 
     public Task<bool> EnableAutoMerge(string method) =>
         Pr is { } pr ? Run(() => Backend.EnableAutoMerge(Ref, pr, method)) : Task.FromResult(false);

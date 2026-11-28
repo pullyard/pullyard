@@ -18,16 +18,20 @@ struct ReposView: View {
     @State private var loadMoreError: String?
 
     private var visible: [RepoSummary] {
-        repos.filter { (!hideArchived || !$0.isArchived) && (text.isEmpty || $0.nameWithOwner.localizedCaseInsensitiveContains(text) || ($0.description ?? "").localizedCaseInsensitiveContains(text)) }
+        let account = app.cacheAccount
+        return repos.filter { RepoFocus.shared.includes($0.nameWithOwner, account: account) && (!hideArchived || !$0.isArchived) && (text.isEmpty || $0.nameWithOwner.localizedCaseInsensitiveContains(text) || ($0.description ?? "").localizedCaseInsensitiveContains(text)) }
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+        FocusBanner()
         List(selection: Binding(get: { app.detailRoot }, set: { app.select($0) })) {
             if let error, !repos.isEmpty { ListErrorNote(message: error) { await load() } }
             ForEach(visible) { r in
                 RepoRow(repo: r)
                     .rowAppear(r.id, rows)
                     .tag(Route.repo(r.ref ?? RepoRef(owner: "", name: "")))
+                    .pyListRow(selected: r.ref.map { app.detailRoot == Route.repo($0) } ?? false)
                     .contextMenu {
                         Button("Open in browser") { openInBrowser(r.url) }
                         Button("Copy link") { copyToPasteboard(r.url) }
@@ -55,9 +59,10 @@ struct ReposView: View {
                 ) { text = "" }
             }
         }
+        }
         .liveRefresh(updated: lastUpdated, refreshing: refreshing, error: repos.isEmpty ? nil : error) { await load() }
         .toolbarSearch(text: $text, prompt: "Filter repositories")
-        .navigationTitle("Repositories")
+        .columnTitle("Repositories")
         .panelToolbar {
             ToolbarItem {
                 Toggle(isOn: $hideArchived) { Label("Hide archived", systemImage: "archivebox") }
@@ -163,6 +168,7 @@ struct RepoRow: View {
                     Text(repo.nameWithOwner).font(.syBody).fontWeight(.medium).foregroundStyle(Color.syText).lineLimit(1).help(repo.nameWithOwner)
                     if repo.isArchived { ChipView(text: "archived", color: .syAmber) }
                     if repo.isFork { Image(systemName: "tuningfork").font(.syCaption2).foregroundStyle(Color.syDim).accessibilityLabel("Fork") }
+                    JiraRepoBadge(full: repo.nameWithOwner)
                 }
                 if let d = repo.description, !d.isEmpty {
                     Text(d).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(2)
@@ -225,8 +231,7 @@ struct RepoDetailView: View {
                 itemsList
             }
         }
-        .navigationTitle(repo.name)
-        .navigationSubtitle(repo.owner)
+        .detailTitle(repo.name, subtitle: repo.owner)
         .panelToolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
@@ -281,6 +286,7 @@ struct RepoDetailView: View {
                             ChipView(text: "\(info.stargazerCount)", color: .syAmber, icon: "star.fill")
                             ChipView(text: "\(info.forkCount)", color: .sySky, icon: "tuningfork")
                             if let branch = info.defaultBranchRef?.name { ChipView(text: branch, color: .syTeal, icon: "arrow.branch", mono: true) }
+                            JiraRepoChip(repo: repo)
                         }
                         .padding(.top, 2)
                     }

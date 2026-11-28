@@ -14,7 +14,7 @@ final class IssueDetailModel {
     var refreshError: String?
     var error: String?
     var actionError: String?
-    var scrollToBottomToken = 0
+    var scrollToLatestToken = 0
 
     init(ref: ItemRef, api: GitHubAPI) {
         self.ref = ref
@@ -36,8 +36,7 @@ final class IssueDetailModel {
             }
             guard let issue = node.issue else { return }
             self.issue = issue
-            let h = ConversationHTML.render(issue: issue)
-            if h != html { html = h }
+            renderHTML()
             lastUpdated = Date()
             error = nil
             refreshError = nil
@@ -45,6 +44,12 @@ final class IssueDetailModel {
             if isCancellation(error) { return }
             if issue == nil { self.error = error.localizedDescription } else { refreshError = error.localizedDescription }
         }
+    }
+
+    func renderHTML() {
+        guard let issue else { return }
+        let h = ConversationHTML.render(issue: issue)
+        if h != html { html = h }
     }
 
     private func run(_ op: () async throws -> Void) async -> Bool {
@@ -63,7 +68,7 @@ final class IssueDetailModel {
     func comment(_ body: String) async -> Bool {
         guard let issue else { return false }
         let ok = await run { try await api.addComment(subject: issue.id, body: body) }
-        if ok { scrollToBottomToken += 1 }
+        if ok { scrollToLatestToken += 1 }
         return ok
     }
 
@@ -79,6 +84,7 @@ struct IssueDetailView: View {
     @State private var model: IssueDetailModel?
     @State private var text = ""
     @State private var confirmClose = false
+    @AppStorage(ConversationOrder.key) private var newestFirst = true
 
     private var draftKey: String {
         DraftStore.key(account: app.cacheAccount, host: app.api?.host ?? "github.com", repo: ref.repo.full, number: ref.number, kind: "issue")
@@ -127,6 +133,7 @@ struct IssueDetailView: View {
                     ChipView(text: ref.repo.full, color: .syTeal, icon: "book.closed.fill")
                     ChipView(text: plural(issue.comments.totalCount, "comment", "comments"), color: .sySky, icon: "bubble.left.fill")
                     Spacer(minLength: 0)
+                    ConversationSortMenu()
                     Text(Fmt.rel(issue.createdAt)).foregroundStyle(Color.syMuted).help(Fmt.full.string(from: issue.createdAt))
                 }
                 .font(.syCallout)
@@ -143,11 +150,13 @@ struct IssueDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
+            .background { PYBackdrop(tints: [issue.visualState.color, .syAccent], base: .clear, strength: 1.2).equatable() }
             Rectangle().fill(Color.syLine).frame(height: 1)
-            HTMLView(html: model.html, scrollToBottomToken: model.scrollToBottomToken, onLink: { url in
+            HTMLView(html: model.html, scrollToLatestToken: model.scrollToLatestToken, onLink: { url in
                 if let route = GitHubURL.parse(url.absoluteString, allowShort: false) { app.open(route, push: true) } else { LinkBrowser.open(url) }
             })
-            .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, web: true) { await model.load() }
+            .task(id: newestFirst) { model.renderHTML() }
+            .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, web: true, button: false) { await model.load() }
             Rectangle().fill(Color.syLine).frame(height: 1)
             HStack(alignment: .bottom, spacing: 8) {
                 ComposerBox(text: $text, placeholder: "Comment (Markdown) — ⌘↩ to send", minHeight: 56).frame(height: 64)
@@ -159,13 +168,11 @@ struct IssueDetailView: View {
             .padding(10)
             .background(Theme.isBrand ? Color.syBar : Color.clear)
         }
-        .navigationTitle(issue.title)
-        .navigationSubtitle("\(ref.repo.full) #\(issue.number)")
+        .detailTitle(issue.title, subtitle: "\(ref.repo.full) #\(issue.number)")
         .task(id: issue.url) { app.noteCanonical(ref, url: issue.url) }
         .panelToolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                if model.busy { ProgressView().controlSize(.small) }
-                RefreshStatus(updated: model.lastUpdated, refreshing: model.loading, error: model.refreshError, compact: true) {
+                RefreshPill(updated: model.lastUpdated, refreshing: model.loading || model.busy, error: model.refreshError) {
                     Task { await model.load() }
                 }
                 if issue.viewerCanUpdate {

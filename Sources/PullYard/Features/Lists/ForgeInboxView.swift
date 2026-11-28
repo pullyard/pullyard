@@ -23,8 +23,7 @@ struct ForgeInboxView: View {
                     Button("Copy Link") { copyToPasteboard(n.url) }
                     Button("Mark as Done") { Task { await markDone(n) } }
                 }
-                .listRowSeparator(.visible)
-                .listRowSeparatorTint(Color.syLine)
+                .pyListRow(selected: selection == n.id)
             }
         }
         .overlay {
@@ -44,8 +43,7 @@ struct ForgeInboxView: View {
         .liveRefresh(updated: updated, refreshing: refreshing, error: items.isEmpty ? nil : error) {
             await load()
         }
-        .navigationTitle(app.forgeCaps.inboxTitle ?? "Inbox")
-        .navigationSubtitle(items.isEmpty ? "" : plural(items.count, "item", "items"))
+        .columnTitle(app.forgeCaps.inboxTitle ?? "Inbox", subtitle: items.isEmpty ? "" : plural(items.count, "item", "items"))
         .task(id: app.account?.id) {
             loading = true
             await load()
@@ -149,8 +147,7 @@ struct ForgeReposView: View {
                         Button("Copy Link") { copyToPasteboard(repo.url) }
                         Button("Copy Name") { copyToPasteboard(repo.fullName) }
                     }
-                    .listRowSeparator(.visible)
-                    .listRowSeparatorTint(Color.syLine)
+                    .pyListRow(selected: selection == repo.id)
             }
         }
         .overlay {
@@ -171,8 +168,7 @@ struct ForgeReposView: View {
             await load()
         }
         .toolbarSearch(text: $text, prompt: "Filter \(app.provider.repositoriesTitle.lowercased())")
-        .navigationTitle(app.provider.repositoriesTitle)
-        .navigationSubtitle(repos.isEmpty ? "" : plural(repos.count, app.provider == .gitlab ? "project" : "repository", app.provider == .gitlab ? "projects" : "repositories"))
+        .columnTitle(app.provider.repositoriesTitle, subtitle: repos.isEmpty ? "" : plural(repos.count, app.provider == .gitlab ? "project" : "repository", app.provider == .gitlab ? "projects" : "repositories"))
         .task(id: app.account?.id) { await load() }
         .onChange(of: app.refreshTick) { Task { await load() } }
     }

@@ -1,0 +1,105 @@
+import CoreImage.CIFilterBuiltins
+import SwiftUI
+
+struct PYLinkSettingsView: View {
+    @State private var server = PYLinkServer.shared
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Allow PullYard for iPhone to connect", isOn: Binding(get: { server.enabled }, set: { server.enabled = $0 }))
+                LabeledContent("Status") {
+                    if server.enabled {
+                        if let port = server.port {
+                            Text("Listening on port \(port)\(server.connected.isEmpty ? "" : " · \(server.connected.count) connected")").foregroundStyle(Color.syGreen)
+                        } else if let error = server.lastError {
+                            Text(error).foregroundStyle(Color.syRed)
+                        } else {
+                            Text("Starting…").foregroundStyle(Color.syMuted)
+                        }
+                    } else {
+                        Text("Off").foregroundStyle(Color.syMuted)
+                    }
+                }
+                Toggle("Connect from anywhere", isOn: Binding(get: { server.internet }, set: { server.internet = $0 }))
+                if server.enabled && server.internet {
+                    LabeledContent("Internet") {
+                        if server.irohOnline {
+                            Text("Reachable").foregroundStyle(Color.syGreen)
+                        } else if let error = server.irohError {
+                            Text(error).foregroundStyle(Color.syRed)
+                        } else {
+                            Text("Connecting…").foregroundStyle(Color.syMuted)
+                        }
+                    }
+                }
+            } header: {
+                SettingsHeader(title: "Connection", icon: "antenna.radiowaves.left.and.right", color: .syGreen)
+            } footer: {
+                Text("Your iPhone can start agent fixes on this Mac and follow the chat live. The connection is end-to-end encrypted with keys exchanged through the QR code. On the same Wi‑Fi it goes straight to this Mac. With Connect from anywhere on, it also works over cellular and other networks through a direct peer-to-peer link, with a public relay as fallback that only sees encrypted traffic.")
+            }
+
+            Section {
+                if let pairing = server.pairing, let expires = server.pairingExpires {
+                    HStack(alignment: .top, spacing: 18) {
+                        if let image = Self.qr(pairing.url) {
+                            Image(nsImage: image)
+                                .interpolation(.none)
+                                .resizable()
+                                .frame(width: 190, height: 190)
+                                .padding(10)
+                                .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("In PullYard on your iPhone open Settings → Mac, tap Pair and scan this code.")
+                            Text("Code \(pairing.code)").font(.system(.title3, design: .monospaced).weight(.semibold))
+                            Text("Fingerprint \(PYLinkCrypto.fingerprint(pairing.key))").font(.system(.callout, design: .monospaced)).foregroundStyle(Color.syMuted)
+                            Text("Expires \(expires.formatted(date: .omitted, time: .shortened))").foregroundStyle(Color.syMuted)
+                            Button("Cancel") { server.cancelPairing() }
+                        }
+                    }
+                } else {
+                    Button("Show pairing code") { server.beginPairing() }
+                    if let error = server.lastError, server.port != nil {
+                        Text(error).foregroundStyle(Color.syRed)
+                    }
+                }
+            } header: {
+                SettingsHeader(title: "Pair an iPhone", icon: "qrcode", color: .sySky)
+            }
+
+            Section {
+                if server.devices.isEmpty {
+                    Text("No iPhones yet.").foregroundStyle(Color.syMuted)
+                }
+                ForEach(server.devices) { device in
+                    HStack {
+                        Image(systemName: "iphone")
+                        VStack(alignment: .leading) {
+                            Text(device.name)
+                            Text(server.connected.contains(device.id) ? "Connected" : device.lastSeen.map { "Last seen \($0.formatted(.relative(presentation: .named)))" } ?? "Never connected")
+                                .font(.caption).foregroundStyle(server.connected.contains(device.id) ? Color.syGreen : Color.syMuted)
+                        }
+                        Spacer()
+                        Button("Remove", role: .destructive) { server.remove(device) }
+                    }
+                }
+            } header: {
+                SettingsHeader(title: "Paired iPhones", icon: "iphone", color: .syIndigo)
+            }
+        }
+        .formStyle(.grouped)
+        .surface(.panel)
+    }
+
+    private static func qr(_ text: String) -> NSImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(text.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 8, y: 8)) else { return nil }
+        let rep = NSCIImageRep(ciImage: output)
+        let image = NSImage(size: rep.size)
+        image.addRepresentation(rep)
+        return image
+    }
+}

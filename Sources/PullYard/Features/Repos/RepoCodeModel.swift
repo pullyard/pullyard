@@ -19,6 +19,9 @@ final class RepoCodeModel {
     var dir = ""
     var entries: [TreeEntry] = []
     var loadingDir = false
+    var refreshing = false
+    var refreshError: String?
+    var lastUpdated: Date?
     var dirError: String?
     var readme: String?
     var selectedFile: String?
@@ -106,10 +109,24 @@ final class RepoCodeModel {
     }
 
     func refresh() async {
+        guard !refreshing else { return }
+        refreshing = true
+        refreshError = nil
+        defer {
+            refreshing = false
+            lastUpdated = Date()
+        }
         let before = fileCommit
-        let sha = try? await resolveCommit(force: true)
+        var sha: String?
+        do {
+            sha = try await resolveCommit(force: true)
+        } catch {
+            if !isCancellation(error) { refreshError = error.localizedDescription }
+        }
+        dirCache.removeValue(forKey: "\(ref)|\(dir)")
         await openDir(dir)
         if let path = selectedFile, let sha, sha != before { await openFile(path) }
+        if refreshError == nil, let dirError { refreshError = dirError }
     }
 
     func retryBlame() async {

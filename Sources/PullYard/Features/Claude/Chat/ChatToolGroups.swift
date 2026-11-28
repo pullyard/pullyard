@@ -133,6 +133,15 @@ enum ToolGrouping {
         return String(line)
     }
 
+    /// What the call does, in full, for the hover bubble: the description and the whole command or target.
+    static func tip(_ call: ChatToolCall, folder: String) -> String {
+        let title = title(call, folder: folder)
+        guard call.name == "Bash", let command = (call.input["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty else {
+            return title
+        }
+        return command == title ? command : title + "\n" + command
+    }
+
     static func title(_ call: ChatToolCall, folder: String) -> String {
         let i = call.input
         let path = { (key: String) in ToolPresentation.relative(i[key] as? String ?? "", folder) }
@@ -173,7 +182,10 @@ struct ToolGroupView: View {
 
     var body: some View {
         if steps.count == 1, let call = steps.first?.call {
-            ToolRowView(call: call, chat: chat, folder: folder, framed: false)
+            VStack(alignment: .leading, spacing: 8) {
+                ToolRowView(call: call, chat: chat, folder: folder, framed: false)
+                ToolImageStrip(calls: [call])
+            }
         } else {
             let calls = self.calls
             VStack(alignment: .leading, spacing: 6) {
@@ -198,10 +210,15 @@ struct ToolGroupView: View {
                             .rotationEffect(.degrees(open ? 90 : 0))
                     }
                     .font(.syCallout)
-                    .contentShape(Rectangle())
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.syText.opacity(0.04)))
+                    .overlay(Capsule().strokeBorder(Color.syLine))
+                    .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityValue(open ? "Expanded" : "Collapsed")
+                ToolImageStrip(calls: calls)
                 if open {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
@@ -213,20 +230,17 @@ struct ToolGroupView: View {
                         }
                     }
                     .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syLine))
-                    .transition(.reveal)
                 }
             }
         }
     }
 
     private func toggle() {
-        withAnimation(Motion.quick) {
-            if open {
-                chat.expandedTools.remove(groupKey)
-                for c in calls { chat.expandedTools.remove(c.id) }
-            } else {
-                chat.expandedTools.insert(groupKey)
-            }
+        if open {
+            chat.expandedTools.remove(groupKey)
+            for c in calls { chat.expandedTools.remove(c.id) }
+        } else {
+            chat.expandedTools.insert(groupKey)
         }
     }
 }
@@ -241,9 +255,7 @@ struct ThinkingStepRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(Motion.quick) {
-                    if open { chat.expandedTools.remove(key) } else { chat.expandedTools.insert(key) }
-                }
+                if open { chat.expandedTools.remove(key) } else { chat.expandedTools.insert(key) }
             } label: {
                 HStack(spacing: 6) {
                     Text("Thinking").foregroundStyle(Color.syDim)
@@ -264,7 +276,6 @@ struct ThinkingStepRow: View {
                 Text(text.text).font(.syCallout).foregroundStyle(Color.syMuted).textSelection(.enabled)
                     .padding(.horizontal, 10)
                     .padding(.bottom, 10)
-                    .transition(.reveal)
             }
         }
     }
@@ -282,9 +293,7 @@ struct ToolRowView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Button {
-                    withAnimation(Motion.quick) {
-                        if open { chat.expandedTools.remove(call.id) } else { chat.expandedTools.insert(call.id) }
-                    }
+                    if open { chat.expandedTools.remove(call.id) } else { chat.expandedTools.insert(call.id) }
                 } label: {
                     HStack(spacing: 7) {
                         statusGlyph
@@ -321,6 +330,7 @@ struct ToolRowView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityValue(open ? "Expanded" : "Collapsed")
+                .hoverTip(open ? nil : ToolGrouping.tip(call, folder: folder))
                 if ToolStopButton.shows(call) {
                     ToolStopButton(call: call, chat: chat)
                 }
@@ -332,7 +342,6 @@ struct ToolRowView: View {
                     .padding(.horizontal, framed ? 10 : 0)
                     .padding(.top, framed ? 0 : 6)
                     .padding(.bottom, framed ? 10 : 0)
-                    .transition(.reveal)
             }
         }
     }

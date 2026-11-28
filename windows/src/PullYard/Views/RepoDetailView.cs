@@ -51,8 +51,15 @@ public sealed class RepoDetailView : LiveDetail
         {
             FileRequested -= OnFileRequested;
             FileRequested += OnFileRequested;
+            JiraService.Connections.Changed -= OnJira;
+            JiraService.Connections.Changed += OnJira;
+            RenderHeader();
         };
-        Unloaded += (_, _) => FileRequested -= OnFileRequested;
+        Unloaded += (_, _) =>
+        {
+            FileRequested -= OnFileRequested;
+            JiraService.Connections.Changed -= OnJira;
+        };
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -165,11 +172,14 @@ public sealed class RepoDetailView : LiveDetail
         if (code is not null && codeView is not null) await code.Start(info?.DefaultBranchRef?.Name ?? "HEAD");
     }
 
+    private void OnJira() => DispatcherQueue.TryEnqueue(RenderHeader);
+
     private void RenderHeader()
     {
         headerCard.Children.Clear();
         var title = Ui.H(8, Ui.Text(repo.Full, 19, "text", FontWeights.SemiBold, select: true));
         if (info?.IsPrivate == true) title.Children.Add(Ui.Chip(L.T("Repo_Private", "private"), "amber", ""));
+        if (JiraRepo.Chip(repo) is { } jira) title.Children.Add(jira);
         var stack = Ui.V(4, title);
         if (!string.IsNullOrEmpty(info?.Description)) stack.Children.Add(Ui.Text(info.Description, 13, "muted", maxLines: 2));
         if (info is not null)

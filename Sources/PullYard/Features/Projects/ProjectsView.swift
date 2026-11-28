@@ -39,6 +39,7 @@ struct ProjectsListView: View {
                 .padding(.vertical, 4)
                 .rowAppear(p.id, rows)
                 .tag(Route.project(p.ref))
+                .pyListRow(selected: app.detailRoot == Route.project(p.ref))
                 .contextMenu { Button("Open in Browser") { openInBrowser(p.url) } }
             }
         }
@@ -57,7 +58,7 @@ struct ProjectsListView: View {
             }
         }
         .liveRefresh(updated: lastUpdated, refreshing: loading, error: projects.isEmpty ? nil : error) { await load() }
-        .navigationTitle("Projects")
+        .columnTitle("Projects")
         .panelToolbar {
             ToolbarItem {
                 Toggle(isOn: $showClosed) { Label("Closed", systemImage: "archivebox") }.help("Show closed")
@@ -231,7 +232,7 @@ struct ProjectBoardView: View {
                 LoadingView()
             }
         }
-        .navigationTitle(project.title)
+        .detailTitle(project.title)
         .task(id: project) {
             guard let api = app.api else { return }
             let m = ProjectBoardModel(ref: project, api: api)
@@ -243,37 +244,27 @@ struct ProjectBoardView: View {
     }
 
     private func board(_ model: ProjectBoardModel) -> some View {
-        @Bindable var model = model
         let columns = columnsFor(model)
         return VStack(spacing: 0) {
-            HStack {
-                if model.groupFields.count > 1 {
-                    Picker("Group by", selection: $model.fieldId) {
-                        ForEach(model.groupFields) { Text($0.name).tag(Optional($0.id)) }
-                    }
-                    .foregroundStyle(Color.syMuted)
-                    .frame(maxWidth: 260)
-                }
-                TextField("Filter cards", text: $filter).textFieldStyle(.roundedBorder).frame(maxWidth: 240)
-                Spacer()
-                ChipView(text: plural(model.items.count, "item", "items"), color: .syIndigo, icon: "square.stack")
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            Rectangle().fill(Color.syLine).frame(height: 1)
+            BoardToolbar(model: model, filter: $filter, columns: columns)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
             ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 12) {
+                HStack(alignment: .top, spacing: 14) {
                     ForEach(columns, id: \.id) { col in
                         ProjectColumn(model: model, column: col, items: col.items, options: model.field?.options ?? [])
                     }
                 }
-                .padding(14)
+                .padding(16)
                 .frame(maxHeight: .infinity, alignment: .top)
             }
+            .scrollIndicators(.automatic)
             RefreshFooter(updated: model.lastUpdated, refreshing: model.loading, error: model.error) {
                 Task { await model.load() }
             }
         }
+        .background { PYBackdrop(tints: Array(Set(columns.map(\.color)).sorted().map(projectColor).prefix(4))).equatable() }
         .panelToolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { openInBrowser(project.url) } label: { Label("Open in Browser", systemImage: "safari") }
@@ -324,92 +315,245 @@ func projectColor(_ name: String) -> Color {
     }
 }
 
+
+struct BoardToolbar: View {
+    @Bindable var model: ProjectBoardModel
+    @Binding var filter: String
+    let columns: [ProjectBoardView.Column]
+
+    var body: some View {
+        PYGlassGroup(spacing: 10) {
+            HStack(spacing: 10) {
+                if model.groupFields.count > 1 {
+                    Menu {
+                        Picker("Group by", selection: $model.fieldId) {
+                            ForEach(model.groupFields) { Text($0.name).tag(Optional($0.id)) }
+                        }
+                        .pickerStyle(.inline)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "rectangle.split.3x1").foregroundStyle(Color.syMuted)
+                            Text("Group by").foregroundStyle(Color.syMuted)
+                            Text(model.field?.name ?? "—").fontWeight(.semibold).foregroundStyle(Color.syText)
+                        }
+                        .font(.syCaption)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.visible)
+                    .fixedSize()
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .pyGlassCapsule(interactive: true)
+                }
+                PYSearchPill(text: $filter, prompt: "Filter cards", width: 260)
+                Spacer(minLength: 12)
+                if columns.count > 1 {
+                    BoardDistribution(columns: columns)
+                }
+                HStack(spacing: 5) {
+                    Image(systemName: "square.stack.3d.up.fill").foregroundStyle(Color.syIndigo)
+                    Text(plural(columns.reduce(0) { $0 + $1.items.count }, "item", "items"))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.syText)
+                }
+                .font(.syCaption.weight(.medium))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .pyGlassCapsule()
+            }
+        }
+    }
+}
+
+struct BoardDistribution: View {
+    let columns: [ProjectBoardView.Column]
+
+    var body: some View {
+        let total = max(1, columns.reduce(0) { $0 + $1.items.count })
+        let filled = columns.filter { !$0.items.isEmpty }
+        HStack(spacing: 2) {
+            ForEach(filled, id: \.id) { col in
+                Capsule()
+                    .fill(projectColor(col.color).gradient)
+                    .frame(width: max(6, 150 * CGFloat(col.items.count) / CGFloat(total)))
+                    .help("\(col.name): \(col.items.count)")
+            }
+        }
+        .frame(height: 6)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .pyGlassCapsule()
+        .animation(Motion.smooth, value: filled.map(\.items.count))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(filled.map { "\($0.name) \($0.items.count)" }.joined(separator: ", "))
+    }
+}
+
 struct ProjectColumn: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.colorScheme) private var scheme
     let model: ProjectBoardModel
     let column: ProjectBoardView.Column
     let items: [ProjectItem]
     let options: [ProjectOption]
     @State private var targeted = false
 
+    private var tint: Color { projectColor(column.color) }
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 20, style: .continuous) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                Circle().stroke(projectColor(column.color), lineWidth: 2).frame(width: 10, height: 10)
-                Text(column.name).fontWeight(.semibold).foregroundStyle(Color.syText).lineLimit(1)
-                Text("\(items.count)").font(.syCaption.weight(.medium)).foregroundStyle(projectColor(column.color))
-                    .padding(.horizontal, 6).background(Capsule().fill(projectColor(column.color).opacity(0.14)))
-                Spacer()
-            }
-            .padding(10)
-            .overlay(alignment: .top) {
-                Rectangle().fill(projectColor(column.color)).frame(height: 3)
-            }
+            header
             ScrollView {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: 10) {
+                    if items.isEmpty {
+                        emptySlot
+                    }
                     ForEach(items) { item in
                         ProjectCard(item: item)
-                            .rowAppear(item.id, model.rows, radius: 8)
-                            .draggable(item.id)
-                            .contextMenu {
-                                Menu("Move to") {
-                                    ForEach(options) { o in
-                                        Button(o.name) { Task { await model.move(item.id, to: o.id) } }
-                                    }
-                                    Divider()
-                                    Button("No Status") { Task { await model.move(item.id, to: nil) } }
-                                }
-                                if let url = item.content?.url {
-                                    Button("Open in Browser") { openInBrowser(url) }
-                                    Button("Copy Link") { copyToPasteboard(url) }
-                                    if let ref = ShortLink.ref(url: url) {
-                                        Button("Copy Short Link") { app.copyShortLink(ref) }
-                                    }
-                                }
+                            .rowAppear(item.id, model.rows, radius: 14)
+                            .draggable(item.id) {
+                                ProjectCard(item: item).frame(width: 276).opacity(0.95)
                             }
+                            .contextMenu { menu(for: item) }
                     }
                 }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+                .padding(.top, 2)
             }
+            .scrollIndicators(.hidden)
             .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false) { await model.load() }
         }
-        .frame(width: 290)
+        .frame(width: 300)
         .frame(maxHeight: .infinity, alignment: .top)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .card(radius: 12, fill: targeted ? Color.syAccent.opacity(0.10) : Color.sySunken)
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(targeted ? Color.syAccent : .clear, lineWidth: 2))
+        .background(alignment: .top) {
+            LinearGradient(colors: [tint.opacity(targeted ? 0.30 : (scheme == .dark ? 0.16 : 0.12)), tint.opacity(0)], startPoint: .top, endPoint: .bottom)
+                .frame(height: 140)
+                .allowsHitTesting(false)
+        }
+        .background(shape.fill(Color.syPanel.opacity(scheme == .dark ? 0.55 : 0.6)))
+        .clipShape(shape)
+        .overlay { shape.strokeBorder(targeted ? tint : Color.syLine, lineWidth: targeted ? 1.5 : 1) }
+        .animation(Motion.fade, value: targeted)
         .dropDestination(for: String.self) { ids, _ in
             guard model.fieldId != nil else { return false }
             for id in ids { Task { await model.move(id, to: column.optionId) } }
             return true
         } isTargeted: { targeted = $0 }
     }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            PYGlowDot(color: tint)
+            Text(column.name)
+                .font(.syBody.weight(.semibold))
+                .foregroundStyle(Color.syText)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            PYCountBadge(count: items.count, tint: tint)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var emptySlot: some View {
+        PYEmptySlot(title: "Nothing here yet", active: targeted, activeTitle: "Drop to move here", tint: tint)
+    }
+
+    @ViewBuilder
+    private func menu(for item: ProjectItem) -> some View {
+        Menu("Move to") {
+            ForEach(options) { o in
+                Button(o.name) { Task { await model.move(item.id, to: o.id) } }
+            }
+            Divider()
+            Button("No Status") { Task { await model.move(item.id, to: nil) } }
+        }
+        if let url = item.content?.url {
+            Button("Open in Browser") { openInBrowser(url) }
+            Button("Copy Link") { copyToPasteboard(url) }
+            if let ref = ShortLink.ref(url: url) {
+                Button("Copy Short Link") { app.copyShortLink(ref) }
+            }
+        }
+    }
 }
 
 struct ProjectCard: View {
     let item: ProjectItem
+    @State private var hovering = false
+
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 14, style: .continuous) }
 
     var body: some View {
         let c = item.content
-        let content = VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 5) {
-                if let s = c?.visualState {
-                    Image(systemName: s.icon).foregroundStyle(s.color).font(.syCaption).accessibilityLabel(s.title)
-                } else {
-                    Image(systemName: "doc.text").foregroundStyle(Color.syDim).font(.syCaption)
+        let state = c?.visualState
+        let accent = state?.color ?? Color.syDim
+        let assignees = c?.assignees?.nodes ?? []
+        let content = VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: state?.icon ?? "doc.text")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(accent.opacity(0.14)))
+                    .accessibilityLabel(state?.title ?? "Draft")
+                Text(c?.repository?.nameWithOwner ?? "Draft")
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let n = c?.number {
+                    Text("#\(n)")
+                        .font(.syCaption.weight(.medium))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.syDim)
                 }
-                Text(c?.repository.map { "\($0.nameWithOwner)\(c?.number.map { "#\($0)" } ?? "")" } ?? "Draft")
-                    .font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1)
-                Spacer()
-                ForEach(c?.assignees?.nodes ?? [], id: \.login) { Avatar(url: $0.avatarUrl, size: 16).help($0.login) }
+                Spacer(minLength: 0)
             }
-            Text(c?.title ?? "—").font(.syCallout.weight(.medium)).foregroundStyle(Color.syText).lineLimit(3).multilineTextAlignment(.leading)
+            Text(c?.title ?? "—")
+                .font(.syCallout.weight(.medium))
+                .foregroundStyle(Color.syText)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+            if !assignees.isEmpty || state != nil {
+                HStack(spacing: 6) {
+                    if let state {
+                        Text(state.title)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(accent)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(accent.opacity(0.12)))
+                    }
+                    Spacer(minLength: 0)
+                    HStack(spacing: -6) {
+                        ForEach(assignees.prefix(4), id: \.login) { a in
+                            Avatar(url: a.avatarUrl, size: 20)
+                                .overlay(Circle().strokeBorder(Color.syRaised, lineWidth: 1.5))
+                                .help(a.login)
+                        }
+                        if assignees.count > 4 {
+                            Text("+\(assignees.count - 4)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(Color.syMuted)
+                                .frame(width: 20, height: 20)
+                                .background(Circle().fill(Color.sySunken))
+                                .overlay(Circle().strokeBorder(Color.syRaised, lineWidth: 1.5))
+                        }
+                    }
+                }
+            }
         }
-        .padding(10)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .card(radius: 8)
-        .contentShape(Rectangle())
+        .pyCardSurface(hover: hovering, accent: accent)
+        .contentShape(shape)
+        .onHover { h in withAnimation(Motion.fade) { hovering = h } }
 
         if let route = c?.route {
             NavigationLink(value: route) { content }.buttonStyle(.plain)

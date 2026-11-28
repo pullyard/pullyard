@@ -136,8 +136,10 @@ struct ForgeListView: View {
 
     private var visible: [SearchItem] {
         let q = text.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return model.items }
-        return model.items.filter {
+        let account = app.cacheAccount
+        let focused = model.items.filter { RepoFocus.shared.includes($0.repository.nameWithOwner, account: account) }
+        guard !q.isEmpty else { return focused }
+        return focused.filter {
             $0.title.lowercased().contains(q) || $0.repository.nameWithOwner.lowercased().contains(q) || ($0.author?.login.lowercased().contains(q) ?? false) || "\($0.number)" == q
         }
     }
@@ -149,9 +151,12 @@ struct ForgeListView: View {
                 ForEach(StateFilter.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
+            .tint(Color.syAccentFill)
             .labelsHidden()
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+            FocusBanner()
             LoadingBar(active: model.loading && !model.items.isEmpty)
             Divider()
             List(selection: Binding(get: { app.forgeSelection?.id }, set: { id in app.forgeSelection = model.items.first { $0.id == id } })) {
@@ -193,8 +198,7 @@ struct ForgeListView: View {
             }
         }
         .toolbarSearch(text: $text, prompt: "Filter: title, repository, author")
-        .navigationTitle(kind.title(app.provider))
-        .navigationSubtitle(items.isEmpty ? "" : plural(items.count, "result", "results") + (model.items.count >= ForgeLimits.listCap ? " (latest)" : ""))
+        .columnTitle(kind.title(app.provider), subtitle: items.isEmpty ? "" : plural(items.count, "result", "results") + (model.items.count >= ForgeLimits.listCap ? " (latest)" : ""))
         .task(id: "\(stateFilter.rawValue)|\(app.account?.id ?? "")") { await reload() }
         .onChange(of: app.refreshTick) { Task { await reload(silent: !model.items.isEmpty) } }
         .onLiveTick { await reload(silent: true) }
@@ -204,8 +208,7 @@ struct ForgeListView: View {
         ItemRow(item: item, showRepo: showRepo, numberPrefix: item.isPR ? app.provider.numberPrefix : "#")
             .rowAppear(item.id, model.rows)
             .tag(item.id)
-            .listRowSeparator(.visible)
-            .listRowSeparatorTint(Color.syLine)
+            .pyListRow(selected: app.forgeSelection?.id == item.id)
             .contextMenu { ForgeItemContextMenu(item: item) }
     }
 
@@ -234,22 +237,24 @@ struct ForgeDetailColumn: View {
         if let item = app.forgeSelection {
             if item.isPR, app.forgeReviews {
                 NavigationStack(path: $app.detailPath) {
-                    PRDetailView(ref: item.ref)
-                        .environment(\.liveFront, app.detailPath.isEmpty)
-                        .navigationDestination(for: Route.self) { RouteView(route: $0) }
+                    WindowRootFrame(minWidth: 320, minHeight: 240) {
+                        PRDetailView(ref: item.ref)
+                            .environment(\.liveFront, app.detailPath.isEmpty)
+                    }
+                    .navigationDestination(for: Route.self) { route in
+                        WindowRootFrame(minWidth: 320, minHeight: 240) { RouteView(route: route) }
+                    }
                 }
+                .environment(\.detailKey, "forge:\(item.id)")
                 .id(item.id)
                 .transition(.routeSwap)
             } else {
                 ForgeItemDetailView(item: item, provider: app.provider, caps: app.forgeCaps).id(item.id).transition(.routeSwap)
+                    .environment(\.detailKey, "forge:\(item.id)")
             }
         } else {
-            VStack(spacing: 12) {
-                IconTile(systemImage: app.provider.icon, color: .syViolet, size: 56).opacity(0.9)
-                Text(placeholder).foregroundStyle(Color.syMuted)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .transition(.opacity)
+            PYEmptyState(title: "Nothing open yet", message: placeholder)
+                .transition(.opacity)
         }
     }
 }
@@ -305,8 +310,9 @@ struct ForgeItemDetailView: View {
                     } label: {
                         Label("Open in Browser", systemImage: "safari")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .pyGlassButton(prominent: true)
                     Button("Copy Link") { copyToPasteboard(item.url) }
+                        .pyGlassButton()
                 }
                 .controlSize(.large)
                 .padding(.top, 4)
@@ -316,13 +322,15 @@ struct ForgeItemDetailView: View {
                         .foregroundStyle(Color.syMuted)
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .card(radius: 10, fill: .sySunken)
+                        .pyCardSurface(radius: 12)
                 }
             }
             .padding(24)
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .background { PYBackdrop(tints: [item.visualState.color, .syAccent], base: .clear, strength: 1.2).equatable() }
+        .detailTitle(item.title, subtitle: "\(item.repository.nameWithOwner)\(item.isPR ? provider.numberPrefix : "#")\(item.number)")
     }
 }
 

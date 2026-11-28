@@ -40,15 +40,15 @@ public static class ThemeTokens
         ["sub"] = new(0xFFF3F1EC, 0xFF111A2C, 0x0A000000, 0x40000000),
         ["code"] = Solid(0xF7F5F0, 0x0A101C, 0xF5F5F5, 0x1E1E1E),
         ["button"] = new(0xFFF3F1EC, 0xFF1B2740, 0xCCFFFFFF, 0x0FFFFFFF),
-        ["line"] = new(WithOpacity(0x1A2333, 0.08), WithOpacity(0xA0AEC4, 0.10), 0x0F000000, 0x15FFFFFF),
-        ["lineStrong"] = new(WithOpacity(0x1A2333, 0.15), WithOpacity(0xA0AEC4, 0.18), 0x1F000000, 0x28FFFFFF),
+        ["line"] = new(WithOpacity(0x1A2333, 0.12), WithOpacity(0xA0AEC4, 0.14), 0x0F000000, 0x15FFFFFF),
+        ["lineStrong"] = new(WithOpacity(0x1A2333, 0.20), WithOpacity(0xA0AEC4, 0.22), 0x1F000000, 0x28FFFFFF),
         ["cardLine"] = new(WithOpacity(0x1A2333, 0.08), WithOpacity(0xA0AEC4, 0.10), 0x0F000000, 0x19000000),
         ["text"] = new(0xFF1A2333, 0xFFE6EBF2, 0xE4000000, 0xFFFFFFFF),
         ["muted"] = new(0xFF5F6B7E, 0xFF8693A8, 0x9E000000, 0xC5FFFFFF),
-        ["dim"] = new(0xFF6B7486, 0xFF8290A6, 0x9E000000, 0x87FFFFFF),
-        ["gutter"] = new(0xFF9AA2B0, 0xFF4A5670, 0x72000000, 0x5DFFFFFF),
+        ["dim"] = new(0xFF646C80, 0xFF7D899F, 0x9E000000, 0x87FFFFFF),
+        ["gutter"] = new(0xFF687084, 0xFF7D899F, 0x9E000000, 0x87FFFFFF),
         ["accent"] = Solid(0x2A8BC8, 0x5BB8EC),
-        ["link"] = Solid(0x1A6A9E, 0x5BB8EC),
+        ["link"] = Solid(0x1F6FA3, 0x5BB8EC),
         ["green"] = Solid(0x2E8A57, 0x5DBE8A, 0x0F7B0F, 0x6CCB5F),
         ["red"] = Solid(0xC2412F, 0xE8746A, 0xC42B1C, 0xFF99A4),
         ["amber"] = Solid(0xB7791F, 0xE8B44C, 0x9D5D00, 0xFCE100),
@@ -58,15 +58,22 @@ public static class ThemeTokens
         ["indigo"] = Solid(0x4E5BC4, 0x8C97E8),
         ["slate"] = Solid(0x6B7486, 0x939CB0),
         ["orange"] = Solid(0xC7651A, 0xF0954A),
-        ["amberText"] = Solid(0x8F5C0E, 0xE8B44C, 0x9D5D00, 0xFCE100),
+        ["amberText"] = Solid(0x9A6416, 0xE8B44C, 0x9D5D00, 0xFCE100),
+        ["amberInk"] = Solid(0x9A6416, 0xE8B44C, 0x9D5D00, 0xFCE100),
         ["greenText"] = Solid(0x23703F, 0x5DBE8A, 0x0F7B0F, 0x6CCB5F),
-        ["coralText"] = Solid(0xB8402F, 0xEE6F5F),
+        ["coralText"] = Solid(0xB8412F, 0xEE6F5F),
+        ["coralInk"] = Solid(0xB8412F, 0xEE6F5F),
+        ["harborLine"] = new(WithOpacity(0x1F6FA3, 0.22), WithOpacity(0x7DD3FC, 0.20), 0x33005FB8, 0x3360CDFF),
+        ["wake"] = new(WithOpacity(0x1F6FA3, 0.55), WithOpacity(0x7DD3FC, 0.75), 0x8C005FB8, 0xBF60CDFF),
+        ["addWord"] = new(WithOpacity(0x2E8A57, 0.26), WithOpacity(0x5DBE8A, 0.28), WithOpacity(0x0F7B0F, 0.28), WithOpacity(0x6CCB5F, 0.30)),
+        ["delWord"] = new(WithOpacity(0xC2412F, 0.22), WithOpacity(0xE8746A, 0.28), WithOpacity(0xC42B1C, 0.26), WithOpacity(0xFF99A4, 0.30)),
         ["accentFill"] = Same(0x1D70A6),
         ["greenFill"] = Same(0x2B7F50),
         ["violetFill"] = Same(0x5E48C8),
         ["redFill"] = Same(0xB23A2A),
         ["slateFill"] = Same(0x5B6476),
-        ["coralFill"] = Same(0xB8402F),
+        ["coralFill"] = Same(0xC24533),
+        ["onCoral"] = Same(0xFFFFFF),
         ["onFill"] = Same(0xFFFFFF),
         ["hover"] = new(WithOpacity(0x1A2333, 0.04), WithOpacity(0xE6EBF2, 0.05), 0x09000000, 0x0FFFFFFF),
         ["selected"] = new(WithOpacity(0x1A2333, 0.07), WithOpacity(0xE6EBF2, 0.08), 0x0F000000, 0x15FFFFFF)
@@ -106,9 +113,9 @@ public static class ThemeTokens
 
     public static string TextKey(string key) => key switch
     {
-        "amber" => "amberText",
+        "amber" => "amberInk",
         "green" => "greenText",
-        "coral" => "coralText",
+        "coral" => "coralInk",
         "sky" => "link",
         _ => key
     };
@@ -186,6 +193,13 @@ public static class ThemeTokens
         Key("redfill", "redFill");
         Key("purplefill", "violetFill");
         Key("coralfill", "coralFill");
+        Key("coralink", "coralInk");
+        Key("amberink", "amberInk");
+        Key("oncoral", "onCoral");
+        Key("harbor", "harborLine");
+        Key("wake", "wake");
+        Key("addword", "addWord");
+        Key("delword", "delWord");
         Tint("add", "green", dark ? 0.14 : 0.12);
         Tint("del", "red", dark ? 0.14 : 0.11);
         Tint("hunkbg", "link", 0.08);

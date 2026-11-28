@@ -104,9 +104,12 @@ final class ClaudeTab: Identifiable {
     var terminalSleeping = false
     var terminalMemory = 0
     var unread = false
+    var environmentID: String?
     var exitCode: Int32?
     var startedAt = Date()
-    let git: GitWorkingCopy
+    /// The working copy the header, changes and PR views show. It starts as the session folder and
+    /// follows the agent into another worktree of the same repo (see `followActiveWorktree`).
+    private(set) var git: GitWorkingCopy
     let chat: ChatSession?
     let configDir: String?
     @ObservationIgnored private var _terminal: ClaudeTerminalView?
@@ -114,14 +117,47 @@ final class ClaudeTab: Identifiable {
     @ObservationIgnored var restartChat: (() -> Void)?
     @ObservationIgnored var openNewChat: (() -> Void)?
 
-    init(folder: String, kind: ClaudeTabKind, title: String, sessionId: String, git: GitWorkingCopy) {
+    init(folder: String, kind: ClaudeTabKind, title: String, sessionId: String, git: GitWorkingCopy, configDir: String?? = .none) {
         self.folder = folder
         self.kind = kind
         self.title = title
         self.sessionId = sessionId
         self.git = git
-        configDir = ClaudeProfiles.shared.activeOverride
-        chat = kind == .chat ? ChatSession(folder: folder, configDir: ClaudeProfiles.shared.activeOverride) : nil
+        let dir = configDir ?? ClaudeProfiles.shared.activeOverride
+        self.configDir = dir
+        chat = kind == .chat ? ChatSession(folder: folder, configDir: dir) : nil
+        chat?.onStart = { [weak self] in self?.peek = false }
+    }
+
+    /// Opened from history just to look at it, still asleep: kept out of the Open list and the saved
+    /// tabs until the session is woken (a message, or "Wake up"). Picking another past session replaces it.
+    var peek = false
+
+    var profile: ClaudeProfile? { ClaudeProfiles.shared.profile(configDir: configDir) }
+
+    /// True when the agent works in a worktree other than the folder the session started in.
+    var followsOtherWorktree: Bool { git.path != folder }
+
+    /// Set when the user picked a worktree in the branch panel; auto-follow leaves the header alone then.
+    var pinnedWorktree: String?
+
+    func follow(_ copy: GitWorkingCopy) {
+        guard copy !== git else { return }
+        git = copy
+    }
+
+    var environment: AgentEnvironment? { AgentEnvironments.shared.environment(id: environmentID) }
+
+    var isDraft: Bool {
+        guard kind == .chat, sessionId.isEmpty, let chat else { return false }
+        return chat.items.isEmpty && !chat.busy
+    }
+
+    func applyEnvironment(_ id: String?) {
+        environmentID = id
+        guard let id, let env = AgentEnvironments.shared.environment(id: id) else { return }
+        chat?.extraDirs = env.folders.filter { $0 != folder }
+        chat?.extraEnv = AgentEnvironments.shared.variables(for: id)
     }
 
     var terminal: ClaudeTerminalView {
@@ -140,6 +176,7 @@ final class ClaudeTab: Identifiable {
         if let chat {
             if chat.pendingCount > 0 { return .waiting }
             if chat.busy { return .working }
+            if chat.running, chat.hasRunningTasks { return .working }
             if chat.running { return .active }
             return chat.sleeping ? .sleeping : .stopped
         }
@@ -175,7 +212,13 @@ final class ClaudeTab: Identifiable {
     }
     func newChatInSameFolder() { openNewChat?() }
 
-    var projectName: String { (folder as NSString).lastPathComponent }
+    /// The repository the session belongs to: a worktree under
+    /// `.claude/worktrees/` reports its parent project, not its own folder.
+    var projectName: String { (ProjectRoot.of(folder) as NSString).lastPathComponent }
+    /// Set once the session has (or is getting) a generated title.
+    @ObservationIgnored var titled = false
+    /// A generated title waiting for the session id so it can be saved.
+    @ObservationIgnored var pendingTitle: String?
 }
 
 @Observable
@@ -196,8 +239,9 @@ final class ClaudeWorkspace {
     @ObservationIgnored private var indexWarmed = false
     @ObservationIgnored private(set) var sessionsByID: [String: ClaudeSessionInfo] = [:]
     let sessionRows = RowAppearTracker()
-    var showInspector = true
+    var showInspector = false
     var ciFixes: [ItemRef: CIFixLaunch] = [:]
+    var prFixes: [ItemRef: CIFixLaunch] = [:]
     var reviewFixes: [ItemRef: ReviewFixLaunch] = [:]
 
     var defaults: AgentDefaults { AgentDefaults.shared }
@@ -267,6 +311,25 @@ final class ClaudeWorkspace {
         projects = []
     }
 
+    func closeTabs(configDir: String?) {
+        let doomed = tabs.filter { $0.configDir == configDir }
+        for tab in doomed {
+            tab.chat?.stop()
+            if tab.terminalRunning { tab.terminal.terminate() }
+        }
+        tabs.removeAll { $0.configDir == configDir }
+        if let selected = selectedTabID, !tabs.contains(where: { $0.id == selected }) { selectedTabID = tabs.first?.id }
+    }
+
+    var accountFilter: String? = UserDefaults.standard.string(forKey: "agents.accountFilter") {
+        didSet { UserDefaults.standard.set(accountFilter, forKey: "agents.accountFilter") }
+    }
+
+    func visibleSessions(_ sessions: [ClaudeSessionInfo]) -> [ClaudeSessionInfo] {
+        guard let filter = accountFilter, ClaudeProfiles.shared.hasSeveral else { return sessions }
+        return sessions.filter { ($0.profileID ?? ClaudeProfiles.defaultID) == filter }
+    }
+
     func sleepAll() {
         for tab in tabs where tab.running && tab.state != .working && tab.state != .waiting { tab.sleepNow() }
     }
@@ -294,19 +357,38 @@ final class ClaudeWorkspace {
         if !force, let last = projectsUpdated, Date().timeIntervalSince(last) < 10 { return }
         loadingProjects = true
         defer { loadingProjects = false }
-        let root = URL(fileURLWithPath: ClaudeProfiles.shared.configDir()).appendingPathComponent("projects", isDirectory: true)
-        let profileID = ClaudeProfiles.shared.activeID
+        let profiles = ClaudeProfiles.shared
+        var seenDirs = Set<String>()
+        let roots: [(id: String, root: URL)] = profiles.visible.compactMap { p in
+            let dir = profiles.configDir(for: p)
+            guard seenDirs.insert(dir).inserted else { return nil }
+            return (p.id, URL(fileURLWithPath: dir).appendingPathComponent("projects", isDirectory: true))
+        }
+        let scopeKey = roots.map(\.id).joined(separator: ",")
         let loaded = await Task.detached(priority: .userInitiated) { () -> [ClaudeProject] in
-            let projects = ClaudeSessionParser.loadAll(root: root)
+            var byPath: [String: [ClaudeSessionInfo]] = [:]
+            var seenIDs = Set<String>()
+            for (id, root) in roots {
+                for project in ClaudeSessionParser.loadAll(root: root) {
+                    for var s in project.sessions where seenIDs.insert(s.id).inserted {
+                        s.profileID = id
+                        byPath[ProjectRoot.of(project.path), default: []].append(s)
+                    }
+                }
+            }
             MemoryRelief.release()
-            return projects
+            return byPath.map { path, sessions in
+                ClaudeProject(id: path, path: path, sessions: sessions.sorted { $0.modified > $1.modified })
+            }
+            .sorted { $0.lastActivity > $1.lastActivity }
         }.value
-        guard profileID == ClaudeProfiles.shared.activeID else { return }
+        guard scopeKey == ClaudeProfiles.shared.visible.map(\.id).filter({ id in roots.contains { $0.id == id } }).joined(separator: ",") else { return }
         let next = Demo.folder.map { f in loaded.filter { $0.path.hasPrefix(f) } } ?? loaded
         projectsUpdated = Date()
         guard next != projects else { return }
         sessionRows.ingest(next.flatMap { $0.sessions.map(\.id) }, mode: .refresh)
         projects = next
+        AgentSessionPrefs.shared.adopt(next.map(\.id))
         sessionsByID = Dictionary(next.flatMap { $0.sessions.map { ($0.id, $0) } }, uniquingKeysWith: { a, _ in a })
         guard indexTask == nil, !indexWarmed else { return }
         indexWarmed = true
@@ -360,11 +442,17 @@ final class ClaudeWorkspace {
     }
 
     @discardableResult
-    func newSession(folder: String, prompt: String? = nil, name: String? = nil, mode: ClaudeMode? = nil, kind: ClaudeTabKind? = nil) -> ClaudeTab {
+    func newSession(folder: String, prompt: String? = nil, name: String? = nil, mode: ClaudeMode? = nil, kind: ClaudeTabKind? = nil, profileID: String? = nil, environmentID: String? = nil) -> ClaudeTab {
         let kind = kind ?? preferredKind
         let title = name ?? prompt.map { String($0.prefix(48)) } ?? "New session"
+        let configDir = ClaudeProfiles.shared.profile(id: profileID)?.configDir ?? (profileID == nil ? ClaudeProfiles.shared.activeOverride : nil)
+        if kind == .chat, prompt == nil, name == nil,
+           let blank = tabs.first(where: { $0.kind == .chat && $0.folder == folder && $0.configDir == configDir && $0.environmentID == environmentID && $0.sessionId.isEmpty && ($0.chat?.items.isEmpty ?? false) }) {
+            selectedTabID = blank.id
+            return blank
+        }
         if kind == .chat {
-            let tab = makeTab(folder: folder, kind: .chat, title: title, sessionId: "")
+            let tab = makeTab(folder: folder, kind: .chat, title: title, sessionId: "", configDir: configDir, environmentID: environmentID)
             startChat(tab, resume: nil, prompt: prompt, mode: mode)
             return tab
         }
@@ -372,22 +460,36 @@ final class ClaudeWorkspace {
         var args = ["--session-id", sessionId]
         if let name, !name.isEmpty { args += ["-n", name] }
         if let prompt, !prompt.isEmpty { args.append(ClaudeLauncher.positionalPrompt(prompt)) }
-        let tab = makeTab(folder: folder, kind: .terminal, title: title, sessionId: sessionId)
+        let tab = makeTab(folder: folder, kind: .terminal, title: title, sessionId: sessionId, configDir: configDir, environmentID: environmentID)
         launchTerminal(tab, extra: args, mode: mode)
         return tab
     }
 
+    /// Opens a past session. A chat opens asleep by default: the history shows right away and the
+    /// `claude` process starts only when the user sends a message or presses Wake up.
+    /// Pass `asleep: false` when the caller sends something to it at once.
     @discardableResult
-    func resume(_ s: ClaudeSessionInfo, fork: Bool = false, kind: ClaudeTabKind? = nil) -> ClaudeTab {
+    func resume(_ s: ClaudeSessionInfo, fork: Bool = false, kind: ClaudeTabKind? = nil, asleep: Bool = true) -> ClaudeTab {
         if !fork, let open = tab(forSession: s.id) {
             selectedTabID = open.id
             return open
         }
         let kind = kind ?? preferredKind
-        let tab = makeTab(folder: s.cwd, kind: kind, title: s.title, sessionId: fork ? "" : s.id)
+        if asleep, !fork {
+            for old in tabs where old.peek && !old.running { close(old) }
+        }
+        let owner = ClaudeProfiles.shared.profile(id: s.profileID)
+        let configDir = owner.map(\.configDir) ?? ClaudeProfiles.shared.activeOverride
+        let tab = makeTab(folder: s.cwd, kind: kind, title: fork ? s.title : AgentSessionPrefs.shared.title(s), sessionId: fork ? "" : s.id, configDir: configDir)
         if kind == .chat {
             tab.chat?.loadHistory(from: s.file)
-            startChat(tab, resume: s.id, fork: fork, prompt: nil, mode: nil)
+            if asleep, !fork, let chat = tab.chat {
+                chat.sessionId = s.id
+                chat.sleeping = true
+                tab.peek = true
+            } else {
+                startChat(tab, resume: s.id, fork: fork, prompt: nil, mode: nil)
+            }
         } else {
             var args = ["--resume", s.id]
             if fork { args.append("--fork-session") }
@@ -419,7 +521,7 @@ final class ClaudeWorkspace {
                 let index = tabs.firstIndex { $0.id == tab.id }
                 let new: ClaudeTab
                 if let info {
-                    new = resume(info.retitled(tab.title), kind: .chat)
+                    new = resume(info.retitled(tab.title), kind: .chat, asleep: keepOriginal)
                     new.chat?.announceResume = false
                     if filesChanged {
                         new.chat?.items.append(.notice(id: UUID().uuidString, text: keepOriginal ? "Forked — file changes made after this point are still on disk" : "Conversation rewound — file changes made after this point stay on disk", isError: false))
@@ -452,7 +554,7 @@ final class ClaudeWorkspace {
     func openInTerminal(_ tab: ClaudeTab) {
         guard !tab.sessionId.isEmpty else { return }
         tab.chat?.stop()
-        let t = makeTab(folder: tab.folder, kind: .terminal, title: tab.title, sessionId: tab.sessionId)
+        let t = makeTab(folder: tab.folder, kind: .terminal, title: tab.title, sessionId: tab.sessionId, configDir: .some(tab.configDir), environmentID: tab.environmentID)
         launchTerminal(t, extra: ["--resume", tab.sessionId])
         tabs.removeAll { $0.id == tab.id }
         selectedTabID = t.id
@@ -461,7 +563,7 @@ final class ClaudeWorkspace {
     func openInChat(_ tab: ClaudeTab) {
         guard !tab.sessionId.isEmpty else { return }
         if tab.terminalRunning { tab.terminal.terminate() }
-        let c = makeTab(folder: tab.folder, kind: .chat, title: tab.title, sessionId: tab.sessionId)
+        let c = makeTab(folder: tab.folder, kind: .chat, title: tab.title, sessionId: tab.sessionId, configDir: .some(tab.configDir), environmentID: tab.environmentID)
         if let file = sessionFile(tab.sessionId) { c.chat?.loadHistory(from: file) }
         startChat(c, resume: tab.sessionId, prompt: nil, mode: nil)
         tabs.removeAll { $0.id == tab.id }
@@ -542,6 +644,158 @@ final class ClaudeWorkspace {
         Task { await reloadProjects() }
     }
 
+    func trashAll(_ sessions: [ClaudeSessionInfo], in name: String) {
+        guard !sessions.isEmpty else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete all \(sessions.count) sessions in “\(name)”?"
+        alert.informativeText = "The conversation transcripts go to the Trash. Files the agents changed are not touched. You can put them back from the Trash."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        for s in sessions {
+            if let open = tab(forSession: s.id) { close(open) }
+            try? FileManager.default.trashItem(at: s.file, resultingItemURL: nil)
+        }
+        Task { await reloadProjects() }
+    }
+
+    func rename(_ tab: ClaudeTab, to title: String) {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        tab.title = t
+        if !tab.sessionId.isEmpty { AgentSessionPrefs.shared.rename(tab.sessionId, to: t) }
+        saveOpenTabs()
+    }
+
+    /// All sessions of the project, across accounts and regardless of the sidebar
+    /// filter, that are not already in `profile`'s account.
+    func sessionsToMove(_ project: ClaudeProject, to profile: ClaudeProfile) -> [ClaudeSessionInfo] {
+        let full = projects.first { $0.id == project.id } ?? project
+        return full.sessions.filter { ($0.profileID ?? ClaudeProfiles.defaultID) != profile.id }
+    }
+
+    /// Moves every session of `project` that belongs to another account into
+    /// `profile`'s Claude config folder, so it lists and resumes under that account.
+    func moveProject(_ project: ClaudeProject, to profile: ClaudeProfile) {
+        let sessions = sessionsToMove(project, to: profile)
+        guard !sessions.isEmpty else { return }
+        let alert = NSAlert()
+        alert.messageText = "Move \(sessions.count) \(sessions.count == 1 ? "session" : "sessions") of “\(project.name)” to \(profile.label)?"
+        alert.informativeText = "Their history moves to the \(profile.label) Claude account and resumes there. The other account, including the Claude app and CLI signed in to it, will no longer list them. Open tabs for these sessions close first. Project files are not touched."
+        alert.addButton(withTitle: "Move")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        for s in sessions { if let open = tab(forSession: s.id) { close(open) } }
+        let files = sessions.map(\.file)
+        let target = URL(fileURLWithPath: ClaudeProfiles.shared.configDir(for: profile), isDirectory: true)
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            let outcome = await Task.detached(priority: .userInitiated) {
+                Swift.Result { try ClaudeSessionMover.move(sessionFiles: files, to: target) }
+            }.value
+            if case .failure(let error) = outcome {
+                let failed = NSAlert()
+                failed.messageText = "Couldn't move all sessions"
+                failed.informativeText = error.localizedDescription
+                failed.runModal()
+            }
+            await self?.reloadProjects()
+        }
+    }
+
+    /// Replaces the placeholder title of a new session with a short topical one.
+    private func autoTitle(_ tab: ClaudeTab, from prompt: String) {
+        guard !tab.titled, tab.sessionId.isEmpty else { return }
+        tab.titled = true
+        let placeholder = tab.title
+        let configDir = tab.configDir
+        Task { [weak self, weak tab] in
+            guard let title = await SessionTitler.title(for: prompt, configDir: configDir),
+                  let self, let tab, tab.title == placeholder else { return }
+            self.applyGeneratedTitle(title, to: tab)
+        }
+    }
+
+    private func applyGeneratedTitle(_ title: String, to tab: ClaudeTab) {
+        tab.title = title
+        if tab.sessionId.isEmpty { tab.pendingTitle = title } else { AgentSessionPrefs.shared.rename(tab.sessionId, to: title) }
+        saveOpenTabs()
+    }
+
+    /// First message of a session with "Worktree" ticked: name it, create
+    /// `.claude/worktrees/<topic>-<hex>`, then start the session there and send the message.
+    private func startInWorktree(from tab: ClaudeTab, text: String, images: [ChatImage]) {
+        guard let chat = tab.chat, !chat.preparingWorktree else { return }
+        chat.preparingWorktree = true
+        chat.lastError = nil
+        tab.titled = true
+        let folder = tab.folder
+        let configDir = tab.configDir
+        Task { [weak self, weak tab] in
+            let generated = await SessionTitler.title(for: text, configDir: configDir)
+            let title = generated ?? SessionTitler.fallback(text)
+            let created = await SessionWorktree.create(from: folder, title: title)
+            guard let self, let tab, let chat = tab.chat else { return }
+            chat.preparingWorktree = false
+            switch created {
+            case .failure(let error):
+                chat.lastError = "Couldn't create a worktree: " + error.localizedDescription
+                chat.useWorktree = false
+                chat.draftRequest = text
+            case .success(let path):
+                let moved = self.makeTab(folder: path, kind: .chat, title: title, sessionId: "", configDir: configDir, environmentID: tab.environmentID)
+                moved.titled = true
+                moved.pendingTitle = title
+                let model = chat.modelValue.isEmpty || chat.modelValue == "default" ? self.defaults.modelArgument : chat.modelValue
+                let effort = chat.effort.isEmpty ? self.defaults.effortArgument : chat.effort
+                let mode = chat.permissionMode.isEmpty || chat.permissionMode == "default" ? nil : chat.permissionMode
+                moved.chat?.start(model: model, effort: effort, mode: mode)
+                moved.chat?.send(text, images: images)
+                self.close(tab)
+                Task { await self.reloadProjects() }
+            }
+        }
+    }
+
+    func markUnread(_ tab: ClaudeTab) {
+        if selectedTabID == tab.id { selectedTabID = tabs.first { $0.id != tab.id }?.id }
+        tab.unread = true
+        SessionSeen.shared.markUnread(tab.sessionId)
+    }
+
+    func newSession(in env: AgentEnvironment, profileID: String? = nil, kind: ClaudeTabKind? = nil) {
+        if let folder = env.startFolder, FileManager.default.fileExists(atPath: folder) {
+            newSession(folder: folder, kind: kind, profileID: profileID, environmentID: env.id)
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = "Start"
+        panel.message = "Choose the folder for a session in “\(env.name)”"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        newSession(folder: url.path, kind: kind, profileID: profileID, environmentID: env.id)
+    }
+
+    var listedTabs: [ClaudeTab] { orderedTabs.filter { !$0.isDraft && !$0.peek } }
+
+    /// Tabs for the tab bar: a peeked session shows only while it is the one being looked at.
+    var barTabs: [ClaudeTab] { orderedTabs.filter { !$0.peek || $0.id == selectedTabID } }
+
+    /// Drag-and-drop: puts `id` where `target` is (after it when dragging right/down, before it otherwise).
+    func moveTab(_ id: UUID, onto target: UUID) {
+        guard id != target, let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target }) else { return }
+        let tab = tabs.remove(at: from)
+        tabs.insert(tab, at: to)
+        saveOpenTabs()
+    }
+
+    var orderedTabs: [ClaudeTab] {
+        let prefs = AgentSessionPrefs.shared
+        return tabs.filter { prefs.isPinned($0.sessionId) } + tabs.filter { !prefs.isPinned($0.sessionId) }
+    }
+
     func requestClose(_ tab: ClaudeTab) {
         if tab.state == .working || tab.state == .waiting {
             pendingClose = tab
@@ -587,15 +841,17 @@ final class ClaudeWorkspace {
         makeTab(folder: folder, kind: .chat, title: title, sessionId: "")
     }
 
-    private func makeTab(folder: String, kind: ClaudeTabKind, title: String, sessionId: String) -> ClaudeTab {
-        let tab = ClaudeTab(folder: folder, kind: kind, title: title, sessionId: sessionId, git: git(for: folder))
+    private func makeTab(folder: String, kind: ClaudeTabKind, title: String, sessionId: String, configDir: String?? = .none, environmentID: String? = nil) -> ClaudeTab {
+        let tab = ClaudeTab(folder: folder, kind: kind, title: title, sessionId: sessionId, git: git(for: folder), configDir: configDir)
+        tab.applyEnvironment(environmentID)
+        ClaudeTrust.mirror(folder: folder, configDir: tab.configDir)
         tab.restartChat = { [weak self, weak tab] in
             guard let self, let tab else { return }
             self.restart(tab)
         }
         tab.openNewChat = { [weak self, weak tab] in
             guard let self, let tab else { return }
-            self.newSession(folder: tab.folder, kind: .chat)
+            self.newSession(folder: tab.folder, kind: .chat, profileID: tab.profile?.id)
         }
         wire(tab)
         tabs.append(tab)
@@ -625,7 +881,26 @@ final class ClaudeWorkspace {
         guard let chat = tab.chat else { return }
         chat.onSessionId = { [weak self, weak tab] sid in
             tab?.sessionId = sid
+            if let title = tab?.pendingTitle {
+                AgentSessionPrefs.shared.rename(sid, to: title)
+                tab?.pendingTitle = nil
+            }
             self?.saveOpenTabs()
+        }
+        chat.onFirstPrompt = { [weak self, weak tab] text in
+            guard let self, let tab else { return }
+            self.autoTitle(tab, from: text)
+        }
+        chat.onWorktreeSend = { [weak self, weak tab] text, images in
+            guard let self, let tab else { return }
+            self.startInWorktree(from: tab, text: text, images: images)
+        }
+        if tab.sessionId.isEmpty, !SessionWorktree.isWorktree(tab.folder) {
+            let folder = tab.folder
+            Task { [weak chat] in
+                let ok = await SessionWorktree.canCreate(in: folder)
+                chat?.worktreeAvailable = ok
+            }
         }
         chat.onTurnFinished = { [weak self, weak tab] in
             guard let tab else { return }
@@ -650,11 +925,19 @@ final class ClaudeWorkspace {
         let kind: String
         let title: String
         let selected: Bool
+        var profileID: String?
+        var environmentID: String?
     }
 
     private struct SavedTabs: Codable {
         let profile: String
         let tabs: [SavedTab]
+    }
+
+    private static func holds(configDir: String, session id: String) -> Bool {
+        let root = URL(fileURLWithPath: configDir).appendingPathComponent("projects", isDirectory: true)
+        guard let dirs = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return false }
+        return dirs.contains { FileManager.default.fileExists(atPath: $0.appendingPathComponent(id + ".jsonl").path) }
     }
 
     private static let openTabsKey = "agents.openTabs"
@@ -664,8 +947,8 @@ final class ClaudeWorkspace {
 
     func saveOpenTabs() {
         guard Demo.folder == nil, restoredTabs || !tabs.isEmpty else { return }
-        let saved = tabs.filter { !$0.sessionId.isEmpty }.map {
-            SavedTab(sessionId: $0.sessionId, folder: $0.folder, kind: $0.kind.rawValue, title: $0.title, selected: $0.id == selectedTabID)
+        let saved = tabs.filter { !$0.sessionId.isEmpty && !$0.peek }.map {
+            SavedTab(sessionId: $0.sessionId, folder: $0.folder, kind: $0.kind.rawValue, title: $0.title, selected: $0.id == selectedTabID, profileID: $0.profile?.id, environmentID: $0.environmentID)
         }
         let payload = SavedTabs(profile: ClaudeProfiles.shared.activeID, tabs: saved)
         if let data = try? JSONEncoder().encode(payload) { UserDefaults.standard.set(data, forKey: Self.openTabsKey) }
@@ -676,16 +959,19 @@ final class ClaudeWorkspace {
         restoredTabs = true
         guard defaults.restoreTabs, Demo.folder == nil, tabs.isEmpty,
               let data = UserDefaults.standard.data(forKey: Self.openTabsKey),
-              let saved = try? JSONDecoder().decode(SavedTabs.self, from: data),
-              saved.profile == ClaudeProfiles.shared.activeID else { return }
+              let saved = try? JSONDecoder().decode(SavedTabs.self, from: data) else { return }
+        let profiles = ClaudeProfiles.shared
         var selected: UUID?
         for s in saved.tabs where FileManager.default.fileExists(atPath: s.folder) && tab(forSession: s.sessionId) == nil {
+            let preferred = [s.profileID, saved.profile].compactMap { profiles.profile(id: $0) }.filter { p in profiles.visible.contains { $0.id == p.id } }
+            let candidates = preferred + profiles.visible.filter { p in !preferred.contains { $0.id == p.id } }
+            guard let owner = candidates.first(where: { Self.holds(configDir: profiles.configDir(for: $0), session: s.sessionId) }) else { continue }
             let kind = ClaudeTabKind(rawValue: s.kind) ?? .chat
-            let tab = makeTab(folder: s.folder, kind: kind, title: s.title, sessionId: s.sessionId)
+            let tab = makeTab(folder: s.folder, kind: kind, title: s.title, sessionId: s.sessionId, configDir: .some(owner.configDir), environmentID: s.environmentID)
             if let chat = tab.chat {
                 chat.sessionId = s.sessionId
                 chat.sleeping = true
-                tab.pendingHistory = SessionRewind.sessionFile(id: s.sessionId, configDir: tab.configDir)
+                tab.pendingHistory = SessionRewind.sessionFile(id: s.sessionId, configDir: profiles.configDir(for: owner))
             } else {
                 tab.terminalSleeping = true
             }
@@ -701,6 +987,9 @@ final class ClaudeWorkspace {
         if let effort = defaults.effortArgument { args += ["--effort", effort] }
         if mode != .standard { args += ["--permission-mode", mode.rawValue] }
         args += StackNotesMCP.args
+        if let env = tab.environment {
+            for dir in env.folders where dir != tab.folder { args += ["--add-dir", dir] }
+        }
         args += extra
         let command = "exec claude " + args.map(ClaudeLauncher.shellQuote).joined(separator: " ")
         let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { FileManager.default.isExecutableFile(atPath: $0) ? $0 : nil } ?? "/bin/zsh"
@@ -715,6 +1004,7 @@ final class ClaudeWorkspace {
             env.removeValue(forKey: key)
         }
         ClaudeProfiles.apply(tab.configDir, to: &env)
+        if let id = tab.environmentID { env.merge(AgentEnvironments.shared.variables(for: id)) { _, new in new } }
 
         tab.terminalRunning = true
         tab.exitCode = nil

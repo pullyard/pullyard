@@ -39,6 +39,10 @@ struct ClaudeProjectsColumn: View {
     @State private var expanded: Set<String> = []
     @State private var collapsedParents: Set<String> = []
     @State private var showArchived = false
+    @State private var pickerFor: ClaudeProfile?
+    @State private var envDraft: AgentEnvironmentDraft?
+    @State private var dropTarget: String?
+    @AppStorage("agents.openCollapsed") private var openCollapsed = false
     private var prefs: AgentSessionPrefs { AgentSessionPrefs.shared }
     @State private var ready = false
     @State private var cursor: String?
@@ -51,8 +55,46 @@ struct ClaudeProjectsColumn: View {
         let open: () -> Void
     }
 
-    private func nodes(_ project: ClaudeProject) -> [SessionTree.Node] {
-        SessionTree.build(Array(project.sessions.filter { (showArchived || !prefs.isArchived($0)) && !prefs.isPinned($0.id) }.prefix(query.isEmpty ? 40 : 200)))
+    private struct SidebarGroup: Identifiable {
+        let id: String
+        let title: String
+        var project: ClaudeProject?
+        var profile: ClaudeProfile?
+        let sessions: [ClaudeSessionInfo]
+        var count: Int
+        var headerless = false
+    }
+
+    private func listed(_ sessions: [ClaudeSessionInfo], limit: Int = 40) -> [ClaudeSessionInfo] {
+        Array(sessions.filter { (showArchived || !prefs.isArchived($0)) && !prefs.isPinned($0.id) }.prefix(query.isEmpty ? limit : 200))
+    }
+
+    private func nodes(_ group: SidebarGroup) -> [SessionTree.Node] {
+        SessionTree.build(group.sessions, detached: prefs.detached)
+    }
+
+    private var groups: [SidebarGroup] {
+        let projects = filtered
+        switch prefs.grouping {
+        case .folder:
+            return prefs.ordered(projects).map { p in
+                SidebarGroup(id: p.id, title: p.name, project: p, sessions: listed(p.sessions), count: p.sessions.count)
+            }
+        case .account:
+            let all = projects.flatMap(\.sessions).sorted { $0.modified > $1.modified }
+            return ClaudeProfiles.shared.visible.compactMap { profile in
+                let mine = all.filter { ($0.profileID ?? ClaudeProfiles.defaultID) == profile.id }
+                guard !mine.isEmpty else { return nil }
+                return SidebarGroup(id: "account:" + profile.id, title: profile.label, profile: profile, sessions: listed(mine, limit: 60), count: mine.count)
+            }
+        case .none:
+            let all = projects.flatMap(\.sessions).sorted { $0.modified > $1.modified }
+            return [SidebarGroup(id: "all", title: "", sessions: listed(all, limit: 80), count: all.count, headerless: true)]
+        }
+    }
+
+    private func isOpen(_ g: SidebarGroup) -> Bool {
+        g.headerless || expanded.contains(g.id) || !query.isEmpty
     }
 
     private var pinnedSessions: [ClaudeSessionInfo] {
@@ -62,10 +104,10 @@ struct ClaudeProjectsColumn: View {
     }
 
     private var navTargets: [NavTarget] {
-        var out = ws.tabs.map { tab in NavTarget(key: "tab:\(tab.id.uuidString)") { ws.selectedTabID = tab.id } }
+        var out = (openCollapsed ? [] : ws.listedTabs).map { tab in NavTarget(key: "tab:\(tab.id.uuidString)") { ws.selectedTabID = tab.id } }
         out += pinnedSessions.map { s in NavTarget(key: s.id) { ws.resume(s) } }
-        for project in filtered where expanded.contains(project.id) || !query.isEmpty {
-            for node in nodes(project) {
+        for group in groups where isOpen(group) {
+            for node in nodes(group) {
                 let s = node.session
                 out.append(NavTarget(key: s.id) { ws.resume(s) })
                 guard !collapsedParents.contains(node.id) else { continue }
@@ -89,60 +131,63 @@ struct ClaudeProjectsColumn: View {
         return true
     }
 
-    private var filtered: [ClaudeProject] {
-        guard !query.isEmpty else { return ws.projects }
+    private func shortcut(_ key: Character) -> Bool {
+        guard let cursor, let s = ws.sessionsByID[cursor] else { return false }
+        switch key {
+        case "p": withAnimation(Motion.smooth) { prefs.togglePin(s.id) }
+        case "u": toggleUnread(s)
+        case "r": rename(s)
+        case "f": ws.resume(s, fork: true)
+        case "a": withAnimation(Motion.smooth) { prefs.setArchived(s.id, !prefs.isArchived(s)) }
+        case "d": ws.trash(s)
+        default: return false
+        }
+        return true
+    }
+
+    private var accountScoped: [ClaudeProject] {
+        guard ws.accountFilter != nil, ClaudeProfiles.shared.hasSeveral else { return ws.projects }
         return ws.projects.compactMap { p in
-            if p.name.localizedCaseInsensitiveContains(query) { return p }
-            let s = p.sessions.filter { $0.title.localizedCaseInsensitiveContains(query) || ($0.branch ?? "").localizedCaseInsensitiveContains(query) }
+            let s = ws.visibleSessions(p.sessions)
             return s.isEmpty ? nil : ClaudeProject(id: p.id, path: p.path, sessions: s)
         }
     }
 
+    private var filtered: [ClaudeProject] {
+        guard !query.isEmpty else { return accountScoped }
+        return accountScoped.compactMap { p in
+            if p.name.localizedCaseInsensitiveContains(query) { return p }
+            let s = p.sessions.filter { prefs.title($0).localizedCaseInsensitiveContains(query) || ($0.branch ?? "").localizedCaseInsensitiveContains(query) }
+            return s.isEmpty ? nil : ClaudeProject(id: p.id, path: p.path, sessions: s)
+        }
+    }
+
+    private var pickerProfile: ClaudeProfile {
+        ClaudeProfiles.shared.profile(id: ws.accountFilter) ?? ClaudeProfiles.shared.active
+    }
+
     var body: some View {
-        ScrollViewReader { proxy in
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                switch ClaudeAccountStore.shared.status {
-                case .loggedIn(let info):
-                    ClaudeAccountCard(info: info, compact: true)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                case .loggedOut:
-                    Label("Not signed in to Claude — sign in on the right", systemImage: "person.crop.circle.badge.exclamationmark")
-                        .foregroundStyle(Color.syAmber)
-                        .padding(8)
-                    if ClaudeProfiles.shared.visible.count > 1 {
-                        ClaudeProfileSwitcher().padding(.horizontal, 8)
-                    }
-                case .notInstalled:
-                    Label("claude CLI not found — see the right side", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(Color.syAmber)
-                        .padding(8)
-                default:
-                    EmptyView()
+        VStack(spacing: 0) {
+            pinnedHeader
+                .padding(.horizontal, 6)
+                .padding(.top, 6)
+                .padding(.bottom, 2)
+            ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    listContent
                 }
-                if ClaudeAccountStore.shared.isLoggedIn {
-                    if ready { historyContent }
-                } else if case .checking = ClaudeAccountStore.shared.status {
-                    HStack { Spacer(); PullYardLoader(size: 32); Spacer() }.padding(.top, 20)
-                } else if case .unknown = ClaudeAccountStore.shared.status {
-                    HStack { Spacer(); PullYardLoader(size: 32); Spacer() }.padding(.top, 20)
-                } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Image(systemName: "lock.fill").font(.syTitle3).foregroundStyle(Color.syDim)
-                        Text("Session history and projects appear after you sign in to Claude.")
-                            .font(.syCallout)
-                            .foregroundStyle(Color.syMuted)
-                    }
-                    .padding(12)
-                }
+                .padding(.horizontal, 6)
+                .padding(.bottom, 6)
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 6)
-        }
-        .onChange(of: cursor) { _, key in
-            if let key { withAnimation(Motion.fade) { proxy.scrollTo(key) } }
-        }
+            .onChange(of: cursor) { _, key in
+                if let key { withAnimation(Motion.fade) { proxy.scrollTo(key) } }
+            }
+            .onChange(of: ws.selectedTabID) { _, id in
+                guard let id, let tab = ws.tabs.first(where: { $0.id == id }) else { return }
+                reveal(tab, proxy: proxy)
+            }
+            }
         }
         .focusable()
         .focused($listFocused)
@@ -150,6 +195,10 @@ struct ClaudeProjectsColumn: View {
         .onKeyPress(.downArrow) { moveCursor(1); return .handled }
         .onKeyPress(.upArrow) { moveCursor(-1); return .handled }
         .onKeyPress(.return) { openCursor() ? .handled : .ignored }
+        .onKeyPress(characters: CharacterSet(charactersIn: "purfad")) { press in
+            guard press.modifiers.subtracting(.capsLock).isEmpty, let key = press.characters.first else { return .ignored }
+            return shortcut(key) ? .handled : .ignored
+        }
         .surface(.list)
         .overlay { if ws.loadingProjects && ws.projects.isEmpty { PullYardLoader(size: 44) } }
         .liveRefresh(updated: ws.projectsUpdated, refreshing: ws.loadingProjects) { await ws.reloadProjects() }
@@ -161,11 +210,13 @@ struct ClaudeProjectsColumn: View {
                     Button { FixTour.shared.start(app: app) } label: { Label("Fixes demo", systemImage: "checkmark.seal") }
                         .help("Walk through the recent chat fixes with mock data")
                 }
-                Button { openFolder() } label: { Label("Open folder", systemImage: "folder.badge.plus") }
-                    .disabled(!ClaudeAccountStore.shared.isLoggedIn)
-                    .help("New session in folder…")
+                Button { pickerFor = pickerProfile } label: { Label("Open project", systemImage: "folder.badge.plus") }
+                    .disabled(!ClaudeAccountStore.shared.isLoggedIn && !ClaudeProfiles.shared.hasSeveral)
+                    .help("New session in a project…")
             }
         }
+        .sheet(item: $pickerFor) { AgentProjectPicker(profile: $0).environment(app) }
+        .sheet(item: $envDraft) { d in AgentEnvironmentSheet(editing: d.editing, draftName: d.name, draftFolders: d.folders) }
         .onAppear {
             ws.sessionRows.ingest(cascadeIDs, mode: .cascade)
             ready = true
@@ -177,42 +228,102 @@ struct ClaudeProjectsColumn: View {
             ws.restoreOpenTabs()
             await ClaudeAccountStore.shared.refresh()
             await ws.reloadProjects(force: false)
-            if expanded.isEmpty, let first = ws.projects.first { expanded.insert(first.id) }
+            if expanded.isEmpty, let first = groups.first { expanded.insert(first.id) }
         }
         .onChange(of: app.refreshTick) { Task { await ws.reloadProjects(force: false) } }
+        .onChange(of: prefs.grouping) { _, _ in
+            if let first = groups.first { expanded.insert(first.id) }
+        }
+    }
+
+    /// Account switcher and New session stay put while the history scrolls.
+    @ViewBuilder
+    private var pinnedHeader: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            switch ClaudeAccountStore.shared.status {
+            case .loggedIn(let info):
+                AgentAccountSwitcher(info: info) { pickerFor = $0 }
+                    .padding(.horizontal, 4)
+                    .padding(.top, 2)
+            case .loggedOut:
+                Label("Not signed in to Claude — sign in on the right", systemImage: "person.crop.circle.badge.exclamationmark")
+                    .font(.syCallout)
+                    .foregroundStyle(Color.syAmber)
+                    .padding(8)
+                if ClaudeProfiles.shared.visible.count > 1 {
+                    AgentAccountSwitcher(info: nil) { pickerFor = $0 }.padding(.horizontal, 4)
+                }
+            case .notInstalled:
+                Label("claude CLI not found — see the right side", systemImage: "exclamationmark.triangle")
+                    .font(.syCallout)
+                    .foregroundStyle(Color.syAmber)
+                    .padding(8)
+            default:
+                if ClaudeProfiles.shared.hasSeveral {
+                    AgentAccountSwitcher(info: nil) { pickerFor = $0 }.padding(.horizontal, 4)
+                }
+            }
+            if ClaudeProfiles.shared.hasSeveral {
+                AgentAccountTabs()
+                    .padding(.horizontal, 4)
+                    .padding(.top, 4)
+            }
+            if ClaudeAccountStore.shared.isLoggedIn || ClaudeProfiles.shared.hasSeveral {
+                AgentNewSessionRow { pickerFor = pickerProfile }
+                    .padding(.horizontal, 4)
+                    .padding(.top, 4)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var listContent: some View {
+        if ClaudeAccountStore.shared.isLoggedIn || ClaudeProfiles.shared.hasSeveral {
+            if ready { historyContent }
+        } else if case .checking = ClaudeAccountStore.shared.status {
+            HStack { Spacer(); PullYardLoader(size: 32); Spacer() }.padding(.top, 20)
+        } else if case .unknown = ClaudeAccountStore.shared.status {
+            HStack { Spacer(); PullYardLoader(size: 32); Spacer() }.padding(.top, 20)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Image(systemName: "lock.fill").font(.syTitle3).foregroundStyle(Color.syDim)
+                Text("Session history and projects appear after you sign in to Claude.")
+                    .font(.syCallout)
+                    .foregroundStyle(Color.syMuted)
+            }
+            .padding(12)
+        }
     }
 
     private var cascadeIDs: [String] {
-        let open = expanded.isEmpty ? Set(ws.projects.prefix(1).map(\.id)) : expanded
-        return filtered.filter { open.contains($0.id) }.flatMap { $0.sessions.prefix(30).map(\.id) }
+        let all = groups
+        let open = expanded.isEmpty ? Set(all.prefix(1).map(\.id)) : expanded
+        return all.filter { $0.headerless || open.contains($0.id) }.flatMap { $0.sessions.prefix(30).map(\.id) }
     }
 
     @ViewBuilder
     private var historyContent: some View {
-        if !ws.tabs.isEmpty {
-            HStack(spacing: 6) {
-                Text("Open").font(.sySubheadline.weight(.semibold))
-                Spacer()
-                Image(systemName: "memorychip").imageScale(.small)
-                Text(ws.totalMemory > 0 ? ProcessMemory.format(ws.totalMemory) : "0 " + "MB").font(.sySubheadline.weight(.semibold))
-                    .monospacedDigit()
+        let listedTabs = ws.listedTabs
+        if !listedTabs.isEmpty {
+            AgentSectionHeader(title: "Open", collapsed: $openCollapsed, count: listedTabs.count) {
+                Text(ws.totalMemory > 0 ? ProcessMemory.format(ws.totalMemory) : "0 MB")
+                    .font(.syCaption2.monospacedDigit())
+                    .foregroundStyle(Color.syDim)
+                    .help("Memory used by running Claude processes")
                 if ws.awakeCount > 0 {
-                    Button("Sleep all") { ws.sleepAll() }
-                        .buttonStyle(.link)
-                        .help("Stop idle processes and free memory")
+                    Button { ws.sleepAll() } label: { Image(systemName: "moon.zzz") }
+                        .buttonStyle(.borderless)
+                        .font(.syCaption)
+                        .foregroundStyle(Color.syMuted)
+                        .help("Sleep all idle sessions and free memory")
+                        .accessibilityLabel("Sleep all idle sessions")
                 }
             }
-            .font(.syCaption)
-            .foregroundStyle(Color.syMuted)
-            .padding(.horizontal, 8)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
-            .help("Memory used by running Claude processes")
-            ForEach(ws.tabs) { tab in
-                OpenTabRow(tab: tab, selected: ws.selectedTabID == tab.id)
+            ForEach(openCollapsed ? [] : listedTabs) { tab in
+                OpenTabRow(tab: tab, selected: ws.selectedTabID == tab.id, pinned: prefs.isPinned(tab.sessionId))
                     .padding(.horizontal, 8)
-                    .background(ClaudeRowHighlight(selected: ws.selectedTabID == tab.id || (listFocused && cursor == "tab:\(tab.id.uuidString)")))
-                    .modifier(HoverHighlight(radius: 6))
+                    .background(AgentRowBackground(selected: ws.selectedTabID == tab.id, focused: listFocused && cursor == "tab:\(tab.id.uuidString)"))
+                    .modifier(HoverHighlight(radius: 7))
                     .contentShape(Rectangle())
                     .id("tab:\(tab.id.uuidString)")
                     .onTapGesture {
@@ -223,56 +334,82 @@ struct ClaudeProjectsColumn: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(ws.selectedTabID == tab.id ? [.isButton, .isSelected] : .isButton)
                     .accessibilityAction { ws.selectedTabID = tab.id }
-                    .contextMenu {
-                        if tab.running {
-                            Button("Free memory (sleep)") { tab.sleepNow() }
-                                .disabled(tab.state == .working || tab.state == .waiting)
-                        } else {
-                            Button("Wake up") { ws.restart(tab) }
-                        }
-                        Button("Close") { ws.requestClose(tab) }
-                    }
+                    .contextMenu { AgentTabMenu(tab: tab, ws: ws) }
+                    .tabReorder(tab, ws: ws, vertical: true)
                     .transition(.opacity)
             }
-            Rectangle().fill(Color.syLine).frame(height: 1).padding(.horizontal, 8).padding(.vertical, 8)
         }
         let pinnedSessions = pinnedSessions
         if !pinnedSessions.isEmpty {
-            HStack(spacing: 5) {
-                Image(systemName: "pin.fill").imageScale(.small)
-                Text("Pinned").font(.sySubheadline.weight(.semibold))
-            }
-            .font(.syCaption)
-            .foregroundStyle(Color.syMuted)
-            .padding(.horizontal, 8)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
+            AgentSectionHeader(title: "Pinned")
             ForEach(pinnedSessions) { s in
                 sessionRow(s)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            Rectangle().fill(Color.syLine).frame(height: 1).padding(.horizontal, 8).padding(.vertical, 8)
         }
-        ForEach(filtered) { project in
-            let open = expanded.contains(project.id) || !query.isEmpty
-            VStack(alignment: .leading, spacing: 0) {
-                ProjectHeader(project: project, expanded: open) {
-                    withAnimation(Motion.smooth) {
-                        if expanded.contains(project.id) { expanded.remove(project.id) } else { expanded.insert(project.id) }
-                    }
-                } onNew: {
-                    ws.newSession(folder: project.path)
-                }
+        if ws.accountFilter != nil, ClaudeProfiles.shared.hasSeveral, query.isEmpty, accountScoped.isEmpty, !ws.loadingProjects {
+            AgentAccountEmpty(profile: pickerProfile) { pickerFor = pickerProfile }
                 .padding(.horizontal, 8)
+                .padding(.top, 6)
+        }
+        if !groups.isEmpty, !(groups.count == 1 && groups[0].headerless && groups[0].sessions.isEmpty) {
+            AgentSectionHeader(title: prefs.grouping == .none ? "Recent" : prefs.grouping == .account ? "Accounts" : "Projects") {
+                Menu {
+                    groupMenu
+                    if prefs.grouping == .folder {
+                        Button("Sort A to Z") { withAnimation(Motion.smooth) { prefs.sortAlphabetically(accountScoped) } }
+                    }
+                    Divider()
+                    Button(showArchived ? "Hide archived sessions" : "Show archived sessions") { withAnimation(Motion.smooth) { showArchived.toggle() } }
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .foregroundStyle(Color.syMuted)
+                .help("Group, sort and filter")
+                .accessibilityLabel("Group, sort and filter")
+            }
+        }
+        ForEach(groups) { group in
+            let open = isOpen(group)
+            VStack(alignment: .leading, spacing: 0) {
+                if let project = group.project {
+                    ProjectHeader(project: project, expanded: open) {
+                        toggle(group)
+                    } onNew: {
+                        ws.newSession(folder: project.path, profileID: ws.accountFilter)
+                    }
+                    .padding(.horizontal, 4)
+                    .contextMenu { projectMenu(project) }
+                    .draggable(project.id)
+                    .dropDestination(for: String.self) { items, _ in
+                        guard let id = items.first, id != project.id else { return false }
+                        withAnimation(Motion.smooth) { prefs.place(id, before: project.id, in: accountScoped) }
+                        return true
+                    } isTargeted: { on in
+                        if on { dropTarget = project.id } else if dropTarget == project.id { dropTarget = nil }
+                    }
+                    .overlay(alignment: .top) {
+                        if dropTarget == project.id {
+                            Capsule().fill(Color.syAgentAccent).frame(height: 2).padding(.horizontal, 10)
+                        }
+                    }
+                } else if let profile = group.profile {
+                    AgentAccountGroupHeader(profile: profile, count: group.count, expanded: open) { toggle(group) } onNew: { pickerFor = profile }
+                        .padding(.horizontal, 4)
+                        .contextMenu { groupMenu }
+                }
                 Collapsible(open: open) {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(nodes(project)) { node in
-                            sessionRow(node.session, children: node.children.count)
+                        ForEach(nodes(group)) { node in
+                            sessionRow(node.session, children: node.children.count, indent: group.headerless ? 0 : 8)
                             if !node.children.isEmpty {
                                 Collapsible(open: !collapsedParents.contains(node.id)) {
                                     VStack(alignment: .leading, spacing: 0) {
                                         ForEach(Array(node.children.enumerated()), id: \.element.id) { index, child in
-                                            sessionRow(child, depth: 1, last: index == node.children.count - 1)
+                                            sessionRow(child, depth: 1, last: index == node.children.count - 1, indent: group.headerless ? 0 : 8)
                                         }
                                     }
                                 }
@@ -281,10 +418,16 @@ struct ClaudeProjectsColumn: View {
                     }
                     .padding(.bottom, 4)
                 }
+                if !open {
+                    ForEach(activeSessions(group)) { s in
+                        sessionRow(s, indent: group.headerless ? 0 : 8)
+                            .transition(.opacity)
+                    }
+                }
             }
         }
         if ws.projects.isEmpty, !ws.loadingProjects {
-            Text("No Claude Code sessions yet").font(.syBody).foregroundStyle(Color.syMuted).padding(12)
+            Text("No agent sessions yet").font(.syBody).foregroundStyle(Color.syMuted).padding(12)
         } else {
             Button(showArchived ? "Hide archived sessions" : "Show archived sessions") { withAnimation(Motion.smooth) { showArchived.toggle() } }
                 .buttonStyle(.link)
@@ -294,7 +437,89 @@ struct ClaudeProjectsColumn: View {
         }
     }
 
-    private func sessionRow(_ s: ClaudeSessionInfo, children: Int = 0, depth: Int = 0, last: Bool = false) -> some View {
+    /// Selecting a session shows it in the list: the list switches to the session's
+    /// account when it is filtered to another one, then scrolls to its row.
+    private func reveal(_ tab: ClaudeTab, proxy: ScrollViewProxy) {
+        guard !tab.sessionId.isEmpty else { return }
+        let owner = tab.profile?.id ?? ws.sessionsByID[tab.sessionId]?.profileID ?? ClaudeProfiles.defaultID
+        if let filter = ws.accountFilter, filter != owner, ClaudeProfiles.shared.hasSeveral,
+           ClaudeProfiles.shared.visible.contains(where: { $0.id == owner }) {
+            withAnimation(Motion.smooth) {
+                app.switchClaudeProfile(to: owner)
+                ws.accountFilter = owner
+            }
+        }
+        let target = tab.sessionId
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            withAnimation(Motion.smooth) { proxy.scrollTo(target) }
+        }
+    }
+
+    /// Sessions open in a tab stay listed even when their group is collapsed.
+    private func activeSessions(_ group: SidebarGroup) -> [ClaudeSessionInfo] {
+        group.sessions.filter { ws.tab(forSession: $0.id) != nil }
+    }
+
+    private func toggle(_ group: SidebarGroup) {
+        withAnimation(Motion.smooth) {
+            if expanded.contains(group.id) { expanded.remove(group.id) } else { expanded.insert(group.id) }
+        }
+    }
+
+    @ViewBuilder
+    private var groupMenu: some View {
+        Picker("Group by", selection: Binding(get: { prefs.grouping }, set: { g in withAnimation(Motion.smooth) { prefs.grouping = g } })) {
+            ForEach(AgentGrouping.allCases) { Text($0.title).tag($0) }
+        }
+        .pickerStyle(.menu)
+        Button("Collapse all") { withAnimation(Motion.smooth) { expanded = [] } }
+        Button("Expand all") { withAnimation(Motion.smooth) { expanded = Set(groups.map(\.id)) } }
+    }
+
+    @ViewBuilder
+    private func projectMenu(_ project: ClaudeProject) -> some View {
+        Button("New session") { ws.newSession(folder: project.path, profileID: ws.accountFilter) }
+            .disabled(!project.exists)
+        Button("Save as environment…") { envDraft = AgentEnvironmentDraft(name: project.name, folders: [project.path]) }
+            .disabled(!project.exists)
+        if ClaudeProfiles.shared.hasSeveral {
+            Menu("New session as") {
+                ForEach(ClaudeProfiles.shared.visible) { p in
+                    Button(p.label) { ws.newSession(folder: project.path, profileID: p.id) }
+                }
+            }
+            .disabled(!project.exists)
+            Menu("Move to account") {
+                ForEach(ClaudeProfiles.shared.visible) { p in
+                    let movable = ws.sessionsToMove(project, to: p).count
+                    Button(movable == 0 ? p.label : "\(p.label) (\(movable))") { ws.moveProject(project, to: p) }
+                        .disabled(movable == 0)
+                }
+            }
+        }
+        Divider()
+        let order = prefs.ordered(accountScoped).map(\.id)
+        Button("Move up") { withAnimation(Motion.smooth) { prefs.move(project.id, by: -1, in: accountScoped) } }
+            .disabled(order.first == project.id)
+        Button("Move down") { withAnimation(Motion.smooth) { prefs.move(project.id, by: 1, in: accountScoped) } }
+            .disabled(order.last == project.id)
+        Button("Sort A to Z") { withAnimation(Motion.smooth) { prefs.sortAlphabetically(accountScoped) } }
+        Divider()
+        groupMenu
+        Divider()
+        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: project.path)]) }
+            .disabled(!project.exists)
+        Button("Copy path") { copyToPasteboard(project.path) }
+        Divider()
+        let live = project.sessions.filter { !prefs.isArchived($0) }
+        Button("Archive all (\(live.count))") {
+            withAnimation(Motion.smooth) { for s in live { prefs.setArchived(s.id, true) } }
+        }
+        .disabled(live.isEmpty)
+        Button("Delete all sessions (\(project.sessions.count))", role: .destructive) { ws.trashAll(project.sessions, in: project.name) }
+    }
+
+    private func sessionRow(_ s: ClaudeSessionInfo, children: Int = 0, depth: Int = 0, last: Bool = false, indent: CGFloat = 0) -> some View {
         SessionRow(
             session: prefs.titles[s.id] == nil ? s : s.retitled(prefs.title(s)),
             open: ws.tab(forSession: s.id) != nil,
@@ -302,15 +527,18 @@ struct ClaudeProjectsColumn: View {
             childCount: children,
             collapsed: collapsedParents.contains(s.id),
             depth: depth,
-            last: last
-        ) {
-            withAnimation(Motion.smooth) {
-                if collapsedParents.contains(s.id) { collapsedParents.remove(s.id) } else { collapsedParents.insert(s.id) }
+            last: last,
+            showAccount: prefs.grouping != .account && ws.accountFilter == nil && ClaudeProfiles.shared.hasSeveral,
+            onToggle: {
+                withAnimation(Motion.smooth) {
+                    if collapsedParents.contains(s.id) { collapsedParents.remove(s.id) } else { collapsedParents.insert(s.id) }
+                }
             }
-        }
+        )
+        .padding(.leading, indent)
         .padding(.horizontal, 8)
-        .background(ClaudeRowHighlight(selected: listFocused && cursor == s.id))
-        .modifier(HoverHighlight(radius: 6))
+        .background(AgentRowBackground(selected: ws.selectedTab.map { !$0.sessionId.isEmpty && $0.sessionId == s.id } ?? false, focused: listFocused && cursor == s.id))
+        .modifier(HoverHighlight(radius: 7))
         .rowAppear(s.id, ws.sessionRows)
         .contentShape(Rectangle())
         .id(s.id)
@@ -319,50 +547,424 @@ struct ClaudeProjectsColumn: View {
             listFocused = true
             ws.resume(s)
         }
-        .contextMenu { sessionMenu(s) }
+        .contextMenu { sessionMenu(s, children: children) }
     }
 
     @ViewBuilder
-    private func sessionMenu(_ s: ClaudeSessionInfo) -> some View {
-        Button(prefs.isPinned(s.id) ? "Unpin" : "Pin to Top") { withAnimation(Motion.smooth) { prefs.togglePin(s.id) } }
-        Button("Rename…") { rename(s) }
-        Button(prefs.isArchived(s) ? "Unarchive" : "Archive") { withAnimation(Motion.smooth) { prefs.setArchived(s.id, !prefs.isArchived(s)) } }
+    private func sessionMenu(_ s: ClaudeSessionInfo, children: Int) -> some View {
+        Menu("Open in") {
+            Button("Chat") { ws.resume(s, kind: .chat) }
+            Button("Terminal tab") { ws.resume(s, kind: .terminal) }
+            Button("Terminal app") {
+                try? ClaudeLauncher.launch(prompt: "", folder: s.cwd, target: .terminal, mode: .standard, sessionName: prefs.title(s), resumeId: s.id, configDir: ClaudeProfiles.shared.profile(id: s.profileID)?.configDir)
+            }
+            if let local = s.desktopId, DesktopSessionIndex.isInstalled {
+                Button("Claude Desktop") { DesktopSessionIndex.open(localID: local) }
+            }
+            Divider()
+            Button("Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: s.cwd)]) }
+        }
         Divider()
-        Button("Resume as chat") { ws.resume(s, kind: .chat) }
-        Button("Resume in terminal") { ws.resume(s, kind: .terminal) }
-        Button("Fork session") { ws.resume(s, fork: true) }
-        if let local = s.desktopId, DesktopSessionIndex.isInstalled {
-            Button("Open in Claude Desktop") { DesktopSessionIndex.open(localID: local) }
+        Button(prefs.isPinned(s.id) ? "Unpin" : "Pin") { withAnimation(Motion.smooth) { prefs.togglePin(s.id) } }
+            .keyboardShortcut("p", modifiers: [])
+        Button(isUnread(s) ? "Mark as read" : "Mark as unread") { toggleUnread(s) }
+            .keyboardShortcut("u", modifiers: [])
+        Button("Rename") { rename(s) }
+            .keyboardShortcut("r", modifiers: [])
+        Button("Fork") { ws.resume(s, fork: true) }
+            .keyboardShortcut("f", modifiers: [])
+        if children > 0 {
+            Button(collapsedParents.contains(s.id) ? "Show nested sessions" : "Hide nested sessions") {
+                withAnimation(Motion.smooth) {
+                    if collapsedParents.contains(s.id) { collapsedParents.remove(s.id) } else { collapsedParents.insert(s.id) }
+                }
+            }
+        }
+        if s.parentId != nil {
+            Divider()
+            Button(prefs.isDetached(s.id) ? "Nest under parent" : "Detach to top level") {
+                withAnimation(Motion.smooth) { prefs.setDetached(s.id, !prefs.isDetached(s.id)) }
+            }
         }
         Divider()
         Button("Copy session ID") { copyToPasteboard(s.id) }
         Button("Copy resume command") { copyToPasteboard("cd \(ClaudeLauncher.shellQuote(s.cwd)) && claude --resume \(s.id)") }
         Button("Reveal transcript in Finder") { NSWorkspace.shared.activateFileViewerSelecting([s.file]) }
-        Button("Move to Trash…", role: .destructive) { ws.trash(s) }
         if let pr = s.prURL { Button("Open PR") { if let r = GitHubURL.parse(pr) { app.section = .prs(.mine); app.open(r) } } }
+        Divider()
+        Button(prefs.isArchived(s) ? "Unarchive" : "Archive") { withAnimation(Motion.smooth) { prefs.setArchived(s.id, !prefs.isArchived(s)) } }
+            .keyboardShortcut("a", modifiers: [])
+        Button("Delete", role: .destructive) { ws.trash(s) }
+            .keyboardShortcut("d", modifiers: [])
+    }
+
+    private func isUnread(_ s: ClaudeSessionInfo) -> Bool {
+        ws.indicator(for: s) == .done
+    }
+
+    private func toggleUnread(_ s: ClaudeSessionInfo) {
+        if isUnread(s) {
+            SessionSeen.shared.mark(s.id)
+            ws.tab(forSession: s.id)?.unread = false
+        } else if let tab = ws.tab(forSession: s.id) {
+            ws.markUnread(tab)
+        } else {
+            SessionSeen.shared.markUnread(s.id)
+        }
     }
 
     private func rename(_ s: ClaudeSessionInfo) {
-        let alert = NSAlert()
-        alert.messageText = "Rename session"
-        alert.informativeText = "The new name is only shown in PullYard."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-        field.stringValue = prefs.title(s)
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = field
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        prefs.rename(s.id, to: field.stringValue)
+        guard let name = AgentRename.ask(title: "Rename session", info: "The new name is only shown in PullYard.", current: prefs.title(s)) else { return }
+        if let tab = ws.tab(forSession: s.id) { ws.rename(tab, to: name) } else { prefs.rename(s.id, to: name) }
+    }
+}
+
+struct AgentEnvironmentDraft: Identifiable {
+    let id = UUID()
+    var editing: AgentEnvironment?
+    var name = ""
+    var folders: [String] = []
+}
+
+struct AgentTabMenu: View {
+    let tab: ClaudeTab
+    let ws: ClaudeWorkspace
+
+    var body: some View {
+        let prefs = AgentSessionPrefs.shared
+        Button(prefs.isPinned(tab.sessionId) ? "Unpin" : "Pin") { withAnimation(Motion.smooth) { prefs.togglePin(tab.sessionId) } }
+            .disabled(tab.sessionId.isEmpty)
+        Button("Rename") { AgentTabMenu.rename(tab, ws: ws) }
+        Button("Mark as unread") { ws.markUnread(tab) }
+            .disabled(tab.sessionId.isEmpty)
+        if let s = ws.sessionsByID[tab.sessionId] {
+            Button("Fork") { ws.resume(s, fork: true) }
+        }
+        Divider()
+        if tab.running {
+            Button("Free memory (sleep)") { tab.sleepNow() }
+                .disabled(tab.state == .working || tab.state == .waiting)
+        } else {
+            Button("Wake up") { ws.restart(tab) }
+        }
+        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: tab.folder)]) }
+        Button("Copy session ID") { copyToPasteboard(tab.sessionId) }
+            .disabled(tab.sessionId.isEmpty)
+        Divider()
+        Button("Close") { ws.requestClose(tab) }
+        Button("Close other tabs") {
+            for other in ws.tabs where other.id != tab.id && !AgentSessionPrefs.shared.isPinned(other.sessionId) { ws.requestClose(other) }
+        }
+        .disabled(ws.tabs.count < 2)
     }
 
-    private func openFolder() {
+    static func rename(_ tab: ClaudeTab, ws: ClaudeWorkspace) {
+        guard let name = AgentRename.ask(title: "Rename session", info: "The new name is only shown in PullYard.", current: tab.title) else { return }
+        ws.rename(tab, to: name)
+    }
+}
+
+struct AgentAccountGroupHeader: View {
+    let profile: ClaudeProfile
+    let count: Int
+    let expanded: Bool
+    let onToggle: () -> Void
+    let onNew: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "chevron.right")
+                .font(.syCaption2.weight(.bold))
+                .foregroundStyle(Color.syDim)
+                .rotationEffect(.degrees(expanded ? 90 : 0))
+                .frame(width: 10)
+            ProfileBadge(profile: profile, size: 18)
+            Text(profile.label).font(.syBody.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
+            Text(verbatim: "\(count)").font(.syCaption2.monospacedDigit()).foregroundStyle(Color.syDim)
+            Spacer(minLength: 4)
+            Button(action: onNew) {
+                Image(systemName: "plus")
+                    .font(.syCaption.weight(.semibold))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(Color.syMuted)
+            .opacity(hover ? 1 : 0)
+            .help("New session as \(profile.label)")
+            .accessibilityLabel("New session as \(profile.label)")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .frame(minHeight: 28)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(hover ? Color.syText.opacity(0.05) : Color.clear))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onToggle)
+        .onHover { h in withAnimation(.easeOut(duration: Motion.Dur.micro)) { hover = h } }
+        .help(profile.email ?? profile.label)
+        .padding(.top, 4)
+    }
+}
+
+struct AgentAccountEmpty: View {
+    let profile: ClaudeProfile
+    let onOpen: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                ProfileBadge(profile: profile, size: 24)
+                Text("No sessions as \(profile.label) yet").font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText)
+            }
+            Text("Pick a project to start the first session with this account.")
+                .font(.syCaption)
+                .foregroundStyle(Color.syMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(action: onOpen) { Label("Open project…", systemImage: "folder.badge.plus") }
+                .buttonStyle(.borderedProminent)
+                .tint(.syAgentFill)
+                .controlSize(.small)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(radius: 10)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2, perform: onOpen)
+    }
+}
+
+struct AgentProjectPicker: View {
+    private let initialProfile: ClaudeProfile
+    @State private var profileID: String
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var selection: String?
+    @State private var envDraft: AgentEnvironmentDraft?
+    @FocusState private var searchFocused: Bool
+
+    init(profile: ClaudeProfile) {
+        initialProfile = profile
+        _profileID = State(initialValue: profile.id)
+    }
+
+    /// The account the new session starts as. Starts at the one the sheet was
+    /// opened for and can be changed from the header before opening.
+    private var profile: ClaudeProfile {
+        ClaudeProfiles.shared.profile(id: profileID) ?? initialProfile
+    }
+
+    @ViewBuilder
+    private var accountLine: some View {
+        let text = Text("New session as \(profile.label)" + (profile.email.map { " · \($0)" } ?? ""))
+            .font(.syCaption)
+            .lineLimit(1)
+        let others = ClaudeProfiles.shared.visible
+        if others.count > 1 {
+            Menu {
+                Picker("Account", selection: $profileID) {
+                    ForEach(others) { p in
+                        Text(p.label + (p.email.map { " — \($0)" } ?? "")).tag(p.id)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } label: {
+                HStack(spacing: 4) {
+                    text
+                    Image(systemName: "chevron.up.chevron.down").font(.syCaption2.weight(.semibold))
+                }
+                .foregroundStyle(Color.syMuted)
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Choose which Claude account this session uses")
+        } else {
+            text.foregroundStyle(Color.syMuted)
+        }
+    }
+
+    private var environments: [AgentEnvironment] {
+        let all = AgentEnvironments.shared.items
+        guard !query.isEmpty else { return all }
+        return all.filter { $0.name.localizedCaseInsensitiveContains(query) }
+    }
+
+    private var projects: [ClaudeProject] {
+        let all = app.claude.projects.filter(\.exists)
+        guard !query.isEmpty else { return all }
+        return all.filter { $0.name.localizedCaseInsensitiveContains(query) || $0.path.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                ProfileBadge(profile: profile, size: 28)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Open a project").font(.syHeadline).foregroundStyle(Color.syText)
+                    accountLine
+                }
+            }
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(Color.syDim)
+                TextField("Search projects", text: $query)
+                    .textFieldStyle(.plain)
+                    .focused($searchFocused)
+                    .onSubmit { if let first = projects.first { open(first.path) } }
+            }
+            .font(.syBody)
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.sySunken))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(searchFocused ? Color.syLineStrong : Color.syLine))
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    if !environments.isEmpty {
+                        sectionTitle("Environments")
+                        ForEach(environments) { env in
+                            environmentRow(env)
+                        }
+                        sectionTitle("Projects")
+                    }
+                    ForEach(projects) { p in
+                        row(p)
+                    }
+                    if projects.isEmpty {
+                        Text(query.isEmpty ? "No projects yet. Choose a folder below." : "No projects match “\(query)”.")
+                            .font(.syCallout)
+                            .foregroundStyle(Color.syMuted)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 24)
+                    }
+                }
+                .padding(4)
+            }
+            .frame(height: 300)
+            .card(radius: 10, fill: .sySunken)
+            HStack {
+                Group {
+                    Button { chooseFolder() } label: { Label("Choose folder…", systemImage: "folder") }
+                    Button { envDraft = AgentEnvironmentDraft() } label: { Label("New environment…", systemImage: "square.stack.3d.up") }
+                }
+                .tint(Color.syText)
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .tint(Color.syText)
+                    .keyboardShortcut(.cancelAction)
+                Button("Open") {
+                    guard let selection else { return }
+                    if selection.hasPrefix("env:"), let env = AgentEnvironments.shared.environment(id: String(selection.dropFirst(4))) { start(env) } else { open(selection) }
+                }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.syAgentFill)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(selection == nil)
+            }
+        }
+        .padding(20)
+        .frame(width: 560)
+        .surface(.panel)
+        .tint(Color.syAgentAccent)
+        .onAppear { searchFocused = true }
+        .sheet(item: $envDraft) { d in AgentEnvironmentSheet(editing: d.editing, draftName: d.name, draftFolders: d.folders) }
+    }
+
+    private func sectionTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.syCaption.weight(.semibold))
+            .foregroundStyle(Color.syMuted)
+            .padding(.horizontal, 8)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+    }
+
+    private func environmentRow(_ env: AgentEnvironment) -> some View {
+        let key = "env:" + env.id
+        let selected = selection == key
+        return HStack(spacing: 10) {
+            Image(systemName: env.icon)
+                .font(.syIcon(11))
+                .foregroundStyle(Color.syAgentAccent)
+                .frame(width: 26, height: 26)
+                .background(RoundedRectangle(cornerRadius: 7).fill(Color.syAgentAccent.opacity(0.12)))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(env.name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
+                Text(environmentDetail(env)).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.middle)
+            }
+            Spacer(minLength: 6)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.syText.opacity(0.1) : Color.clear))
+        .modifier(HoverHighlight(radius: 8))
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { start(env) }
+        .simultaneousGesture(TapGesture().onEnded { selection = key })
+        .contextMenu {
+            Button("Start session") { start(env) }
+            Button("Edit…") { envDraft = AgentEnvironmentDraft(editing: env) }
+            Divider()
+            Button("Delete", role: .destructive) { AgentEnvironments.shared.remove(env.id) }
+        }
+    }
+
+    private func environmentDetail(_ env: AgentEnvironment) -> String {
+        var parts: [String] = []
+        if let first = env.startFolder { parts.append((first as NSString).lastPathComponent) }
+        if env.folders.count > 1 { parts.append("+\(env.folders.count - 1) folders") }
+        if !env.variableNames.isEmpty { parts.append("\(env.variableNames.count) variables") }
+        return parts.isEmpty ? "Choose a folder when starting" : parts.joined(separator: " · ")
+    }
+
+    private func start(_ env: AgentEnvironment) {
+        dismiss()
+        DispatchQueue.main.async { app.claude.newSession(in: env, profileID: profile.id) }
+    }
+
+    private func row(_ p: ClaudeProject) -> some View {
+        let selected = selection == p.path
+        let tint = ProjectPalette.color(for: p.path)
+        return HStack(spacing: 10) {
+            Image(systemName: "folder.fill")
+                .font(.syIcon(11))
+                .foregroundStyle(tint)
+                .frame(width: 26, height: 26)
+                .background(RoundedRectangle(cornerRadius: 7).fill(tint.opacity(0.14)))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(p.name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
+                Text(p.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
+                    .font(.syCaption)
+                    .foregroundStyle(Color.syMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 6)
+            Text(Fmt.rel(p.lastActivity)).font(.syCaption).foregroundStyle(Color.syDim)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.syText.opacity(0.1) : Color.clear))
+        .modifier(HoverHighlight(radius: 8))
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { open(p.path) }
+        .simultaneousGesture(TapGesture().onEnded { selection = p.path })
+    }
+
+    private func chooseFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.prompt = "Open"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        ws.newSession(folder: url.path)
+        open(url.path)
+    }
+
+    private func open(_ path: String) {
+        app.claude.newSession(folder: path, profileID: profile.id)
+        dismiss()
     }
 }
 
@@ -374,30 +976,50 @@ struct ProjectHeader: View {
     @State private var hover = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        let tint = project.exists ? ProjectPalette.color(for: project.path) : Color.syDim
+        HStack(spacing: 7) {
             Image(systemName: "chevron.right")
-                .font(.syCaption2.weight(.semibold))
+                .font(.syCaption2.weight(.bold))
                 .foregroundStyle(Color.syDim)
                 .rotationEffect(.degrees(expanded ? 90 : 0))
                 .frame(width: 10)
-            Text(project.name).font(.syCallout.weight(.semibold)).foregroundStyle(project.exists ? Color.syText : Color.syMuted).lineLimit(1)
-            Text("\(project.sessions.count)").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
-            Spacer()
-            Button(action: onNew) { Image(systemName: "plus") }
-                .buttonStyle(.borderless)
-                .foregroundStyle(Color.syMuted)
-                .opacity(hover ? 1 : 0.5)
-                .help("New session")
-                .accessibilityLabel("New session")
-                .disabled(!project.exists)
+            Image(systemName: expanded ? "folder.fill" : "folder")
+                .font(.syCallout)
+                .foregroundStyle(tint)
+                .frame(width: 16)
+            Text(project.name)
+                .font(.syBody.weight(.semibold))
+                .foregroundStyle(project.exists ? Color.syText : Color.syMuted)
+                .lineLimit(1)
+            Text(verbatim: "\(project.sessions.count)")
+                .font(.syCaption2.monospacedDigit())
+                .foregroundStyle(Color.syDim)
+            Spacer(minLength: 4)
+            Button(action: onNew) {
+                Image(systemName: "plus")
+                    .font(.syCaption.weight(.semibold))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(Color.syMuted)
+            .opacity(hover ? 1 : 0)
+            .help("New session in \(project.name)")
+            .accessibilityLabel("New session in \(project.name)")
+            .disabled(!project.exists)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .frame(minHeight: 28)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(hover ? Color.syText.opacity(0.05) : Color.clear))
         .contentShape(Rectangle())
         .onTapGesture(perform: onToggle)
-        .onHover { hover = $0 }
+        .onHover { h in withAnimation(.easeOut(duration: Motion.Dur.micro)) { hover = h } }
         .help(project.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
         .textCase(nil)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
+        .padding(.top, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(project.name), \(project.sessions.count) sessions, \(expanded ? "expanded" : "collapsed")")
     }
 }
 
@@ -408,12 +1030,12 @@ enum SessionTree {
         var id: String { session.id }
     }
 
-    static func build(_ sessions: [ClaudeSessionInfo]) -> [Node] {
+    static func build(_ sessions: [ClaudeSessionInfo], detached: Set<String> = []) -> [Node] {
         let ids = Set(sessions.map(\.id))
         var children: [String: [ClaudeSessionInfo]] = [:]
         var roots: [ClaudeSessionInfo] = []
         for s in sessions {
-            if let p = s.parentId, p != s.id, ids.contains(p) { children[p, default: []].append(s) } else { roots.append(s) }
+            if let p = s.parentId, p != s.id, ids.contains(p), !detached.contains(s.id) { children[p, default: []].append(s) } else { roots.append(s) }
         }
         return roots
             .map { Node(session: $0, children: (children[$0.id] ?? []).sorted { $0.modified > $1.modified }) }
@@ -455,38 +1077,14 @@ struct SessionRow: View {
     var collapsed = false
     var depth = 0
     var last = false
+    var showAccount = false
     var onToggle: () -> Void = {}
     @State private var expired = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             if depth > 0 {
-                SessionTreeGuide(last: last).padding(.leading, 10)
-            }
-            Text(session.title)
-                .font(.syBody)
-                .fontWeight(open ? .semibold : .regular)
-                .foregroundStyle(depth > 0 ? Color.syMuted : Color.syText)
-                .lineLimit(1)
-            if childCount > 0 {
-                Button(action: onToggle) {
-                    Image(systemName: "chevron.down")
-                        .font(.syCaption2.weight(.semibold))
-                        .rotationEffect(.degrees(collapsed ? -90 : 0))
-                        .foregroundStyle(Color.syDim)
-                        .padding(2)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(collapsed ? "Expand" : "Collapse")
-                .accessibilityLabel(collapsed ? "Expand" : "Collapse")
-            }
-            Spacer(minLength: 8)
-            if session.prNumber != nil {
-                Image(systemName: "arrow.triangle.pull").font(.syCaption).foregroundStyle(Color.syViolet.opacity(0.85)).accessibilityLabel("Pull request")
-            }
-            if childCount > 0 {
-                Text("\(childCount)").font(.syCaption.monospacedDigit()).foregroundStyle(Color.syDim)
+                SessionTreeGuide(last: last).padding(.leading, 6)
             }
             SessionIndicatorDot(indicator: expired ? SessionIndicator(closed: session) : indicator)
                 .task(id: indicator == .working && !open) {
@@ -495,11 +1093,68 @@ struct SessionRow: View {
                     if left > 0 { try? await Task.sleep(for: .seconds(left + 0.2)) }
                     expired = true
                 }
+            Text(session.title)
+                .font(.syBody)
+                .fontWeight(open ? .medium : .regular)
+                .foregroundStyle(depth > 0 ? Color.syMuted : Color.syText)
+                .lineLimit(1)
+            if childCount > 0 {
+                Button(action: onToggle) {
+                    HStack(spacing: 2) {
+                        Image(systemName: "chevron.down")
+                            .font(.syCaption2.weight(.semibold))
+                            .rotationEffect(.degrees(collapsed ? -90 : 0))
+                        Text(verbatim: "\(childCount)").font(.syCaption2.monospacedDigit())
+                    }
+                    .foregroundStyle(Color.syDim)
+                    .padding(.horizontal, 3)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(collapsed ? "Show nested sessions" : "Hide nested sessions")
+                .accessibilityLabel(collapsed ? "Show nested sessions" : "Hide nested sessions")
+            }
+            Spacer(minLength: 6)
+            if let worktree = session.worktreeName {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.syCaption2)
+                    .foregroundStyle(Color.syDim)
+                    .help("Worktree " + worktree)
+                    .accessibilityLabel("Worktree " + worktree)
+            }
+            if let n = session.prNumber {
+                Text(verbatim: "#\(n)")
+                    .font(.syCaption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(Color.syViolet)
+                    .accessibilityLabel("Pull request \(n)")
+            }
+            if showAccount, let profile = ClaudeProfiles.shared.profile(id: session.profileID) {
+                Circle()
+                    .fill(AgentAccountChip.color(for: profile.id))
+                    .frame(width: 6, height: 6)
+                    .help(profile.label)
+                    .accessibilityLabel("Account \(profile.label)")
+            }
+            Text(Self.age(session.modified))
+                .font(.syCaption2.monospacedDigit())
+                .foregroundStyle(Color.syDim)
+                .frame(minWidth: 22, alignment: .trailing)
         }
-        .padding(.vertical, 7)
-        .padding(.leading, 4)
-        .frame(minHeight: 32)
+        .padding(.vertical, 5)
+        .padding(.leading, 2)
+        .frame(minHeight: 28)
         .help(details)
+    }
+
+    static func age(_ date: Date) -> String {
+        let s = max(0, Int(Date().timeIntervalSince(date)))
+        switch s {
+        case ..<60: return "now"
+        case ..<3600: return "\(s / 60)m"
+        case ..<86_400: return "\(s / 3600)h"
+        case ..<604_800: return "\(s / 86_400)d"
+        default: return "\(s / 604_800)w"
+        }
     }
 
     private var details: String {
@@ -514,18 +1169,45 @@ struct SessionRow: View {
 struct OpenTabRow: View {
     let tab: ClaudeTab
     let selected: Bool
+    var pinned = false
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(tab.title).font(.syBody).lineLimit(1).fontWeight(selected ? .semibold : .regular).foregroundStyle(Color.syText)
+            if tab.unread && tab.state != .working && tab.state != .waiting {
+                SessionIndicatorDot(indicator: .done)
+            } else {
+                SessionStateGlyph(state: tab.state).frame(width: 14, height: 14)
+            }
+            Text(tab.title)
+                .font(.syBody)
+                .fontWeight(selected ? .semibold : .regular)
+                .foregroundStyle(Color.syText)
+                .lineLimit(1)
             Spacer(minLength: 6)
-            Text(tab.projectName).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
-            SessionIndicatorDot(indicator: SessionIndicator(tab: tab))
+            if pinned {
+                Image(systemName: "pin.fill").font(.syCaption2).foregroundStyle(Color.syDim)
+            }
+            Text(tab.projectName)
+                .font(.syCaption)
+                .foregroundStyle(Color.syDim)
+                .lineLimit(1)
+                .frame(maxWidth: 110, alignment: .trailing)
         }
-        .padding(.vertical, 7)
-        .padding(.leading, 4)
-        .frame(minHeight: 32)
-        .help(tab.state.help)
+        .padding(.vertical, 5)
+        .padding(.leading, 2)
+        .frame(minHeight: 28)
+        .hoverTip(activityTip)
+    }
+
+    /// The session's state and what the agent is doing right now (or did last).
+    private var activityTip: String {
+        var lines = [tab.title, tab.state.title]
+        if let chat = tab.chat, let last = chat.items.last(where: { if case .tool = $0 { return true }; return false }),
+           case .tool(let call) = last {
+            let verb = call.status == .running ? "Now: " : "Last: "
+            lines[1] += " · " + verb + ToolGrouping.title(call, folder: tab.folder)
+        }
+        return lines.joined(separator: "\n")
     }
 }
 
@@ -535,7 +1217,7 @@ struct SessionStateGlyph: View {
     var body: some View {
         Group {
             switch state {
-            case .working: ProgressView().controlSize(.mini)
+            case .working: PYLoader(size: 11, label: "Working")
             case .waiting: Circle().fill(Color.syAmber).frame(width: 7, height: 7)
             case .active: Circle().fill(Color.syMuted).frame(width: 5, height: 5)
             case .sleeping, .stopped: Circle().strokeBorder(Color.syDim, lineWidth: 1).frame(width: 6, height: 6)
@@ -627,7 +1309,7 @@ struct ClaudeWorkspaceView: View {
                                                     Text("Session ended" + (tab.exitCode.map { " (\($0))" } ?? "")).foregroundStyle(Color.syMuted)
                                                 }
                                                 HStack {
-                                                    Button("Resume session") { ws.restart(tab) }.buttonStyle(.borderedProminent).tint(.syAgentAccent)
+                                                    Button("Resume session") { ws.restart(tab) }.buttonStyle(.borderedProminent).tint(.syAgentFill)
                                                     Button("Close tab") { ws.close(tab) }
                                                 }
                                             }
@@ -710,37 +1392,77 @@ struct ClaudeEmptyState: View {
 
     var body: some View {
         let ws = app.claude
-        VStack(spacing: 16) {
-            Image(systemName: "terminal").font(.system(size: 34, weight: .light)).foregroundStyle(Color.syMuted)
-            Text("Agents").font(.syTitle2.weight(.semibold)).foregroundStyle(Color.syText)
-            Text("Runs Claude Code, installed on this Mac. Start a new session in a project or resume one from the history on the left.")
-                .foregroundStyle(Color.syMuted)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(ws.projects.filter(\.exists).prefix(6)) { p in
-                    Button {
-                        ws.newSession(folder: p.path)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "folder").foregroundStyle(Color.syMuted).frame(width: 22)
-                            Text(p.name).fontWeight(.medium).foregroundStyle(Color.syText)
-                            Spacer()
-                            Text(Fmt.rel(p.lastActivity)).font(.syCaption).foregroundStyle(Color.syDim)
-                            Image(systemName: "plus").foregroundStyle(Color.syMuted)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                        .card(radius: 10)
-                    }
-                    .buttonStyle(.plain)
+        let projects = Array(ws.projects.filter(\.exists).prefix(6))
+        ZStack {
+            if Theme.isBrand { BrandAurora().opacity(0.8) }
+            VStack(spacing: 18) {
+                ZStack(alignment: .bottom) {
+                    HarborWaves().frame(width: 180, height: 20).offset(y: 14)
+                    DrawnLogoMark(key: "agents-empty", size: 88)
                 }
+                .padding(.bottom, 10)
+                Text("Agents on deck")
+                    .font(.system(size: TextZoom.shared.size(26), weight: .semibold, design: .serif))
+                    .foregroundStyle(Color.syText)
+                Text("Runs Claude Code, installed on this Mac. Start a new session in a project or resume one from the history on the left.")
+                    .foregroundStyle(Color.syMuted)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 440)
+                if !projects.isEmpty {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                        ForEach(projects) { p in
+                            AgentProjectCard(name: p.name, path: p.path, last: p.lastActivity) { ws.newSession(folder: p.path) }
+                        }
+                    }
+                    .frame(maxWidth: 520)
+                    .padding(.top, 6)
+                }
+                HStack(spacing: 16) {
+                    HStack(spacing: 6) { Keycap(key: "⌘N"); Text("New session").font(.syCaption).foregroundStyle(Color.syMuted) }
+                    HStack(spacing: 6) { Keycap(key: "⇧⌘K"); Text("Go to session").font(.syCaption).foregroundStyle(Color.syMuted) }
+                }
+                .padding(.top, 4)
             }
-            .frame(width: 380)
+            .padding(32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .surface(.panel)
+    }
+}
+
+private struct AgentProjectCard: View {
+    let name: String
+    let path: String
+    let last: Date
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "folder.fill")
+                    .font(.syIcon(13))
+                    .foregroundStyle(Color.syCoral)
+                    .frame(width: 30, height: 30)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.syCoral.opacity(0.12)))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
+                    Text(Fmt.rel(last)).font(.syCaption).foregroundStyle(Color.syMuted)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "plus")
+                    .font(.syIcon(11))
+                    .foregroundStyle(hovering ? Color.syCoralInk : Color.syDim)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.syRaised))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(hovering ? Color.syCoral.opacity(0.45) : Color.syLine))
+            .shadow(color: .black.opacity(hovering ? 0.07 : 0.03), radius: hovering ? 10 : 4, y: 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .onHover { h in withAnimation(.easeOut(duration: Motion.Dur.fast)) { hovering = h } }
+        .help("New session in \(path)")
     }
 }
 
@@ -751,33 +1473,29 @@ struct ClaudeTabBar: View {
         let ws = app.claude
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
-                ForEach(ws.tabs) { tab in
-                    let selected = tab.id == ws.selectedTabID
-                    HStack(spacing: 6) {
-                        SessionStateGlyph(state: tab.state)
-                        Text(tab.title).lineLimit(1).frame(maxWidth: 180, alignment: .leading).foregroundStyle(selected ? Color.syText : Color.syMuted)
-                        Text(tab.projectName).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
-                        Button { ws.requestClose(tab) } label: { Image(systemName: "xmark").font(.syCaption2.weight(.bold)).frame(width: 16, height: 16).contentShape(Rectangle()) }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(Color.syMuted)
-                            .help("Close \(tab.title)")
-                            .accessibilityLabel("Close \(tab.title)")
-                    }
-                    .font(.syCallout)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: Radius.m).fill(selected ? Color.sySelected : Color.clear))
-                    .contentShape(Rectangle())
-                    .onTapGesture { ws.selectedTabID = tab.id }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel("\(tab.title), \(tab.projectName), \(tab.state.title)")
-                    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-                    .accessibilityAction { ws.selectedTabID = tab.id }
+                ForEach(ws.barTabs) { tab in
+                    ClaudeTabChip(tab: tab, selected: tab.id == ws.selectedTabID, pinned: AgentSessionPrefs.shared.isPinned(tab.sessionId))
+                        .tabReorder(tab, ws: ws, vertical: false)
                 }
                 Menu {
                     if let current = ws.selectedTab {
-                        Button("Chat in \(current.projectName)") { ws.newSession(folder: current.folder, kind: .chat) }
-                        Button("Terminal in \(current.projectName)") { ws.newSession(folder: current.folder, kind: .terminal) }
+                        Button("Chat in \(current.projectName)") { ws.newSession(folder: current.folder, kind: .chat, profileID: current.profile?.id) }
+                        Button("Terminal in \(current.projectName)") { ws.newSession(folder: current.folder, kind: .terminal, profileID: current.profile?.id) }
+                        if ClaudeProfiles.shared.hasSeveral {
+                            Menu("New Chat As") {
+                                ForEach(ClaudeProfiles.shared.visible) { p in
+                                    Button(p.email.map { "\(p.label) · \($0)" } ?? p.label) { ws.newSession(folder: current.folder, kind: .chat, profileID: p.id) }
+                                }
+                            }
+                        }
+                        Divider()
+                    }
+                    if !AgentEnvironments.shared.items.isEmpty {
+                        Menu("Environments") {
+                            ForEach(AgentEnvironments.shared.items) { env in
+                                Button { ws.newSession(in: env) } label: { Label(env.name, systemImage: env.icon) }
+                            }
+                        }
                         Divider()
                     }
                     ForEach(ws.projects.filter(\.exists).prefix(12)) { p in
@@ -795,6 +1513,8 @@ struct ClaudeTabBar: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
         }
+        .scrollBounceBehavior(.basedOnSize)
+        .fixedSize(horizontal: false, vertical: true)
         .modifier(ClaudeBarBackground())
     }
 }
@@ -808,7 +1528,24 @@ struct ClaudeControlBar: View {
         HStack(spacing: 6) {
             HStack(spacing: 8) {
                 Text(tab.projectName).fontWeight(.semibold).foregroundStyle(Color.syText).lineLimit(1)
-                AgentBranchMenu(tab: tab, pr: ws.pullRequest(for: tab))
+                    .layoutPriority(2)
+                AgentAccountChip(profile: tab.profile)
+                if let env = tab.environment {
+                    Label(env.name, systemImage: env.icon)
+                        .labelStyle(CompactLabelStyle())
+                        .font(.syCaption.weight(.medium))
+                        .foregroundStyle(Color.syAgentAccent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.syAgentAccent.opacity(0.12)))
+                        .help("Environment: " + env.name)
+                }
+                let pr = ws.pullRequest(for: tab)
+                ViewThatFits(in: .horizontal) {
+                    AgentBranchMenu(tab: tab, pr: pr, style: .full)
+                    AgentBranchMenu(tab: tab, pr: pr, style: .compact)
+                    AgentBranchMenu(tab: tab, pr: pr, style: .minimal)
+                }
                 TabStateBadge(state: tab.state, memory: tab.memoryBytes)
             }
             .lineLimit(1)
@@ -902,6 +1639,8 @@ struct ClaudeControlBar: View {
         .font(.syCallout)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+        .clipped()
         .modifier(ClaudeBarBackground())
     }
 
@@ -995,9 +1734,9 @@ struct ChangesPanel: View {
         let git = tab.git
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                if git.loading { ProgressView().controlSize(.mini) }
+                if git.loading { PYLoader(size: 12) }
                 Text(git.changes.isEmpty ? "No uncommitted changes" : plural(git.changes.count, "file changed", "files changed"))
-                    .font(.syCaption).foregroundStyle(Color.syMuted)
+                    .font(.syCaption.weight(.medium)).foregroundStyle(git.changes.isEmpty ? Color.syMuted : Color.syText)
                 if !git.changes.isEmpty {
                     DiffStat(additions: git.changes.reduce(0) { $0 + $1.additions }, deletions: git.changes.reduce(0) { $0 + $1.deletions })
                 }
@@ -1010,28 +1749,37 @@ struct ChangesPanel: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             if !git.unpushed.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Unpushed commits" + " · \(git.unpushed.count)").font(.syCaption.weight(.semibold)).foregroundStyle(Color.syMuted)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.up.circle.fill").foregroundStyle(Color.syCoral)
+                        Text(plural(git.unpushed.count, "unpushed commit", "unpushed commits"))
+                            .font(.sy(size: 10, weight: .semibold))
+                            .textCase(.uppercase)
+                            .tracking(0.5)
+                            .foregroundStyle(Color.syCoralInk)
+                    }
                     ForEach(git.unpushed.prefix(6)) { c in
                         HStack(spacing: 6) {
-                            Text(c.short).font(.syCaption.monospaced()).foregroundStyle(Color.syMuted)
-                            Text(c.subject).font(.syCaption).lineLimit(1)
+                            Text(c.short)
+                                .font(.syCaption2.monospaced())
+                                .foregroundStyle(Color.syMuted)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.syText.opacity(0.05)))
+                            Text(c.subject).font(.syCaption).foregroundStyle(Color.syText).lineLimit(1)
                         }
                     }
                 }
+                .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.syCoral.opacity(0.06)))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syCoral.opacity(0.2)))
                 .padding(.horizontal, 10)
-                .padding(.bottom, 6)
+                .padding(.bottom, 8)
             }
             ClaudeHairline()
             if git.changes.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle").font(.syLargeTitle).foregroundStyle(Color.syDim)
-                    Text("Changes Claude makes will show up here automatically")
-                        .font(.syCallout).foregroundStyle(Color.syMuted).multilineTextAlignment(.center)
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                InspectorEmptyState(icon: "checkmark.seal", title: "Working tree clean", message: "Changes the agent makes will show up here automatically.")
             } else {
                 PlainDiffList(files: git.changes, collapsed: $collapsed, scrollTarget: target) { path in
                     NSWorkspace.shared.open(URL(fileURLWithPath: tab.folder + "/" + path))
@@ -1193,7 +1941,7 @@ struct BranchPRPanel: View {
                                     app.claude.send(AgentShip.openPRPrompt(branch: b, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead, remote: tab.git.remote), to: tab)
                                 }
                                 .buttonStyle(.borderedProminent)
-                                .tint(.syAgentAccent)
+                                .tint(.syAgentFill)
                                 .disabled(tab.busy)
                                 Button("Create in Browser") { openInBrowser("https://github.com/\(repo.full)/pull/new/\(b)") }
                             }
@@ -1355,7 +2103,7 @@ struct ForgeBranchPanel: View {
                                 app.claude.send(AgentShip.openPRPrompt(branch: b, defaultBranch: nil, hasChanges: !tab.git.changes.isEmpty, ahead: tab.git.ahead, remote: remote.with(kind: kind)), to: tab)
                             }
                             .buttonStyle(.borderedProminent)
-                            .tint(.syAgentAccent)
+                            .tint(.syAgentFill)
                             .disabled(tab.busy)
                             Button("Create in Browser") { openInBrowser(remote.newRequestURL(branch: b, kind: kind)) }
                         }
@@ -1563,7 +2311,7 @@ struct InspectorPRDetail: View {
                         Label("Ask Claude to review this PR", systemImage: "text.magnifyingglass")
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .tint(.syAgentAccent)
+                    .tint(.syAgentFill)
                 }
                 .controlSize(.small)
             }
@@ -1613,56 +2361,69 @@ struct InspectorPRDetail: View {
 }
 
 struct AgentBranchMenu: View {
+    /// How much of the label to show; the control bar falls back to a
+    /// shorter one when the full label doesn't fit its column.
+    enum Style { case full, compact, minimal }
+
     let tab: ClaudeTab
     let pr: (number: Int, url: String)?
+    var style: Style = .full
     @Environment(AppModel.self) private var app
     @State private var hover = false
+    @State private var open = false
+    @State private var query = ""
+    @State private var worktrees: [GitWorktreeEntry] = []
 
     var body: some View {
+        Group {
+            content
+        }
+        // Follow the agent when it moves into another worktree of this repo.
+        .task(id: tab.chat?.items.count ?? 0) {
+            try? await Task.sleep(for: .milliseconds(400))
+            await app.claude.followActiveWorktree(tab)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         let git = tab.git
         if git.isRepo, let branch = git.branch {
-            Menu {
-                Section("Switch branch") {
-                    ForEach(git.localBranches.prefix(20), id: \.self) { b in
-                        Button { switchTo(b) } label: {
-                            if b == branch { Label(b, systemImage: "checkmark") } else { Text(b) }
-                        }
-                        .disabled(b == branch || tab.state == .working)
-                    }
-                }
-                Button("New Branch…") { newBranch() }
-                    .disabled(tab.state == .working)
-                Divider()
-                if branch != "HEAD" {
-                    Button("Copy Branch Name") { copyToPasteboard(branch) }
-                }
-                if let worktree = git.worktree {
-                    Button("Reveal Worktree “\(worktree)” in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: tab.folder)]) }
-                }
-                if let pr {
-                    Button("Open Pull Request #\(pr.number)") {
-                        if let r = GitHubURL.parse(pr.url) { app.section = .prs(.mine); app.open(r) }
-                    }
-                    if !git.changes.isEmpty {
-                        Button("Commit and Push with Agent") { app.claude.send(AgentShip.commitPrompt(pr: pr.number), to: tab) }
-                            .disabled(tab.state == .working)
-                    }
-                } else if branch != "HEAD", let remote = git.remote {
-                    Button(remote.kind == .gitlab ? "Open Merge Request with Agent" : "Open Pull Request with Agent") {
-                        app.claude.send(AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: !git.changes.isEmpty, ahead: git.ahead, remote: remote), to: tab)
-                    }
-                    .disabled(tab.state == .working)
-                }
-            } label: {
+            Button { open.toggle() } label: {
+                label(branch: branch, git: git)
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+            .onHover { hover = $0 }
+            .help(helpText(branch: branch, git: git))
+            .popover(isPresented: $open, arrowEdge: .bottom) { panel(branch: branch, git: git) }
+        } else {
+            Color.clear.frame(width: 0, height: 0)
+        }
+    }
+
+    private func helpText(branch: String, git: GitWorkingCopy) -> String {
+        var parts = [branch]
+        if let worktree = git.worktree { parts.append("worktree " + worktree) }
+        if tab.followsOtherWorktree { parts.append("the agent is working here, not in the session folder") }
+        if let pr { parts.append("#\(pr.number)") }
+        return parts.joined(separator: " · ")
+    }
+
+    private func label(branch: String, git: GitWorkingCopy) -> some View {
                 HStack(spacing: 5) {
                     Image(systemName: "arrow.triangle.branch").imageScale(.small)
-                    Text(branch == "HEAD" ? "Detached HEAD" : branch).lineLimit(1).truncationMode(.middle).frame(maxWidth: 240, alignment: .leading).fixedSize(horizontal: false, vertical: true)
-                    if let worktree = git.worktree {
-                        Text("·").foregroundStyle(Color.syDim)
-                        Image(systemName: "square.stack.3d.up").imageScale(.small)
-                        Text(worktree).lineLimit(1)
+                    if style != .minimal {
+                        Text(branch == "HEAD" ? "Detached HEAD" : branch).lineLimit(1).truncationMode(.middle).frame(maxWidth: style == .full ? 240 : 150, alignment: .leading).fixedSize(horizontal: false, vertical: true)
                     }
-                    if let pr {
+                    if let worktree = git.worktree {
+                        if style != .minimal { Text("·").foregroundStyle(Color.syDim) }
+                        Image(systemName: "square.stack.3d.up").imageScale(.small)
+                        if style == .full {
+                            Text(worktree).lineLimit(1).truncationMode(.middle).frame(maxWidth: 180, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    if let pr, style != .minimal {
                         Text("·").foregroundStyle(Color.syDim)
                         Text("#\(pr.number)")
                     }
@@ -1672,15 +2433,130 @@ struct AgentBranchMenu: View {
                 .foregroundStyle(Color.syMuted)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.syText.opacity(hover ? 0.08 : 0.04)))
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.syText.opacity(hover || open ? 0.08 : 0.04)))
+                .contentShape(Rectangle())
+    }
+
+    // MARK: Popover
+
+    private func panel(branch: String, git: GitWorkingCopy) -> some View {
+        let working = tab.state == .working
+        let others = git.localBranches.filter { $0 != branch }
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let shown = q.isEmpty ? others : others.filter { $0.lowercased().contains(q) }
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("BRANCH")
+                .font(.syCaption2.weight(.semibold))
+                .tracking(0.6)
+                .foregroundStyle(Color.syDim)
+                .padding(.horizontal, 10)
+                .padding(.top, 4)
+                .padding(.bottom, 2)
+            BranchPanelRow(name: branch == "HEAD" ? "Detached HEAD" : branch, detail: git.worktree.map { "worktree · \($0)" } ?? "checked out", current: true) {}
+            if worktrees.count > 1 {
+                Divider().padding(.vertical, 4)
+                HStack {
+                    Text("WORKTREE")
+                        .font(.syCaption2.weight(.semibold))
+                        .tracking(0.6)
+                        .foregroundStyle(Color.syDim)
+                    Spacer()
+                    Text(working ? "agent is working" : "the agent works where you pick").font(.syCaption2).foregroundStyle(Color.syDim)
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 2)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(worktrees) { w in
+                            let here = ActiveWorktree.standard(w.path) == ActiveWorktree.standard(git.path)
+                            BranchPanelRow(icon: w.isMain ? "folder" : "square.stack.3d.up",
+                                           name: w.isMain ? "\(w.name) · main checkout" : w.name,
+                                           detail: (w.branch ?? "detached HEAD") + " · " + w.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"),
+                                           current: here, disabled: working) {
+                                close { app.claude.pinWorktree(tab, to: w) }
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 200)
+                .fixedSize(horizontal: false, vertical: true)
             }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .onHover { hover = $0 }
-            .help(git.worktree == nil ? "Branch" : "Branch and worktree")
+            if others.count > 0 {
+                Divider().padding(.vertical, 4)
+                HStack {
+                    Text("SWITCH BRANCH")
+                        .font(.syCaption2.weight(.semibold))
+                        .tracking(0.6)
+                        .foregroundStyle(Color.syDim)
+                    Spacer()
+                    if working { Text("agent is working").font(.syCaption2).foregroundStyle(Color.syDim) }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 2)
+                if others.count > 8 {
+                    TextField("Filter branches", text: $query)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 4)
+                }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(shown.prefix(40), id: \.self) { b in
+                            BranchPanelRow(name: b, detail: nil, current: false, disabled: working) {
+                                close { switchTo(b) }
+                            }
+                        }
+                        if shown.isEmpty {
+                            Text("No branch matches").font(.syCaption).foregroundStyle(Color.syMuted).padding(10)
+                        }
+                    }
+                }
+                .frame(maxHeight: 260)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            Divider().padding(.vertical, 4)
+            PanelActionRow(icon: "plus", title: "New branch…", disabled: working) { close { newBranch() } }
+            if branch != "HEAD" {
+                PanelActionRow(icon: "doc.on.doc", title: "Copy branch name") { close { copyToPasteboard(branch) } }
+            }
+            if let worktree = git.worktree {
+                PanelActionRow(icon: "folder", title: "Reveal “\(worktree)” in Finder") {
+                    close { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: git.path)]) }
+                }
+            }
+            if tab.followsOtherWorktree {
+                PanelActionRow(icon: "arrow.uturn.backward", title: "Show session folder") { close { tab.pinnedWorktree = nil; tab.follow(app.claude.git(for: tab.folder)) } }
+            }
+            if let pr {
+                Divider().padding(.vertical, 4)
+                PanelActionRow(icon: "arrow.triangle.pull", title: "Open pull request #\(pr.number)") {
+                    close { if let r = GitHubURL.parse(pr.url) { app.section = .prs(.mine); app.open(r) } }
+                }
+                if !git.changes.isEmpty {
+                    PanelActionRow(icon: "arrow.up.circle", title: "Commit and push with agent", disabled: working) {
+                        close { app.claude.send(AgentShip.commitPrompt(pr: pr.number), to: tab) }
+                    }
+                }
+            } else if branch != "HEAD", let remote = git.remote {
+                Divider().padding(.vertical, 4)
+                PanelActionRow(icon: "arrow.triangle.pull", title: remote.kind == .gitlab ? "Open merge request with agent" : "Open pull request with agent", disabled: working) {
+                    close { app.claude.send(AgentShip.openPRPrompt(branch: branch, defaultBranch: nil, hasChanges: !git.changes.isEmpty, ahead: git.ahead, remote: remote), to: tab) }
+                }
+            }
         }
+        .padding(6)
+        .frame(width: 360)
+        .onDisappear { query = "" }
+        .task {
+            let dir = tab.folder
+            worktrees = await Task.detached(priority: .userInitiated) { GitWorktreeEntry.list(in: dir) }.value
+        }
+    }
+
+    private func close(_ action: @escaping () -> Void) {
+        open = false
+        DispatchQueue.main.async(execute: action)
     }
 
     private func switchTo(_ branch: String, create: Bool = false) {
@@ -1708,6 +2584,52 @@ struct AgentBranchMenu: View {
         let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         switchTo(name, create: true)
+    }
+}
+
+private struct BranchPanelRow: View {
+    var icon = "arrow.triangle.branch"
+    let name: String
+    let detail: String?
+    let current: Bool
+    var disabled = false
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.syCallout.weight(current ? .semibold : .regular))
+                    .foregroundStyle(current ? Color.syAgentAccent : Color.syMuted)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(current ? Color.syAgentAccent.opacity(0.14) : Color.clear))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name)
+                        .font(.syCallout.weight(current ? .semibold : .regular))
+                        .foregroundStyle(Color.syText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let detail {
+                        Text(detail).font(.syCaption).foregroundStyle(Color.syMuted).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                Spacer(minLength: 6)
+                if current {
+                    Image(systemName: "checkmark").font(.syCaption.weight(.bold)).foregroundStyle(Color.syAgentAccent).frame(width: 14)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, current ? 6 : 2)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hover && !current && !disabled ? Color.syText.opacity(0.07) : Color.clear))
+            .contentShape(Rectangle())
+            .opacity(disabled ? 0.45 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .allowsHitTesting(!current)
+        .onHover { hover = $0 }
+        .accessibilityAddTraits(current ? [.isSelected] : [])
     }
 }
 
@@ -1741,5 +2663,216 @@ struct Collapsible<Content: View>: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
             }
         }
+    }
+}
+
+private struct ClaudeTabChip: View {
+    let tab: ClaudeTab
+    let selected: Bool
+    var pinned = false
+    @Environment(AppModel.self) private var app
+    @State private var hovering = false
+
+    var body: some View {
+        let ws = app.claude
+        let waiting = tab.state == .waiting
+        HStack(spacing: 6) {
+            if pinned {
+                Image(systemName: "pin.fill").font(.syCaption2).foregroundStyle(Color.syDim)
+            }
+            SessionStateGlyph(state: tab.state)
+            Text(tab.title)
+                .italic(tab.peek)
+                .lineLimit(1)
+                .frame(maxWidth: 180, alignment: .leading)
+                .foregroundStyle(selected ? Color.syText : Color.syMuted)
+                .fontWeight(selected ? .medium : .regular)
+            AgentAccountChip(profile: tab.profile, compact: true)
+            if waiting {
+                Text("Needs you")
+                    .font(.sy(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.syCoralInk)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.syCoral.opacity(0.14)))
+            } else {
+                Text(tab.projectName).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
+            }
+            Button { ws.requestClose(tab) } label: { Image(systemName: "xmark").font(.syCaption2.weight(.bold)).frame(width: 16, height: 16).contentShape(Rectangle()) }
+                .buttonStyle(.borderless)
+                .foregroundStyle(Color.syMuted)
+                .opacity(selected || hovering ? 1 : 0)
+                .help("Close \(tab.title)")
+                .accessibilityLabel("Close \(tab.title)")
+        }
+        .font(.syCallout)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background {
+            RoundedRectangle(cornerRadius: Radius.m)
+                .fill(selected ? Color.syRaised : (hovering ? Color.syHover : Color.clear))
+                .shadow(color: .black.opacity(selected ? 0.06 : 0), radius: 4, y: 1)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: Radius.m)
+                .strokeBorder(selected ? Color.syLineStrong : (waiting ? Color.syCoral.opacity(0.4) : Color.clear))
+        }
+        .overlay(alignment: .bottom) {
+            if selected {
+                Capsule().fill(Color.syAgentAccent).frame(height: 2).padding(.horizontal, 10).offset(y: 1)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { ws.selectedTabID = tab.id }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { AgentTabMenu.rename(tab, ws: ws) })
+        .contextMenu { AgentTabMenu(tab: tab, ws: ws) }
+        .onHover { h in withAnimation(.easeOut(duration: Motion.Dur.micro)) { hovering = h } }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(tab.title), \(tab.projectName), \(tab.state.title)")
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { ws.selectedTabID = tab.id }
+    }
+}
+
+struct InspectorEmptyState: View {
+    let icon: String
+    let title: String
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.syIcon(18))
+                .foregroundStyle(Color.syAgentAccent)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(Color.syAgentAccent.opacity(0.1)))
+                .overlay(Circle().strokeBorder(Color.syAgentAccent.opacity(0.2)))
+            Text(title)
+                .font(.system(size: TextZoom.shared.size(15), weight: .semibold, design: .serif))
+                .foregroundStyle(Color.syText)
+            Text(message)
+                .font(.syCaption)
+                .foregroundStyle(Color.syMuted)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 240)
+            HarborWaves().frame(width: 90, height: 12).opacity(0.7)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct AgentAccountChip: View {
+    let profile: ClaudeProfile?
+    var compact = false
+
+    static func color(for id: String) -> Color {
+        let palette: [Color] = [.sySky, .syViolet, .syTeal, .syAmberInk, .syIndigo, .syCoralInk]
+        let sum = id.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+        return palette[id == ClaudeProfiles.defaultID ? 0 : 1 + sum % (palette.count - 1)]
+    }
+
+    var body: some View {
+        if ClaudeProfiles.shared.hasSeveral, let profile {
+            let tint = Self.color(for: profile.id)
+            Text(compact ? profile.initial : profile.label)
+                .font(.sy(size: 10, weight: .semibold))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .padding(.horizontal, compact ? 5 : 6)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(tint.opacity(0.14)))
+                .help(profile.email.map { "\(profile.label) · \($0)" } ?? profile.label)
+                .accessibilityLabel("Account \(profile.label)")
+        }
+    }
+}
+
+struct AgentAccountFilter: View {
+    @Environment(AppModel.self) private var app
+    var onOpenProject: (ClaudeProfile) -> Void = { _ in }
+
+    var body: some View {
+        let ws = app.claude
+        HStack(spacing: 4) {
+            filterButton(title: "All", id: nil, tint: .syMuted, selected: ws.accountFilter == nil)
+            ForEach(ClaudeProfiles.shared.visible) { p in
+                filterButton(title: AgentAccountFilter.name(p), id: p.id, tint: AgentAccountChip.color(for: p.id), selected: ws.accountFilter == p.id)
+                    .simultaneousGesture(TapGesture(count: 2).onEnded { onOpenProject(p) })
+                    .contextMenu {
+                        Button("Open project as \(p.label)…") { onOpenProject(p) }
+                        Button("Rename “\(p.label)”…") { AgentRename.account(p) }
+                        if p.id != ClaudeProfiles.shared.activeID {
+                            Divider()
+                            Button("Make default for new sessions") { app.switchClaudeProfile(to: p.id) }
+                        }
+                    }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    static func name(_ p: ClaudeProfile) -> String {
+        let twins = ClaudeProfiles.shared.visible.filter { $0.label == p.label }.count > 1
+        guard twins, let user = p.email?.split(separator: "@").first else { return p.label }
+        return "\(p.label) · \(user)"
+    }
+
+    private func filterButton(title: String, id: String?, tint: Color, selected: Bool) -> some View {
+        Button {
+            app.claude.accountFilter = id
+            if let id { app.switchClaudeProfile(to: id) }
+        } label: {
+            HStack(spacing: 4) {
+                if id != nil { Circle().fill(tint).frame(width: 6, height: 6) }
+                Text(title).lineLimit(1)
+            }
+            .font(.syCaption.weight(selected ? .semibold : .regular))
+            .foregroundStyle(selected ? Color.syText : Color.syMuted)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(selected ? Color.syRaised : Color.clear))
+            .overlay(Capsule().strokeBorder(selected ? Color.syLineStrong : Color.syLine))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(id == nil ? "Sessions from all accounts" : "Only sessions from \(title). Double-click to open a project as \(title).")
+    }
+}
+
+extension View {
+    /// Drag a tab (in the tab bar or the Open list) onto another to move it there.
+    func tabReorder(_ tab: ClaudeTab, ws: ClaudeWorkspace, vertical: Bool) -> some View {
+        modifier(TabReorder(tab: tab, ws: ws, vertical: vertical))
+    }
+}
+
+private struct TabReorder: ViewModifier {
+    let tab: ClaudeTab
+    let ws: ClaudeWorkspace
+    let vertical: Bool
+    @State private var targeted = false
+    private static let prefix = "pullyard.tab|"
+
+    func body(content: Content) -> some View {
+        content
+            .draggable(Self.prefix + tab.id.uuidString) {
+                Text(tab.title).font(.syCallout).lineLimit(1).padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.syRaised))
+            }
+            .overlay(alignment: vertical ? .top : .leading) {
+                if targeted {
+                    Capsule().fill(Color.syAgentAccent)
+                        .frame(width: vertical ? nil : 2, height: vertical ? 2 : nil)
+                        .offset(x: vertical ? 0 : -3, y: vertical ? -1 : 0)
+                        .allowsHitTesting(false)
+                }
+            }
+            .dropDestination(for: String.self) { payloads, _ in
+                guard let raw = payloads.first, raw.hasPrefix(Self.prefix),
+                      let id = UUID(uuidString: String(raw.dropFirst(Self.prefix.count))) else { return false }
+                withAnimation(Motion.smooth) { ws.moveTab(id, onto: tab.id) }
+                return true
+            } isTargeted: { targeted = $0 }
     }
 }

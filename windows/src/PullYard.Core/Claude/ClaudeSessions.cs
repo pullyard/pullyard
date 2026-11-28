@@ -22,8 +22,9 @@ public sealed class ClaudeSessionInfo
     public string? ParentId { get; init; }
     public string? DesktopId { get; init; }
     public bool Archived { get; init; }
+    public string? ProfileId { get; init; }
 
-    public ClaudeSessionInfo With(string? title = null, DesktopLink? link = null) => new()
+    public ClaudeSessionInfo With(string? title = null, DesktopLink? link = null, string? profileId = null) => new()
     {
         Id = Id,
         File = File,
@@ -38,7 +39,8 @@ public sealed class ClaudeSessionInfo
         LinesRemoved = LinesRemoved,
         ParentId = link is null ? ParentId : link.Parent,
         DesktopId = link is null ? DesktopId : link.Local,
-        Archived = link?.Archived ?? Archived
+        Archived = link?.Archived ?? Archived,
+        ProfileId = profileId ?? ProfileId
     };
 
     public string? WorktreeName
@@ -77,6 +79,30 @@ public static class ClaudeSessionParser
             if (i >= 0) return cwd[..i];
         }
         return cwd;
+    }
+
+    public static List<ClaudeProject> LoadAccounts(IEnumerable<(string ProfileId, string Root)> roots, IReadOnlyDictionary<string, DesktopLink>? desktop = null)
+    {
+        var byPath = new Dictionary<string, List<ClaudeSessionInfo>>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>();
+        var dirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (profileId, root) in roots)
+        {
+            if (!dirs.Add(Path.TrimEndingDirectorySeparator(root))) continue;
+            foreach (var project in LoadAll(root, desktop))
+            {
+                foreach (var s in project.Sessions)
+                {
+                    if (!seen.Add(s.Id)) continue;
+                    if (!byPath.TryGetValue(project.Path, out var list)) byPath[project.Path] = list = new();
+                    list.Add(s.With(profileId: profileId));
+                }
+            }
+        }
+        return byPath
+            .Select(kv => new ClaudeProject { Id = kv.Key, Path = kv.Key, Sessions = kv.Value.OrderByDescending(s => s.Modified).ToList() })
+            .OrderByDescending(p => p.LastActivity)
+            .ToList();
     }
 
     public static List<ClaudeProject> LoadAll(string root, IReadOnlyDictionary<string, DesktopLink>? desktop = null)

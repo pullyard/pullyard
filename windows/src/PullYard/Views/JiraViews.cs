@@ -14,7 +14,9 @@ namespace PullYard.Views;
 
 public static class JiraService
 {
-    public static JiraAccount Account { get; } = new(Settings.Shared, new CredentialVault());
+    public static JiraConnections Connections { get; } = new(Settings.Shared, new CredentialVault());
+
+    public const string TicketGlyph = "\uE8EC";
 
     public const string TokenUrl = "https://id.atlassian.com/manage-profile/security/api-tokens";
 
@@ -46,30 +48,24 @@ public static class JiraService
 
 public sealed class JiraConnectForm : Grid
 {
-    private readonly JiraAccount account = JiraService.Account;
-    private readonly TextBox site = new() { PlaceholderText = L.T("Jira_SitePlaceholder", "Jira address — acme.atlassian.net") };
-    private readonly TextBox email = new() { PlaceholderText = L.T("Jira_EmailPlaceholder", "Atlassian account email (empty for a Data Center token)") };
-    private readonly PasswordBox token = new() { PlaceholderText = L.T("Jira_TokenPlaceholder", "API token") };
-    private readonly TextBlock error = Ui.Text("", 12, "red", wrap: true, select: true);
-    private readonly StackPanel body = Ui.V(10);
-    private bool busy;
+    private readonly JiraConnections store = JiraService.Connections;
+    private readonly StackPanel body = Ui.V(12);
+    private readonly TextBox ruleOrg = new() { PlaceholderText = L.T("Jira_RuleOrgPlaceholder", "GitHub organization"), MinWidth = 160 };
+    private readonly ComboBox ruleTarget = new() { MinWidth = 140 };
+    private string? editing;
+    private bool reconnect;
+    private bool adding;
 
     public JiraConnectForm()
     {
-        site.Text = account.Site;
-        email.Text = account.Email;
-        token.KeyDown += (_, e) =>
-        {
-            if (e.Key == Windows.System.VirtualKey.Enter) Connect();
-        };
         Children.Add(body);
         Loaded += (_, _) =>
         {
-            account.Changed -= OnChanged;
-            account.Changed += OnChanged;
+            store.Changed -= OnChanged;
+            store.Changed += OnChanged;
             Render();
         };
-        Unloaded += (_, _) => account.Changed -= OnChanged;
+        Unloaded += (_, _) => store.Changed -= OnChanged;
         Render();
     }
 
@@ -78,48 +74,253 @@ public sealed class JiraConnectForm : Grid
     private void Render()
     {
         body.Children.Clear();
-        if (account.IsConfigured)
+        var list = store.Connections;
+        if (list.Count == 0)
         {
-            var info = Ui.V(1, Ui.Text(account.DisplayName ?? L.T("Jira_Connected", "Connected"), 13, "text"), Ui.Caption(account.BaseUrl?.Host ?? ""));
-            var row = Ui.Columns((Ui.Glyph("", 16, "green"), Ui.Auto), (info, Ui.Star), (Ui.Button(L.T("Jira_Disconnect", "Disconnect"), account.Disconnect), Ui.Auto));
-            row.ColumnSpacing = 10;
-            body.Children.Add(row);
+            body.Children.Add(Ui.Text(L.T("Jira_ConnectHint", "Connect Jira to see the ticket for a pull request and move it between statuses. Your API token stays in Windows Credential Manager."), 13, "muted", wrap: true));
+            body.Children.Add(new JiraConnectionEditor(null, false, Render, null));
             return;
         }
-        body.Children.Add(Ui.Text(L.T("Jira_ConnectHint", "Connect Jira to see the ticket for a pull request and move it between statuses. Your API token stays in Windows Credential Manager."), 13, "muted", wrap: true));
-        body.Children.Add(site);
-        body.Children.Add(email);
-        var connect = Ui.Button(L.T("Jira_Connect", "Connect"), Connect, accent: true);
-        if (busy)
+        var rows = Ui.V(8);
+        foreach (var c in list)
         {
-            connect.Content = Ui.Spinner(14);
-            connect.IsEnabled = false;
+            if (editing == c.Id) rows.Children.Add(Ui.Card(new JiraConnectionEditor(c, reconnect, Close, Close), 10, "sunken", 12));
+            else rows.Children.Add(Row(c));
         }
-        if (token.Parent is Panel old) old.Children.Remove(token);
-        var row2 = Ui.Columns((token, Ui.Star), (connect, Ui.Auto));
-        body.Children.Add(row2);
-        body.Children.Add(Ui.Link(L.T("Jira_CreateToken", "Create an API token at id.atlassian.com"), () => LinkBrowser.Open(JiraService.TokenUrl)));
-        error.Visibility = error.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-        body.Children.Add(error);
+        body.Children.Add(rows);
+        if (adding) body.Children.Add(Ui.Card(new JiraConnectionEditor(null, false, Close, Close), 10, "sunken", 12));
+        else
+        {
+            var add = Ui.Button(L.T("Jira_AddConnection", "Add Jira connection"), () =>
+            {
+                adding = true;
+                editing = null;
+                Render();
+            }, glyph: "\uE710");
+            add.HorizontalAlignment = HorizontalAlignment.Left;
+            body.Children.Add(add);
+        }
+        var orgRules = store.OrgOverrides;
+        var repoRules = store.RepoOverrides;
+        if (list.Count > 1 || orgRules.Count > 0 || repoRules.Count > 0) body.Children.Add(Rules(list, orgRules, repoRules));
     }
 
-    private async void Connect()
+    private void Close()
     {
-        if (busy || site.Text.Trim().Length == 0 || token.Password.Trim().Length == 0) return;
-        busy = true;
-        error.Text = "";
+        editing = null;
+        adding = false;
+        reconnect = false;
         Render();
+    }
+
+    private FrameworkElement Row(JiraConnection c)
+    {
+        var ok = c.DisplayName is not null && store.Token(c.Id) is { Length: > 0 };
+        var icon = ok ? Ui.Glyph("\uE930", 16, "green") : Ui.Glyph("\uE7BA", 16, "amber");
+        Ui.Tip(icon, ok ? L.T("Jira_Connected", "Connected") : L.T("Jira_NeedsToken", "Needs a new token"));
+        var name = Ui.H(6, Ui.Text(c.Name, 13, "text", FontWeights.SemiBold));
+        if (c.DisplayName is { } who) name.Children.Add(Ui.Text(who, 12.5, "muted"));
+        var summary = Ui.Caption(c.ProjectSummary);
+        summary.TextTrimming = TextTrimming.CharacterEllipsis;
+        Ui.Tip(summary, c.ProjectKeys.Count > 0 ? string.Join(", ", c.ProjectKeys) : c.Host);
+        var id = c.Id;
+        var more = Ui.IconButton("\uE712", L.F("Jira_ConnectionMenu", "{0} options", c.Name), () => { }, "text");
+        more.Flyout = Ui.Menu(
+            Ui.MenuItem(L.T("Jira_Edit", "Edit…"), () => Edit(id, false), "\uE70F"),
+            Ui.MenuItem(L.T("Jira_Reconnect", "Reconnect with a new token…"), () => Edit(id, true), "\uE8D7"),
+            Ui.MenuItem(L.T("Jira_RefreshProjects", "Refresh projects"), () => store.RefreshProjects(id).Forget(), "\uE72C"),
+            Ui.Separator(),
+            Ui.MenuItem(L.T("Jira_Remove", "Remove…"), () => Remove(c).Forget(), "\uE74D"));
+        var row = Ui.Columns((icon, Ui.Auto), (Ui.V(1, name, summary), Ui.Star), (more, Ui.Auto));
+        row.ColumnSpacing = 10;
+        return row;
+    }
+
+    private void Edit(string id, bool token)
+    {
+        editing = id;
+        reconnect = token;
+        adding = false;
+        Render();
+    }
+
+    private async Task Remove(JiraConnection c)
+    {
+        if (await Dialogs.Confirm(XamlRoot, L.F("Jira_RemoveQ", "Remove “{0}”?", c.Name), L.T("Jira_RemoveButton", "Remove"), true,
+                L.T("Jira_RemoveHelp", "Its API token is deleted from Windows Credential Manager, and rules that point to it go too.")))
+            store.Remove(c.Id);
+    }
+
+    private FrameworkElement Rules(List<JiraConnection> list, Dictionary<string, string> orgRules, Dictionary<string, string> repoRules)
+    {
+        var panel = Ui.V(6, Ui.Text(L.T("Jira_Rules", "Rules"), 13, "text", FontWeights.SemiBold),
+            Ui.Text(L.T("Jira_RulesHint", "Tickets go to the site that owns their project key. A rule sends every ticket of a repository or organization to one connection."), 12, "muted", wrap: true));
+        string NameOf(string id) => list.FirstOrDefault(c => c.Id == id)?.Name ?? L.T("Jira_RemovedConnection", "removed connection");
+        foreach (var (full, id) in repoRules.OrderBy(kv => kv.Key))
+        {
+            var key = full;
+            panel.Children.Add(RuleRow("\uE8B7", full, NameOf(id), () => store.SetRepoOverride(null, key)));
+        }
+        foreach (var (org, id) in orgRules.OrderBy(kv => kv.Key))
+        {
+            var key = org;
+            panel.Children.Add(RuleRow("\uE716", L.F("Jira_AllOf", "All of {0}", org), NameOf(id), () => store.SetOrgOverride(null, key)));
+        }
+        ruleTarget.Items.Clear();
+        foreach (var c in list) ruleTarget.Items.Add(new ComboBoxItem { Content = c.Name, Tag = c.Id });
+        ruleTarget.SelectedIndex = 0;
+        if (ruleOrg.Parent is Panel oldOrg) oldOrg.Children.Remove(ruleOrg);
+        if (ruleTarget.Parent is Panel oldTarget) oldTarget.Children.Remove(ruleTarget);
+        var addRule = Ui.Button(L.T("Jira_AddRule", "Add rule"), () =>
+        {
+            var org = ruleOrg.Text.Trim().TrimStart('@');
+            if (org.Length == 0 || (ruleTarget.SelectedItem as ComboBoxItem)?.Tag is not string id) return;
+            ruleOrg.Text = "";
+            store.SetOrgOverride(id, org);
+        });
+        panel.Children.Add(new WrapPanel(8, ruleOrg, ruleTarget, addRule) { VerticalSpacing = 8 });
+        panel.Margin = new Thickness(0, 6, 0, 0);
+        return panel;
+    }
+
+    private static FrameworkElement RuleRow(string glyph, string scope, string target, Action remove)
+    {
+        var left = Ui.H(6, Ui.Glyph(glyph, 12, "muted"), Ui.Text(scope, 13, "text", mono: true), Ui.Glyph("\uE72A", 10, "dim"), Ui.Text(target, 13, "sky"));
+        var x = Ui.IconButton("\uE711", L.F("Jira_RemoveRule", "Remove rule for {0}", scope), remove);
+        return Ui.Columns((left, Ui.Star), (x, Ui.Auto));
+    }
+}
+
+public sealed class JiraConnectionEditor : StackPanel
+{
+    private readonly JiraConnections store = JiraService.Connections;
+    private readonly JiraConnection? existing;
+    private readonly Action done;
+    private readonly TextBox name = new() { PlaceholderText = L.T("Jira_NamePlaceholder", "Name, e.g. Work") };
+    private readonly TextBox site = new() { PlaceholderText = L.T("Jira_SitePlaceholder", "Jira address — acme.atlassian.net") };
+    private readonly TextBox email = new() { PlaceholderText = L.T("Jira_EmailPlaceholder", "Atlassian account email (empty for a Data Center token)") };
+    private readonly PasswordBox token = new();
+    private readonly TextBlock error = Ui.Text("", 12, "red", wrap: true, select: true);
+    private readonly Button save;
+    private bool busy;
+
+    public JiraConnectionEditor(JiraConnection? existing, bool focusToken, Action done, Action? cancel)
+    {
+        this.existing = existing;
+        this.done = done;
+        Spacing = 10;
+        name.Text = existing?.Name ?? "";
+        site.Text = existing?.Site ?? "";
+        email.Text = existing?.Email ?? "";
+        token.PlaceholderText = existing is null ? L.T("Jira_TokenPlaceholder", "API token") : L.T("Jira_TokenKeep", "API token (leave empty to keep the current one)");
+        token.KeyDown += (_, e) =>
+        {
+            if (e.Key == Windows.System.VirtualKey.Enter) Save().Forget();
+        };
+        save = Ui.Button(existing is null ? L.T("Jira_Connect", "Connect") : L.T("Common_Save", "Save"), () => Save().Forget(), accent: true);
+        Children.Add(name);
+        Children.Add(site);
+        Children.Add(email);
+        Children.Add(token);
+        var actions = Ui.H(8, save);
+        if (cancel is not null) actions.Children.Add(Ui.Button(L.T("Jira_Cancel", "Cancel"), cancel));
+        Children.Add(Ui.Columns((actions, Ui.Star), (Ui.Link(L.T("Jira_CreateToken", "Create an API token at id.atlassian.com"), () => LinkBrowser.Open(JiraService.TokenUrl)), Ui.Auto)));
+        error.Visibility = Visibility.Collapsed;
+        Children.Add(error);
+        if (focusToken) Loaded += (_, _) => token.Focus(FocusState.Programmatic);
+    }
+
+    private async Task Save()
+    {
+        if (busy || site.Text.Trim().Length == 0 || (existing is null && token.Password.Trim().Length == 0)) return;
+        busy = true;
+        error.Visibility = Visibility.Collapsed;
+        save.IsEnabled = false;
+        var label = save.Content;
+        save.Content = Ui.Spinner(14);
         try
         {
-            await account.Connect(site.Text, email.Text, token.Password);
+            if (existing is null) await store.Add(name.Text, site.Text, email.Text, token.Password);
+            else await store.Update(existing.Id, name.Text, site.Text, email.Text, token.Password);
             token.Password = "";
+            busy = false;
+            done();
+            return;
         }
         catch (Exception e)
         {
             error.Text = e.Message;
+            error.Visibility = Visibility.Visible;
         }
         busy = false;
-        Render();
+        save.Content = label;
+        save.IsEnabled = true;
+    }
+}
+
+public static class JiraRepo
+{
+    public static string? RoutedName(RepoRef repo) =>
+        JiraService.Connections.ConnectionForRepo(repo) is { } id ? JiraService.Connections.Connection(id)?.Name : null;
+
+    public static FrameworkElement? Badge(string full)
+    {
+        var store = JiraService.Connections;
+        if (!store.HasSeveral || RepoRef.Parse(full) is not { } repo || RoutedName(repo) is not { } name) return null;
+        var badge = Ui.H(3, Ui.Glyph(JiraService.TicketGlyph, 10, "sky"), Ui.Text(name, 11, "sky"));
+        Ui.Tip(badge, L.F("Jira_RepoUses", "Jira: {0}", name));
+        return badge;
+    }
+
+    public static FrameworkElement? Chip(RepoRef repo)
+    {
+        var store = JiraService.Connections;
+        if (!store.IsConfigured) return null;
+        var label = RoutedName(repo) is { } name ? name : L.T("Jira_ByKey", "Jira: by key");
+        var content = Ui.H(5, Ui.Glyph(JiraService.TicketGlyph, 11, "sky"), Ui.Text(label, 12, "sky", FontWeights.Medium));
+        var button = new DropDownButton
+        {
+            Content = content,
+            Padding = new Thickness(8, 2, 6, 3),
+            MinHeight = 0,
+            CornerRadius = new CornerRadius(11),
+            Background = Palette.Brush("sky", 0.12),
+            BorderThickness = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Ui.Tip(button, L.T("Jira_RepoChipTip", "Which Jira this repository uses"));
+        Ui.Named(button, L.F("Jira_RepoUses", "Jira: {0}", label));
+        button.Flyout = Menu(repo);
+        return button;
+    }
+
+    private static MenuFlyout Menu(RepoRef repo)
+    {
+        var store = JiraService.Connections;
+        var list = store.Connections;
+        var (repoRule, orgRule) = store.Override(repo);
+        var menu = new MenuFlyout();
+        menu.Items.Add(new MenuFlyoutItem { Text = L.F("Jira_ForRepo", "Jira for {0}", repo.Full), IsEnabled = false });
+        var ownerName = orgRule is not null ? list.FirstOrDefault(c => c.Id == orgRule)?.Name : null;
+        var automatic = ownerName is not null ? L.F("Jira_SameAsOwner", "Same as owner ({0})", ownerName) : L.T("Jira_Automatic", "Automatic");
+        menu.Items.Add(Ui.CheckItem(automatic, repoRule is null, () => store.SetRepoOverride(null, repo)));
+        foreach (var c in list)
+        {
+            var id = c.Id;
+            menu.Items.Add(Ui.CheckItem(c.Name, repoRule == id, () => store.SetRepoOverride(id, repo)));
+        }
+        if (list.Count > 1)
+        {
+            menu.Items.Add(Ui.Separator());
+            menu.Items.Add(new MenuFlyoutItem { Text = L.F("Jira_AllOfOwner", "All of {0}", repo.Owner), IsEnabled = false });
+            menu.Items.Add(Ui.CheckItem(L.T("Jira_ByProjectKey", "By project key"), orgRule is null, () => store.SetOrgOverride(null, repo.Owner)));
+            foreach (var c in list)
+            {
+                var id = c.Id;
+                menu.Items.Add(Ui.CheckItem(c.Name, orgRule == id, () => store.SetOrgOverride(id, repo.Owner)));
+            }
+        }
+        return menu;
     }
 }
 
@@ -182,7 +383,7 @@ public static class JiraUi
 public sealed class JiraTab : Grid
 {
     private readonly PRDetailViewModel model;
-    private readonly JiraAccount account = JiraService.Account;
+    private readonly JiraConnections account = JiraService.Connections;
     private readonly StackPanel content = Ui.V(16);
     private readonly Dictionary<string, JiraIssue> issues = new();
     private readonly Dictionary<string, string> errors = new();
@@ -264,7 +465,7 @@ public sealed class JiraTab : Grid
     private FrameworkElement Header(int count)
     {
         var title = Ui.Text(count == 1 ? L.T("Jira_LinkedOne", "1 linked ticket") : L.F("Jira_LinkedMany", "{0} linked tickets", count), 14, "text", FontWeights.SemiBold);
-        var info = Ui.V(1, title, Ui.Caption(account.BaseUrl?.Host ?? ""));
+        var info = Ui.V(1, title, Ui.Caption(account.Names(issues.Values)));
         Button toggle;
         if (linking)
         {
@@ -416,7 +617,7 @@ public sealed class JiraTab : Grid
     private async Task Load(List<string> keys)
     {
         foreach (var key in keys)
-            if (!issues.ContainsKey(key) && account.CachedIssue(key) is { } hit) issues[key] = hit;
+            if (!issues.ContainsKey(key) && account.CachedIssue(key, model.Ref.Repo) is { } hit) issues[key] = hit;
         var todo = keys.Where(k => !issues.ContainsKey(k) && !errors.ContainsKey(k) && pending.Add(k)).ToList();
         RenderIfLoaded();
         if (todo.Count == 0) return;
@@ -424,7 +625,7 @@ public sealed class JiraTab : Grid
         {
             try
             {
-                var issue = await account.Load(key);
+                var issue = await account.FetchIssue(key, model.Ref.Repo);
                 issues[key] = issue;
                 errors.Remove(key);
             }
@@ -517,12 +718,18 @@ public sealed class JiraIssueCard : Grid
             var parentRow = Ui.H(5, Ui.Glyph("", 10, "muted"), Ui.Text(parentKey, 12, "muted", FontWeights.SemiBold, mono: true), parentSummary);
             stack.Children.Add(JiraUi.Plain(parentRow, () =>
             {
-                if (JiraService.Account.BaseUrl is { } b) LinkBrowser.Open(JiraAuth.BaseString(b) + "/browse/" + parentKey);
+                LinkBrowser.Open(issue.SiteBase + "/browse/" + parentKey);
             }, L.T("Jira_ParentTip", "Parent ticket — open in Jira")));
         }
 
         var (glyph, color) = JiraService.TypeIcon(issue.Type);
         var left = Ui.H(10, Ui.IconTile(glyph, color, 24), Ui.Text(issue.Key, 13, "text", FontWeights.SemiBold, mono: true), issue.Type is { } type ? Ui.Caption(type) : null);
+        if (JiraService.Connections.HasSeveral && JiraService.Connections.Connection(issue.ConnectionId) is { } owner)
+        {
+            var site = Ui.Chip(owner.Name, "sky", JiraService.TicketGlyph);
+            Ui.Tip(site, owner.Host);
+            left.Children.Add(site);
+        }
         RenderStatus();
         var flyout = new Flyout { Content = transitionsPanel, Placement = FlyoutPlacementMode.BottomEdgeAlignedRight };
         flyout.Opening += (_, _) =>
@@ -672,7 +879,7 @@ public sealed class JiraIssueCard : Grid
     private async Task LoadTransitions()
     {
         if (loadingTransitions || transitions is { Count: > 0 }) return;
-        if (JiraService.Account.Client() is not { } client)
+        if (JiraService.Connections.Client(issue.ConnectionId) is not { } client)
         {
             transitions = new();
             RenderTransitions();
@@ -694,7 +901,7 @@ public sealed class JiraIssueCard : Grid
 
     private async Task Move(JiraTransition t)
     {
-        if (JiraService.Account.Client() is not { } client) return;
+        if (JiraService.Connections.Client(issue.ConnectionId) is not { } client) return;
         moving = true;
         errorText.Visibility = Visibility.Collapsed;
         RenderStatus();
@@ -702,7 +909,7 @@ public sealed class JiraIssueCard : Grid
         {
             await client.Transition(issue.Key, t.Id);
             transitions = null;
-            onChange(await client.Issue(issue.Key));
+            onChange((await client.Issue(issue.Key)) with { ConnectionId = issue.ConnectionId });
         }
         catch (Exception e)
         {
@@ -717,7 +924,8 @@ public sealed class JiraIssueCard : Grid
 public sealed class JiraMergeFollowUp : Grid
 {
     private readonly PullRequestDetail pr;
-    private readonly JiraAccount account = JiraService.Account;
+    private readonly RepoRef repo;
+    private readonly JiraConnections account = JiraService.Connections;
     private readonly StackPanel body = Ui.V(6);
     private List<JiraIssue> issues = new();
     private readonly Dictionary<string, JiraTransition> moves = new();
@@ -725,9 +933,10 @@ public sealed class JiraMergeFollowUp : Grid
     private string? error;
     private bool dismissed;
 
-    public JiraMergeFollowUp(PullRequestDetail pr)
+    public JiraMergeFollowUp(PullRequestDetail pr, RepoRef repo)
     {
         this.pr = pr;
+        this.repo = repo;
         Children.Add(new Border
         {
             Background = Palette.Brush("sky", 0.07),
@@ -742,20 +951,13 @@ public sealed class JiraMergeFollowUp : Grid
     private async Task Load()
     {
         dismissed = JiraFollowUp.IsDismissed(Settings.Shared, pr.Url);
-        if (!pr.Merged || dismissed || !account.IsConfigured || account.Client() is not { } client) return;
+        if (!pr.Merged || dismissed || !account.IsConfigured) return;
         var found = new List<JiraIssue>();
         foreach (var key in account.Keys(pr).Take(5))
         {
-            if (account.CachedIssue(key) is { } hit)
-            {
-                found.Add(hit);
-                continue;
-            }
             try
             {
-                var fresh = await client.Issue(key);
-                account.Remember(fresh);
-                found.Add(fresh);
+                found.Add(await account.FetchIssue(key, repo));
             }
             catch (Exception)
             {
@@ -763,6 +965,7 @@ public sealed class JiraMergeFollowUp : Grid
         }
         foreach (var issue in JiraFollowUp.Open(found))
         {
+            if (account.Client(issue.ConnectionId) is not { } client) continue;
             try
             {
                 if (JiraFollowUp.DoneTransition(await client.Transitions(issue.Key)) is { } t) moves[issue.Key] = t;
@@ -815,7 +1018,7 @@ public sealed class JiraMergeFollowUp : Grid
 
     private async Task Move(JiraIssue issue, JiraTransition t)
     {
-        if (working is not null || account.Client() is not { } client) return;
+        if (working is not null || account.Client(issue.ConnectionId) is not { } client) return;
         working = issue.Key;
         error = null;
         Render();
@@ -824,7 +1027,7 @@ public sealed class JiraMergeFollowUp : Grid
             await client.Transition(issue.Key, t.Id);
             try
             {
-                var fresh = await client.Issue(issue.Key);
+                var fresh = (await client.Issue(issue.Key)) with { ConnectionId = issue.ConnectionId };
                 account.Remember(fresh);
                 issues = issues.Select(i => i.Key == fresh.Key ? fresh : i).ToList();
             }

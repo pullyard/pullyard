@@ -7,6 +7,7 @@ struct ClaudeProfile: Codable, Identifiable, Hashable {
     var configDir: String?
     var email: String?
     var plan: String?
+    var org: String?
     var owner: String?
     var endpoint: AgentEndpoint?
 
@@ -74,6 +75,7 @@ final class ClaudeProfiles {
         profiles[i].owner = nil
         profiles[i].email = nil
         profiles[i].plan = nil
+        profiles[i].org = nil
         activeByOwner = activeByOwner.filter { $0.value != id }
         save()
     }
@@ -103,17 +105,29 @@ final class ClaudeProfiles {
 
     var activeOverride: String? { active.configDir }
 
+    func profile(configDir: String?) -> ClaudeProfile? {
+        profiles.first { $0.configDir == configDir }
+    }
+
+    func profile(id: String?) -> ClaudeProfile? {
+        guard let id else { return nil }
+        return profiles.first { $0.id == id }
+    }
+
+    var hasSeveral: Bool { visible.count > 1 }
+
     private func save() {
         if let data = try? JSONEncoder().encode(profiles) { UserDefaults.standard.set(data, forKey: Self.listKey) }
         UserDefaults.standard.set(activeID, forKey: Self.activeKey)
         UserDefaults.standard.set(activeByOwner, forKey: Self.activeByOwnerKey)
     }
 
-    func updateCachedInfo(email: String?, plan: String?) {
+    func updateCachedInfo(email: String?, plan: String?, org: String?) {
         guard let i = profiles.firstIndex(where: { $0.id == activeID }) else { return }
-        if profiles[i].email != email || profiles[i].plan != plan {
+        if profiles[i].email != email || profiles[i].plan != plan || profiles[i].org != org {
             profiles[i].email = email
             profiles[i].plan = plan
+            profiles[i].org = org
             save()
         }
     }
@@ -172,14 +186,45 @@ final class ClaudeProfiles {
     }
 }
 
+@MainActor
+enum AgentRename {
+    static func ask(title: String, info: String, current: String) -> String? {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = info
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        field.stringValue = current
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
+    }
+
+    static func account(_ profile: ClaudeProfile) {
+        let detail = profile.email.map { "Signed in as \($0). " } ?? ""
+        guard let name = ask(title: "Rename account", info: detail + "The name is only shown in PullYard.", current: profile.label) else { return }
+        ClaudeProfiles.shared.rename(profile.id, to: name)
+    }
+}
+
 extension AppModel {
     func switchClaudeProfile(to id: String) {
         guard id != ClaudeProfiles.shared.activeID, ClaudeProfiles.shared.visible.contains(where: { $0.id == id }) else { return }
-        claude.closeAllForProfileSwitch()
         ClaudeProfiles.shared.setActive(id)
         ClaudeUsageStore.shared.windows = []
         ClaudeUsageStore.shared.subscription = nil
-        ClaudeAccountStore.shared.status = .checking
+        if claude.accountFilter != nil { claude.accountFilter = id }
+        let next = ClaudeProfiles.shared.active
+        if let endpoint = next.endpoint {
+            ClaudeAccountStore.shared.status = .loggedIn(ClaudeAccountInfo(email: nil, orgName: nil, subscription: nil, method: "endpoint", provider: endpoint.kind == .openRouter ? endpoint.kind.title : endpoint.host))
+        } else if let email = next.email {
+            ClaudeAccountStore.shared.status = .loggedIn(ClaudeAccountInfo(email: email, orgName: next.org, subscription: next.plan, method: nil, provider: "firstParty"))
+        } else {
+            ClaudeAccountStore.shared.status = .checking
+        }
         Task {
             await ClaudeAccountStore.shared.refresh(force: true)
             await claude.reloadProjects()
@@ -196,9 +241,11 @@ extension AppModel {
                 switchClaudeProfile(to: fresh.id)
             }
         }
+        claude.closeTabs(configDir: profile.configDir)
         Task {
             await ClaudeAccountStore.shared.logout(configDir: profile.configDir)
             profiles.remove(id)
+            await claude.reloadProjects()
         }
     }
 }
@@ -221,6 +268,7 @@ struct ClaudeProfileMenuItems: View {
             }
         }
         Button("Add account…") { showAdd = true }
+        Button("Rename “\(profiles.active.label)”…") { AgentRename.account(profiles.active) }
         if !profiles.active.isDefault {
             Button("Remove “\(profiles.active.label)”…", role: .destructive) { removeTarget = profiles.active }
         }
@@ -340,12 +388,13 @@ struct AddClaudeProfileSheet: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(editing != nil ? "Save" : kind == nil ? "Create and sign in" : "Create", action: create)
                     .buttonStyle(.borderedProminent)
-                    .tint(.syCoral)
+                    .tint(.syCoralFill)
                     .keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
         .frame(width: 500)
+        .surface(.panel)
         .onAppear {
             guard let endpoint = editing?.endpoint else { return }
             access = .endpoint(endpoint.kind)
@@ -411,5 +460,47 @@ struct AddClaudeProfileSheet: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+}
+
+enum ClaudeTrust {
+    static func stateFile(configDir: String?) -> URL {
+        if let configDir { return URL(fileURLWithPath: configDir).appendingPathComponent(".claude.json") }
+        if let env = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"], !env.isEmpty {
+            return URL(fileURLWithPath: env).appendingPathComponent(".claude.json")
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json")
+    }
+
+    static func isTrusted(_ folder: String, in json: [String: Any]) -> Bool {
+        guard let projects = json["projects"] as? [String: Any] else { return false }
+        var path = (folder as NSString).standardizingPath
+        while true {
+            if let entry = projects[path] as? [String: Any], entry["hasTrustDialogAccepted"] as? Bool == true { return true }
+            let parent = (path as NSString).deletingLastPathComponent
+            if parent == path || parent.isEmpty { return false }
+            path = parent
+        }
+    }
+
+    static func mirror(folder: String, configDir: String?) {
+        guard let configDir else { return }
+        let target = stateFile(configDir: configDir)
+        let source = stateFile(configDir: nil)
+        guard target.path != source.path,
+              let mainData = try? Data(contentsOf: source),
+              let main = try? JSONSerialization.jsonObject(with: mainData) as? [String: Any],
+              isTrusted(folder, in: main),
+              let data = try? Data(contentsOf: target),
+              var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              !isTrusted(folder, in: json) else { return }
+        var projects = json["projects"] as? [String: Any] ?? [:]
+        let key = (folder as NSString).standardizingPath
+        var entry = projects[key] as? [String: Any] ?? [:]
+        entry["hasTrustDialogAccepted"] = true
+        projects[key] = entry
+        json["projects"] = projects
+        guard let out = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) else { return }
+        try? out.write(to: target, options: .atomic)
     }
 }

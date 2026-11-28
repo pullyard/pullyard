@@ -8,6 +8,8 @@ struct ResolveConflictsSheet: View {
     @AppStorage("claudeTarget.v2") private var target: ClaudeTarget = .app
     @AppStorage("claudeMode") private var mode: ClaudePermissionMode = .standard
     @AppStorage("agentFix.isolatedWorktree") private var isolate = true
+    @State private var worktreePath: String?
+    @AppStorage("agentFix.profile") private var profileID = ""
     @State private var launching = false
     @State private var push = true
     @State private var custom: String?
@@ -42,9 +44,9 @@ struct ResolveConflictsSheet: View {
             Toggle("Push when done", isOn: $push).toggleStyle(.checkbox)
             promptEditor
             ClaudeFolderRow(repo: model.ref.repo, folder: $folder, detecting: detecting)
-            ClaudeWorktreeRow(folder: folder, number: pr.number, target: target, isolate: $isolate)
+            ClaudeWorktreeRow(folder: folder, number: pr.number, target: target, isolate: $isolate, worktreePath: $worktreePath)
             if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
-            ClaudeLaunchRow(target: $target, mode: $mode, canLaunch: !launching && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (target == .copy || folder != nil), onLaunch: launch)
+            ClaudeLaunchRow(target: $target, mode: $mode, profileID: Binding(get: { ClaudeProfiles.shared.profile(id: profileID).map { p in ClaudeProfiles.shared.visible.contains(p) ? p.id : ClaudeProfiles.shared.activeID } ?? ClaudeProfiles.shared.activeID }, set: { profileID = $0 }), canLaunch: !launching && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (target == .copy || folder != nil), onLaunch: launch)
         }
         .padding(20)
         .frame(width: 780, height: 640)
@@ -64,7 +66,7 @@ struct ResolveConflictsSheet: View {
                     .font(.syCaption.weight(.semibold))
                     .foregroundStyle(Color.syMuted)
                 Spacer()
-                if model.conflicts == .checking { ProgressView().controlSize(.mini) }
+                if model.conflicts == .checking { PYLoader(size: 12) }
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
@@ -118,7 +120,7 @@ struct ResolveConflictsSheet: View {
         Task {
             defer { launching = false }
             do {
-                try await ClaudeLauncher.startForPR(app: app, prompt: prompt, folder: folder, isolate: isolate, pr: pr, repo: model.ref.repo, target: target, mode: mode, name: "Resolve conflicts PR #\(pr.number): \(pr.title)")
+                try await ClaudeLauncher.startForPR(app: app, prompt: prompt, folder: folder, isolate: isolate, worktreePath: worktreePath, pr: pr, repo: model.ref.repo, target: target, mode: mode, name: "Resolve conflicts PR #\(pr.number): \(pr.title)", profileID: ClaudeProfiles.shared.profile(id: profileID).flatMap { ClaudeProfiles.shared.visible.contains($0) ? $0.id : nil })
                 dismiss()
             } catch {
                 self.error = error.localizedDescription

@@ -50,6 +50,8 @@ final class ChatToolCall: Identifiable {
     var partialInput = ""
     var status: Status = .running
     var resultText: String?
+    var resultImages: [ChatImage] = []
+    var imageFiles: [ChatPreviewItem] = []
     var structured: [String: Any]?
     var permission: PermissionRequest?
     var parentToolUseId: String?
@@ -151,6 +153,20 @@ final class ClaudeUsageStore {
     var subscription: String?
     var overageNote: String?
     var updatedAt: Date?
+    var byAccount: [String: Snapshot] = [:]
+
+    struct Snapshot {
+        var windows: [RateWindow] = []
+        var subscription: String?
+        var overageNote: String?
+        var updatedAt: Date?
+    }
+
+    static func key(_ configDir: String?) -> String { configDir ?? "default" }
+
+    func snapshot(for configDir: String?) -> Snapshot {
+        byAccount[Self.key(configDir)] ?? Snapshot(windows: windows, subscription: subscription, overageNote: overageNote, updatedAt: updatedAt)
+    }
 }
 
 struct MCPServerStatus: Identifiable, Hashable {
@@ -209,12 +225,27 @@ final class ChatSession {
     var createdPR: String?
     var turnStartedAt: Date?
     var sleeping = false
+    /// Called each time the process starts (a new chat, a wake, a resume).
+    @ObservationIgnored var onStart: (() -> Void)?
     @ObservationIgnored var lastActivity = Date()
     var memoryBytes = 0
     var expandedTools: Set<String> = []
     var draftRequest: String?
+    /// The project is a git checkout this new session could branch off into its own worktree.
+    var worktreeAvailable = false
+    /// The user wants the first message to start the session in a fresh worktree.
+    var useWorktree = UserDefaults.standard.object(forKey: "agents.useWorktree") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(useWorktree, forKey: "agents.useWorktree") }
+    }
+    var preparingWorktree = false
+    /// Called with the first message of a new session, before it is sent.
+    @ObservationIgnored var onFirstPrompt: ((String) -> Void)?
+    /// Takes over the first message when the session should move into a worktree.
+    @ObservationIgnored var onWorktreeSend: ((String, [ChatImage]) -> Void)?
+    @ObservationIgnored private var firstPromptSeen = false
     var draftText = ""
     var draftImages: [ChatImage] = []
+    var draftFiles: [URL] = []
     var droppedItems: [ChatDropItem] = []
     var dropTargeted = false
     @ObservationIgnored private var dropExit: DispatchWorkItem?
@@ -313,6 +344,9 @@ final class ChatSession {
         return nil
     }
 
+    @ObservationIgnored var extraEnv: [String: String] = [:]
+    @ObservationIgnored var extraDirs: [String] = []
+
     init(folder: String, configDir: String?) {
         self.folder = folder
         self.configDir = configDir
@@ -376,6 +410,7 @@ final class ChatSession {
             if fork { args.append("--fork-session") } else { sessionId = resume }
         }
         args += StackNotesMCP.args
+        for dir in extraDirs { args += ["--add-dir", dir] }
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: bin)
@@ -386,6 +421,7 @@ final class ChatSession {
         ClaudeProfiles.apply(configDir, to: &env)
         env["PATH"] = [(bin as NSString).deletingLastPathComponent, "/opt/homebrew/bin", "/usr/local/bin", env["PATH"] ?? "/usr/bin:/bin"].joined(separator: ":")
         if let browser = LinkBrowser.helperScript() { env["BROWSER"] = browser }
+        env.merge(extraEnv) { _, new in new }
         p.environment = env
 
         let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
@@ -425,6 +461,7 @@ final class ChatSession {
         stdin = inPipe.fileHandleForWriting
         running = true
         sleeping = false
+        onStart?()
         intentionalStop = false
         lastActivity = Date()
         lastError = nil
@@ -450,6 +487,7 @@ final class ChatSession {
         costBase = totalCost
         rollbacks.removeAll()
         for t in tools.values where t.status == .running { t.status = wasIntentional ? .done : .error }
+        for t in tools.values { Self.retireIfOrphaned(t) }
         if wasIntentional {
             sleeping = sessionId != nil
             pendingPermissions.removeAll()
@@ -492,6 +530,14 @@ final class ChatSession {
     func send(_ text: String, images: [ChatImage] = []) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !images.isEmpty else { return }
+        if items.isEmpty, !firstPromptSeen {
+            if worktreeAvailable, useWorktree, let move = onWorktreeSend {
+                move(trimmed, images)
+                return
+            }
+            firstPromptSeen = true
+            onFirstPrompt?(trimmed)
+        }
         lastActivity = Date()
         let id = UUID().uuidString
         items.append(.user(id: id, text: trimmed, images: images))
@@ -501,6 +547,20 @@ final class ChatSession {
             return
         }
         deliver(trimmed, images: images)
+    }
+
+    func sendNow(_ id: String) {
+        guard let index = queuedPrompts.firstIndex(where: { $0.id == id }) else { return }
+        let prompt = queuedPrompts.remove(at: index)
+        queuedPrompts.insert(prompt, at: 0)
+        queuedIDs.removeAll { $0 == id }
+        queuedIDs.insert(id, at: 0)
+        if busy {
+            interrupt()
+        } else {
+            budgetPaused = false
+            flushQueue()
+        }
     }
 
     func cancelQueued(_ id: String) -> String? {
@@ -792,7 +852,9 @@ final class ChatSession {
             guard let id = block["tool_use_id"] as? String, let tool = tools[id] else { continue }
             if tool.status != .denied { tool.status = (block["is_error"] as? Bool == true) ? .error : .done }
             tool.resultText = ChatSession.resultText(block["content"])
+            tool.resultImages = ChatSession.resultImages(block["content"])
             tool.structured = ChatSession.trimmed(o["tool_use_result"] as? [String: Any])
+            scanImageFiles([tool])
             if let bg = tool.structured?["backgroundTaskId"] as? String {
                 tool.taskId = bg
                 tool.backgrounded = true
@@ -972,6 +1034,13 @@ final class ChatSession {
             store.overageNote = nil
         }
         store.updatedAt = Date()
+        let key = ClaudeUsageStore.key(configDir)
+        var snap = store.byAccount[key] ?? .init()
+        snap.windows = store.windows
+        snap.overageNote = store.overageNote
+        snap.updatedAt = store.updatedAt
+        snap.subscription = snap.subscription ?? store.subscription
+        store.byAccount[key] = snap
     }
 
     func refreshContext() {
@@ -1001,7 +1070,9 @@ final class ChatSession {
             }
             AgentDefaults.shared.remember(models: models)
             if let sub = (body["account"] as? [String: Any])?["subscriptionType"] as? String {
-                ClaudeUsageStore.shared.subscription = sub.replacingOccurrences(of: "Claude ", with: "")
+                let plan = sub.replacingOccurrences(of: "Claude ", with: "")
+                ClaudeUsageStore.shared.subscription = plan
+                ClaudeUsageStore.shared.byAccount[ClaudeUsageStore.key(configDir), default: .init()].subscription = plan
             }
             commands = (body["commands"] as? [[String: Any]] ?? []).compactMap { c in
                 guard let n = c["name"] as? String else { return nil }
@@ -1041,6 +1112,13 @@ final class ChatSession {
         return (Data(data), true)
     }
 
+    /// Marks a background command or sub-agent whose process has ended as stopped, so it no longer shows as working.
+    static func retireIfOrphaned(_ call: ChatToolCall) {
+        guard taskTools.contains(call.name), ChatTaskState(call).isActive else { return }
+        call.taskStatus = "stopped"
+        if call.status == .running { call.status = .done }
+    }
+
     func loadHistory(from file: URL, limit: Int = 600) {
         guard !historyLoading else { return }
         historyLoading = true
@@ -1053,14 +1131,43 @@ final class ChatSession {
     }
 
     func apply(_ history: ChatHistory) {
-        for case .tool(let c) in history.items { tools[c.id] = c }
+        for case .tool(let c) in history.items {
+            tools[c.id] = c
+            // A background task from an earlier process can't still be running: that process is gone.
+            if !running { Self.retireIfOrphaned(c) }
+        }
         var head = history.items
         if history.partial { head.insert(.notice(id: "older", text: "Showing the latest messages", isError: false), at: 0) }
         if !head.isEmpty, announceResume {
             head.append(.notice(id: "resumed", text: "Session resumed", isError: false))
         }
         items = head + items
+        scanImageFiles(history.items.compactMap { if case .tool(let c) = $0 { return c } else { return nil } })
         DispatchQueue.global(qos: .utility).async { MemoryRelief.release() }
+    }
+
+    func scanImageFiles(_ calls: [ChatToolCall]) {
+        let jobs = calls.compactMap { ToolImageScan($0, folder: folder) }
+        guard !jobs.isEmpty else { return }
+        let byId = Dictionary(calls.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        Task {
+            let found = await Task.detached(priority: .utility) {
+                jobs.compactMap { job -> (String, [ChatPreviewItem])? in
+                    let items = job.run()
+                    return items.isEmpty ? nil : (job.id, items)
+                }
+            }.value
+            for (id, items) in found { byId[id]?.imageFiles = items }
+        }
+    }
+
+    nonisolated static func resultImages(_ content: Any?) -> [ChatImage] {
+        guard let blocks = content as? [[String: Any]] else { return [] }
+        return blocks.prefix(24).compactMap { block -> ChatImage? in
+            guard block["type"] as? String == "image", let source = block["source"] as? [String: Any], source["type"] as? String == "base64",
+                  let encoded = source["data"] as? String, let bytes = Data(base64Encoded: encoded) else { return nil }
+            return ChatImage(data: bytes, mediaType: source["media_type"] as? String ?? "image/png")
+        }
     }
 
     nonisolated static func parseHistory(_ file: URL, limit: Int = 600) -> ChatHistory? {
@@ -1088,6 +1195,7 @@ final class ChatSession {
                         if b["type"] as? String == "tool_result", let id = b["tool_use_id"] as? String, let tool = map[id] {
                             tool.status = (b["is_error"] as? Bool == true) ? .error : .done
                             tool.resultText = ChatSession.resultText(b["content"])
+                            tool.resultImages = ChatSession.resultImages(b["content"])
                             tool.structured = ChatSession.trimmed(o["toolUseResult"] as? [String: Any])
                         } else if b["type"] as? String == "text", let s = b["text"] as? String, !s.hasPrefix("<") {
                             texts.append(s)

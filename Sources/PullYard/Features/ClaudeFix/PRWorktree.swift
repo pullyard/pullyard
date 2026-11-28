@@ -15,9 +15,27 @@ struct GitError: LocalizedError {
 }
 
 enum PRWorktrees {
+    static let folder = ".claude/worktrees"
+
     static func path(clone: String, number: Int) -> String {
+        URL(fileURLWithPath: clone).standardizedFileURL.appendingPathComponent(folder).appendingPathComponent("pr-\(number)").path
+    }
+
+    static func legacyPath(clone: String, number: Int) -> String {
         let url = URL(fileURLWithPath: clone).standardizedFileURL
         return url.deletingLastPathComponent().appendingPathComponent(url.lastPathComponent + "-worktrees").appendingPathComponent("pr-\(number)").path
+    }
+
+    static func excludeFolder(in clone: String) {
+        guard let common = try? git(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: clone) else { return }
+        let info = URL(fileURLWithPath: common).appendingPathComponent("info", isDirectory: true)
+        let file = info.appendingPathComponent("exclude")
+        let line = "/" + folder + "/"
+        let current = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+        guard !current.split(separator: "\n").contains(where: { $0.trimmingCharacters(in: .whitespaces) == line }) else { return }
+        try? FileManager.default.createDirectory(at: info, withIntermediateDirectories: true)
+        let prefix = current.isEmpty || current.hasSuffix("\n") ? "" : "\n"
+        try? (current + prefix + line + "\n").write(to: file, atomically: true, encoding: .utf8)
     }
 
     static func branch(number: Int) -> String { "pullyard/pr-\(number)" }
@@ -69,9 +87,12 @@ enum PRWorktrees {
         let remote = remote(for: repo, remotes: remotes) ?? "origin"
         try git(["fetch", "--quiet", remote, "pull/\(number)/head"], in: clone)
         let head = try git(["rev-parse", "FETCH_HEAD"], in: clone)
-        let path = path(clone: clone, number: number)
         let branch = branch(number: number)
         let known = registered(try git(["worktree", "list", "--porcelain"], in: clone))
+        let legacy = legacyPath(clone: clone, number: number)
+        let useLegacy = known.contains(URL(fileURLWithPath: legacy).standardizedFileURL.path) && FileManager.default.fileExists(atPath: legacy)
+        let path = useLegacy ? legacy : path(clone: clone, number: number)
+        if !useLegacy { excludeFolder(in: clone) }
         let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
         if known.contains(standardized), FileManager.default.fileExists(atPath: path) {
             let dirty = !(try git(["status", "--porcelain"], in: path)).isEmpty
@@ -86,15 +107,15 @@ enum PRWorktrees {
     }
 
     static func existing(clone: String, number: Int) -> String? {
-        let path = path(clone: clone, number: number)
-        guard FileManager.default.fileExists(atPath: path),
-              let list = try? git(["worktree", "list", "--porcelain"], in: clone),
-              registered(list).contains(URL(fileURLWithPath: path).standardizedFileURL.path) else { return nil }
-        return path
+        guard let list = try? git(["worktree", "list", "--porcelain"], in: clone) else { return nil }
+        let known = registered(list)
+        return [path(clone: clone, number: number), legacyPath(clone: clone, number: number)].first { p in
+            FileManager.default.fileExists(atPath: p) && known.contains(URL(fileURLWithPath: p).standardizedFileURL.path)
+        }
     }
 
     static func remove(clone: String, number: Int) throws {
-        let path = path(clone: clone, number: number)
+        guard let path = existing(clone: clone, number: number) else { return }
         guard (try git(["status", "--porcelain"], in: path)).isEmpty else {
             throw GitError(message: "The worktree has uncommitted changes. Commit or discard them first.")
         }

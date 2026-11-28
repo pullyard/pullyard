@@ -16,10 +16,29 @@ struct ClaudeSessionInfo: Identifiable, Hashable {
     var parentId: String? = nil
     var desktopId: String? = nil
     var archived = false
+    var profileID: String? = nil
 
     var worktreeName: String? {
-        guard let r = cwd.range(of: "/.claude/worktrees/") else { return nil }
-        return String(cwd[r.upperBound...]).components(separatedBy: "/").first
+        if let r = cwd.range(of: "/.claude/worktrees/") {
+            return String(cwd[r.upperBound...]).components(separatedBy: "/").first
+        }
+        return ProjectRoot.legacyWorktree(cwd)?.name
+    }
+}
+
+enum ProjectRoot {
+    static func legacyWorktree(_ path: String) -> (root: String, name: String)? {
+        let url = URL(fileURLWithPath: path)
+        let parent = url.deletingLastPathComponent()
+        guard parent.lastPathComponent.hasSuffix("-worktrees") else { return nil }
+        let base = parent.deletingLastPathComponent().appendingPathComponent(String(parent.lastPathComponent.dropLast("-worktrees".count))).path
+        guard FileManager.default.fileExists(atPath: base + "/.git") else { return nil }
+        return (base, url.lastPathComponent)
+    }
+
+    static func of(_ path: String) -> String {
+        if let r = path.range(of: "/.claude/worktrees/") { return String(path[..<r.lowerBound]) }
+        return legacyWorktree(path)?.root ?? path
     }
 }
 
@@ -29,6 +48,7 @@ extension ClaudeSessionInfo {
         copy.parentId = parentId
         copy.desktopId = desktopId
         copy.archived = archived
+        copy.profileID = profileID
         return copy
     }
 }
@@ -147,8 +167,7 @@ enum ClaudeSessionParser {
     }
 
     static func projectRoot(for cwd: String) -> String {
-        if let r = cwd.range(of: "/.claude/worktrees/") { return String(cwd[..<r.lowerBound]) }
-        return cwd
+        ProjectRoot.of(cwd)
     }
 
     static func loadAll(root: URL = root) -> [ClaudeProject] {

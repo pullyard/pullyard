@@ -234,6 +234,16 @@ impl VisualState {
         }
     }
 
+    pub fn compact_icon(&self) -> &'static str {
+        match self {
+            VisualState::Draft => "document-edit-symbolic",
+            VisualState::Closed => "sy-x-symbolic",
+            VisualState::Completed => "sy-check-symbolic",
+            VisualState::NotPlanned => "list-remove-symbolic",
+            _ => self.icon(),
+        }
+    }
+
     pub fn title(&self) -> &'static str {
         match self {
             VisualState::Open | VisualState::IssueOpen => "Open",

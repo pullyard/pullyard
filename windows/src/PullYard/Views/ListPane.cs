@@ -15,7 +15,7 @@ public abstract class ListPane : Grid
     protected readonly TextBlock CountText = Ui.Text("", 13, "muted");
     protected readonly StackPanel Tools = Ui.H(2);
     protected readonly StackPanel FilterRow = Ui.V(6);
-    protected readonly ProgressBar LoadingBar = new() { IsIndeterminate = true, Visibility = Visibility.Collapsed, Height = 3, MinHeight = 3 };
+    protected readonly WakeBar LoadingBar = new() { Visibility = Visibility.Collapsed };
     protected readonly RefreshContainer Refresh = new();
     protected readonly ListView List;
     protected readonly RowAppear Appear;
@@ -98,6 +98,7 @@ public abstract class ListPane : Grid
     {
         SearchItem s => s.Id,
         GroupedSearchItem g => g.Item.Id,
+        SnoozedSearchItem z => z.Item.Id,
         NotificationThread n => n.Id,
         RepoSummary r => r.Id,
         ProjectSummary p => p.Id,

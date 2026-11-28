@@ -153,6 +153,10 @@ struct ChatComposer: View {
         get { chat.draftImages }
         nonmutating set { chat.draftImages = newValue }
     }
+    private var attachedFiles: [URL] {
+        get { chat.draftFiles }
+        nonmutating set { chat.draftFiles = newValue }
+    }
     @State private var height: CGFloat = 34
     @State private var caret = 0
     @State private var completion: CompletionKind?
@@ -160,6 +164,8 @@ struct ChatComposer: View {
     @State private var selected = 0
     @State private var files: [String] = []
     @State private var focusToken = 0
+    @State private var recorder = WhisperRecorder()
+    @State private var dictationError: String?
     @State private var completionMemo = CompletionMemo()
 
     var body: some View {
@@ -188,12 +194,16 @@ struct ChatComposer: View {
                 if completion != nil, !completionItems.isEmpty {
                     completionList
                 }
-                if !images.isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(images) { img in
+                if !images.isEmpty || !attachedFiles.isEmpty {
+                    FlowLayout(spacing: 6, lineSpacing: 6) {
+                        ForEach(Array(images.enumerated()), id: \.element.id) { index, img in
                             ZStack(alignment: .topTrailing) {
                                 if let ns = img.image {
-                                    Image(nsImage: ns).resizable().scaledToFill().frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 6))
+                                    Button { ChatPreviewItem.open(images.map(ChatPreviewItem.init(image:)), at: index) } label: {
+                                        Image(nsImage: ns).resizable().scaledToFill().frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 6))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Open preview")
                                 }
                                 Button { images.removeAll { $0.id == img.id } } label: {
                                     Image(systemName: "xmark.circle.fill").foregroundStyle(.white, .black.opacity(0.6))
@@ -203,6 +213,11 @@ struct ChatComposer: View {
                                 .accessibilityLabel("Remove image")
                                 .offset(x: 4, y: -4)
                             }
+                        }
+                        ForEach(attachedFiles, id: \.self) { url in
+                            ChatFileChip(url: url, onOpen: { ChatQuickLook.shared.show(attachedFiles, at: attachedFiles.firstIndex(of: url) ?? 0) }, onRemove: {
+                                attachedFiles.removeAll { $0 == url }
+                            })
                         }
                     }
                 }
@@ -219,10 +234,15 @@ struct ChatComposer: View {
                             .allowsHitTesting(false)
                     }
                 }
+                if recorder.phase != .idle {
+                    DictationBar(recorder: recorder, onStop: dictate, onCancel: { recorder.cancel() })
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
                 bottomBar
             }
+            .animation(Motion.smooth, value: recorder.phase)
             .padding(10)
-            .card(radius: 12)
+            .pyGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous), fallback: .syRaised)
             .padding(12)
         }
         .onChange(of: text) { updateCompletion() }
@@ -283,6 +303,21 @@ struct ChatComposer: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
             }
+            if chat.preparingWorktree {
+                HStack(spacing: 5) {
+                    ProgressView().controlSize(.mini)
+                    Text("Creating worktree…")
+                }
+                .foregroundStyle(Color.syMuted)
+            } else if chat.worktreeAvailable, chat.items.isEmpty {
+                Toggle(isOn: Binding(get: { chat.useWorktree }, set: { chat.useWorktree = $0 })) {
+                    Label("Worktree", systemImage: "arrow.triangle.branch")
+                }
+                .toggleStyle(.checkbox)
+                .foregroundStyle(Color.syMuted)
+                .fixedSize()
+                .help("Start this session in its own git worktree on a new claude/… branch, under .claude/worktrees")
+            }
             if !chat.mcpServers.isEmpty {
                 let broken = chat.mcpServers.filter { !$0.healthy && !$0.pending }
                 Menu {
@@ -328,18 +363,27 @@ struct ChatComposer: View {
                 .foregroundStyle(Color.syMuted)
                 .help("Attach image")
                 .accessibilityLabel("Attach image")
-            Button { dictate() } label: { Image(systemName: "mic") }
+            Button { dictate() } label: { dictationIcon }
                 .buttonStyle(.borderless)
-                .foregroundStyle(Color.syMuted)
-                .help("Dictate a prompt (macOS dictation)")
-                .accessibilityLabel("Dictate a prompt")
+                .foregroundStyle(recorder.phase == .recording ? Color.syRed : Color.syMuted)
+                .disabled(recorder.phase == .transcribing)
+                .help(dictationHelp)
+                .accessibilityLabel(recorder.phase == .recording ? "Stop dictation" : "Dictate a prompt")
+                .alert("Dictation", isPresented: Binding(get: { dictationError != nil }, set: { if !$0 { dictationError = nil } })) {
+                    if !WhisperEngine.shared.isReady, WhisperEngine.shared.engine == .whisper {
+                        Button("Open Settings") { openSettings() }
+                    }
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(dictationError ?? "")
+                }
             Spacer()
             UsageRingButton(chat: chat)
             if chat.busy {
                 ComposerRoundButton(icon: "stop.fill", style: .stop, help: "Stop (Esc)") { chat.interrupt() }
                     .transition(.opacity.combined(with: .offset(x: 6)))
             }
-            let hasContent = !(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty)
+            let hasContent = !(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty && attachedFiles.isEmpty)
             if !chat.busy || hasContent {
                 ComposerRoundButton(icon: "arrow.up", style: .send, enabled: hasContent, help: chat.busy ? "Queue message (↩)" : "Send (↩)") { submit() }
                     .transition(.opacity)
@@ -356,10 +400,67 @@ struct ChatComposer: View {
         focusToken += 1
     }
 
+    @ViewBuilder
+    private var dictationIcon: some View {
+        switch recorder.phase {
+        case .idle:
+            Image(systemName: "mic")
+        case .recording:
+            Image(systemName: "stop.circle.fill")
+        case .transcribing:
+            PYLoader(size: 12, label: "Transcribing")
+        }
+    }
+
+    private var dictationHelp: String {
+        let whisper = WhisperEngine.shared
+        guard whisper.engine == .whisper else { return "Dictate a prompt (macOS dictation)" }
+        switch recorder.phase {
+        case .idle: return "Dictate with Whisper (" + whisper.language.title + ")"
+        case .recording: return "Stop and transcribe"
+        case .transcribing: return "Transcribing…"
+        }
+    }
+
     private func dictate() {
-        focusToken += 1
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil)
+        let whisper = WhisperEngine.shared
+        guard whisper.engine == .whisper else {
+            focusToken += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil)
+            }
+            return
+        }
+        guard whisper.isReady else {
+            dictationError = WhisperError.notDownloaded.localizedDescription
+            return
+        }
+        switch recorder.phase {
+        case .idle:
+            whisper.prewarm()
+            Task {
+                do {
+                    try await recorder.start()
+                    focusToken += 1
+                } catch {
+                    dictationError = error.localizedDescription
+                }
+            }
+        case .recording:
+            let samples = recorder.stop()
+            Task {
+                do {
+                    let spoken = try await recorder.transcribe(samples)
+                    let current = text
+                    text = current.isEmpty ? spoken : current + (current.hasSuffix(" ") || current.hasSuffix("\n") ? "" : " ") + spoken
+                    focusToken += 1
+                } catch WhisperError.empty {
+                } catch {
+                    dictationError = error.localizedDescription
+                }
+            }
+        case .transcribing:
+            break
         }
     }
 
@@ -436,22 +537,29 @@ struct ChatComposer: View {
     }
 
     private func submit() {
+        if recorder.phase == .recording {
+            dictate()
+            return
+        }
+        if recorder.phase == .transcribing { return }
         if completion != nil, let item = completionItems[safe: selected] {
             accept(item)
             return
         }
-        let message = text
+        let message = ChatFileMention.compose(text, files: attachedFiles, folder: chat.folder)
         guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty else { return }
         if !tab.chatRunning { tab.ensureChatRunning() }
         chat.send(message, images: images)
         text = ""
         caret = 0
         images = []
+        attachedFiles = []
         completion = nil
     }
 
     private func handleKey(_ e: NSEvent) -> Bool {
         if e.keyCode == 53 {
+            if recorder.phase == .recording { recorder.cancel(); return true }
             if completion != nil { completion = nil; return true }
             if chat.busy { chat.interrupt(); return true }
             return false
@@ -624,11 +732,8 @@ struct ChatComposer: View {
             }
             return
         }
-        let path = url.path.hasPrefix(chat.folder + "/") ? String(url.path.dropFirst(chat.folder.count + 1)) : url.path
-        let mention = "@" + (path.contains(" ") ? "\"\(path)\"" : path) + " "
-        let separator = text.isEmpty || text.hasSuffix(" ") || text.hasSuffix("\n") ? "" : " "
-        text += separator + mention
-        caret = (text as NSString).length
+        let file = url.standardizedFileURL
+        if !attachedFiles.contains(file) { attachedFiles.append(file) }
         focusToken += 1
     }
 

@@ -7,10 +7,10 @@ SIGN_ID="${SIGN_ID:-$(security find-identity -v -p codesigning | awk -F'"' '/App
 
 if [ "${UNIVERSAL:-0}" = "1" ]; then
     swift build -c release --arch arm64
-    swift build -c release --arch x86_64
+    PULLYARD_NO_IROH=1 swift build -c release --arch x86_64 --scratch-path .build-x86_64
     mkdir -p build
-    lipo -create .build/arm64-apple-macosx/release/PullYard .build/x86_64-apple-macosx/release/PullYard -output build/PullYard-universal
-    lipo -create .build/arm64-apple-macosx/release/pullyard-mcp .build/x86_64-apple-macosx/release/pullyard-mcp -output build/pullyard-mcp-universal
+    lipo -create .build/arm64-apple-macosx/release/PullYard .build-x86_64/x86_64-apple-macosx/release/PullYard -output build/PullYard-universal
+    lipo -create .build/arm64-apple-macosx/release/pullyard-mcp .build-x86_64/x86_64-apple-macosx/release/pullyard-mcp -output build/pullyard-mcp-universal
     BIN=build/PullYard-universal
     HELPER=build/pullyard-mcp-universal
 else
@@ -39,7 +39,7 @@ cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/THIRD-PARTY-NOTICES.txt LICENSE "$APP/Contents/Resources/"
 
 codesign --force --options runtime --sign "${SIGN_ID:--}" "$APP/Contents/Helpers/pullyard-mcp"
-codesign --force --options runtime --sign "${SIGN_ID:--}" "$APP"
+codesign --force --options runtime --entitlements Resources/PullYard.entitlements --sign "${SIGN_ID:--}" "$APP"
 echo "Built: $APP (signed with: ${SIGN_ID:-ad-hoc})"
 
 if [ "${1:-}" = "--install" ]; then

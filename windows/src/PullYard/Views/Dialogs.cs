@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using PullYard.Controls;
 using PullYard.Core.Api;
@@ -113,42 +114,181 @@ public static class Dialogs
         }
     }
 
+    public static FrameworkElement Segments(IReadOnlyList<(string Id, string Title, string? Glyph)> items, string selected, Action<string> changed, string name)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
+        var buttons = new List<(ToggleButton Button, string Id)>();
+        foreach (var (id, title, glyph) in items)
+        {
+            var b = new ToggleButton
+            {
+                Content = glyph is null ? title : Ui.H(6, Ui.Glyph(glyph, 12, "text"), new TextBlock { Text = title }),
+                IsChecked = id == selected,
+                Padding = new Thickness(10, 4, 10, 4),
+                MinWidth = 0
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, title);
+            buttons.Add((b, id));
+            row.Children.Add(TextZoom.Track(b, 13));
+        }
+        foreach (var (button, id) in buttons)
+        {
+            button.Click += (_, _) =>
+            {
+                foreach (var (other, otherId) in buttons) other.IsChecked = otherId == id;
+                changed(id);
+            };
+        }
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(row, name);
+        return new Border
+        {
+            Child = row,
+            Padding = new Thickness(2),
+            CornerRadius = new CornerRadius(7),
+            Background = Palette.Brush("sunken"),
+            BorderBrush = Palette.Brush("line"),
+            BorderThickness = new Thickness(1),
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+    }
+
+    private static Action<string> PaintablePrimary(ContentDialog d)
+    {
+        d.PrimaryButtonStyle = (Style)Application.Current.Resources["AccentButtonStyle"];
+        if (ThemeService.IsHighContrast) return _ => { };
+        var fill = new SolidColorBrush();
+        var hover = new SolidColorBrush();
+        var pressed = new SolidColorBrush();
+        var disabled = new SolidColorBrush();
+        d.Resources["AccentButtonBackground"] = fill;
+        d.Resources["AccentButtonBackgroundPointerOver"] = hover;
+        d.Resources["AccentButtonBackgroundPressed"] = pressed;
+        d.Resources["AccentButtonBackgroundDisabled"] = disabled;
+        var text = Palette.Brush("onFill");
+        d.Resources["AccentButtonForeground"] = text;
+        d.Resources["AccentButtonForegroundPointerOver"] = text;
+        d.Resources["AccentButtonForegroundPressed"] = text;
+        d.Resources["AccentButtonForegroundDisabled"] = Palette.Brush("onFill", 0.7);
+        static Windows.UI.Color Fade(Windows.UI.Color c, byte a) => Windows.UI.Color.FromArgb(a, c.R, c.G, c.B);
+        return key =>
+        {
+            var c = Palette.Get(PullYard.Core.Theming.ThemeTokens.FillKey(key));
+            fill.Color = c;
+            hover.Color = Fade(c, 230);
+            pressed.Color = Fade(c, 204);
+            disabled.Color = Fade(c, 102);
+        };
+    }
+
+    private static FrameworkElement PendingList(PRDetailViewModel model)
+    {
+        var panel = Ui.V(4, Ui.Text(L.F("Review_PendingInline", "Inline comments to be submitted: {0}", model.PendingCount), 12, "muted", FontWeights.SemiBold));
+        foreach (var c in model.Pending.Take(6))
+        {
+            var where = Ui.Text($"{c.Path}:{c.Line}", 11.5, "link", mono: true);
+            where.MaxWidth = 220;
+            var body = Ui.Text(c.Body.ReplaceLineEndings(" "), 12.5, "text", maxLines: 1);
+            var row = Ui.Columns((where, Ui.Auto), (body, Ui.Star));
+            Ui.Tip(row, c.Body);
+            panel.Children.Add(row);
+        }
+        if (model.PendingCount > 6) panel.Children.Add(Ui.Caption(L.F("Review_PendingMore", "+{0} more", model.PendingCount - 6)));
+        return Ui.Card(panel, 8, "sunken", 10);
+    }
+
+    public static void ReviewToast(PRDetailViewModel model, string verdict)
+    {
+        if (model.Pr is not { } pr) return;
+        var next = model.NextReview;
+        switch (verdict)
+        {
+            case "APPROVE":
+                ShellView.Toast(L.F("Toast_Approved", "Approved {0}", model.NumberText), false, next is null ? null : L.T("Toast_NextReview", "Next review →"), next is null ? null : () => AppViewModel.Shared.Open(next.Route), "", "green");
+                break;
+            case "REQUEST_CHANGES":
+                ShellView.Toast(L.F("Toast_ChangesRequested", "Requested changes on {0}", model.NumberText), false, null, null, "", "red");
+                break;
+            default:
+                ShellView.Toast(L.F("Toast_ReviewSent", "Review sent on {0}", model.NumberText), false, null, null, "", "link");
+                break;
+        }
+    }
+
     public static async Task Review(XamlRoot? root, PRDetailViewModel model)
     {
         if (root is null || model.Pr is not { } pr) return;
+        var own = pr.ViewerDidAuthor;
+        var verdict = "COMMENT";
         var panel = Ui.V(10);
         if (model.RestoredDrafts)
-            panel.Children.Add(Ui.H(6, Ui.Glyph("\uE81C", 12), Ui.Caption(L.T("Review_Restored", "Restored from your last session"))));
-        if (model.PendingCount > 0)
-            panel.Children.Add(Ui.H(6, Ui.Glyph("", 12), Ui.Text(L.F("Review_PendingInline", "Inline comments to be submitted: {0}", model.PendingCount), 13, "muted")));
+            panel.Children.Add(Ui.H(6, Ui.Glyph("", 12), Ui.Caption(L.T("Review_Restored", "Restored from your last session"))));
+        Action validate = () => { };
+        var verdicts = new List<(string Id, string Title, string? Glyph)> { ("COMMENT", L.T("Review_SegComment", "Comment"), "") };
+        if (model.CanApprove) verdicts.Add(("APPROVE", L.T("PR_Approve", "Approve"), ""));
+        if (model.Features.RequestChanges && !own) verdicts.Add(("REQUEST_CHANGES", L.T("Review_RequestChanges", "Request changes"), ""));
+        if (verdicts.Count > 1)
+        {
+            panel.Children.Add(Segments(verdicts, verdict, v =>
+            {
+                verdict = v;
+                validate();
+            }, L.T("Review_Verdict", "Verdict")));
+        }
+        else if (own)
+        {
+            panel.Children.Add(Ui.Caption(L.T("Review_OwnPR", "This is your pull request, so the review is a comment.")));
+        }
+        if (model.PendingCount > 0) panel.Children.Add(PendingList(model));
         var text = Editor(L.T("Review_Summary", "Review summary (optional when approving)"), model.SummaryDraft, minHeight: 140);
         panel.Children.Add(text);
-        var radios = new RadioButtons();
-        var comment = new RadioButton { Content = L.T("Review_CommentOnly", "Comment — without approval"), Tag = "COMMENT", IsChecked = true };
-        var approve = new RadioButton { Content = L.T("PR_Approve", "Approve"), Tag = "APPROVE", IsEnabled = model.CanApprove };
-        radios.Items.Add(comment);
-        radios.Items.Add(approve);
-        if (model.Features.RequestChanges)
-            radios.Items.Add(new RadioButton { Content = L.T("Review_RequestChanges", "Request changes"), Tag = "REQUEST_CHANGES", IsEnabled = !pr.ViewerDidAuthor });
-        radios.SelectedIndex = 0;
-        panel.Children.Add(radios);
+        var reason = Ui.Text("", 12, "amberInk", wrap: true);
+        reason.Visibility = Visibility.Collapsed;
+        panel.Children.Add(reason);
         var d = Create(root, L.F("Review_Title", "Review {0}", model.NumberText), panel, L.T("Review_Submit", "Submit review"), model.PendingCount > 0 ? L.T("Review_Discard", "Discard pending comments") : null);
-        string Event() => (radios.SelectedItem as RadioButton)?.Tag as string ?? "COMMENT";
-        void Validate() => d.IsPrimaryButtonEnabled = Event() == "APPROVE" || text.Text.Trim().Length > 0 || model.PendingCount > 0;
+        var paint = PaintablePrimary(d);
+        validate = () =>
+        {
+            var ready = verdict == "APPROVE" || text.Text.Trim().Length > 0 || model.PendingCount > 0;
+            d.IsPrimaryButtonEnabled = ready;
+            reason.Text = ready ? "" : verdict == "REQUEST_CHANGES"
+                ? L.T("Review_WhyChanges", "Explain what needs to change, or add inline comments, to request changes.")
+                : L.T("Review_WhyComment", "Write a summary or add inline comments to send a comment.");
+            reason.Visibility = ready ? Visibility.Collapsed : Visibility.Visible;
+            d.PrimaryButtonText = verdict switch
+            {
+                "APPROVE" => L.T("PR_Approve", "Approve"),
+                "REQUEST_CHANGES" => L.T("Review_RequestChanges", "Request changes"),
+                _ => L.T("Review_SubmitComment", "Comment")
+            };
+            paint(verdict switch { "APPROVE" => "green", "REQUEST_CHANGES" => "red", _ => "accent" });
+        };
         text.TextChanged += (_, _) =>
         {
             model.SetSummaryDraft(text.Text);
-            Validate();
+            validate();
         };
-        radios.SelectionChanged += (_, _) => Validate();
-        Validate();
-        d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, () => model.SubmitReview(Event(), text.Text), args);
+        validate();
+        var sent = false;
+        d.PrimaryButtonClick += async (_, args) => sent = await RunWhileOpen(d, () => model.SubmitReview(verdict, text.Text), args);
         var discard = false;
         d.SecondaryButtonClick += (_, _) => discard = true;
         await ShowAsync(d);
+        if (sent) ReviewToast(model, verdict);
         if (!discard || model.PendingCount == 0) return;
         if (await Confirm(root, L.F("Review_DiscardQ", "Discard {0} pending comment(s)?", model.PendingCount), L.T("Review_DiscardButton", "Discard"), message: L.T("Review_DiscardBody", "The pending inline comments are deleted. This can't be undone.")))
             model.ClearPending();
+    }
+
+    private enum MergeStage { Ready, Waiting, Conflicts, Behind, Blocked }
+
+    private static MergeStage Stage(PRDetailViewModel model, PullRequestDetail pr)
+    {
+        if (pr.Mergeable == "CONFLICTING" || pr.MergeStateStatus == "DIRTY") return MergeStage.Conflicts;
+        if (pr.MergeStateStatus == "BEHIND") return MergeStage.Behind;
+        var requirements = model.Requirements;
+        if (PRDetailViewModel.Headline(pr, requirements).ready) return MergeStage.Ready;
+        var waiting = requirements.Any(r => r.State == RequirementState.Pending) || pr.ReviewDecision == "REVIEW_REQUIRED" || pr.Checks.Any(c => c.Outcome == CheckOutcome.Pending);
+        return waiting ? MergeStage.Waiting : MergeStage.Blocked;
     }
 
     public static async Task Merge(XamlRoot? root, PRDetailViewModel model)
@@ -161,59 +301,146 @@ public static class Dialogs
             "SQUASH" => repo.SquashMergeAllowed,
             _ => repo.RebaseMergeAllowed
         }).ToList();
-        var methods = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, Header = L.T("Merge_Method", "Method") };
-        foreach (var m in allowed) methods.Items.Add(new ComboBoxItem { Content = m == "MERGE" && model.IsGitLab ? L.T("MR_MergeMethod", "Merge") : MergeMethods.Title(m), Tag = m });
+        if (allowed.Count == 0)
+        {
+            await Alert(root, L.F("Merge_Title", "Merge {0} into {1}", model.NumberText, pr.BaseRefName), L.T("Merge_NoMethods", "This repository doesn’t allow any merge method you can use."));
+            return;
+        }
         var def = repo?.ViewerDefaultMergeMethod ?? "MERGE";
-        methods.SelectedIndex = Math.Max(0, allowed.IndexOf(allowed.Contains(def) ? def : allowed.FirstOrDefault() ?? "MERGE"));
+        var method = allowed.Contains(def) ? def : allowed[0];
         var title = new TextBox { PlaceholderText = model.IsGitLab ? L.T("MR_TitlePlaceholder", "Commit title (GitLab default)") : model.Features.IsBitbucket ? L.T("BB_TitlePlaceholder", "Commit title (Bitbucket default)") : L.T("Merge_TitlePlaceholder", "Commit title (GitHub default)") };
         var message = Editor(L.T("Merge_BodyPlaceholder", "Commit description (optional)"), minHeight: 80);
         var sameRepo = pr.HeadRepository?.NameWithOwner == model.Ref.Repo.Full;
         var deleteBox = new CheckBox { Content = L.F("Merge_DeleteBranch", "Delete branch {0} after merge", pr.HeadRefName), IsChecked = true, Visibility = !(repo?.DeleteBranchOnMerge ?? false) && sameRepo ? Visibility.Visible : Visibility.Collapsed };
-        string Method() => (methods.SelectedItem as ComboBoxItem)?.Tag as string ?? "MERGE";
         void Prefill()
         {
-            title.Text = Method() != "SQUASH" ? "" : model.Features.IsGitHub ? $"{pr.Title} (#{pr.Number})" : pr.Title;
-            var rebase = Method() == "REBASE";
+            title.Text = method != "SQUASH" ? "" : model.Features.IsGitHub ? $"{pr.Title} (#{pr.Number})" : pr.Title;
+            var rebase = method == "REBASE";
             title.Visibility = rebase ? Visibility.Collapsed : Visibility.Visible;
             message.Visibility = rebase ? Visibility.Collapsed : Visibility.Visible;
         }
-        methods.SelectionChanged += (_, _) => Prefill();
         Prefill();
-        var canAuto = repo?.AutoMergeAllowed == true && pr.AutoMergeRequest is null && pr.MergeStateStatus != "CLEAN";
-        var body = Ui.V(10, methods, title, message, deleteBox);
-        var queue = model.UsesQueue;
-        if (queue)
+        var panel = Ui.V(10);
+        var headline = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch, IsTabStop = false };
+        var checklist = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch, IsTabStop = false };
+        panel.Children.Add(headline);
+        panel.Children.Add(checklist);
+        if (model.UsesQueue)
         {
             var note = Ui.Text(L.F("Merge_QueueNote", "{0} uses a {1}. Add the {2} to it and it merges once the required checks pass; merging directly may be rejected.", pr.BaseRefName, model.QueueTitle, model.Provider.RequestTitle()), 12, "muted", wrap: true);
-            body.Children.Insert(0, Ui.Columns((Ui.Glyph("\ue916", 13), Ui.Auto), (note, Ui.Star)));
+            panel.Children.Add(Ui.Columns((Ui.Glyph("\ue916", 13), Ui.Auto), (note, Ui.Star)));
         }
-        var heading = L.F("Merge_Title", "Merge {0} into {1}", model.NumberText, pr.BaseRefName);
-        var d = queue
-            ? Create(root, heading, body, L.F("Merge_AddToQueue", "Add to {0}", model.QueueTitle), L.T("Merge_MergeDirectly", "Merge directly"))
-            : Create(root, heading, body, L.T("Merge_MergeButton", "Merge"), canAuto ? L.T("Merge_EnableAuto", "Enable auto-merge") : null);
-        Task<bool> MergeNow()
+        if (allowed.Count > 1)
         {
-            var t = title.Text.Trim();
-            var b = message.Text.Trim();
-            var del = deleteBox.IsChecked == true && deleteBox.Visibility == Visibility.Visible;
-            return model.Merge(Method(), t.Length == 0 ? null : t, b.Length == 0 ? null : b, del);
-        }
-        if (queue)
-        {
-            d.IsSecondaryButtonEnabled = allowed.Count > 0;
-            d.PrimaryButtonClick += async (_, args) =>
+            panel.Children.Add(Segments(allowed.Select(m => (m, MethodTitle(model, m), (string?)MergeMethods.Glyph(m))).ToList(), method, m =>
             {
-                if (await RunWhileOpen(d, () => model.Simple(PRAction.Enqueue), args)) ShellView.Toast(L.F("Merge_AddedToQueue", "Added to the {0}", model.QueueTitle));
-            };
-            d.SecondaryButtonClick += async (_, args) => await RunWhileOpen(d, MergeNow, args);
+                method = m;
+                Prefill();
+            }, L.T("Merge_Method", "Method")));
         }
-        else
+        panel.Children.Add(title);
+        panel.Children.Add(message);
+        panel.Children.Add(deleteBox);
+        var d = Create(root, L.F("Merge_Title", "Merge {0} into {1}", model.NumberText, pr.BaseRefName), panel, L.T("Merge_MergeButton", "Merge"));
+        var paint = PaintablePrimary(d);
+        string primary = "merge", secondary = "";
+        void Apply()
         {
-            d.IsPrimaryButtonEnabled = allowed.Count > 0;
-            d.PrimaryButtonClick += async (_, args) => await RunWhileOpen(d, MergeNow, args);
-            d.SecondaryButtonClick += async (_, args) => await RunWhileOpen(d, () => model.EnableAutoMerge(Method()), args);
+            if (model.Pr is not { } current) return;
+            var s = PRDetailViewModel.Headline(current, model.Requirements);
+            headline.Content = Ui.H(8, Ui.Glyph(s.glyph, 14, s.color), Ui.Text(s.text, 13, "text", wrap: true));
+            checklist.Content = model.Requirements.Count > 0 ? PRContent.RequirementsList(model, current, model.Requirements, null) : null;
+            var canAuto = repo?.AutoMergeAllowed == true && current.AutoMergeRequest is null;
+            var mergeAnyway = L.T("Merge_Anyway", "Merge anyway");
+            var whenReady = L.T("Merge_WhenReady", "Merge when ready");
+            (string Id, string Title, string Color, string? Second, string? SecondTitle) plan = model.UsesQueue
+                ? ("queue", L.F("Merge_AddToQueue", "Add to {0}", model.QueueTitle), "accent", "merge", L.T("Merge_MergeDirectly", "Merge directly"))
+                : Stage(model, current) switch
+                {
+                    MergeStage.Ready => ("merge", L.T("Merge_MergeButton", "Merge"), "green", canAuto && current.MergeStateStatus != "CLEAN" ? "auto" : null, whenReady),
+                    MergeStage.Waiting => canAuto ? ("auto", whenReady, "accent", "merge", mergeAnyway) : ("merge", mergeAnyway, "red", null, null),
+                    MergeStage.Conflicts => ("resolve", L.T("Merge_ResolveConflicts", "Resolve conflicts…"), "coral", "merge", mergeAnyway),
+                    MergeStage.Behind => model.Features.UpdateBranch ? ("update", L.T("Merge_UpdateBranch", "Update branch"), "accent", "merge", mergeAnyway) : ("merge", mergeAnyway, "red", canAuto ? "auto" : null, whenReady),
+                    _ => ("merge", mergeAnyway, "red", canAuto ? "auto" : null, whenReady)
+                };
+            primary = plan.Id;
+            secondary = plan.Second ?? "";
+            d.PrimaryButtonText = plan.Title;
+            d.SecondaryButtonText = plan.Second is null ? "" : plan.SecondTitle ?? "";
+            paint(plan.Color);
         }
+        Apply();
+        void OnModel(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName is nameof(PRDetailViewModel.Pr) or nameof(PRDetailViewModel.RulesState)) d.DispatcherQueue.TryEnqueue(Apply);
+        }
+        model.PropertyChanged += OnModel;
+        var choice = "";
+        d.PrimaryButtonClick += (_, _) => choice = primary;
+        d.SecondaryButtonClick += (_, _) => choice = secondary;
         await ShowAsync(d);
+        model.PropertyChanged -= OnModel;
+        switch (choice)
+        {
+            case "auto":
+                if (await model.EnableAutoMerge(method))
+                    ShellView.Toast(L.F("Toast_AutoMerge", "{0} merges when ready", model.NumberText), false, null, null, "", "link");
+                break;
+            case "queue":
+                if (await model.Simple(PRAction.Enqueue))
+                    ShellView.Toast(L.F("Merge_AddedToQueue", "Added to the {0}", model.QueueTitle));
+                break;
+            case "update":
+                if (await model.Simple(PRAction.UpdateBranch))
+                    ShellView.Toast(L.F("Toast_BranchUpdated", "Updating {0} from {1}", pr.HeadRefName, pr.BaseRefName), false, null, null, "", "link");
+                break;
+            case "resolve":
+                LinkBrowser.Open(model.Features.IsGitHub ? pr.Url + "/conflicts" : pr.Url);
+                break;
+            case "merge":
+                var t = title.Text.Trim();
+                var b = message.Text.Trim();
+                var del = deleteBox.IsChecked == true && deleteBox.Visibility == Visibility.Visible;
+                await ConfirmMerge(root, model, method, t.Length == 0 ? null : t, b.Length == 0 ? null : b, del);
+                break;
+        }
+    }
+
+    private static string MethodTitle(PRDetailViewModel model, string method) =>
+        method == "MERGE" && model.IsGitLab ? L.T("MR_MergeMethod", "Merge") : MergeMethods.Title(method);
+
+    private static async Task ConfirmMerge(XamlRoot root, PRDetailViewModel model, string method, string? title, string? body, bool deleteBranch)
+    {
+        if (model.Pr is not { } pr) return;
+        var stage = Stage(model, pr);
+        var lines = Ui.V(8,
+            Ui.H(8, Ui.Glyph(MergeMethods.Glyph(method), 13, "muted"), Ui.Text(MethodTitle(model, method), 13)),
+            deleteBranch ? Ui.H(8, Ui.Glyph("", 13, "muted"), Ui.Text(L.F("Merge_ConfirmDelete", "Delete {0} afterwards", pr.HeadRefName), 13)) : null);
+        if (stage != MergeStage.Ready)
+        {
+            var blocker = model.Requirements.FirstOrDefault(r => r.State == RequirementState.Missing) ?? model.Requirements.FirstOrDefault(r => r.State == RequirementState.Pending);
+            var warn = blocker is null ? L.T("Merge_ConfirmBlocked", "GitHub reports this pull request isn’t ready. Merging now bypasses that.") : L.F("Merge_ConfirmBlockedBy", "Not ready: {0}. Merging now bypasses it.", blocker.Title);
+            var row = Ui.Columns((Ui.Glyph("", 13, "amber"), Ui.Auto), (Ui.Text(warn, 13, "amberInk", wrap: true), Ui.Star));
+            lines.Children.Add(Ui.Card(row, 8, "sunken", 10));
+        }
+        var d = Create(root, L.F("Merge_ConfirmTitle", "Merge {0} into {1}?", model.NumberText, pr.BaseRefName), lines, stage == MergeStage.Ready ? L.T("Merge_MergeButton", "Merge") : L.T("Merge_Anyway", "Merge anyway"));
+        PaintablePrimary(d)(stage == MergeStage.Ready ? "green" : "red");
+        if (await ShowAsync(d) != ContentDialogResult.Primary) return;
+        if (!await model.Merge(method, title, body, deleteBranch)) return;
+        var text = L.F("Toast_Merged", "Merged {0} into {1}", model.NumberText, pr.BaseRefName);
+        if (model.DeletedBranch is not null)
+        {
+            ShellView.Toast(text, false, L.T("Toast_RestoreBranch", "Restore branch"), () => RestoreBranch(model).Forget(), "", "violet");
+            return;
+        }
+        var next = model.NextReview;
+        ShellView.Toast(text, false, next is null ? null : L.T("Toast_NextReview", "Next review →"), next is null ? null : () => AppViewModel.Shared.Open(next.Route), "", "violet");
+    }
+
+    private static async Task RestoreBranch(PRDetailViewModel model)
+    {
+        var branch = model.DeletedBranch?.Branch ?? "";
+        if (await model.RestoreBranch()) ShellView.Toast(L.F("Toast_BranchRestored", "Restored {0}", branch));
     }
 
     public static async Task EditPR(XamlRoot? root, PRDetailViewModel model)
@@ -632,7 +859,31 @@ public static class Dialogs
     {
         if (root is null) return;
         var text = Editor(L.F("Inline_Placeholder", "Comment on line {0} (Markdown)", anchor.Line), model.ComposerText(anchor), minHeight: 100);
-        var panel = Ui.V(8, Ui.Text($"{anchor.Path}:{anchor.Line} ({anchor.Side.ToLowerInvariant()})", 12, "muted", mono: true), text);
+        var location = Ui.Text($"{anchor.Path}:{anchor.Line} ({anchor.Side.ToLowerInvariant()})", 12, "muted", mono: true);
+        FrameworkElement header = location;
+        if (anchor.Side == "RIGHT" && model.LineText(anchor) is { } original)
+        {
+            void Suggest()
+            {
+                var block = $"```suggestion\n{original}\n```\n";
+                var at = Math.Clamp(text.SelectionStart, 0, text.Text.Length);
+                var prefix = at > 0 && text.Text[at - 1] != '\n' && text.Text[at - 1] != '\r' ? "\n" : "";
+                text.Text = text.Text.Insert(at, prefix + block);
+                text.SelectionStart = at + prefix.Length + "```suggestion\n".Length;
+                text.SelectionLength = original.Length;
+                text.Focus(FocusState.Programmatic);
+            }
+            var suggest = Ui.Button(L.T("Inline_Suggest", "Suggest change"), Suggest, glyph: "\uE70F", tooltip: L.T("Inline_SuggestHint", "Insert a suggestion block with this line (Ctrl+G)"));
+            var accelerator = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.G, Modifiers = Windows.System.VirtualKeyModifiers.Control };
+            accelerator.Invoked += (_, e) =>
+            {
+                e.Handled = true;
+                Suggest();
+            };
+            text.KeyboardAccelerators.Add(accelerator);
+            header = Ui.Columns((location, Ui.Star), (suggest, Ui.Auto));
+        }
+        var panel = Ui.V(8, header, text);
         var d = Create(root, L.T("Inline_Title", "Comment on line"), panel, L.T("Inline_Single", "Add single comment"), L.T("Inline_AddToReview", "Add to review"));
         ToolTipService.SetToolTip(d, L.T("Inline_Help", "“Add to review” saves the comment as pending and submits it with the review"));
         void Validate()
@@ -794,6 +1045,7 @@ public static class Dialogs
         var charCount = Ui.Text("", 11, "dim");
         var updating = false;
         var shownText = "";
+        var tickets = new List<PullYard.Core.Jira.JiraIssue>();
 
         string Generated()
         {
@@ -804,7 +1056,7 @@ public static class Dialogs
             }
             if (useReviewer && found is not null) return FixPromptExtractor.Wrap(found, pr, options);
             var chosen = threads.Where(t => selected.Contains(t.Id)).ToList();
-            return FixPrompt.Build(pr, model.Ref.Repo, chosen, general, options);
+            return FixPrompt.Build(pr, model.Ref.Repo, chosen, general, options, tickets);
         }
 
         void Regenerate()
@@ -832,6 +1084,28 @@ public static class Dialogs
             reset.Visibility = Visibility.Visible;
             charCount.Text = promptBox.Text.Length.ToString();
         };
+
+        async Task LoadTickets()
+        {
+            var store = JiraService.Connections;
+            if (ci || !store.IsConfigured) return;
+            var loaded = new List<PullYard.Core.Jira.JiraIssue>();
+            foreach (var key in store.Keys(pr).Take(3))
+            {
+                try
+                {
+                    loaded.Add(await store.FetchIssue(key, model.Ref.Repo));
+                }
+                catch
+                {
+                }
+            }
+            if (loaded.Count == 0) return;
+            tickets = loaded;
+            if (custom is null && !(useReviewer && found is not null)) Regenerate();
+        }
+
+        LoadTickets().Forget();
 
         var panel = Ui.V(10);
         panel.Children.Add(Ui.H(10, Ui.IconTile("", "coral", 30), Ui.V(1, Ui.Text(L.T("Fix_Button", "Fix with agent"), 15, "text", FontWeights.SemiBold), Ui.H(6, Ui.Text($"#{pr.Number}", 13, "violet", FontWeights.SemiBold), Ui.Text(pr.Title, 13, "muted")))));

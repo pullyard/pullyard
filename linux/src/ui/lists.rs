@@ -6,12 +6,26 @@ use adw::prelude::*;
 use chrono::{DateTime, Utc};
 use gtk::glib;
 
-use super::item_row::{describe_row, item_menu, item_row};
+use super::item_row::{describe_row, item_menu, item_row_with};
 use super::menu::{context_menu, Menu};
 use super::widgets::*;
 use crate::api::models::{Route, SearchItem};
 use crate::list_sort::ListSort;
-use crate::{app, settings};
+use crate::{app, queue, settings};
+
+const SNOOZED_GROUP: &str = "__snoozed__";
+
+fn snoozed_header(count: usize, expanded: bool) -> gtk::Box {
+    let b = hbox(7);
+    margins(&b, 6, 0, 3, 0);
+    b.append(&icon(if expanded { "pan-down-symbolic" } else { "pan-end-symbolic" }, 12));
+    b.append(&icon_tile("sy-moon-symbolic", "indigo", 24));
+    let t = label_with("Snoozed", &["sy-bold", "sy-text"]);
+    t.set_hexpand(true);
+    b.append(&t);
+    b.append(&status_chip(&count.to_string(), "indigo", None));
+    b
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum StateFilter {
@@ -594,6 +608,14 @@ impl SearchList {
             }
             None => false,
         });
+        let weak = Rc::downgrade(&me);
+        queue::on_change(move |_| match weak.upgrade() {
+            Some(me) => {
+                me.render();
+                true
+            }
+            None => false,
+        });
         me.reload(false);
         keep_alive(&tv, me);
         tv.upcast()
@@ -762,7 +784,10 @@ impl SearchList {
         for item in items {
             sig.push('|');
             sig.push_str(&crate::util::rel(Some(item.updated_at)));
+            let key = item.item_ref().title();
+            sig.push_str(&format!("|{:?}|{:?}", queue::seen(&key), queue::snoozed_until(&key)));
         }
+        sig.push_str(&format!("|{}", self.collapsed.borrow().contains(SNOOZED_GROUP)));
         if self.grouped {
             let mut collapsed: Vec<String> = self.collapsed.borrow().iter().cloned().collect();
             collapsed.sort();
@@ -805,9 +830,28 @@ impl SearchList {
                 }
             }
         } else {
-            for item in items {
+            let now = Utc::now();
+            let (active, snoozed): (Vec<&SearchItem>, Vec<&SearchItem>) = items.iter().partition(|i| !queue::is_snoozed(queue::snoozed_until(&i.item_ref().title()), now));
+            for item in active {
                 self.append_item(item, true);
                 keys.push(Some(item.route()));
+            }
+            if !snoozed.is_empty() {
+                let open = self.collapsed.borrow().contains(SNOOZED_GROUP);
+                let row = gtk::ListBoxRow::new();
+                row.set_widget_name(&format!("group:{SNOOZED_GROUP}"));
+                row.set_child(Some(&snoozed_header(snoozed.len(), open)));
+                row.set_selectable(false);
+                set_label(&row, &format!("Snoozed, {} items", snoozed.len()));
+                set_expanded(&row, open);
+                self.list.append(&row);
+                keys.push(None);
+                if open {
+                    for item in snoozed {
+                        self.append_item(item, true);
+                        keys.push(Some(item.route()));
+                    }
+                }
             }
         }
         self.append_footer(&mut keys);
@@ -816,10 +860,36 @@ impl SearchList {
 
     fn append_item(&self, item: &SearchItem, show_repo: bool) {
         let row = gtk::ListBoxRow::new();
-        row.set_child(Some(&item_row(item, show_repo)));
+        let key = item.item_ref().title();
+        let news = queue::has_news(queue::seen(&key), item.updated_at);
+        row.set_child(Some(&item_row_with(item, show_repo, news)));
         describe_row(&row, item);
         let it = item.clone();
-        context_menu(&row, move || item_menu(&it));
+        context_menu(&row, move || {
+            let mut menu = item_menu(&it);
+            menu.section(None);
+            let key = it.item_ref().title();
+            match queue::snoozed_until(&key) {
+                Some(until) => {
+                    let k = key.clone();
+                    menu.item(&format!("Wake Up ({})", queue::wake_label(until)), move || queue::wake(&k));
+                }
+                None => {
+                    let k = key.clone();
+                    menu.submenu("Snooze", move |sub| {
+                        for preset in queue::Snooze::ALL {
+                            let k = k.clone();
+                            sub.item(preset.title(), move || snooze_with_undo(&k, preset));
+                        }
+                    });
+                }
+            }
+            if queue::has_news(queue::seen(&key), it.updated_at) {
+                let k = key.clone();
+                menu.item("Mark as Seen", move || queue::mark_seen(&k, Utc::now()));
+            }
+            menu
+        });
         self.list.append(&row);
     }
 
@@ -835,6 +905,13 @@ impl SearchList {
             None => self.list.unselect_all(),
         }
     }
+}
+
+fn snooze_with_undo(key: &str, preset: queue::Snooze) {
+    let until = preset.until(chrono::Local::now());
+    queue::snooze(key, until);
+    let k = key.to_string();
+    app::toast_action(&format!("Snoozed {key} {}", queue::wake_label(until.with_timezone(&Utc).timestamp())), "Undo", move || queue::wake(&k));
 }
 
 fn toggles_children(b: &gtk::Box) -> Vec<gtk::ToggleButton> {

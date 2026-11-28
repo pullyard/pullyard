@@ -23,13 +23,13 @@ struct ItemRef: Hashable, Codable {
     var title: String { "\(repo.full)#\(number)" }
 }
 
-struct ProjectRef: Hashable {
+struct ProjectRef: Hashable, Codable {
     let id: String
     let title: String
     let url: String
 }
 
-enum Route: Hashable {
+enum Route: Hashable, Codable {
     case pr(ItemRef)
     case issue(ItemRef)
     case repo(RepoRef)
@@ -695,6 +695,22 @@ struct RepoConnection: Decodable {
 struct ReposResponse: Decodable {
     struct V: Decodable { let repositories: RepoConnection }
     let viewer: V
+}
+
+struct GitHubOwner: Decodable, Hashable, Identifiable {
+    let login: String
+    let avatarUrl: String?
+    var id: String { login }
+}
+
+struct OrganizationsResponse: Decodable {
+    struct V: Decodable { let organizations: Nodes<GitHubOwner> }
+    let viewer: V
+}
+
+struct OwnerReposResponse: Decodable {
+    struct O: Decodable { let repositories: RepoConnection }
+    let repositoryOwner: O?
 }
 
 struct RepoInfoResponse: Decodable {

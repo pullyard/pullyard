@@ -12,6 +12,12 @@ struct Release: Equatable {
     let dmgURL: URL
     let dmgSize: Int64
     var signatureURL: URL? = nil
+    var devBuild: Int? = nil
+    var devCommit: String? = nil
+
+    var isDev: Bool { devBuild != nil }
+    var identifier: String { devBuild.map { "dev-\($0)" } ?? version }
+    var displayVersion: String { devBuild.map { "\(version) dev \($0)" } ?? version }
 }
 
 enum UpdateError: LocalizedError {
@@ -70,7 +76,11 @@ final class Updater {
     static let lastCheckKey = "update.lastCheck"
     static let skippedVersionKey = "update.skippedVersion"
     static let announcedVersionKey = "update.announcedVersion"
+    static let devChannelKey = "update.devChannel"
+    static let devTag = "dev-build"
+    nonisolated static let devAPI = URL(string: "https://api.github.com/repos/pullyard/pullyard/releases/tags/dev-build")!
     static let checkInterval: TimeInterval = 6 * 3600
+    static let devCheckInterval: TimeInterval = 5 * 60
     static let releasesPage = "https://github.com/pullyard/pullyard/releases/latest"
     static func changelogURL(_ version: String) -> String { "https://pullyard.app/changelog.html#v\(version)" }
     nonisolated static let latestAPI = URL(string: "https://api.github.com/repos/pullyard/pullyard/releases/latest")!
@@ -86,6 +96,23 @@ final class Updater {
     private var stagedApp: URL?
 
     let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    let currentDevBuild = Bundle.main.object(forInfoDictionaryKey: "PYDevBuild") as? Int
+    let currentDevCommit = Bundle.main.object(forInfoDictionaryKey: "PYDevCommit") as? String
+
+    var currentDisplayVersion: String {
+        guard let build = currentDevBuild else { return currentVersion }
+        return "\(currentVersion) dev \(build)" + (currentDevCommit.map { " (\($0))" } ?? "")
+    }
+
+    var devChannel: Bool { UserDefaults.standard.bool(forKey: Self.devChannelKey) }
+
+    func isNewer(_ release: Release) -> Bool {
+        if let build = release.devBuild {
+            guard let mine = currentDevBuild else { return Self.compare(release.version, currentVersion) != .orderedAscending }
+            return build > mine
+        }
+        return Self.compare(release.version, currentVersion) == .orderedDescending
+    }
 
     private init() {}
 
@@ -121,11 +148,13 @@ final class Updater {
         guard periodicTask == nil else { return }
         periodicTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 3600 * 1_000_000_000)
+                let dev = UserDefaults.standard.bool(forKey: Self.devChannelKey)
+                try? await Task.sleep(for: .seconds(dev ? 300 : 3600))
                 guard let self, !Task.isCancelled else { return }
                 let defaults = UserDefaults.standard
                 guard defaults.object(forKey: Self.autoCheckKey) as? Bool ?? true else { continue }
-                if let last = defaults.object(forKey: Self.lastCheckKey) as? Date, Date().timeIntervalSince(last) < Self.checkInterval { continue }
+                let interval = defaults.bool(forKey: Self.devChannelKey) ? Self.devCheckInterval : Self.checkInterval
+                if let last = defaults.object(forKey: Self.lastCheckKey) as? Date, Date().timeIntervalSince(last) < interval { continue }
                 if case .available = self.state { continue }
                 await self.check(userInitiated: false)
             }
@@ -142,18 +171,20 @@ final class Updater {
         }
         state = .checking
         do {
-            let latest = try await Self.fetchLatest()
+            let latest = devChannel ? try await Self.fetchDev() : try await Self.fetchLatest()
             UserDefaults.standard.set(Date(), forKey: Self.lastCheckKey)
             release = latest
-            if Self.compare(latest.version, currentVersion) == .orderedDescending {
+            if isNewer(latest) {
                 state = .available(latest)
                 let defaults = UserDefaults.standard
                 let skipped = defaults.string(forKey: Self.skippedVersionKey)
                 let announced = defaults.string(forKey: Self.announcedVersionKey)
                 if userInitiated {
                     presentRequest += 1
-                } else if skipped != latest.version, announced != latest.version {
-                    defaults.set(latest.version, forKey: Self.announcedVersionKey)
+                } else if latest.isDev {
+                    await downloadAndInstall(quiet: true)
+                } else if skipped != latest.identifier, announced != latest.identifier {
+                    defaults.set(latest.identifier, forKey: Self.announcedVersionKey)
                     if NSApp.isActive {
                         presentRequest += 1
                     } else {
@@ -172,7 +203,7 @@ final class Updater {
 
     func skip() {
         guard let release else { return }
-        UserDefaults.standard.set(release.version, forKey: Self.skippedVersionKey)
+        UserDefaults.standard.set(release.identifier, forKey: Self.skippedVersionKey)
         state = .idle
     }
 
@@ -183,12 +214,12 @@ final class Updater {
         }
     }
 
-    func downloadAndInstall() async {
+    func downloadAndInstall(quiet: Bool = false) async {
         guard let release, !isBusy else { return }
         state = .downloading(0)
         do {
             let dir = Self.updatesDir
-            let destination = dir.appendingPathComponent("PullYard-\(release.version).dmg")
+            let destination = dir.appendingPathComponent("PullYard-\(release.identifier).dmg")
             try await Task.detached {
                 let fm = FileManager.default
                 try? fm.removeItem(at: dir)
@@ -200,13 +231,17 @@ final class Updater {
                 }
             }
             state = .installing
-            try await UpdateSignature.verify(dmg: dmg, signatureURL: release.signatureURL)
+            try await UpdateSignature.verify(dmg: dmg, signatureURL: release.signatureURL, publicKey: release.isDev ? UpdateSignature.devPublicKey : UpdateSignature.publicKey)
             let bundleID = Bundle.main.bundleIdentifier
             let version = release.version
             stagedApp = try await Task.detached { try Self.stage(dmg: dmg, version: version, bundleID: bundleID) }.value
             state = .readyToRelaunch
         } catch {
             state = .failed(error.localizedDescription)
+        }
+        if quiet {
+            if case .readyToRelaunch = state { UpdateNotifier.shared.postReady(release) }
+            return
         }
         presentRequest += 1
     }
@@ -329,6 +364,41 @@ final class Updater {
         if code == 404 { throw UpdateError.noReleases }
         guard (200..<300).contains(code) else { throw UpdateError.http(code) }
         return try parseRelease(data)
+    }
+
+    nonisolated static func fetchDev() async throws -> Release {
+        var req = URLRequest(url: devAPI)
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.timeoutInterval = 20
+        let (data, response) = try await Diagnostics.track(.rest, Diagnostics.restName("GET", req.url), url: req.url, authenticated: false) { try await URLSession.shared.data(for: req) }
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if code == 404 { throw UpdateError.noReleases }
+        guard (200..<300).contains(code) else { throw UpdateError.http(code) }
+        return try parseDevRelease(data)
+    }
+
+    nonisolated static func parseDevRelease(_ data: Data) throws -> Release {
+        let base = try parseRelease(data)
+        var fields: [String: String] = [:]
+        for line in base.notes.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            if parts.count == 2 { fields[parts[0].lowercased()] = parts[1] }
+        }
+        guard let build = fields["build"].flatMap(Int.init), let version = fields["version"], !version.isEmpty else { throw UpdateError.noReleases }
+        return Release(
+            version: version,
+            name: "PullYard \(version) dev \(build)",
+            notes: fields["message"] ?? "",
+            pageURL: base.pageURL,
+            publishedAt: base.publishedAt,
+            dmgURL: base.dmgURL,
+            dmgSize: base.dmgSize,
+            signatureURL: base.signatureURL,
+            devBuild: build,
+            devCommit: fields["commit"]
+        )
     }
 
     nonisolated static func parseRelease(_ data: Data) throws -> Release {
@@ -517,6 +587,18 @@ final class UpdateNotifier: NSObject, UNUserNotificationCenterDelegate {
         guard !installed else { return }
         installed = true
         UNUserNotificationCenter.current().delegate = self
+    }
+
+    func postReady(_ release: Release) {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "PullYard \(release.displayVersion) is ready"
+            content.body = (release.notes.isEmpty ? "" : release.notes + "\n") + "Click to relaunch with the new dev build."
+            content.sound = .default
+            center.add(UNNotificationRequest(identifier: "update-\(release.identifier)", content: content, trigger: nil))
+        }
     }
 
     func post(version: String) {

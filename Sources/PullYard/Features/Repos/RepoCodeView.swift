@@ -18,6 +18,7 @@ struct RepoCodeView: View {
             if defaultBranch != nil { await model.start(defaultBranch: defaultBranch) }
         }
         .sheet(isPresented: $showQuickOpen) { QuickOpenSheet(model: model) }
+        .onChange(of: model.loadingDir) { _, loading in if !loading, model.lastUpdated == nil { model.lastUpdated = Date() } }
         .focusedSceneValue(\.blame, model.selectedFile != nil && model.file != nil ? blameBinding : nil)
         .onChange(of: model.blameOn && model.showsMarkdown, initial: true) { _, needsSource in
             if needsSource { markdownSource = true }
@@ -48,6 +49,9 @@ struct RepoCodeView: View {
                 .fixedSize()
                 .help("Branch")
                 Spacer()
+                RefreshPill(updated: model.lastUpdated, refreshing: model.refreshing || model.loadingDir, error: model.refreshError) {
+                    Task { await model.refresh() }
+                }
                 Button { showQuickOpen = true } label: { Image(systemName: "magnifyingglass").foregroundStyle(Color.syMuted) }
                     .buttonStyle(.borderless)
                     .help("Go to file (⌘P)")
@@ -187,7 +191,7 @@ struct RepoCodeView: View {
         if model.file != nil {
             if model.blameOn {
                 if model.blameLoading {
-                    ProgressView().controlSize(.mini)
+                    PYLoader(size: 12)
                 } else if let e = model.blameError {
                     Label(e, systemImage: "exclamationmark.triangle.fill")
                         .font(.syCaption)

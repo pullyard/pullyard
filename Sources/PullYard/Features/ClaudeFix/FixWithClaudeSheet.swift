@@ -13,6 +13,8 @@ struct FixWithClaudeSheet: View {
     @AppStorage("claudeTarget.v2") private var target: ClaudeTarget = .app
     @AppStorage("claudeMode") private var mode: ClaudePermissionMode = .standard
     @AppStorage("agentFix.isolatedWorktree") private var isolate = true
+    @State private var worktreePath: String?
+    @AppStorage("agentFix.profile") private var profileID = ""
     @State private var launching = false
     @State private var found: FoundFixPrompt?
     @State private var source: FixSource = .composed
@@ -29,6 +31,7 @@ struct FixWithClaudeSheet: View {
     @State private var ciHead: String?
     @State private var ciNonce = CIFixPrompt.nonce()
     @State private var ciStale = false
+    @State private var tickets: [JiraIssue] = []
 
     private var allFailing: [CheckContext] { CIFailureCollector.failing(pr.checks) }
     private var failing: [CheckContext] { CIFailureCollector.shown(allFailing, focus: ci?.focus) }
@@ -45,7 +48,7 @@ struct FixWithClaudeSheet: View {
             return CIFixPrompt.build(pr: pr, repo: model.ref.repo, failures: chosen.compactMap { ciItems[$0.id] }, pending: chosen.filter { ciItems[$0.id] == nil }.map { CIFailure(check: $0).name }, options: options, nonce: ciNonce)
         }
         let chosen = threads.filter { selected.contains($0.id) }
-        return FixPrompt.build(pr: pr, repo: model.ref.repo, threads: chosen, general: general, options: options)
+        return FixPrompt.build(pr: pr, repo: model.ref.repo, threads: chosen, general: general, options: options, tickets: tickets)
     }
 
     private var prompt: String { custom ?? generated }
@@ -78,9 +81,9 @@ struct FixWithClaudeSheet: View {
             .onChange(of: options.push) { _, push in if !push { options.replyAndResolve = false } }
             promptEditor
             ClaudeFolderRow(repo: model.ref.repo, folder: $folder, detecting: detecting)
-            ClaudeWorktreeRow(folder: folder, number: pr.number, target: target, isolate: $isolate)
+            ClaudeWorktreeRow(folder: folder, number: pr.number, target: target, isolate: $isolate, worktreePath: $worktreePath)
             if let error { Text(error).font(.syCaption).foregroundStyle(Color.syRed) }
-            ClaudeLaunchRow(target: $target, mode: $mode, canLaunch: !launching && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (target == .copy || folder != nil) && !(source == .ci && (ciLoading || ciSelected.isEmpty)), onLaunch: launch)
+            ClaudeLaunchRow(target: $target, mode: $mode, profileID: Binding(get: { ClaudeProfiles.shared.profile(id: profileID).map { p in ClaudeProfiles.shared.visible.contains(p) ? p.id : ClaudeProfiles.shared.activeID } ?? ClaudeProfiles.shared.activeID }, set: { profileID = $0 }), canLaunch: !launching && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (target == .copy || folder != nil) && !(source == .ci && (ciLoading || ciSelected.isEmpty)), onLaunch: launch)
         }
         .padding(20)
         .frame(width: 780, height: 680)
@@ -119,6 +122,16 @@ struct FixWithClaudeSheet: View {
             if selected.isEmpty { selected = Set(threads.map(\.id)) }
             folder = await LocalRepoStore.detect(model.ref.repo)
             detecting = false
+        }
+        .task(id: pr.url) {
+            let store = JiraConnections.shared
+            guard store.isConfigured else { return }
+            var found: [JiraIssue] = []
+            for key in JiraTab.keys(for: pr).prefix(3) {
+                if let issue = try? await store.fetchIssue(key, repo: model.ref.repo) { found.append(issue) }
+            }
+            guard !found.isEmpty else { return }
+            tickets = found
         }
     }
 
@@ -195,7 +208,7 @@ struct FixWithClaudeSheet: View {
                     Text("showing \(failing.count) of \(allFailing.count)").font(.syCaption).foregroundStyle(Color.syDim)
                 }
                 if ciLoading {
-                    ProgressView().controlSize(.mini)
+                    PYLoader(size: 12)
                     Text("Collecting logs…").font(.syCaption).foregroundStyle(Color.syDim)
                 }
                 Spacer()
@@ -238,7 +251,7 @@ struct FixWithClaudeSheet: View {
                 Text(ciDetail(item)).font(.syCaption).foregroundStyle(Color.syDim).lineLimit(1)
             }
         } else if ciLoading {
-            ProgressView().controlSize(.mini)
+            PYLoader(size: 12)
         }
     }
 
@@ -315,9 +328,12 @@ struct FixWithClaudeSheet: View {
         Task {
             defer { launching = false }
             do {
-                let tab = try await ClaudeLauncher.startForPR(app: app, prompt: prompt, folder: folder, isolate: isolate, pr: pr, repo: model.ref.repo, target: target, mode: mode, name: name)
+                let tab = try await ClaudeLauncher.startForPR(app: app, prompt: prompt, folder: folder, isolate: isolate, worktreePath: worktreePath, pr: pr, repo: model.ref.repo, target: target, mode: mode, name: name, profileID: ClaudeProfiles.shared.profile(id: profileID).flatMap { ClaudeProfiles.shared.visible.contains($0) ? $0.id : nil })
                 if source == .ci, target != .copy {
                     app.claude.ciFixes[model.ref] = CIFixLaunch(tabID: tab?.id, target: target, headOid: pr.headRefOid, at: Date())
+                }
+                if let tab {
+                    app.claude.prFixes[model.ref] = CIFixLaunch(tabID: tab.id, target: target, headOid: pr.headRefOid, at: Date())
                 }
                 if source != .ci, target != .copy {
                     let ids = (source == .composed ? threads.filter { selected.contains($0.id) } : threads).map(\.id)
@@ -364,7 +380,7 @@ struct ClaudeFixBanner: View {
                 Button("Fix with agent", action: action)
                     .controlSize(.small)
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.syCoral)
+                    .tint(Color.syCoralFill)
             }
             .font(.syCallout)
             .padding(.horizontal, 10)
@@ -418,7 +434,7 @@ struct ReReviewBanner: View {
                     } label: {
                         HStack(spacing: 5) {
                             if sending {
-                                ProgressView().controlSize(.mini)
+                                PYLoader(size: 12)
                             } else {
                                 Image(systemName: "arrow.triangle.2.circlepath")
                             }

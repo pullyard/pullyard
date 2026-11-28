@@ -176,6 +176,7 @@ mod tests {
             parent_id: None,
             desktop_id: None,
             archived,
+            profile_id: None,
         }
     }
 

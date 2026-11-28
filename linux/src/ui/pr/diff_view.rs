@@ -117,6 +117,24 @@ fn attributes(spans: &[(usize, usize, Token)], shift: usize) -> pango::AttrList 
     list
 }
 
+fn add_word_highlight(list: &pango::AttrList, kind: LineKind, start: usize, end: usize) {
+    let dark = crate::theme::is_dark();
+    let (name, light, dark_hex, alpha) = match kind {
+        LineKind::Add => ("green", "#2E8A57", "#5DBE8A", if dark { 0.30 } else { 0.28 }),
+        LineKind::Del => ("red", "#C2412F", "#E8746A", if dark { 0.30 } else { 0.28 }),
+        _ => return,
+    };
+    let Some((r, g, b)) = crate::theme::token_hex(name).and_then(rgb).or_else(|| rgb(if dark { dark_hex } else { light })) else { return };
+    let mut bg = pango::AttrColor::new_background(r, g, b);
+    bg.set_start_index(start as u32);
+    bg.set_end_index(end as u32);
+    list.insert(bg);
+    let mut a = pango::AttrInt::new_background_alpha((alpha * 65535.0) as u16);
+    a.set_start_index(start as u32);
+    a.set_end_index(end as u32);
+    list.insert(a);
+}
+
 pub fn ensure_css() {
     if CSS_DONE.with(|d| d.replace(true)) {
         return;
@@ -124,7 +142,7 @@ pub fn ensure_css() {
     let Some(display) = gtk::gdk::Display::default() else { return };
     let provider = gtk::CssProvider::new();
     provider.load_from_string(
-        "diffcode { padding: 0; }\n.diff-filler { background-color: @sy_line; }\n.diff-split-right { border-left: 1px solid @sy_line_strong; }\n.diff-review-bar { border-bottom: 1px solid @sy_line; padding: 4px 12px; }\n.diff-review-bar button.flat { min-height: 24px; min-width: 24px; padding: 2px; }\n.diff-selected { background-image: image(alpha(@accent_bg_color, 0.28)); }\n",
+        "diffcode { padding: 0; }\n.diff-filler { background-color: @sy_line; }\n.diff-split-right { border-left: 1px solid @sy_line_strong; }\n.diff-review-bar { border-bottom: 1px solid @sy_line; padding: 4px 12px; }\n.diff-review-bar button.flat { min-height: 24px; min-width: 24px; padding: 2px; }\n.diff-selected { background-image: image(alpha(@accent_bg_color, 0.28)); }\n.diff-line.add { box-shadow: inset 3px 0 @sy_green; }\n.diff-line.del { box-shadow: inset 3px 0 @sy_red; }\n.diff-gutter .diff-plus { color: @sy_coral; opacity: 0; transition: opacity 120ms ease-out; font-weight: 700; }\n.diff-line:hover .diff-gutter .diff-plus, .diff-gutter.commentable:hover .diff-plus { opacity: 1; }\n.diff-review-bar { min-height: 28px; }\n",
     );
     gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2);
 }
@@ -403,6 +421,11 @@ impl DiffCode {
             if !spans.is_empty() {
                 *imp.attrs.borrow_mut() = Some(attributes(&spans, 1));
             }
+        }
+        if let Some((start, end)) = line.word.filter(|_| code && text.len() > 1) {
+            let list = imp.attrs.borrow_mut().take().unwrap_or_default();
+            add_word_highlight(&list, line.kind, start + 1, end + 1);
+            *imp.attrs.borrow_mut() = Some(list);
         }
         me.update_property(&[gtk::accessible::Property::Label(&text)]);
         *imp.text.borrow_mut() = text;
@@ -689,14 +712,22 @@ fn kind_class(w: &gtk::Box, kind: LineKind) {
     }
 }
 
-fn gutter_label(text: &str, chars: i32, line: &DiffLine, can_comment: bool, on_comment: Option<&OnComment>) -> gtk::Label {
-    let gutter = label_with(text, &["diff-gutter"]);
-    gutter.set_width_chars(chars);
-    gutter.set_xalign(1.0);
+fn gutter_label(text: &str, chars: i32, line: &DiffLine, can_comment: bool, on_comment: Option<&OnComment>) -> gtk::Box {
+    let gutter = hbox(0);
+    gutter.add_css_class("diff-gutter");
     gutter.set_valign(gtk::Align::Start);
+    let numbers = label_with(&text[..text.len().saturating_sub(2)], &["diff-gutter"]);
+    numbers.set_width_chars(chars - 2);
+    numbers.set_xalign(1.0);
+    gutter.append(&numbers);
+    let plus = label_with(if can_comment { " +" } else { "  " }, &["diff-gutter", "diff-plus"]);
+    plus.set_width_chars(2);
+    decorative(&plus);
+    gutter.append(&plus);
     if can_comment {
         gutter.add_css_class("commentable");
         gutter.set_tooltip_text(Some("Comment on this line"));
+        set_label(&gutter, &format!("Comment on line {}", line.anchor_line().unwrap_or_default()));
         if let Some(f) = on_comment {
             let f = f.clone();
             let l = line.clone();

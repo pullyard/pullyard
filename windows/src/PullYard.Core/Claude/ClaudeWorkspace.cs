@@ -56,14 +56,14 @@ public sealed partial class ClaudeTab : ObservableObject
     public TerminalSession? Terminal { get; set; }
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.Now;
 
-    public ClaudeTab(string folder, ClaudeTabKind kind, string title, string sessionId, GitWorkingCopy git)
+    public ClaudeTab(string folder, ClaudeTabKind kind, string title, string sessionId, GitWorkingCopy git, string? configDir)
     {
         Folder = folder;
         Kind = kind;
         this.title = title;
         this.sessionId = sessionId;
         Git = git;
-        ConfigDir = ClaudeProfiles.Shared.ActiveOverride;
+        ConfigDir = configDir;
         if (kind == ClaudeTabKind.Chat)
         {
             Chat = new ChatSession(folder, ConfigDir);
@@ -72,6 +72,8 @@ public sealed partial class ClaudeTab : ObservableObject
     }
 
     public SessionIndicator Indicator => SessionIndicators.ForTab(State, Unread);
+
+    public ClaudeProfile? Profile => ClaudeProfiles.Shared.ProfileFor(ConfigDir);
 
     partial void OnStateChanged(ClaudeTabState value) => OnPropertyChanged(nameof(Indicator));
 
@@ -387,6 +389,47 @@ public sealed partial class ClaudeWorkspace : ObservableObject
         }
     }
 
+    public void CloseTabs(string? configDir)
+    {
+        var doomed = Tabs.Where(t => ClaudeProfiles.SameDir(t.ConfigDir, configDir)).ToList();
+        if (doomed.Count == 0) return;
+        foreach (var tab in doomed)
+        {
+            tab.Chat?.Stop();
+            tab.Terminal?.Dispose();
+            tab.Terminal = null;
+            Tabs.Remove(tab);
+        }
+        if (SelectedTab is { } selected && !Tabs.Contains(selected)) SelectedTab = Tabs.FirstOrDefault();
+    }
+
+    public string? AccountFilter
+    {
+        get => S.GetString(Keys.AgentsAccountFilter) is { Length: > 0 } id && ClaudeProfiles.Shared.Visible.Any(p => p.Id == id) ? id : null;
+        set
+        {
+            S.Set(Keys.AgentsAccountFilter, value ?? "");
+            OnPropertyChanged();
+        }
+    }
+
+    public static string OwnerId(ClaudeSessionInfo s) => s.ProfileId ?? ClaudeProfiles.DefaultId;
+
+    public List<ClaudeSessionInfo> VisibleSessions(IEnumerable<ClaudeSessionInfo> sessions)
+    {
+        if (AccountFilter is not { } filter || !ClaudeProfiles.Shared.HasSeveral) return sessions.ToList();
+        return sessions.Where(s => OwnerId(s) == filter).ToList();
+    }
+
+    public List<ClaudeProject> AccountScoped(IEnumerable<ClaudeProject> projects)
+    {
+        if (AccountFilter is null || !ClaudeProfiles.Shared.HasSeveral) return projects.ToList();
+        return projects
+            .Select(p => new ClaudeProject { Id = p.Id, Path = p.Path, Sessions = VisibleSessions(p.Sessions) })
+            .Where(p => p.Sessions.Count > 0)
+            .ToList();
+    }
+
     public void CloseAllForProfileSwitch()
     {
         foreach (var tab in Tabs.ToList())
@@ -421,10 +464,10 @@ public sealed partial class ClaudeWorkspace : ObservableObject
         LoadingProjects = true;
         try
         {
-            var root = Path.Combine(ClaudeProfiles.Shared.ConfigDir(), "projects");
-            var profileId = ClaudeProfiles.Shared.ActiveId;
-            var loaded = await Task.Run(() => ClaudeSessionParser.LoadAll(root, DesktopSessionIndex.Load()));
-            if (profileId != ClaudeProfiles.Shared.ActiveId) return;
+            var roots = Roots();
+            var scope = string.Join(",", roots.Select(r => r.ProfileId));
+            var loaded = await Task.Run(() => ClaudeSessionParser.LoadAccounts(roots, DesktopSessionIndex.Load()));
+            if (scope != string.Join(",", Roots().Select(r => r.ProfileId))) return;
             if (Demo.Folder is { } f) loaded = loaded.Where(p => p.Path.StartsWith(f, StringComparison.OrdinalIgnoreCase)).ToList();
             Projects = loaded;
             ProjectsUpdated = DateTimeOffset.Now;
@@ -434,6 +477,15 @@ public sealed partial class ClaudeWorkspace : ObservableObject
         {
             LoadingProjects = false;
         }
+    }
+
+    private static List<(string ProfileId, string Root)> Roots()
+    {
+        var profiles = ClaudeProfiles.Shared;
+        var visible = profiles.Visible;
+        if (visible.Count == 0) visible = new List<ClaudeProfile> { profiles.Active };
+        var ordered = visible.Where(p => p.Id == profiles.ActiveId).Concat(visible.Where(p => p.Id != profiles.ActiveId));
+        return ordered.Select(p => (p.Id, Path.Combine(profiles.ConfigDir(p), "projects"))).ToList();
     }
 
     public IEnumerable<ClaudeSessionInfo> AllSessions => Projects.SelectMany(p => p.Sessions);
@@ -454,13 +506,17 @@ public sealed partial class ClaudeWorkspace : ObservableObject
 
     public ClaudeTab? TabForSession(string id) => Tabs.FirstOrDefault(t => t.SessionId == id);
 
-    public ClaudeTab NewSession(string folder, string? prompt = null, string? name = null, ClaudeMode? mode = null, ClaudeTabKind? kind = null)
+    public static string? ConfigDirFor(string? profileId) =>
+        profileId is null ? ClaudeProfiles.Shared.ActiveOverride : ClaudeProfiles.Shared.Profile(profileId) is { } p ? p.ConfigDir : ClaudeProfiles.Shared.ActiveOverride;
+
+    public ClaudeTab NewSession(string folder, string? prompt = null, string? name = null, ClaudeMode? mode = null, ClaudeTabKind? kind = null, string? profileId = null)
     {
         var k = kind ?? PreferredKind;
+        var configDir = ConfigDirFor(profileId);
         var title = name ?? (prompt is { Length: > 0 } p ? (p.Length > 48 ? p[..48] : p) : "New session");
         if (k == ClaudeTabKind.Chat)
         {
-            var tab = MakeTab(folder, ClaudeTabKind.Chat, title, "");
+            var tab = MakeTab(folder, ClaudeTabKind.Chat, title, "", configDir);
             StartChat(tab, null, false, prompt, mode);
             return tab;
         }
@@ -469,7 +525,7 @@ public sealed partial class ClaudeWorkspace : ObservableObject
         var viaShim = ClaudeLauncher.Command?.UsesCmdShell == true;
         if (!string.IsNullOrEmpty(name)) args.AddRange(new[] { "-n", viaShim ? ClaudeLauncher.SanitizeName(name) : name });
         if (!viaShim && !string.IsNullOrEmpty(prompt)) args.Add(ClaudeLauncher.FitCommandLine(prompt));
-        var t = MakeTab(folder, ClaudeTabKind.Terminal, title, sessionId);
+        var t = MakeTab(folder, ClaudeTabKind.Terminal, title, sessionId, configDir);
         LaunchTerminal(t, args, mode);
         return t;
     }
@@ -482,7 +538,7 @@ public sealed partial class ClaudeWorkspace : ObservableObject
             return open;
         }
         var k = kind ?? PreferredKind;
-        var tab = MakeTab(s.Cwd, k, s.Title, fork ? "" : s.Id);
+        var tab = MakeTab(s.Cwd, k, s.Title, fork ? "" : s.Id, ConfigDirFor(s.ProfileId));
         if (k == ClaudeTabKind.Chat)
         {
             tab.Chat?.LoadHistory(s.File);
@@ -501,7 +557,7 @@ public sealed partial class ClaudeWorkspace : ObservableObject
     {
         if (string.IsNullOrEmpty(tab.SessionId)) return;
         tab.Chat?.Stop();
-        var t = MakeTab(tab.Folder, ClaudeTabKind.Terminal, tab.Title, tab.SessionId, select: false);
+        var t = MakeTab(tab.Folder, ClaudeTabKind.Terminal, tab.Title, tab.SessionId, tab.ConfigDir, select: false);
         LaunchTerminal(t, new List<string> { "--resume", tab.SessionId }, null);
         Replace(tab, t);
     }
@@ -510,7 +566,7 @@ public sealed partial class ClaudeWorkspace : ObservableObject
     {
         if (string.IsNullOrEmpty(tab.SessionId)) return;
         tab.Terminal?.Dispose();
-        var c = MakeTab(tab.Folder, ClaudeTabKind.Chat, tab.Title, tab.SessionId, select: false);
+        var c = MakeTab(tab.Folder, ClaudeTabKind.Chat, tab.Title, tab.SessionId, tab.ConfigDir, select: false);
         if (SessionsById.TryGetValue(tab.SessionId, out var info)) c.Chat?.LoadHistory(info.File);
         StartChat(c, tab.SessionId, false, null, null);
         Replace(tab, c);
@@ -599,7 +655,7 @@ public sealed partial class ClaudeWorkspace : ObservableObject
             ClaudeTab next;
             if (info is not null)
             {
-                next = Resume(Retitled(info, tab.Title), kind: ClaudeTabKind.Chat);
+                next = Resume(info.With(title: tab.Title, profileId: tab.Profile?.Id), kind: ClaudeTabKind.Chat);
                 if (next.Chat is { } c)
                 {
                     c.Items.RemoveAll(i => i.Id == "nresumed");
@@ -616,7 +672,7 @@ public sealed partial class ClaudeWorkspace : ObservableObject
                 catch
                 {
                 }
-                next = NewSession(tab.Folder, prompt: replacement, name: tab.Title, kind: ClaudeTabKind.Chat);
+                next = NewSession(tab.Folder, prompt: replacement, name: tab.Title, kind: ClaudeTabKind.Chat, profileId: tab.Profile?.Id);
             }
             tab.Chat?.Stop();
             tab.Terminal?.Dispose();
@@ -629,21 +685,6 @@ public sealed partial class ClaudeWorkspace : ObservableObject
             chat.LastError = e.Message;
         }
     }
-
-    private static ClaudeSessionInfo Retitled(ClaudeSessionInfo s, string title) => new()
-    {
-        Id = s.Id,
-        File = s.File,
-        Cwd = s.Cwd,
-        Title = title,
-        Branch = s.Branch,
-        Modified = s.Modified,
-        PrUrl = s.PrUrl,
-        PrNumber = s.PrNumber,
-        Model = s.Model,
-        LinesAdded = s.LinesAdded,
-        LinesRemoved = s.LinesRemoved
-    };
 
     public void Close(ClaudeTab tab)
     {
@@ -676,9 +717,9 @@ public sealed partial class ClaudeWorkspace : ObservableObject
         if (submit) tab.Terminal?.Write("\r");
     }
 
-    private ClaudeTab MakeTab(string folder, ClaudeTabKind kind, string title, string sessionId, bool select = true)
+    private ClaudeTab MakeTab(string folder, ClaudeTabKind kind, string title, string sessionId, string? configDir, bool select = true)
     {
-        var tab = new ClaudeTab(folder, kind, title, sessionId, GitFor(folder));
+        var tab = new ClaudeTab(folder, kind, title, sessionId, GitFor(folder), configDir);
         tab.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(ClaudeTab.State) or nameof(ClaudeTab.MemoryBytes) or nameof(ClaudeTab.Unread)) UpdateCounts();

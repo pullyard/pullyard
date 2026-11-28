@@ -9,10 +9,11 @@ public sealed class DiffLine
     public string Text { get; init; } = "";
     public int? OldLine { get; init; }
     public int? NewLine { get; init; }
+    public bool OutsideHunk { get; init; }
 
     public string AnchorSide => Kind == DiffLineKind.Del ? "LEFT" : "RIGHT";
     public int? AnchorLine => Kind == DiffLineKind.Del ? OldLine : NewLine;
-    public bool Commentable => Kind is DiffLineKind.Add or DiffLineKind.Del or DiffLineKind.Context;
+    public bool Commentable => !OutsideHunk && Kind is DiffLineKind.Add or DiffLineKind.Del or DiffLineKind.Context;
 }
 
 public sealed class DiffFile

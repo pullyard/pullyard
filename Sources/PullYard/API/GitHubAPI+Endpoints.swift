@@ -96,6 +96,16 @@ extension GitHubAPI {
         try await graphQL(Q.badges)
     }
 
+    func focusCounts(_ scope: String) async throws -> (reviews: Int, mine: Int) {
+        struct Count: Decodable { let issueCount: Int }
+        struct R: Decodable { let rr: Count; let mine: Count }
+        let r: R = try await graphQL(Q.focusCounts, [
+            "rr": "is:pr is:open review-requested:@me archived:false \(scope)",
+            "mine": "is:pr is:open author:@me archived:false \(scope)"
+        ])
+        return (r.rr.issueCount, r.mine.issueCount)
+    }
+
     func pullRequest(_ ref: ItemRef) async throws -> PRDetailResponse {
         let vars: [String: Any?] = ["owner": ref.repo.owner, "name": ref.repo.name, "number": ref.number]
         do {
@@ -189,6 +199,18 @@ extension GitHubAPI {
         return r.viewer.repositories
     }
 
+    /// Organizations you belong to.
+    func organizations() async throws -> [GitHubOwner] {
+        let r: OrganizationsResponse = try await graphQL(Q.organizations)
+        return r.viewer.organizations.nodes
+    }
+
+    /// Repositories of a user or organization, newest push first.
+    func ownerRepos(_ login: String, after: String?) async throws -> RepoConnection? {
+        let r: OwnerReposResponse = try await graphQL(Q.ownerRepos, ["login": login, "after": after])
+        return r.repositoryOwner?.repositories
+    }
+
     func repoInfo(_ repo: RepoRef) async throws -> RepoInfoResponse.R? {
         let r: RepoInfoResponse = try await graphQL(Q.repoInfo, ["owner": repo.owner, "name": repo.name])
         return r.repository
@@ -275,6 +297,10 @@ extension GitHubAPI {
     func deleteBranch(repo: String, branch: String) async throws {
         let encoded = branch.split(separator: "/").map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }.joined(separator: "/")
         try await send("DELETE", "/repos/\(repo)/git/refs/heads/\(encoded)")
+    }
+
+    func restoreBranch(repo: String, branch: String, sha: String) async throws {
+        try await send("POST", "/repos/\(repo)/git/refs", body: ["ref": "refs/heads/\(branch)", "sha": sha])
     }
 
     func rerunFailedJobs(repo: RepoRef, runId: Int) async throws {
