@@ -28,11 +28,11 @@ enum JiraLook {
 
     static func prioritySymbol(_ priority: String) -> String {
         switch priority.lowercased() {
-        case "highest", "blocker", "critical": "chevron.up.2"
-        case "high", "major": "chevron.up"
-        case "medium": "equal"
-        case "low", "minor": "chevron.down"
-        default: "chevron.down.2"
+        case "highest", "blocker", "critical": "exclamationmark.2"
+        case "high", "major": "arrow.up"
+        case "medium": "minus"
+        case "low", "minor": "arrow.down"
+        default: "arrow.down.to.line"
         }
     }
 
@@ -60,6 +60,8 @@ struct JiraBoardView: View {
     @State private var column: String?
     @State private var opened: JiraCard?
     @State private var collapsed: Set<String> = []
+    @State private var searching = false
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         Group {
@@ -83,7 +85,6 @@ struct JiraBoardView: View {
         .navigationTitle(store.board?.name ?? L("Jira board"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
-        .searchable(text: $query, prompt: Text(searchPrompt))
         .task(id: "\(store.siteID ?? "")|\(store.board?.id ?? 0)|\(tab.rawValue)") { await store.load(tab) }
         .refreshable { await store.load(tab, force: true) }
         .environment(\.jiraRefresh, { await store.load(tab, force: true) })
@@ -103,6 +104,29 @@ struct JiraBoardView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            VStack(spacing: 1) {
+                Text(store.board?.name ?? L("Jira board")).mobileFont(size: 16, weight: .semibold).foregroundStyle(MobileTheme.ink).lineLimit(1)
+                if let sprint = store.sprint, tab == .sprint {
+                    let done = store.sprintCards.filter { $0.statusCategory == "done" }.count
+                    Text(String(format: L("%@ · %d of %d done"), sprint.name, done, store.sprintCards.count))
+                        .mobileFont(size: 11).foregroundStyle(MobileTheme.muted).lineLimit(1)
+                }
+            }
+            .accessibilityElement(children: .combine)
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                withAnimation(.snappy) {
+                    searching.toggle()
+                    if !searching { query = "" }
+                }
+                searchFocused = searching
+            } label: {
+                Image(systemName: searching ? "xmark" : "magnifyingglass")
+            }
+            .accessibilityLabel(searching ? "Close search" : "Search")
+        }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 if jira.sites.count > 1 {
@@ -153,6 +177,26 @@ struct JiraBoardView: View {
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
+            if searching {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(MobileTheme.muted)
+                    TextField(searchPrompt, text: $query)
+                        .focused($searchFocused)
+                        .submitLabel(.search)
+                        .autocorrectionDisabled()
+                    if !query.isEmpty {
+                        Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MobileTheme.dim) }
+                            .buttonStyle(.pyPlain)
+                            .accessibilityLabel("Clear search")
+                    }
+                }
+                .mobileFont(size: 15)
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .background(MobileTheme.card, in: Capsule())
+                .overlay(Capsule().stroke(MobileTheme.line, lineWidth: 1))
+                .padding(.horizontal, 16)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
             filterBar
             if let error = store.error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -223,17 +267,6 @@ struct JiraBoardView: View {
                     .foregroundStyle(person == nil ? MobileTheme.ink : Color.white)
                     .padding(.horizontal, 13).padding(.vertical, 8)
                     .pyGlassCapsule(tint: person == nil ? nil : MobileTheme.accent, interactive: true, fallback: person == nil ? MobileTheme.card : MobileTheme.accent)
-                }
-                if tab == .sprint, let sprint = store.sprint {
-                    let done = store.sprintCards.filter { $0.statusCategory == "done" }.count
-                    HStack(spacing: 6) {
-                        Image(systemName: "flag.checkered").mobileFont(size: 12, weight: .semibold).foregroundStyle(MobileTheme.accent)
-                        Text(sprint.name).mobileFont(size: 14, weight: .semibold).foregroundStyle(MobileTheme.ink).lineLimit(1)
-                        Text("\(done)/\(store.sprintCards.count)").mobileFont(size: 12, weight: .bold, design: .rounded).foregroundStyle(MobileTheme.muted).monospacedDigit()
-                    }
-                    .padding(.horizontal, 13).padding(.vertical, 8)
-                    .pyGlassCapsule(fallback: MobileTheme.card)
-                    .accessibilityElement(children: .combine)
                 }
             }
             .padding(.vertical, 2)
@@ -602,7 +635,7 @@ struct JiraKanban: View {
                 HStrip {
                     HStack(spacing: 8) {
                         ForEach(groups, id: \.column.id) { group in
-                            Chip(title: group.column.name, count: group.cards.count, isSelected: visible == group.column.id) {
+                            JiraStatusChip(title: group.column.name, count: group.cards.count, tint: tint(group.cards, column: group.column), selected: visible == group.column.id) {
                                 withAnimation(.snappy) { visible = group.column.id }
                             }
                             .id(group.column.id)
@@ -615,16 +648,16 @@ struct JiraKanban: View {
             }
             GeometryReader { geo in
                 let width = min(geo.size.width - 44, 360)
-                ScrollView(.horizontal, showsIndicators: false) {
+                ScrollView(.horizontal, showsIndicators: false) { Group {
                     LazyHStack(alignment: .top, spacing: 12) {
                         ForEach(groups, id: \.column.id) { group in
-                            JiraKanbanColumn(column: group.column, cards: group.cards, tint: tint(group.cards), columns: groups.map(\.column), onOpen: onOpen)
+                            JiraKanbanColumn(column: group.column, cards: group.cards, tint: tint(group.cards, column: group.column), columns: groups.map(\.column), onOpen: onOpen)
                                 .frame(width: width, height: geo.size.height)
                                 .id(group.column.id)
                         }
                     }
                     .scrollTargetLayout()
-                }
+                }.background(HorizontalOnly()) }
                 .contentMargins(.horizontal, 16, for: .scrollContent)
                 .scrollTargetBehavior(.viewAligned)
                 .scrollPosition(id: $visible)
@@ -639,10 +672,45 @@ struct JiraKanban: View {
         (groups.first { !$0.cards.isEmpty } ?? groups.first)?.column.id
     }
 
-    private func tint(_ cards: [JiraCard]) -> Color {
+    private func tint(_ cards: [JiraCard], column: JiraColumnInfo) -> Color {
+        let name = column.name.lowercased()
+        if name.contains("done") || name.contains("closed") || name.contains("release") { return MobileTheme.green }
+        if name.contains("review") || name.contains("qa") || name.contains("test") { return MobileTheme.violet }
+        if name.contains("block") { return MobileTheme.red }
+        if name.contains("progress") || name.contains("doing") { return MobileTheme.accent }
+        if name.contains("to do") || name.contains("todo") || name.contains("backlog") || name.contains("open") { return MobileTheme.slate }
         var tally: [String: Int] = [:]
         for card in cards { tally[card.statusCategory, default: 0] += 1 }
         return JiraLook.statusColor(tally.max { $0.value < $1.value }?.key ?? "new")
+    }
+}
+
+private struct JiraStatusChip: View {
+    let title: String
+    let count: Int
+    let tint: Color
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Circle().fill(tint).frame(width: 7, height: 7)
+                Text(title).mobileFont(size: 14, weight: .semibold).lineLimit(1)
+                Text("\(count)")
+                    .mobileFont(size: 12, weight: .bold, design: .rounded)
+                    .foregroundStyle(selected ? tint : MobileTheme.muted)
+                    .contentTransition(.numericText())
+            }
+            .foregroundStyle(selected ? MobileTheme.ink : MobileTheme.muted)
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(selected ? tint.opacity(0.16) : MobileTheme.card, in: Capsule())
+            .overlay(Capsule().stroke(selected ? tint.opacity(0.55) : MobileTheme.line, lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.pyPlain)
+        .accessibilityLabel("\(title), \(count)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -709,6 +777,12 @@ private struct JiraKanbanColumn: View {
                 .padding(.bottom, 12)
             }
             .refreshable { await refresh?() }
+        }
+        .background(alignment: .top) {
+            LinearGradient(colors: [tint.opacity(0.16), tint.opacity(0)], startPoint: .top, endPoint: .bottom)
+                .frame(height: 120)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .allowsHitTesting(false)
         }
         .background(MobileTheme.panel.opacity(0.7), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(targeted ? MobileTheme.accent : MobileTheme.line, lineWidth: targeted ? 1.5 : 1))

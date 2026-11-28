@@ -104,8 +104,40 @@ struct HStrip<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) { content }
-            .scrollBounceBehavior(.basedOnSize, axes: .vertical)
-            .fixedSize(horizontal: false, vertical: true)
+        ScrollView(.horizontal, showsIndicators: false) {
+            content.background(HorizontalOnly())
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+// SwiftUI leaves vertical bounce on for horizontal scroll views in some containers, so a vertical
+// swipe drags the whole strip out of view. Reach the backing UIScrollView and pin it to one axis.
+struct HorizontalOnly: UIViewRepresentable {
+    func makeUIView(context: Context) -> PinView { PinView() }
+    func updateUIView(_ view: PinView, context: Context) { view.pin() }
+
+    final class PinView: UIView {
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            pin()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            pin()
+        }
+
+        func pin() {
+            var view = superview
+            while let current = view, !(current is UIScrollView) { view = current.superview }
+            guard let scroll = view as? UIScrollView else { return }
+            scroll.alwaysBounceVertical = false
+            scroll.isDirectionalLockEnabled = true
+            scroll.contentInsetAdjustmentBehavior = .never
+            if scroll.contentInset.top != 0 || scroll.contentInset.bottom != 0 { scroll.contentInset.top = 0; scroll.contentInset.bottom = 0 }
+            if scroll.contentOffset.y != 0 { scroll.contentOffset.y = 0 }
+            if scroll.contentSize.height > scroll.bounds.height, scroll.bounds.height > 0 { scroll.contentSize.height = scroll.bounds.height }
+        }
     }
 }
