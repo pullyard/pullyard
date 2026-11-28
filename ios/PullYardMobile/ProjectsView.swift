@@ -4,17 +4,33 @@ struct ProjectsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var query = ""
     @State private var isReordering = false
+    @AppStorage("projects.owner") private var owner = ""
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var all: [ProjectSummary] { model.allProjects }
+    private static func owner(of name: String) -> String { name.split(separator: "/").first.map(String.init) ?? name }
+    private var owners: [(name: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for project in all { counts[Self.owner(of: project.nameWithOwner), default: 0] += 1 }
+        for name in model.pinnedProjects where counts[Self.owner(of: name)] == nil { counts[Self.owner(of: name)] = 1 }
+        let me = model.user?.login
+        return counts.map { (name: $0.key, count: $0.value) }.sorted { lhs, rhs in
+            if (lhs.name == me) != (rhs.name == me) { return lhs.name == me }
+            if lhs.count != rhs.count { return lhs.count > rhs.count }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+    private var activeOwner: String? { owners.contains { $0.name == owner } ? owner : nil }
+    private func inOwner(_ name: String) -> Bool { activeOwner.map { Self.owner(of: name) == $0 } ?? true }
     private var filtered: [ProjectSummary] {
-        guard !trimmed.isEmpty else { return all }
-        return all.filter { $0.nameWithOwner.localizedCaseInsensitiveContains(trimmed) || ($0.description ?? "").localizedCaseInsensitiveContains(trimmed) }
+        let scoped = all.filter { inOwner($0.nameWithOwner) }
+        guard !trimmed.isEmpty else { return scoped }
+        return scoped.filter { $0.nameWithOwner.localizedCaseInsensitiveContains(trimmed) || ($0.description ?? "").localizedCaseInsensitiveContains(trimmed) }
     }
     private var pinned: [ProjectSummary] {
         let byName = Dictionary(all.map { ($0.nameWithOwner, $0) }, uniquingKeysWith: { first, _ in first })
         return model.pinnedProjects.map { byName[$0] ?? ProjectSummary(nameWithOwner: $0) }
-            .filter { trimmed.isEmpty || $0.nameWithOwner.localizedCaseInsensitiveContains(trimmed) }
+            .filter { inOwner($0.nameWithOwner) && (trimmed.isEmpty || $0.nameWithOwner.localizedCaseInsensitiveContains(trimmed)) }
     }
     private var waiting: [ProjectSummary] {
         filtered.filter { !model.isPinned($0.nameWithOwner) && model.reviewRequests(in: $0.nameWithOwner) > 0 }
@@ -43,6 +59,25 @@ struct ProjectsView: View {
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
             }
             .listSectionSeparator(.hidden)
+
+            if owners.count > 1 {
+                Section {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            Chip(title: "All", count: all.count, isSelected: activeOwner == nil) { owner = "" }
+                            ForEach(owners, id: \.name) { item in
+                                Chip(title: item.name, count: item.count, isSelected: activeOwner == item.name) {
+                                    owner = activeOwner == item.name ? "" : item.name
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                }
+                .listSectionSeparator(.hidden)
+            }
 
             if let typedRepo {
                 Section {

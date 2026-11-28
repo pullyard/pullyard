@@ -162,6 +162,9 @@ struct RootView: View {
                 IslandPresenter.shared.install(feedback: model.feedback)
             }
             let arguments = ProcessInfo.processInfo.arguments
+            if model.isDemo, arguments.contains("-PYPin") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { model.pinnedProjects = ["harbor/mobile", "harbor/api"] }
+            }
             if model.isDemo, let index = arguments.firstIndex(of: "-PYOpen"), arguments.indices.contains(index + 1), let url = URL(string: arguments[index + 1]) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { handleURL(url) }
             }
@@ -209,6 +212,11 @@ struct RootView: View {
         if url.scheme == "pullyard", url.host == "agent", let id = url.pathComponents.dropFirst().first {
             model.selectedTab = .agents
             if router.top(in: .agents) != .agent(id) { router.open(.agent(id), in: .agents) }
+            return
+        }
+        if url.scheme == "pullyard", url.host == "tab", let name = url.pathComponents.dropFirst().first, let tab = AppTab(rawValue: name) {
+            router.popToRoot(tab)
+            model.selectedTab = tab
             return
         }
         if url.scheme == "pullyard", url.host == "queue" {
