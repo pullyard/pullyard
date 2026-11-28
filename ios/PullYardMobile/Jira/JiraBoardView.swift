@@ -68,7 +68,16 @@ struct JiraBoardView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(BrandBackdrop())
             } else {
-                content
+                VStack(spacing: 0) {
+                    controls
+                    if tab == .sprint {
+                        JiraKanban(groups: store.grouped(store.sprintCards.filter(matches)), focus: $column, onOpen: { opened = $0 })
+                            .overlay { overlayState }
+                    } else {
+                        content
+                    }
+                }
+                .background(BrandBackdrop())
             }
         }
         .navigationTitle(store.board?.name ?? L("Jira board"))
@@ -77,6 +86,7 @@ struct JiraBoardView: View {
         .searchable(text: $query, prompt: Text(searchPrompt))
         .task(id: "\(store.siteID ?? "")|\(store.board?.id ?? 0)|\(tab.rawValue)") { await store.load(tab) }
         .refreshable { await store.load(tab, force: true) }
+        .environment(\.jiraRefresh, { await store.load(tab, force: true) })
         .sheet(item: $opened) { card in
             JiraCardSheet(key: card.key).pySheetStyle()
         }
@@ -136,41 +146,48 @@ struct JiraBoardView: View {
         return Array(Set(source.compactMap(\.assignee))).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("View", selection: $tab) {
+                ForEach(JiraBoardTab.allCases) { Text(L($0.title)).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            filterBar
+            if let error = store.error {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .mobileFont(size: 13).foregroundStyle(MobileTheme.red)
+                    .padding(.horizontal, 16)
+                    .onTapGesture { store.error = nil }
+            }
+        }
+        .padding(.top, 6)
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder
+    private var overlayState: some View {
+        if store.loading && !loaded {
+            PullYardLoader(title: L("Loading Jira…"))
+        } else if loaded, store.boards.isEmpty {
+            PYEmptyState(title: "No boards", message: "This Jira site has no boards you can see.")
+        } else if loaded, tab == .sprint, store.sprintCards.isEmpty {
+            PYEmptyState(title: "Nothing on this board", message: store.board?.isScrum == true ? "There is no active sprint, or it has no issues." : "This board has no open issues.")
+        }
+    }
+
     private var content: some View {
         List {
-            Section {
-                Picker("View", selection: $tab) {
-                    ForEach(JiraBoardTab.allCases) { Text(L($0.title)).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                .listRowBackground(Color.clear)
-                filterBar
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                if let error = store.error {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .mobileFont(size: 13).foregroundStyle(MobileTheme.red)
-                        .listRowBackground(Color.clear)
-                }
-            }
-            .listRowSeparator(.hidden)
             switch tab {
-            case .sprint: sprintSections
+            case .sprint: EmptyView()
             case .backlog: backlogSections
             case .list: listSection
             }
         }
         .pyListStyle()
         .listSectionSpacing(14)
-        .overlay {
-            if store.loading && !loaded {
-                PullYardLoader(title: L("Loading Jira…"))
-            } else if loaded, store.boards.isEmpty {
-                PYEmptyState(title: "No boards", message: "This Jira site has no boards you can see.")
-            }
-        }
-        .animation(.easeOut(duration: 0.2), value: column)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .overlay { overlayState }
     }
 
     private var loaded: Bool {
@@ -220,6 +237,7 @@ struct JiraBoardView: View {
                 }
             }
             .padding(.vertical, 2)
+            .padding(.horizontal, 16)
         }
     }
 
@@ -555,6 +573,157 @@ struct JiraCardSheet: View {
                 }
             } else {
                 PullYardLoader(size: 22)
+            }
+        }
+    }
+}
+
+private struct JiraRefreshKey: EnvironmentKey {
+    static let defaultValue: (@Sendable () async -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    var jiraRefresh: (@Sendable () async -> Void)? {
+        get { self[JiraRefreshKey.self] }
+        set { self[JiraRefreshKey.self] = newValue }
+    }
+}
+
+struct JiraKanban: View {
+    let groups: [(column: JiraColumnInfo, cards: [JiraCard])]
+    @Binding var focus: String?
+    let onOpen: (JiraCard) -> Void
+    @ObservedObject private var store = JiraBoardStore.shared
+    @State private var visible: String?
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ScrollViewReader { chips in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(groups, id: \.column.id) { group in
+                            Chip(title: group.column.name, count: group.cards.count, isSelected: visible == group.column.id) {
+                                withAnimation(.snappy) { visible = group.column.id }
+                            }
+                            .id(group.column.id)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 2)
+                }
+                .onChange(of: visible) { _, id in withAnimation(.snappy) { chips.scrollTo(id, anchor: .center) } }
+            }
+            GeometryReader { geo in
+                let width = min(geo.size.width - 44, 360)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 12) {
+                        ForEach(groups, id: \.column.id) { group in
+                            JiraKanbanColumn(column: group.column, cards: group.cards, tint: tint(group.cards), columns: groups.map(\.column), onOpen: onOpen)
+                                .frame(width: width, height: geo.size.height)
+                                .id(group.column.id)
+                        }
+                    }
+                    .scrollTargetLayout()
+                }
+                .contentMargins(.horizontal, 16, for: .scrollContent)
+                .scrollTargetBehavior(.viewAligned)
+                .scrollPosition(id: $visible)
+            }
+        }
+        .onAppear { if visible == nil { visible = firstBusy } }
+        .onChange(of: groups.map(\.column.id)) { _, ids in if visible == nil || !ids.contains(visible ?? "") { visible = firstBusy } }
+    }
+
+    private var firstBusy: String? {
+        (groups.first { !$0.cards.isEmpty } ?? groups.first)?.column.id
+    }
+
+    private func tint(_ cards: [JiraCard]) -> Color {
+        var tally: [String: Int] = [:]
+        for card in cards { tally[card.statusCategory, default: 0] += 1 }
+        return JiraLook.statusColor(tally.max { $0.value < $1.value }?.key ?? "new")
+    }
+}
+
+private struct JiraKanbanColumn: View {
+    let column: JiraColumnInfo
+    let cards: [JiraCard]
+    let tint: Color
+    let columns: [JiraColumnInfo]
+    let onOpen: (JiraCard) -> Void
+    @ObservedObject private var store = JiraBoardStore.shared
+    @Environment(\.jiraRefresh) private var refresh
+    @State private var targeted = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Circle().fill(tint).frame(width: 8, height: 8)
+                Text(column.name).mobileFont(size: 15, weight: .semibold).foregroundStyle(MobileTheme.ink).lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(cards.count)")
+                    .mobileFont(size: 12, weight: .bold, design: .rounded).foregroundStyle(MobileTheme.muted)
+                    .padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(MobileTheme.line, in: Capsule())
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    if cards.isEmpty {
+                        VStack(spacing: 6) {
+                            Image(systemName: targeted ? "arrow.down.circle.fill" : "tray").mobileFont(size: 20)
+                            Text(targeted ? L("Drop to move here") : L("Nothing here")).mobileFont(size: 13)
+                        }
+                        .foregroundStyle(targeted ? MobileTheme.accent : MobileTheme.dim)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 28)
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(targeted ? MobileTheme.accent : MobileTheme.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
+                    }
+                    ForEach(cards) { card in
+                        Button { onOpen(card) } label: {
+                            JiraCardRow(card: card, busy: store.moving.contains(card.key))
+                                .padding(12)
+                                .background(MobileTheme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(MobileTheme.line, lineWidth: 1))
+                        }
+                        .buttonStyle(.pyPlain)
+                        .draggable(card.key) {
+                            JiraCardRow(card: card).padding(12).frame(width: 280)
+                                .background(MobileTheme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .contextMenu {
+                            Menu {
+                                ForEach(columns.filter { $0.id != column.id }) { target in
+                                    Button(target.name) { move(card, to: target) }
+                                }
+                            } label: { Label("Move to", systemImage: "arrow.right.square") }
+                            Link(destination: card.url) { Label("Open in Jira", systemImage: "safari") }
+                            Button { UIPasteboard.general.string = card.key } label: { Label("Copy key", systemImage: "doc.on.doc") }
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 12)
+            }
+            .refreshable { await refresh?() }
+        }
+        .background(MobileTheme.panel.opacity(0.7), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(targeted ? MobileTheme.accent : MobileTheme.line, lineWidth: targeted ? 1.5 : 1))
+        .dropDestination(for: String.self) { keys, _ in
+            guard let key = keys.first, let card = store.card(key) else { return false }
+            move(card, to: column)
+            return true
+        } isTargeted: { targeted = $0 }
+    }
+
+    private func move(_ card: JiraCard, to target: JiraColumnInfo) {
+        Task {
+            if await store.move(card, to: target) {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            } else {
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
             }
         }
     }
