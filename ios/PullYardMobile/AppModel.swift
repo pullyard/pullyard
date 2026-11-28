@@ -216,7 +216,7 @@ final class AppModel: ObservableObject {
         if !snoozed.isEmpty {
             result = result.filter { pull in pull.key.map { snoozed[$0.id] == nil } ?? true }
         }
-        if focusPinnedOnly, key.project == nil, !pinnedProjects.isEmpty {
+        if focusActive, key.project == nil, !pinnedProjects.isEmpty {
             result = result.filter { pull in pull.repo.map(pinnedProjects.contains) ?? false }
         }
         return result
@@ -224,6 +224,11 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var snoozed: [String: Date] = SnoozeStore.all()
     @Published private(set) var focusPinnedOnly = FocusSettings.pinnedOnly
+    @Published var appFocus = UserDefaults.standard.bool(forKey: "focus.app") {
+        didSet { UserDefaults.standard.set(appFocus, forKey: "focus.app") }
+    }
+
+    var focusActive: Bool { focusPinnedOnly || appFocus }
 
     func reloadFocus() { focusPinnedOnly = FocusSettings.pinnedOnly }
     func isSnoozed(_ key: PRKey) -> Bool { snoozed[key.id].map { $0 > .now } ?? false }

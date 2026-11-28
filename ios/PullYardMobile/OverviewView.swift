@@ -21,12 +21,7 @@ struct OverviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                if model.focusPinnedOnly && !model.pinnedProjects.isEmpty {
-                    Label("Focus: pinned projects only", systemImage: "moon.circle.fill")
-                        .mobileFont(size: 13, weight: .semibold).foregroundStyle(MobileTheme.violet)
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                        .pyGlassCapsule(tint: MobileTheme.violet.opacity(0.15), fallback: MobileTheme.violet.opacity(0.12))
-                }
+                if !model.pinnedProjects.isEmpty { FocusToggle() }
                 heroCard
                 OutboxCard()
                 PushedBranchesCard()
@@ -365,5 +360,35 @@ struct FilteredPullsView: View {
         case .changesRequested: "No one has requested changes on your pull requests."
         default: "No open pull requests match."
         }
+    }
+}
+
+struct FocusToggle: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        let system = model.focusPinnedOnly
+        Button {
+            withAnimation(.easeOut(duration: 0.2)) { model.appFocus.toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "scope").mobileFont(size: 13, weight: .semibold)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(model.focusActive ? "Focus on pinned projects" : "Focus").mobileFont(size: 14, weight: .semibold)
+                    Text(system ? L("Turned on by your Focus") : String(format: L("%d pinned"), model.pinnedProjects.count))
+                        .mobileFont(size: 11).opacity(0.8)
+                }
+                Spacer(minLength: 6)
+                Image(systemName: model.focusActive ? "checkmark.circle.fill" : "circle").mobileFont(size: 16, weight: .semibold)
+            }
+            .foregroundStyle(model.focusActive ? Color.white : MobileTheme.ink)
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .contentShape(Capsule())
+            .pyGlassCapsule(tint: model.focusActive ? MobileTheme.accent : nil, interactive: true, fallback: model.focusActive ? MobileTheme.accent : MobileTheme.card)
+        }
+        .buttonStyle(.pyPlain)
+        .disabled(system)
+        .accessibilityLabel("Focus on pinned projects")
+        .accessibilityValue(model.focusActive ? "On" : "Off")
     }
 }
