@@ -153,8 +153,9 @@ struct ForgeListView: View {
             .pickerStyle(.segmented)
             .tint(Color.syAccentFill)
             .labelsHidden()
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
             FocusBanner()
             LoadingBar(active: model.loading && !model.items.isEmpty)
             Divider()
@@ -207,8 +208,7 @@ struct ForgeListView: View {
         ItemRow(item: item, showRepo: showRepo, numberPrefix: item.isPR ? app.provider.numberPrefix : "#")
             .rowAppear(item.id, model.rows)
             .tag(item.id)
-            .listRowSeparator(.visible)
-            .listRowSeparatorTint(Color.syLine)
+            .pyListRow(selected: app.forgeSelection?.id == item.id)
             .contextMenu { ForgeItemContextMenu(item: item) }
     }
 
@@ -237,9 +237,13 @@ struct ForgeDetailColumn: View {
         if let item = app.forgeSelection {
             if item.isPR, app.forgeReviews {
                 NavigationStack(path: $app.detailPath) {
-                    PRDetailView(ref: item.ref)
-                        .environment(\.liveFront, app.detailPath.isEmpty)
-                        .navigationDestination(for: Route.self) { RouteView(route: $0) }
+                    WindowRootFrame(minWidth: 320, minHeight: 240) {
+                        PRDetailView(ref: item.ref)
+                            .environment(\.liveFront, app.detailPath.isEmpty)
+                    }
+                    .navigationDestination(for: Route.self) { route in
+                        WindowRootFrame(minWidth: 320, minHeight: 240) { RouteView(route: route) }
+                    }
                 }
                 .environment(\.detailKey, "forge:\(item.id)")
                 .id(item.id)
@@ -306,8 +310,9 @@ struct ForgeItemDetailView: View {
                     } label: {
                         Label("Open in Browser", systemImage: "safari")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .pyGlassButton(prominent: true)
                     Button("Copy Link") { copyToPasteboard(item.url) }
+                        .pyGlassButton()
                 }
                 .controlSize(.large)
                 .padding(.top, 4)
@@ -317,13 +322,14 @@ struct ForgeItemDetailView: View {
                         .foregroundStyle(Color.syMuted)
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .card(radius: 10, fill: .sySunken)
+                        .pyCardSurface(radius: 12)
                 }
             }
             .padding(24)
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .background { PYBackdrop(tints: [item.visualState.color, .syAccent], base: .clear, strength: 1.2).equatable() }
         .detailTitle(item.title, subtitle: "\(item.repository.nameWithOwner)\(item.isPR ? provider.numberPrefix : "#")\(item.number)")
     }
 }

@@ -150,6 +150,7 @@ struct IssueDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
+            .background { PYBackdrop(tints: [issue.visualState.color, .syAccent], base: .clear, strength: 1.2).equatable() }
             Rectangle().fill(Color.syLine).frame(height: 1)
             HTMLView(html: model.html, scrollToLatestToken: model.scrollToLatestToken, onLink: { url in
                 if let route = GitHubURL.parse(url.absoluteString, allowShort: false) { app.open(route, push: true) } else { LinkBrowser.open(url) }

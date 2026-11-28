@@ -116,9 +116,12 @@ struct FocusSidebarRow: View {
                     .padding(.vertical, 5)
                 }
             }
+            .padding(.vertical, compact ? 0 : 3)
             .background {
-                (active ? Color.syAccent.opacity(0.1) : hovering ? Color.syHover : Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: Radius.m - 1))
+                let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+                shape
+                    .fill(active ? Color.syAccent.opacity(0.12) : Color.syText.opacity(hovering ? 0.07 : 0.04))
+                    .overlay(shape.strokeBorder(active ? Color.syAccent.opacity(0.35) : Color.syLine, lineWidth: 1))
             }
             .contentShape(Rectangle())
         }

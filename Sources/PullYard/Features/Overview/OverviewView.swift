@@ -325,13 +325,11 @@ struct OverviewView: View {
             Button(running + attention > 0 ? "Open Agents" : "New session") {
                 if running + attention > 0 { app.section = .claude } else { app.newAgentSession() }
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Color.syAgentFill)
+            .pyGlassButton(prominent: true, tint: .syAgentFill)
             .controlSize(.regular)
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.syRaised))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.syLine))
+        .pyCardSurface(radius: 16)
     }
 
     private func agentsLine(running: Int, attention: Int) -> String {
@@ -404,9 +402,7 @@ private struct OverviewTile: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.syRaised))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(hovering ? kind.tint.opacity(0.45) : Color.syLine))
-        .shadow(color: .black.opacity(hovering ? 0.08 : 0.03), radius: hovering ? 12 : 6, y: hovering ? 4 : 2)
+        .pyCardSurface(hover: hovering, accent: kind.tint)
         .contentShape(Rectangle())
         .onHover { h in withAnimation(.easeOut(duration: Motion.Dur.fast)) { hovering = h } }
         .accessibilityElement(children: .combine)

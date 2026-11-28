@@ -12,6 +12,8 @@ final class WhisperRecorder {
 
     private(set) var phase: Phase = .idle
     private(set) var level: Double = 0
+    private(set) var levels: [Double] = Array(repeating: 0, count: WhisperRecorder.historyLength)
+    static let historyLength = 48
     @ObservationIgnored private let engine = AVAudioEngine()
     @ObservationIgnored private let buffer = SampleBuffer()
 
@@ -49,14 +51,30 @@ final class WhisperRecorder {
             guard error == nil, let data = out.floatChannelData?[0], out.frameLength > 0 else { return }
             let samples = Array(UnsafeBufferPointer(start: data, count: Int(out.frameLength)))
             sink.append(samples)
-            var sum: Float = 0
-            for s in samples { sum += s * s }
-            let rms = Double(sqrt(sum / Float(samples.count)))
-            Task { @MainActor in self?.level = min(1, rms * 10) }
+            let chunks = Self.loudness(samples, chunk: 800)
+            Task { @MainActor in self?.push(chunks) }
         }
         engine.prepare()
         try engine.start()
         phase = .recording
+    }
+
+    private func push(_ chunks: [Double]) {
+        guard phase == .recording, !chunks.isEmpty else { return }
+        levels = Array((levels + chunks).suffix(Self.historyLength))
+        level = chunks.last ?? 0
+    }
+
+    // Speech sits roughly between -55 dB (quiet room) and -10 dB (close and loud); map that range to 0…1.
+    nonisolated static func loudness(_ samples: [Float], chunk: Int) -> [Double] {
+        stride(from: 0, to: samples.count, by: chunk).map { start in
+            let slice = samples[start..<min(start + chunk, samples.count)]
+            var sum: Float = 0
+            for s in slice { sum += s * s }
+            let rms = Double(sqrt(sum / Float(max(slice.count, 1))))
+            let db = 20 * log10(max(rms, 1e-6))
+            return min(1, max(0, (db + 55) / 45))
+        }
     }
 
     func stop() -> [Float] {
@@ -64,6 +82,7 @@ final class WhisperRecorder {
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
         level = 0
+        levels = Array(repeating: 0, count: Self.historyLength)
         phase = .idle
         return buffer.take()
     }

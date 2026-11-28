@@ -354,7 +354,9 @@ struct SurfaceBackground: ViewModifier {
     let surface: Surface
 
     func body(content: Content) -> some View {
-        if Theme.isBrand {
+        if Theme.isBrand, surface == .list || surface == .sidebar || surface == .panel {
+            content.scrollContentBackground(.hidden).background { PYBackdrop(tints: surface == .list ? [.syAccent, .syViolet] : [.syViolet, .syAccent], base: surface.color, strength: surface == .list ? 0.8 : surface == .sidebar ? 0.6 : 0.45).equatable() }
+        } else if Theme.isBrand {
             content.scrollContentBackground(.hidden).background(surface.color)
         } else {
             content

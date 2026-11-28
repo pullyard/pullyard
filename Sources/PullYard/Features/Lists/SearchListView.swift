@@ -456,21 +456,19 @@ struct SearchListView: View {
                     }
                     .pickerStyle(.inline)
                 } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "arrow.up.arrow.down")
-                        Text(sort.short)
-                    }
-                    .font(.syCaption.weight(.medium))
+                    PYPillMenuLabel(icon: "arrow.up.arrow.down", title: sort.short)
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .pyPill()
                 .help("Sort: \(sort.title) · Density: \(density.title)")
                 .accessibilityLabel("Sort")
                 .accessibilityValue(sort.title)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
             if !ignoresFocus { FocusBanner() }
             LoadingBar(active: model.loading && !model.showingCached && !model.items.isEmpty)
             Divider()
@@ -556,8 +554,7 @@ struct SearchListView: View {
         ItemRow(item: item, showRepo: !grouped)
             .rowAppear(item.id, model.rows)
             .tag(item.route)
-            .listRowSeparator(.visible)
-            .listRowSeparatorTint(Color.syLine)
+            .pyListRow(selected: app.detailRoot == item.route)
             .onAppear {
                 if !grouped, item.id == model.items.last?.id { Task { await model.loadMore(api: app.api) } }
             }
@@ -638,12 +635,7 @@ struct RepoGroupHeader: View {
                 Text(group.owner).font(.syCaption2).foregroundStyle(Color.syDim).lineLimit(1)
             }
             Spacer()
-            Text("\(group.items.count)")
-                .font(.syCaption2.weight(.semibold).monospacedDigit())
-                .foregroundStyle(color)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(Capsule().fill(color.opacity(0.14)))
+            PYCountBadge(count: group.items.count, tint: color)
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onToggle)
@@ -741,7 +733,7 @@ struct ItemRow: View {
         .padding(.vertical, density == .compact ? 2 : 4)
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
-        .hoverHighlight(radius: 7)
+        .hoverHighlight(radius: 10, color: Theme.isBrand ? .clear : .syText)
         .padding(.horizontal, -6)
         .help(item.title)
         .accessibilityElement(children: .ignore)

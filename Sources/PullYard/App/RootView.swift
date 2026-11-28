@@ -264,7 +264,7 @@ struct DetailColumn: View {
                     .surface(.panel)
             } else {
                 NavigationStack(path: $app.detailPath) {
-                    Group {
+                    WindowRootFrame(minWidth: 320, minHeight: 240) {
                         if let root = app.detailRoot {
                             RouteView(route: root).id(root).transition(.routeSwap)
                         } else {
@@ -277,7 +277,9 @@ struct DetailColumn: View {
                             .transition(.opacity)
                         }
                     }
-                    .navigationDestination(for: Route.self) { RouteView(route: $0) }
+                    .navigationDestination(for: Route.self) { route in
+                        WindowRootFrame(minWidth: 320, minHeight: 240) { RouteView(route: route) }
+                    }
                 }
                 .surface(.panel)
             }
@@ -294,8 +296,10 @@ struct DetachedRouteWindow: View {
         Group {
             if app.phase == .loggedIn {
                 NavigationStack(path: $path) {
-                    RouteView(route: route, detached: true)
-                        .navigationDestination(for: Route.self) { RouteView(route: $0, detached: true) }
+                    WindowRootFrame(minWidth: 320, minHeight: 240) { RouteView(route: route, detached: true) }
+                        .navigationDestination(for: Route.self) { next in
+                            WindowRootFrame(minWidth: 320, minHeight: 240) { RouteView(route: next, detached: true) }
+                        }
                 }
             } else {
                 PYEmptyState(title: "PullYard is locked", message: "Open the main window to sign in or unlock.")
@@ -637,7 +641,12 @@ struct SidebarGroup<Content: View>: View {
                 .frame(maxWidth: .infinity)
                 .accessibilityHidden(true)
         } else {
-            let label = title.font(.sySubheadline.weight(.semibold))
+            let label = title
+                .textCase(.uppercase)
+                .font(.syCaption2.weight(.bold))
+                .tracking(0.8)
+                .foregroundStyle(Color.syDim)
+                .padding(.top, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             if let key {
@@ -782,7 +791,12 @@ struct SidebarRow: View {
                             .lineLimit(1)
                         Spacer(minLength: 4)
                         if count > 0 {
-                            Text(section == .notifications && count >= GitHubAPI.notificationPageSize ? "\(GitHubAPI.notificationPageSize)+" : "\(count)").font(.syCallout.monospacedDigit()).foregroundStyle(Color.syMuted)
+                            Text(section == .notifications && count >= GitHubAPI.notificationPageSize ? "\(GitHubAPI.notificationPageSize)+" : "\(count)")
+                                .font(.syCaption.monospacedDigit().weight(.semibold))
+                                .foregroundStyle(selected ? color : Color.syMuted)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(selected ? color.opacity(0.18) : Color.syText.opacity(0.06)))
                         }
                     }
                     .padding(.leading, Space.m)
@@ -791,11 +805,14 @@ struct SidebarRow: View {
                 }
             }
             .background {
-                ZStack(alignment: .leading) {
-                    selected ? Color.sySelected : hovering ? Color.syHover : Color.clear
-                    if selected { color.frame(width: 3) }
+                let shape = RoundedRectangle(cornerRadius: Radius.m + 1, style: .continuous)
+                if selected {
+                    shape
+                        .fill(LinearGradient(colors: [color.opacity(0.20), color.opacity(0.08)], startPoint: .leading, endPoint: .trailing))
+                        .overlay(shape.strokeBorder(color.opacity(0.28), lineWidth: 1))
+                } else if hovering {
+                    shape.fill(Color.syHover)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: Radius.m - 1))
             }
             .contentShape(Rectangle())
         // Selected through the sidebar List's selection (see SidebarView), so the whole row can be dragged to reorder.
@@ -823,7 +840,7 @@ struct SidebarIcon: View {
             .foregroundStyle(color)
             .frame(width: side, height: side)
             .accessibilityHidden(true)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.syText.opacity(0.05)))
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(color.opacity(0.14)))
             .overlay {
                 if !GlassSupport.isAvailable {
                     RoundedRectangle(cornerRadius: 6)

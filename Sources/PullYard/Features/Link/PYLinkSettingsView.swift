@@ -33,11 +33,13 @@ struct PYLinkSettingsView: View {
                         }
                     }
                 }
+            } header: {
+                SettingsHeader(title: "Connection", icon: "antenna.radiowaves.left.and.right", color: .syGreen)
             } footer: {
                 Text("Your iPhone can start agent fixes on this Mac and follow the chat live. The connection is end-to-end encrypted with keys exchanged through the QR code. On the same Wi‑Fi it goes straight to this Mac. With Connect from anywhere on, it also works over cellular and other networks through a direct peer-to-peer link, with a public relay as fallback that only sees encrypted traffic.")
             }
 
-            Section("Pair an iPhone") {
+            Section {
                 if let pairing = server.pairing, let expires = server.pairingExpires {
                     HStack(alignment: .top, spacing: 18) {
                         if let image = Self.qr(pairing.url) {
@@ -62,9 +64,11 @@ struct PYLinkSettingsView: View {
                         Text(error).foregroundStyle(Color.syRed)
                     }
                 }
+            } header: {
+                SettingsHeader(title: "Pair an iPhone", icon: "qrcode", color: .sySky)
             }
 
-            Section("Paired iPhones") {
+            Section {
                 if server.devices.isEmpty {
                     Text("No iPhones yet.").foregroundStyle(Color.syMuted)
                 }
@@ -80,9 +84,12 @@ struct PYLinkSettingsView: View {
                         Button("Remove", role: .destructive) { server.remove(device) }
                     }
                 }
+            } header: {
+                SettingsHeader(title: "Paired iPhones", icon: "iphone", color: .syIndigo)
             }
         }
         .formStyle(.grouped)
+        .surface(.panel)
     }
 
     private static func qr(_ text: String) -> NSImage? {

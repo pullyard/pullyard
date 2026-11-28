@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SwiftUI
 
 enum GitHubURL {
@@ -212,20 +213,82 @@ enum VisualState {
     }
 }
 
+@MainActor
+enum AvatarImages {
+    private static let cache: NSCache<NSURL, NSImage> = {
+        let c = NSCache<NSURL, NSImage>()
+        c.countLimit = 800
+        return c
+    }()
+    private static var inFlight: [URL: Task<CGImage?, Never>] = [:]
+    private static var failed: [URL: Date] = [:]
+
+    static func cached(_ url: URL) -> NSImage? { cache.object(forKey: url as NSURL) }
+
+    static func load(_ url: URL, pixels: Int) async -> NSImage? {
+        if let hit = cached(url) { return hit }
+        if let at = failed[url], Date().timeIntervalSince(at) < 300 { return nil }
+        let task = inFlight[url] ?? Task.detached(priority: .utility) { () -> CGImage? in
+            guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return nil }
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: max(pixels, 16),
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true
+            ]
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        }
+        inFlight[url] = task
+        let cg = await task.value
+        inFlight[url] = nil
+        guard let cg else {
+            failed[url] = Date()
+            return nil
+        }
+        if let hit = cached(url) { return hit }
+        let image = NSImage(cgImage: cg, size: NSSize(width: CGFloat(cg.width) / 2, height: CGFloat(cg.height) / 2))
+        cache.setObject(image, forKey: url as NSURL)
+        return image
+    }
+}
+
 struct Avatar: View {
     let url: String?
     var size: CGFloat = 20
     var ring = false
+    @State private var loaded: Loaded?
+
+    private struct Loaded {
+        let url: URL
+        let image: NSImage
+    }
 
     var body: some View {
-        AsyncImage(url: resolved) { image in
-            image.resizable().interpolation(.medium)
-        } placeholder: {
-            Circle().fill(.quaternary)
+        let resolved = resolved
+        Group {
+            if let image = image(for: resolved) {
+                Image(nsImage: image).resizable().interpolation(.medium)
+            } else {
+                Circle().fill(.quaternary)
+            }
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
         .overlay { if ring { Circle().strokeBorder(Color.syLineStrong, lineWidth: 0.5) } }
+        .task(id: resolved) {
+            guard let resolved, AvatarImages.cached(resolved) == nil else { return }
+            if let image = await AvatarImages.load(resolved, pixels: Int(size * 2)) {
+                loaded = Loaded(url: resolved, image: image)
+            }
+        }
+    }
+
+    private func image(for url: URL?) -> NSImage? {
+        guard let url else { return nil }
+        if let loaded, loaded.url == url { return loaded.image }
+        return AvatarImages.cached(url)
     }
 
     private var resolved: URL? {
@@ -584,4 +647,50 @@ func isCancellation(_ error: Error) -> Bool {
     if let u = error as? URLError, u.code == .cancelled { return true }
     let ns = error as NSError
     return ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled
+}
+
+struct UncheckedBox<Value>: @unchecked Sendable {
+    let value: Value
+    init(_ value: Value) { self.value = value }
+}
+
+private struct DeckActiveKey: LayoutValueKey { static let defaultValue = false }
+private struct DeckIDKey: LayoutValueKey { static let defaultValue: AnyHashable? = nil }
+
+extension View {
+    func deckPage<ID: Hashable>(_ id: ID, active: Bool) -> some View {
+        layoutValue(key: DeckIDKey.self, value: AnyHashable(id)).layoutValue(key: DeckActiveKey.self, value: active)
+    }
+}
+
+// Stacks pages that stay alive while hidden. The deck always takes exactly the proposed size and
+// never asks pages for theirs, so a hidden page can't stretch the window; a hidden page keeps the
+// size it last had on screen, so resizing the visible one doesn't re-lay-out the others.
+struct PageDeck: Layout {
+    func makeCache(subviews: Subviews) -> [AnyHashable: CGSize] { [:] }
+    func updateCache(_ cache: inout [AnyHashable: CGSize], subviews: Subviews) {}
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout [AnyHashable: CGSize]) -> CGSize {
+        if let w = proposal.width, let h = proposal.height, w.isFinite, h.isFinite { return CGSize(width: w, height: h) }
+        let active = subviews.first { $0[DeckActiveKey.self] } ?? subviews.first
+        let fit = active?.sizeThatFits(proposal) ?? .zero
+        let w = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? fit.width
+        let h = proposal.height.flatMap { $0.isFinite ? $0 : nil } ?? fit.height
+        return CGSize(width: w, height: h)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout [AnyHashable: CGSize]) {
+        for subview in subviews {
+            let id = subview[DeckIDKey.self]
+            var size = bounds.size
+            if subview[DeckActiveKey.self] {
+                if let id { cache[id] = size }
+            } else if let id, let kept = cache[id] {
+                size = kept
+            } else if let id {
+                cache[id] = size
+            }
+            subview.place(at: bounds.origin, proposal: ProposedViewSize(size))
+        }
+    }
 }

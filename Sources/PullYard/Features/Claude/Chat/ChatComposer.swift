@@ -234,12 +234,15 @@ struct ChatComposer: View {
                             .allowsHitTesting(false)
                     }
                 }
+                if recorder.phase != .idle {
+                    DictationBar(recorder: recorder, onStop: dictate, onCancel: { recorder.cancel() })
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
                 bottomBar
             }
+            .animation(Motion.smooth, value: recorder.phase)
             .padding(10)
-            .card(radius: 14)
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.syLineStrong))
-            .shadow(color: .black.opacity(0.06), radius: 14, y: 4)
+            .pyGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous), fallback: .syRaised)
             .padding(12)
         }
         .onChange(of: text) { updateCompletion() }
@@ -404,8 +407,6 @@ struct ChatComposer: View {
             Image(systemName: "mic")
         case .recording:
             Image(systemName: "stop.circle.fill")
-                .scaleEffect(1 + recorder.level * 0.25)
-                .animation(.easeOut(duration: 0.1), value: recorder.level)
         case .transcribing:
             PYLoader(size: 12, label: "Transcribing")
         }
@@ -438,7 +439,12 @@ struct ChatComposer: View {
         case .idle:
             whisper.prewarm()
             Task {
-                do { try await recorder.start() } catch { dictationError = error.localizedDescription }
+                do {
+                    try await recorder.start()
+                    focusToken += 1
+                } catch {
+                    dictationError = error.localizedDescription
+                }
             }
         case .recording:
             let samples = recorder.stop()
@@ -531,6 +537,11 @@ struct ChatComposer: View {
     }
 
     private func submit() {
+        if recorder.phase == .recording {
+            dictate()
+            return
+        }
+        if recorder.phase == .transcribing { return }
         if completion != nil, let item = completionItems[safe: selected] {
             accept(item)
             return
@@ -548,6 +559,7 @@ struct ChatComposer: View {
 
     private func handleKey(_ e: NSEvent) -> Bool {
         if e.keyCode == 53 {
+            if recorder.phase == .recording { recorder.cancel(); return true }
             if completion != nil { completion = nil; return true }
             if chat.busy { chat.interrupt(); return true }
             return false

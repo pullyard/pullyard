@@ -15,13 +15,16 @@ struct TabStrip<ID: Hashable>: View {
     var shortcuts = false
     @Namespace private var ns
     @State private var hovered: ID?
+    @State private var available: CGFloat = 0
+    @State private var fullWidth: CGFloat = 0
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            strip(titles: true)
-            strip(titles: false)
-        }
-        .animation(Motion.spring, value: selection)
+        let titles = fullWidth == 0 || available == 0 || fullWidth <= available
+        strip(titles: titles)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { available = $0 }
+            .onChange(of: items.map { "\($0.title)|\($0.badge ?? "")" }) { fullWidth = 0 }
+            .animation(Motion.spring, value: selection)
     }
 
     private func strip(titles: Bool) -> some View {
@@ -50,13 +53,24 @@ struct TabStrip<ID: Hashable>: View {
                     .font(.syCallout.weight(selected ? .semibold : .regular))
                     .foregroundStyle(selected || hovered == item.id ? Color.syText : Color.syMuted)
                     .padding(.horizontal, titles ? 12 : 10)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 6)
+                    .background {
+                        if selected {
+                            Capsule()
+                                .fill(Color.syAccent.opacity(0.12))
+                                .matchedGeometryEffect(id: titles ? "pill" : "pill.compact", in: ns)
+                        } else if hovered == item.id {
+                            Capsule().fill(Color.syText.opacity(0.06))
+                        }
+                    }
+                    .padding(.vertical, 2)
                     .contentShape(Rectangle())
                     .overlay(alignment: .bottom) {
                         if selected {
                             Capsule()
                                 .fill(Color.syAccent)
-                                .frame(height: 2)
+                                .frame(width: 18, height: 3)
+                                .shadow(color: Color.syAccent.opacity(0.7), radius: 4)
                                 .matchedGeometryEffect(id: titles ? "underline" : "underline.compact", in: ns)
                         }
                     }
@@ -68,8 +82,9 @@ struct TabStrip<ID: Hashable>: View {
                 .accessibilityLabel(item.badgeLabel.map { "\(item.title), \($0)" } ?? item.badge.map { "\(item.title), \($0)" } ?? item.title)
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
-            Spacer(minLength: 0)
         }
+        .fixedSize()
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { if titles { fullWidth = $0 + 16 } }
         .padding(.horizontal, 8)
     }
 }

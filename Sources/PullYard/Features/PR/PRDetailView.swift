@@ -67,34 +67,37 @@ struct PRDetailContent: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if headerCollapsed {
-                CompactPRBar(model: model, pr: pr) { expandedOverride = true }
-            } else {
-                VStack(spacing: 0) {
-                    PRHeaderView(model: model, pr: pr, onMerge: { showMerge = true }, onRequestReview: { showReviewers = true }, onFixChecks: pr.isOpen && model.features.claude ? { ciFix = CIFixRequest() } : nil, onRerun: canRerun ? { confirm = .rerunFailed } : nil, onCollapse: collapsible ? { expandedOverride = false } : nil)
-                    if model.features.requestReviewers {
-                        ReReviewBanner(model: model, pr: pr) { showReviewers = true }
-                    }
-                    if model.features.claude {
-                        ClaudeFixBanner(pr: pr) { showFix = true }
-                        CloseLoopBanner(model: model, pr: pr) { closeLoop = CloseLoopRequest(preselected: $0) }
+            VStack(spacing: 0) {
+                if headerCollapsed {
+                    CompactPRBar(model: model, pr: pr) { expandedOverride = true }
+                } else {
+                    VStack(spacing: 0) {
+                        PRHeaderView(model: model, pr: pr, onMerge: { showMerge = true }, onRequestReview: { showReviewers = true }, onFixChecks: pr.isOpen && model.features.claude ? { ciFix = CIFixRequest() } : nil, onRerun: canRerun ? { confirm = .rerunFailed } : nil, onCollapse: collapsible ? { expandedOverride = false } : nil)
+                        if model.features.requestReviewers {
+                            ReReviewBanner(model: model, pr: pr) { showReviewers = true }
+                        }
+                        if model.features.claude {
+                            ClaudeFixBanner(pr: pr) { showFix = true }
+                            CloseLoopBanner(model: model, pr: pr) { closeLoop = CloseLoopRequest(preselected: $0) }
+                        }
                     }
                 }
-            }
-            HStack(spacing: 0) {
-                TabStrip(items: tabItems, selection: $model.tab, shortcuts: true)
-                if model.tab == .conversation {
-                    ConversationSortMenu().padding(.trailing, 12)
+                HStack(spacing: 0) {
+                    TabStrip(items: tabItems, selection: $model.tab, shortcuts: true)
+                    if model.tab == .conversation {
+                        ConversationSortMenu().padding(.trailing, 12)
+                    }
                 }
+                .padding(.top, 6)
             }
-            .padding(.top, 6)
+            .background { PYBackdrop(tints: [pr.visualState.color, .syAccent], base: .clear, strength: 1.2).equatable() }
             Divider()
-            ZStack {
+            PageDeck {
                 ForEach(PRTab.allCases) { tab in
                     if model.visitedTabs.contains(tab), tab != .stack || model.tab == .stack {
                         tabContent(tab)
+                            .deckPage(tab, active: model.tab == tab)
                             .opacity(model.tab == tab ? 1 : 0)
-                            .animation(Motion.fade, value: model.tab)
                             .allowsHitTesting(model.tab == tab)
                             .disabled(model.tab != tab)
                             .accessibilityHidden(model.tab != tab)
@@ -102,6 +105,7 @@ struct PRDetailContent: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
         }
         .transaction(value: headerCollapsed) { $0.animation = nil }
         .onChange(of: model.tab) { expandedOverride = false }
@@ -759,8 +763,7 @@ struct MergeStatusBar: View {
                         if s.ready {
                             Button("Merge…", action: onMerge)
                                 .controlSize(.small)
-                                .buttonStyle(.borderedProminent)
-                                .tint(Color.syGreenFill)
+                                .pyGlassButton(prominent: true, tint: .syGreenFill)
                         } else {
                             Button("Merge…", action: onMerge)
                                 .controlSize(.small)
@@ -788,9 +791,12 @@ struct MergeStatusBar: View {
                         .transition(.opacity)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: Radius.m).fill(s.color.opacity(Tint.banner)))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .overlay(alignment: .leading) {
+                Capsule().fill(s.color.gradient).frame(width: 3).padding(.vertical, 8).padding(.leading, 1)
+            }
+            .pyGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous), tint: s.color.opacity(0.10), fallback: s.color.opacity(Tint.banner))
             .accessibilityElement(children: .contain)
         }
     }

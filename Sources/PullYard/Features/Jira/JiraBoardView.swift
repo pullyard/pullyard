@@ -290,13 +290,13 @@ struct JiraBoardView: View {
             } else {
                 VStack(spacing: 0) {
                     header
-                    Divider()
                     switch tab {
                     case .sprint: content
                     case .backlog: backlogContent
                     case .list: listContent
                     }
                 }
+                .background { PYBackdrop(tints: boardTints).equatable() }
             }
         }
         .task(id: model.connectionID) { await model.refresh() }
@@ -323,61 +323,101 @@ struct JiraBoardView: View {
     // MARK: Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                if connections.hasSeveral {
-                    JiraAccountTabs(selection: model.connectionID) { model.select($0) }
-                        .frame(maxWidth: 480, alignment: .leading)
-                }
-                Spacer(minLength: 8)
-                if loading { WakeLoader() }
-                Button { Task { await refreshTab() } } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.borderless)
-                    .help("Refresh")
-                    .keyboardShortcut("r", modifiers: .command)
-                    .accessibilityLabel("Refresh board")
-                if let url = model.boardURL {
-                    Button { openInBrowser(url) } label: { Image(systemName: "arrow.up.right.square") }
-                        .buttonStyle(.borderless)
-                        .help("Open board in Jira")
-                        .accessibilityLabel("Open board in Jira")
-                }
-            }
-            HStack(spacing: 10) {
-                boardMenu
-                JiraBoardTabsBar(selection: $tab)
-                if tab == .sprint { sprintPill }
-                Spacer(minLength: 8)
-                assigneeFilter
-                TextField(searchPrompt, text: $search)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 200)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
-    private var sprintPill: some View {
-                Button {
-                    Task { await model.refresh() }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .rotationEffect(.degrees(model.loading ? 360 : 0))
-                            .animation(model.loading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: model.loading)
-                        Text(model.sprint?.name ?? "Refresh")
+        PYGlassGroup(spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    if connections.hasSeveral {
+                        JiraAccountTabs(selection: model.connectionID) { model.select($0) }
+                            .frame(maxWidth: 480, alignment: .leading)
+                    }
+                    Spacer(minLength: 8)
+                    if loading { WakeLoader() }
+                    HStack(spacing: 2) {
+                        Button { Task { await refreshTab() } } label: {
+                            Image(systemName: "arrow.clockwise").frame(width: 28, height: 26)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Refresh")
+                        .keyboardShortcut("r", modifiers: .command)
+                        .accessibilityLabel("Refresh board")
+                        if let url = model.boardURL {
+                            Button { openInBrowser(url) } label: {
+                                Image(systemName: "arrow.up.right.square").frame(width: 28, height: 26)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Open board in Jira")
+                            .accessibilityLabel("Open board in Jira")
+                        }
                     }
                     .font(.syCallout.weight(.medium))
                     .foregroundStyle(Color.syMuted)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Capsule().strokeBorder(Color.syLine))
-                    .contentShape(Capsule())
+                    .padding(.horizontal, 4)
+                    .pyGlassCapsule(interactive: true)
                 }
-                .buttonStyle(.plain)
-                .disabled(model.loading)
-                .help(refreshHelp)
+                HStack(spacing: 10) {
+                    boardMenu
+                    JiraBoardTabsBar(selection: $tab)
+                    if tab == .sprint { sprintPill }
+                    Spacer(minLength: 8)
+                    assigneeFilter
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .pyGlassCapsule()
+                    searchField
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 14)
+        .padding(.bottom, 6)
+    }
+
+    private var sprintPill: some View {
+        let total = model.issues.count
+        let done = model.issues.filter { $0.statusCategory == "done" }.count
+        let progress = total == 0 ? 0 : Double(done) / Double(total)
+        return Button {
+            Task { await model.refresh() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: model.sprint == nil ? "arrow.triangle.2.circlepath" : "flag.checkered")
+                    .foregroundStyle(model.sprint == nil ? Color.syMuted : Color.syAccent)
+                Text(model.sprint?.name ?? "Refresh")
+                    .foregroundStyle(Color.syText)
+                    .lineLimit(1)
+                if total > 0 {
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.syText.opacity(0.10))
+                        Capsule().fill(LinearGradient(colors: [.syAccent, .syGreen], startPoint: .leading, endPoint: .trailing))
+                            .frame(width: max(4, 64 * progress))
+                    }
+                    .frame(width: 64, height: 5)
+                    .animation(Motion.smooth, value: progress)
+                    Text("\(done)/\(total)")
+                        .monospacedDigit()
+                        .foregroundStyle(Color.syMuted)
+                        .contentTransition(.numericText())
+                }
+            }
+            .font(.syCaption.weight(.medium))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .pyGlassCapsule(interactive: true)
+        .disabled(model.loading)
+        .help(refreshHelp)
+        .accessibilityLabel(model.sprint.map { "\($0.name), \(done) of \(total) done" } ?? "Refresh")
+    }
+
+    private var searchField: some View {
+        PYSearchPill(text: $search, prompt: searchPrompt)
+    }
+
+    private var boardTints: [Color] {
+        let count = max(model.columns.count, 1)
+        return (0..<min(count, 4)).map { JiraStyle.columnTint(index: $0, count: count, issues: []) }
     }
 
     private var searchPrompt: String {
@@ -424,12 +464,6 @@ struct JiraBoardView: View {
         }
     }
 
-    private var filtering: Bool { !assignees.isEmpty || !search.trimmingCharacters(in: .whitespaces).isEmpty }
-
-    private func matches(_ issue: JiraIssue) -> Bool {
-        JiraIssueFilter.matches(issue, assignees: assignees, query: search)
-    }
-
     @ViewBuilder
     private var errorBanner: some View {
         if let error = work.error ?? model.error {
@@ -458,11 +492,12 @@ struct JiraBoardView: View {
                     snapshot: work.backlog,
                     isScrum: model.board?.isScrum == true,
                     moving: work.moving,
-                    filter: matches,
-                    filtering: filtering,
+                    assignees: assignees,
+                    query: search,
                     onOpen: { opened = $0 },
                     onMove: { key, sprint in Task { await work.move(key, toSprint: sprint) } }
                 )
+                .equatable()
             }
         }
     }
@@ -481,13 +516,14 @@ struct JiraBoardView: View {
             VStack(spacing: 0) {
                 errorBanner
                 JiraIssueListView(
-                    issues: work.list.issues.filter(matches),
+                    issues: JiraIssueFilter.filter(work.list.issues, assignees: assignees, query: search),
                     total: work.list.issues.count,
                     hasMore: work.list.next != nil,
                     loadingMore: work.loadingMore,
                     onOpen: { opened = $0 },
                     onLoadMore: { Task { await work.loadMore() } }
                 )
+                .equatable()
             }
         }
     }
@@ -507,7 +543,8 @@ struct JiraBoardView: View {
             }
         } label: {
             Text(model.board?.name ?? (model.loadedOnce ? "No boards" : "Loading…"))
-                .font(.syTitle3.weight(.semibold))
+                .font(.syTitle2.weight(.bold))
+                .foregroundStyle(Color.syText)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -635,7 +672,7 @@ struct JiraBoardView: View {
     // MARK: Columns
 
     private var visibleIssues: [JiraIssue] {
-        model.issues.filter(matches)
+        JiraIssueFilter.filter(model.issues, assignees: assignees, query: search)
     }
 
     @ViewBuilder
@@ -660,14 +697,16 @@ struct JiraBoardView: View {
                         .onTapGesture { model.error = nil }
                 }
                 ScrollView(.horizontal) {
-                    HStack(alignment: .top, spacing: 12) {
-                        ForEach(model.grouped(visibleIssues), id: \.column.id) { entry in
-                            JiraBoardColumnView(column: entry.column, issues: entry.issues, moving: model.moving, canDrop: !model.columns.isEmpty) { opened = $0 } onDrop: { key, before in
+                    let groups = model.grouped(visibleIssues)
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(Array(groups.enumerated()), id: \.element.column.id) { index, entry in
+                            JiraBoardColumnView(column: entry.column, issues: entry.issues, tint: JiraStyle.columnTint(index: index, count: groups.count, issues: entry.issues), moving: model.moving, canDrop: !model.columns.isEmpty) { opened = $0 } onDrop: { key, before in
                                 Task { await model.move(key, to: entry.column, before: before) }
                             }
+                            .equatable()
                         }
                     }
-                    .padding(16)
+                    .padding(18)
                     .frame(maxHeight: .infinity, alignment: .top)
                 }
             }
@@ -732,9 +771,10 @@ struct JiraAccountTabs: View {
     }
 }
 
-struct JiraBoardColumnView: View {
+struct JiraBoardColumnView: View, Equatable {
     let column: JiraBoardColumn
     let issues: [JiraIssue]
+    var tint: Color = .sySky
     let moving: Set<String>
     let canDrop: Bool
     let onOpen: (JiraIssue) -> Void
@@ -742,24 +782,47 @@ struct JiraBoardColumnView: View {
     let onDrop: (String, String?) -> Void
     @State private var targeted = false
     @State private var targetCard: String?
+    @Environment(\.colorScheme) private var scheme
+
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 20, style: .continuous) }
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.column == b.column && a.issues == b.issues && a.tint == b.tint && a.canDrop == b.canDrop
+            && a.moving.filter { key in a.issues.contains { $0.key == key } } == b.moving.filter { key in b.issues.contains { $0.key == key } }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Text(column.name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syText).lineLimit(1)
-                Text("\(issues.count)").font(.syCallout.monospacedDigit()).foregroundStyle(Color.syMuted)
-                Spacer()
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                PYGlowDot(color: tint)
+                Text(column.name)
+                    .font(.syCallout.weight(.semibold))
+                    .foregroundStyle(Color.syText)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                PYCountBadge(count: issues.count, tint: tint)
             }
-            .padding(.horizontal, 6)
-            .padding(.top, 4)
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+            .accessibilityElement(children: .combine)
             ScrollView(.vertical) {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: 10) {
+                    if issues.isEmpty { emptySlot }
                     ForEach(issues) { issue in
                         JiraBoardCard(issue: issue, busy: moving.contains(issue.key)) { onOpen(issue) }
-                            .draggable(issue.key)
+                            .draggable(issue.key) {
+                                JiraBoardCard(issue: issue) {}.frame(width: 268)
+                            }
                             .overlay(alignment: .top) {
                                 if targetCard == issue.key {
-                                    Capsule().fill(Color.syAccent).frame(height: 3).offset(y: -5.5).allowsHitTesting(false)
+                                    Capsule()
+                                        .fill(tint)
+                                        .frame(height: 3)
+                                        .shadow(color: tint.opacity(0.8), radius: 4)
+                                        .offset(y: -6.5)
+                                        .allowsHitTesting(false)
+                                        .transition(.opacity)
                                 }
                             }
                             .dropDestination(for: String.self) { keys, _ in
@@ -771,20 +834,33 @@ struct JiraBoardColumnView: View {
                             }
                     }
                 }
-                .padding(.bottom, 8)
+                .padding(.horizontal, 10)
+                .padding(.top, 2)
+                .padding(.bottom, 10)
+                .animation(Motion.fade, value: targetCard)
             }
             .scrollIndicators(.never)
         }
-        .padding(8)
-        .frame(width: 270)
+        .frame(width: 292)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.syText.opacity(targeted ? 0.08 : 0.035)))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(targeted ? Color.syAccent : Color.clear, lineWidth: 1.5))
+        .background(alignment: .top) {
+            LinearGradient(colors: [tint.opacity(targeted ? 0.30 : (scheme == .dark ? 0.16 : 0.12)), tint.opacity(0)], startPoint: .top, endPoint: .bottom)
+                .frame(height: 140)
+                .allowsHitTesting(false)
+        }
+        .background(shape.fill(Color.syPanel.opacity(scheme == .dark ? 0.55 : 0.6)))
+        .clipShape(shape)
+        .overlay { shape.strokeBorder(targeted ? tint : Color.syLine, lineWidth: targeted ? 1.5 : 1) }
+        .animation(Motion.fade, value: targeted)
         .dropDestination(for: String.self) { keys, _ in
             guard canDrop, let key = keys.first else { return false }
             onDrop(key, nil)
             return true
         } isTargeted: { targeted = canDrop && $0 }
+    }
+
+    private var emptySlot: some View {
+        PYEmptySlot(title: "Nothing here", active: targeted, activeTitle: "Drop to move here", tint: tint)
     }
 }
 
@@ -793,51 +869,69 @@ struct JiraBoardCard: View {
     var busy = false
     let onOpen: () -> Void
     @State private var hover = false
+    @Environment(\.colorScheme) private var scheme
+
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 14, style: .continuous) }
+    private var done: Bool { issue.statusCategory == "done" }
 
     var body: some View {
+        let typeColor = JiraStyle.typeColor(issue.type)
         VStack(alignment: .leading, spacing: 10) {
-                Text(issue.summary)
-                    .font(.syBody)
-                    .foregroundStyle(Color.syText)
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 6) {
+                Image(systemName: JiraStyle.typeIcon(issue.type))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(typeColor)
+                    .frame(width: 20, height: 20)
+                    .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(typeColor.opacity(0.15)))
+                    .help(issue.type ?? "Issue")
+                Text(issue.key)
+                    .font(.syCaption.weight(.semibold).monospaced())
+                    .foregroundStyle(done ? Color.syDim : Color.syMuted)
+                    .strikethrough(done)
+                Spacer(minLength: 4)
+                if busy { WakeLoader() }
+                if let p = issue.priority {
+                    Image(systemName: priorityIcon(p))
+                        .font(.system(size: 10, weight: .heavy))
+                        .foregroundStyle(JiraStyle.priorityColor(p))
+                        .frame(width: 20, height: 20)
+                        .background(Circle().fill(JiraStyle.priorityColor(p).opacity(0.12)))
+                        .help("Priority: \(p)")
+                }
+            }
+            Text(issue.summary)
+                .font(.syBody.weight(.medium))
+                .foregroundStyle(done ? Color.syMuted : Color.syText)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .bottom, spacing: 6) {
                 if !issue.labels.isEmpty {
                     FlowLabels(labels: issue.labels)
                 }
-                HStack(spacing: 6) {
-                    Image(systemName: JiraStyle.typeIcon(issue.type))
-                        .font(.syCaption)
-                        .foregroundStyle(JiraStyle.typeColor(issue.type))
-                    Text(issue.key)
-                        .font(.syCaption.weight(.semibold).monospaced())
-                        .foregroundStyle(issue.statusCategory == "done" ? Color.syDim : Color.syMuted)
-                        .strikethrough(issue.statusCategory == "done")
-                    Spacer(minLength: 4)
-                    if busy { WakeLoader() }
-                    if let p = issue.priority {
-                        Image(systemName: priorityIcon(p))
-                            .font(.syCaption.weight(.bold))
-                            .foregroundStyle(JiraStyle.priorityColor(p))
-                            .help("Priority: \(p)")
-                    }
-                    if issue.assignee != nil {
-                        Avatar(url: issue.assigneeAvatar, size: 22).help(issue.assignee ?? "")
-                    } else {
-                        Image(systemName: "person.crop.circle.dashed").foregroundStyle(Color.syDim).help("Unassigned")
-                    }
+                Spacer(minLength: 4)
+                if issue.assignee != nil {
+                    Avatar(url: issue.assigneeAvatar, size: 22)
+                        .overlay(Circle().strokeBorder(Color.white.opacity(scheme == .dark ? 0.18 : 0.9), lineWidth: 1.5))
+                        .help(issue.assignee ?? "")
+                } else {
+                    Image(systemName: "person.crop.circle.dashed")
+                        .font(.system(size: 18))
+                        .foregroundStyle(Color.syDim)
+                        .help("Unassigned")
                 }
             }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.syRaised))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(hover ? Color.syLineStrong : Color.syLine))
-            .contentShape(RoundedRectangle(cornerRadius: 10))
-            .opacity(busy ? 0.6 : 1)
+        }
+        .padding(12)
+        .pyCardSurface(hover: hover, accent: typeColor)
+        .opacity(busy ? 0.6 : 1)
+        .contentShape(shape)
         // A tap gesture, not a Button: a Button swallows the mouse-down and the card could not be dragged.
         .onTapGesture(perform: onOpen)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(named: "Open", onOpen)
-        .onHover { hover = $0 }
+        .onHover { h in withAnimation(Motion.fade) { hover = h } }
         .help("\(issue.key) · \(issue.status)")
         .contextMenu {
             Button("Open in Jira") { openInBrowser(issue.url) }
@@ -862,27 +956,70 @@ private struct FlowLabels: View {
     let labels: [String]
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 4) { chips(labels) }
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(stride(from: 0, to: labels.count, by: 2)), id: \.self) { i in
-                    HStack(spacing: 4) { chips(Array(labels[i..<min(i + 2, labels.count)])) }
-                }
-            }
-        }
+        ChipFlow(spacing: 4) { chips(labels) }
     }
 
     @ViewBuilder
     private func chips(_ list: [String]) -> some View {
         ForEach(list, id: \.self) { label in
             Text(label)
-                .font(.syCaption)
-                .foregroundStyle(Color.syMuted)
+                .font(.syCaption2.weight(.medium))
+                .foregroundStyle(Color.syIndigo)
                 .lineLimit(1)
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 7)
                 .padding(.vertical, 2)
-                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.syLineStrong))
+                .background(Capsule().fill(Color.syIndigo.opacity(0.12)))
         }
+    }
+}
+
+private struct ChipFlow: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(subviews, width: proposal.width ?? .infinity)
+        let width = rows.map(\.width).max() ?? 0
+        let height = rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(rows.count - 1, 0))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(subviews, width: bounds.width) {
+            var x = bounds.minX
+            for (index, size) in zip(row.indices, row.sizes) {
+                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row {
+        var indices: [Int] = []
+        var sizes: [CGSize] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> [Row] {
+        var rows: [Row] = []
+        var row = Row()
+        for (index, subview) in subviews.enumerated() {
+            var size = subview.sizeThatFits(.unspecified)
+            size.width = min(size.width, width)
+            let next = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            if !row.indices.isEmpty, next > width {
+                rows.append(row)
+                row = Row()
+            }
+            row.width = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            row.height = max(row.height, size.height)
+            row.indices.append(index)
+            row.sizes.append(size)
+        }
+        if !row.indices.isEmpty { rows.append(row) }
+        return rows
     }
 }
 
@@ -1111,46 +1248,64 @@ struct JiraBoardSkeleton: View {
     var body: some View {
         let names = columns.isEmpty ? Array(repeating: "", count: 5) : columns
         ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 12) {
-                ForEach(Array(names.enumerated()), id: \.offset) { index, name in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Group {
-                            if name.isEmpty {
-                                ShimmerBar(width: 90, height: 12)
-                            } else {
-                                Text(name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syMuted)
-                            }
-                        }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 4)
-                        ForEach(0..<max(1, 4 - index % 3), id: \.self) { card in
-                            VStack(alignment: .leading, spacing: 8) {
-                                ShimmerBar(height: 11)
-                                ShimmerBar(width: card % 2 == 0 ? 170 : 120, height: 11)
-                                HStack(spacing: 6) {
-                                    ShimmerBar(width: 64, height: 10)
-                                    Spacer()
-                                    Circle().fill(Color.syLine).frame(width: 22, height: 22)
+            HStack(alignment: .top, spacing: 14) {
+                    ForEach(Array(names.enumerated()), id: \.offset) { index, name in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Group {
+                                if name.isEmpty {
+                                    ShimmerBar(width: 90, height: 12)
+                                } else {
+                                    Text(name).font(.syCallout.weight(.semibold)).foregroundStyle(Color.syMuted)
                                 }
-                                .padding(.top, 4)
                             }
-                            .padding(12)
-                            .background(RoundedRectangle(cornerRadius: 10).fill(Color.syRaised))
-                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syLine))
+                            .padding(.horizontal, 4)
+                            .padding(.top, 4)
+                            .padding(.bottom, 2)
+                            ForEach(0..<max(1, 4 - index % 3), id: \.self) { card in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ShimmerBar(width: 64, height: 10)
+                                    ShimmerBar(height: 11)
+                                    ShimmerBar(width: card % 2 == 0 ? 170 : 120, height: 11)
+                                    HStack {
+                                        Spacer()
+                                        Circle().fill(Color.syLine).frame(width: 22, height: 22)
+                                    }
+                                }
+                                .padding(12)
+                                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.syRaised.opacity(0.8)))
+                                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.syLine))
+                            }
                         }
+                        .padding(10)
+                        .frame(width: 292, alignment: .top)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.syPanel.opacity(0.55)))
+                        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.syLine))
                     }
-                    .padding(8)
-                    .frame(width: 270, alignment: .top)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.syText.opacity(0.035)))
-                }
             }
-            .padding(16)
+            .padding(18)
             .frame(maxHeight: .infinity, alignment: .top)
         }
         .scrollDisabled(true)
         .accessibilityElement()
         .accessibilityLabel("Loading board")
+    }
+}
+
+extension JiraStyle {
+    static func columnTint(index: Int, count: Int, issues: [JiraIssue]) -> Color {
+        if !issues.isEmpty {
+            var tally: [String: Int] = [:]
+            for i in issues { tally[i.statusCategory, default: 0] += 1 }
+            switch tally.max(by: { $0.value < $1.value })?.key {
+            case "done": return .syGreen
+            case "indeterminate": return index.isMultiple(of: 2) ? .sySky : .syViolet
+            default: return .sySlate
+            }
+        }
+        if index == 0 { return .sySlate }
+        if index == count - 1 { return .syGreen }
+        return index.isMultiple(of: 2) ? .sySky : .syViolet
     }
 }
 

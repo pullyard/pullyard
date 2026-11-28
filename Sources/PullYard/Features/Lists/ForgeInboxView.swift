@@ -23,8 +23,7 @@ struct ForgeInboxView: View {
                     Button("Copy Link") { copyToPasteboard(n.url) }
                     Button("Mark as Done") { Task { await markDone(n) } }
                 }
-                .listRowSeparator(.visible)
-                .listRowSeparatorTint(Color.syLine)
+                .pyListRow(selected: selection == n.id)
             }
         }
         .overlay {
@@ -148,8 +147,7 @@ struct ForgeReposView: View {
                         Button("Copy Link") { copyToPasteboard(repo.url) }
                         Button("Copy Name") { copyToPasteboard(repo.fullName) }
                     }
-                    .listRowSeparator(.visible)
-                    .listRowSeparatorTint(Color.syLine)
+                    .pyListRow(selected: selection == repo.id)
             }
         }
         .overlay {
