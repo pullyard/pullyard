@@ -100,10 +100,12 @@ struct DictationBar: View {
                 .frame(height: 30)
                 .frame(maxWidth: .infinity)
             if recording {
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Color.syMuted)
-                    .keyboardShortcut(.cancelAction)
+                Button(action: onCancel) {
+                    Label("Cancel", systemImage: "xmark")
+                        .labelStyle(.titleAndIcon)
+                }
+                .pyGlassButton()
+                .keyboardShortcut(.cancelAction)
                     .help("Discard the recording (Esc)")
                 Button(action: onStop) {
                     Label("Done", systemImage: "return")
