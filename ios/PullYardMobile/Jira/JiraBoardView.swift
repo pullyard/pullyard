@@ -199,7 +199,7 @@ struct JiraBoardView: View {
     }
 
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        HStrip {
             HStack(spacing: 8) {
                 if store.me != nil {
                     Chip(title: "Only me", symbol: "person.fill", isSelected: onlyMe && person == nil) {
@@ -247,7 +247,7 @@ struct JiraBoardView: View {
         if store.loadedSprint {
             if groups.count > 1 {
                 Section {
-                    ScrollView(.horizontal, showsIndicators: false) {
+                    HStrip {
                         HStack(spacing: 8) {
                             Chip(title: "All", count: groups.reduce(0) { $0 + $1.cards.count }, isSelected: column == nil) { column = nil }
                             ForEach(groups, id: \.column.id) { group in
@@ -599,7 +599,7 @@ struct JiraKanban: View {
     var body: some View {
         VStack(spacing: 10) {
             ScrollViewReader { chips in
-                ScrollView(.horizontal, showsIndicators: false) {
+                HStrip {
                     HStack(spacing: 8) {
                         ForEach(groups, id: \.column.id) { group in
                             Chip(title: group.column.name, count: group.cards.count, isSelected: visible == group.column.id) {
@@ -628,6 +628,7 @@ struct JiraKanban: View {
                 .contentMargins(.horizontal, 16, for: .scrollContent)
                 .scrollTargetBehavior(.viewAligned)
                 .scrollPosition(id: $visible)
+                .scrollBounceBehavior(.basedOnSize, axes: .vertical)
             }
         }
         .onAppear { if visible == nil { visible = firstBusy } }
