@@ -159,13 +159,15 @@ final class SpeechDictation: ObservableObject {
             self.recorder = recorder
             recordingURL = url
             transcript = ""
+            startedAt = Date()
+            levels = Array(repeating: 0, count: Self.historyLength)
             isRecording = true
             meter = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self, let recorder = self.recorder else { return }
                     recorder.updateMeters()
                     let power = recorder.averagePower(forChannel: 0)
-                    self.level = CGFloat(max(0, min(1, (power + 50) / 45)))
+                    self.push(CGFloat(max(0, min(1, (power + 50) / 45))))
                 }
             }
         } catch {
@@ -203,6 +205,26 @@ final class SpeechDictation: ObservableObject {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    func discard() {
+        if let recorder {
+            meter?.invalidate()
+            meter = nil
+            recorder.stop()
+            self.recorder = nil
+            if let url = recordingURL { try? FileManager.default.removeItem(at: url) }
+            recordingURL = nil
+            transcript = ""
+            isRecording = false
+            level = 0
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            return
+        }
+        task?.cancel()
+        task = nil
+        transcript = ""
+        finish()
     }
 
     private func finish() {
@@ -271,6 +293,7 @@ struct DictationButton: View {
 
 struct DictationLevelStrip: View {
     @ObservedObject var dictation: SpeechDictation
+    let onCancel: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -298,10 +321,21 @@ struct DictationLevelStrip: View {
                 .animation(.linear(duration: 0.06), value: dictation.levels)
             }
             .frame(height: 26)
+            Button(action: onCancel) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(MobileTheme.muted)
+                    .frame(width: 30, height: 30)
+                    .background(MobileTheme.ink.opacity(0.07), in: Circle())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.pyPlain)
+            .accessibilityLabel("Cancel dictation")
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.leading, 12).padding(.trailing, 2).padding(.vertical, 2)
         .background(MobileTheme.red.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Recording your voice")
     }
 }

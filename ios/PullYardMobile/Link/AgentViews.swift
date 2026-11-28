@@ -1383,7 +1383,10 @@ struct AgentChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if dictation.isRecording {
-                DictationLevelStrip(dictation: dictation)
+                DictationLevelStrip(dictation: dictation) {
+                    dictation.discard()
+                    draft = dictationBase
+                }
                     .padding(.horizontal, 10).padding(.top, 8)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
