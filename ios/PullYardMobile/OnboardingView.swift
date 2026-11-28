@@ -17,7 +17,7 @@ struct OnboardingView: View {
                 VoyageBackdrop(progress: progress, leaving: leaving)
                     .ignoresSafeArea()
 
-                ScrollView(.horizontal, showsIndicators: false) {
+                ScrollView(.horizontal, showsIndicators: false) { Group {
                     LazyHStack(spacing: 0) {
                         ForEach(0..<count, id: \.self) { index in
                             OnboardingPage(index: index, active: current == index && !leaving)
@@ -33,7 +33,7 @@ struct OnboardingView: View {
                         }
                     }
                     .scrollTargetLayout()
-                }
+                }.background(HorizontalOnly()) }
                 .scrollTargetBehavior(.paging)
                 .scrollPosition(id: $page)
                 .modifier(ScrollProgress(progress: $progress, width: geo.size.width, page: current))

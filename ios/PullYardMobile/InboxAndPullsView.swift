@@ -34,7 +34,7 @@ struct InboxView: View {
     var body: some View {
         List {
             Section {
-                ScrollView(.horizontal, showsIndicators: false) {
+                ScrollView(.horizontal, showsIndicators: false) { Group {
                     PYGlassGroup {
                         HStack(spacing: 8) {
                             ForEach(InboxFilter.allCases) { option in
@@ -45,7 +45,7 @@ struct InboxView: View {
                         }
                     }
                     .padding(.horizontal, 16).padding(.vertical, 6)
-                }
+                }.background(HorizontalOnly()) }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
                 FreshnessLabel(state: model.inboxState) { Task { await model.refreshInbox() } }
@@ -399,7 +399,7 @@ struct PullRequestsView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal, showsIndicators: false) { Group {
                 PYGlassGroup {
                     HStack(spacing: 8) {
                         ForEach(PRQueue.allCases) { queue in
@@ -418,7 +418,7 @@ struct PullRequestsView: View {
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 6)
-            }
+            }.background(HorizontalOnly()) }
             HStack(spacing: 8) {
                 if model.statusFilter != .open {
                     RemovableChip(title: model.statusFilter.rawValue, symbol: "line.3.horizontal.decrease") { model.statusFilter = .open }

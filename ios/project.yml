@@ -14,6 +14,7 @@ settings:
     MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
     PY_GITHUB_CLIENT_ID: ""
+    DEVELOPMENT_TEAM: T5S7X9CM2J
     GENERATE_INFOPLIST_FILE: YES
     INFOPLIST_KEY_CFBundleDisplayName: PullYard
     INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
@@ -43,6 +44,12 @@ targets:
         INFOPLIST_FILE: Support/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: PullYard
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        INFOPLIST_KEY_NSCameraUsageDescription: PullYard uses the camera to scan the pairing code shown by PullYard on your Mac.
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: PullYard connects to PullYard on your Mac to start agent fixes and stream the chat.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: PullYard listens while you dictate a message to the agent on your Mac.
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: PullYard turns your dictation into text for the agent. Speech is recognized on this iPhone when possible.
+        INFOPLIST_KEY_NSSupportsLiveActivities: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   PullYardWidget:
     type: app-extension

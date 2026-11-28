@@ -228,7 +228,7 @@ struct FileDiffView: View {
                     if wrap {
                         diffLines(lines, anchored: anchored)
                     } else {
-                        ScrollView(.horizontal, showsIndicators: true) { diffLines(lines, anchored: anchored).fixedSize(horizontal: true, vertical: false) }
+                        ScrollView(.horizontal, showsIndicators: true) { Group { diffLines(lines, anchored: anchored).fixedSize(horizontal: true, vertical: false) }.background(HorizontalOnly()) }
                     }
                 } else {
                     PYEmptyState(title: "Diff not shown", message: "This file is binary or too large to display here.") {

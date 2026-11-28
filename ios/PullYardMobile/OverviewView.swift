@@ -21,12 +21,8 @@ struct OverviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                if model.focusPinnedOnly && !model.pinnedProjects.isEmpty {
-                    Label("Focus: pinned projects only", systemImage: "moon.circle.fill")
-                        .mobileFont(size: 13, weight: .semibold).foregroundStyle(MobileTheme.violet)
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                        .pyGlassCapsule(tint: MobileTheme.violet.opacity(0.15), fallback: MobileTheme.violet.opacity(0.12))
-                }
+                if !model.pinnedProjects.isEmpty { FocusToggle() }
+                JiraOverviewCard()
                 heroCard
                 OutboxCard()
                 PushedBranchesCard()
@@ -170,7 +166,7 @@ struct OverviewView: View {
                 Spacer()
                 Button("All") { model.selectedTab = .projects }.mobileFont(size: 14, weight: .semibold)
             }
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal, showsIndicators: false) { Group {
                 HStack(spacing: 10) {
                     ForEach(model.pinnedProjects, id: \.self) { repo in
                         NavigationLink(value: Route.project(repo)) {
@@ -192,7 +188,7 @@ struct OverviewView: View {
                         .buttonStyle(.pyPlain)
                     }
                 }
-            }
+            }.background(HorizontalOnly()) }
         }
     }
 
@@ -352,5 +348,112 @@ struct FilteredPullsView: View {
         case .changesRequested: "No one has requested changes on your pull requests."
         default: "No open pull requests match."
         }
+    }
+}
+
+struct FocusToggle: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        let system = model.focusPinnedOnly
+        Button {
+            withAnimation(.easeOut(duration: 0.2)) { model.appFocus.toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "scope").mobileFont(size: 13, weight: .semibold)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(model.focusActive ? "Focus on pinned projects" : "Focus").mobileFont(size: 14, weight: .semibold)
+                    Text(system ? L("Turned on by your Focus") : String(format: L("%d pinned"), model.pinnedProjects.count))
+                        .mobileFont(size: 11).opacity(0.8)
+                }
+                Spacer(minLength: 6)
+                Image(systemName: model.focusActive ? "checkmark.circle.fill" : "circle").mobileFont(size: 16, weight: .semibold)
+            }
+            .foregroundStyle(model.focusActive ? Color.white : MobileTheme.ink)
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .contentShape(Capsule())
+            .pyGlassCapsule(tint: model.focusActive ? MobileTheme.accent : nil, interactive: true, fallback: model.focusActive ? MobileTheme.accent : MobileTheme.card)
+        }
+        .buttonStyle(.pyPlain)
+        .disabled(system)
+        .accessibilityLabel("Focus on pinned projects")
+        .accessibilityValue(model.focusActive ? "On" : "Off")
+    }
+}
+
+struct JiraOverviewCard: View {
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject private var jira = JiraStore.shared
+    @ObservedObject private var board = JiraBoardStore.shared
+
+    var body: some View {
+        if jira.isConfigured || model.isDemo {
+            NavigationLink(value: Route.jiraBoard) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "rectangle.split.3x1")
+                            .mobileFont(size: 15, weight: .semibold)
+                            .foregroundStyle(MobileTheme.accent)
+                            .frame(width: 32, height: 32)
+                            .background(MobileTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(board.board?.name ?? L("Jira board")).mobileFont(size: 16, weight: .semibold).foregroundStyle(MobileTheme.ink).lineLimit(1)
+                            Text(subtitle).mobileFont(size: 12).foregroundStyle(MobileTheme.muted).lineLimit(1)
+                        }
+                        Spacer(minLength: 6)
+                        Image(systemName: "chevron.right").mobileFont(size: 12, weight: .semibold).foregroundStyle(MobileTheme.muted)
+                    }
+                    if board.loadedSprint, !columns.isEmpty {
+                        HStack(spacing: 0) {
+                            ForEach(columns, id: \.name) { column in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("\(column.count)")
+                                        .mobileFont(size: 20, weight: .bold, design: .rounded)
+                                        .foregroundStyle(column.count > 0 ? MobileTheme.ink : MobileTheme.dim)
+                                        .contentTransition(.numericText())
+                                    Text(column.name).mobileFont(size: 11).foregroundStyle(MobileTheme.muted).lineLimit(1)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        if total > 0 {
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(MobileTheme.line)
+                                    Capsule().fill(MobileTheme.green).frame(width: geo.size.width * CGFloat(done) / CGFloat(total))
+                                }
+                            }
+                            .frame(height: 5)
+                        }
+                    } else if board.loading {
+                        PullYardLoader(size: 22)
+                    }
+                }
+                .padding(16)
+                .pyGlass(in: RoundedRectangle(cornerRadius: PYRadius.card, style: .continuous), interactive: true, fallback: MobileTheme.card)
+            }
+            .buttonStyle(.pyPlain)
+            .task { await board.load(.sprint) }
+            .accessibilityLabel(String(format: L("Jira board, %@"), subtitle))
+        }
+    }
+
+    private var mine: [JiraCard] {
+        guard let me = board.me else { return board.sprintCards }
+        return board.sprintCards.filter { $0.assignee == me }
+    }
+
+    private var columns: [(name: String, count: Int)] {
+        Array(board.grouped(mine).map { (name: $0.column.name, count: $0.cards.count) }.prefix(4))
+    }
+
+    private var total: Int { mine.count }
+    private var done: Int { mine.filter { $0.statusCategory == "done" }.count }
+
+    private var subtitle: String {
+        if let sprint = board.sprint {
+            return total > 0 ? String(format: L("%@ · %d of %d yours done"), sprint.name, done, total) : sprint.name
+        }
+        return board.loadedSprint ? L("Your work on the board") : L("Loading…")
     }
 }

@@ -101,7 +101,7 @@ struct AgentAttachmentStrip: View {
     let remove: (AgentAttachment) -> Void
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal, showsIndicators: false) { Group {
             HStack(spacing: 8) {
                 ForEach(attachments) { attachment in
                     ZStack(alignment: .topTrailing) {
@@ -136,7 +136,7 @@ struct AgentAttachmentStrip: View {
                 }
             }
             .padding(.horizontal, 2)
-        }
+        }.background(HorizontalOnly()) }
     }
 }
 

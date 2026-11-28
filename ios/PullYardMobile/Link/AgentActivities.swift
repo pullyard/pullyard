@@ -19,6 +19,26 @@ enum AgentActivities {
         Task { for activity in activities { await activity.end(nil, dismissalPolicy: .immediate) } }
     }
 
+    static func dismissFinished() {
+        let done = Activity<AgentActivityAttributes>.activities.filter { activity in
+            activity.activityState != .active || activity.content.state.finished != nil || !tracked.contains(activity.attributes.session)
+        }
+        for activity in done { pending[activity.attributes.session] = nil }
+        Task { for activity in done { await activity.end(nil, dismissalPolicy: .immediate) } }
+    }
+
+    // Runs on willTerminate: the process is about to die, so block briefly until the end calls reach ActivityKit.
+    nonisolated static func endAllBeforeExit() {
+        let activities = Activity<AgentActivityAttributes>.activities
+        guard !activities.isEmpty else { return }
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            for activity in activities { await activity.end(nil, dismissalPolicy: .immediate) }
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 2)
+    }
+
     static var hasActive: Bool { Activity<AgentActivityAttributes>.activities.contains { $0.activityState == .active } }
 
     static func track(_ session: String) { tracked.insert(session) }

@@ -23,6 +23,8 @@
 		1FF0948F19859135FE91737B /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F704A55C1B2862A9E81B2369 /* SearchView.swift */; };
 		20B23EC4331D918C39410462 /* InboxAndPullsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EF4EBD49C399A1EBB703665 /* InboxAndPullsView.swift */; };
 		228D58DECC871A8C3AB8E280 /* JiraViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E89E11B5D2A4EE80E9B6378A /* JiraViews.swift */; };
+		2F89F727427040F80D5EE35E /* JiraBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AE36C5F19813CA02F26EC1E /* JiraBoardView.swift */; };
+		702061054022A42E4BDA56ED /* JiraBoardStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CBE19F6078A98811E782A77 /* JiraBoardStore.swift */; };
 		2447CE6CB79EEE43B34463B2 /* PYLinkProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94231697E07DA3DAFF6139C2 /* PYLinkProtocol.swift */; };
 		2BB15762897716909F534C3C /* DemoData.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC50A581502EF04854200F81 /* DemoData.swift */; };
 		2CDEB08C4B1F821762AB609D /* AgentActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C19694612AE062E76BC181B6 /* AgentActivity.swift */; };
@@ -155,10 +157,10 @@
 		435E8F2A21391A7806B96123 /* KeyboardDismisser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDismisser.swift; sourceTree = "<group>"; };
 		492802CE69238D7B67870B90 /* LinkClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkClient.swift; sourceTree = "<group>"; };
 		4E906B2E7B97FCF8016A2F05 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
-		4FEA9E8ED657C416009BF3B6 /* PullYardWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PullYardWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		4FEA9E8ED657C416009BF3B6 /* PullYardWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PullYardWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		50FC49B8614CEC06A877D59E /* AgentsHome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsHome.swift; sourceTree = "<group>"; };
 		5540DD8A1EFE9214A4C8EBAE /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
-		665A39E542BD09746979B213 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		665A39E542BD09746979B213 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		674809AA8E4123FA4CFAF63B /* AgentAttachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentAttachments.swift; sourceTree = "<group>"; };
 		6D854E33B7127DD7D9C8A882 /* AgentTurnSummaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTurnSummaryTests.swift; sourceTree = "<group>"; };
 		74E2AA9BE3CE7453E864C018 /* CredentialVaultTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialVaultTests.swift; sourceTree = "<group>"; };
@@ -184,9 +186,9 @@
 		AA0C66F8D185CD5194B079AE /* CIActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CIActivity.swift; sourceTree = "<group>"; };
 		AC50A581502EF04854200F81 /* DemoData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoData.swift; sourceTree = "<group>"; };
 		B6D80172FDB710BD8881905F /* PullRequestDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PullRequestDetailView.swift; sourceTree = "<group>"; };
-		BAA821B14496A8A2E7564C1D /* PullYardShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PullYardShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		BAA821B14496A8A2E7564C1D /* PullYardShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PullYardShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		BEFCC7B897348C70330D0FFB /* IslandGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandGeometryTests.swift; sourceTree = "<group>"; };
-		BF51D71B18FDD71AD5E3A9A7 /* PullYardMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PullYardMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		BF51D71B18FDD71AD5E3A9A7 /* PullYardMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PullYardMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C19694612AE062E76BC181B6 /* AgentActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivity.swift; sourceTree = "<group>"; };
 		CDA54E3ED6B7AF977D609157 /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		CE425C9086597B1189109F0E /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
@@ -199,6 +201,8 @@
 		E371F51D2299F6292593D247 /* AgentDiffBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDiffBuilderTests.swift; sourceTree = "<group>"; };
 		E7ACC95A77417C6758DB98D1 /* JiraKeyFinderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraKeyFinderTests.swift; sourceTree = "<group>"; };
 		E89E11B5D2A4EE80E9B6378A /* JiraViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraViews.swift; sourceTree = "<group>"; };
+		5CBE19F6078A98811E782A77 /* JiraBoardStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraBoardStore.swift; sourceTree = "<group>"; };
+		6AE36C5F19813CA02F26EC1E /* JiraBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraBoardView.swift; sourceTree = "<group>"; };
 		EBD4F0DC8CF7BE8F81827D8C /* DeviceFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceFlow.swift; sourceTree = "<group>"; };
 		ECB22B19338EC4FCC87BFDAB /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		EEFDE3973B2CC94C18370636 /* VoyageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoyageTests.swift; sourceTree = "<group>"; };
@@ -237,6 +241,8 @@
 			children = (
 				4127AF0EAFF3D7141F27CD40 /* JiraStore.swift */,
 				E89E11B5D2A4EE80E9B6378A /* JiraViews.swift */,
+				5CBE19F6078A98811E782A77 /* JiraBoardStore.swift */,
+				6AE36C5F19813CA02F26EC1E /* JiraBoardView.swift */,
 			);
 			path = Jira;
 			sourceTree = "<group>";
@@ -449,8 +455,6 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
-				TargetAttributes = {
-				};
 			};
 			buildConfigurationList = 0BE45CE00F09378E19B9937C /* Build configuration list for PBXProject "PullYardMobile" */;
 			developmentRegion = en;
@@ -538,6 +542,8 @@
 				506C6041378E535399DE85EA /* IssueDetailView.swift in Sources */,
 				8328112F372F52C1C66FA8DE /* JiraStore.swift in Sources */,
 				228D58DECC871A8C3AB8E280 /* JiraViews.swift in Sources */,
+				702061054022A42E4BDA56ED /* JiraBoardStore.swift in Sources */,
+				2F89F727427040F80D5EE35E /* JiraBoardView.swift in Sources */,
 				726AA9D25FB3D0D5CC3C8ABE /* KeyboardDismisser.swift in Sources */,
 				F126D8433948F1AF3BE7B615 /* LinkClient.swift in Sources */,
 				C070820FA7D4B882307E041E /* LiveActivities.swift in Sources */,
@@ -623,6 +629,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Support/PullYardWidget.entitlements;
+				DEVELOPMENT_TEAM = T5S7X9CM2J;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Support/Widget-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = PullYard;
@@ -713,6 +720,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Support/PullYardShare.entitlements;
+				DEVELOPMENT_TEAM = T5S7X9CM2J;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Support/Share-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = PullYard;
@@ -734,9 +742,18 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Support/PullYardMobile.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = T5S7X9CM2J;
 				INFOPLIST_FILE = Support/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = PullYard;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSCameraUsageDescription = "PullYard uses the camera to scan the pairing code shown by PullYard on your Mac.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "PullYard connects to PullYard on your Mac to start agent fixes and stream the chat.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "PullYard listens while you dictate a message to the agent on your Mac.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "PullYard turns your dictation into text for the agent. Speech is recognized on this iPhone when possible.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -751,6 +768,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Support/PullYardShare.entitlements;
+				DEVELOPMENT_TEAM = T5S7X9CM2J;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Support/Share-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = PullYard;
@@ -870,9 +888,18 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Support/PullYardMobile.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = T5S7X9CM2J;
 				INFOPLIST_FILE = Support/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = PullYard;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSCameraUsageDescription = "PullYard uses the camera to scan the pairing code shown by PullYard on your Mac.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "PullYard connects to PullYard on your Mac to start agent fixes and stream the chat.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "PullYard listens while you dictate a message to the agent on your Mac.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "PullYard turns your dictation into text for the agent. Speech is recognized on this iPhone when possible.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -887,6 +914,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Support/PullYardWidget.entitlements;
+				DEVELOPMENT_TEAM = T5S7X9CM2J;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Support/Widget-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = PullYard;

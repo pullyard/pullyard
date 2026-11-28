@@ -119,6 +119,8 @@ final class DemoGitHubAPI: GitHubAPI {
             ProjectSummary(nameWithOwner: "harbor/api", description: "Sync and webhooks service", isPrivate: true, openPullRequests: 2, pushedAt: ago(60)),
             ProjectSummary(nameWithOwner: "harbor/design", description: "Design tokens and icons", openPullRequests: 1, pushedAt: ago(400)),
             ProjectSummary(nameWithOwner: "harbor/docs", description: "Public documentation", openPullRequests: 0, pushedAt: ago(9_000)),
+            ProjectSummary(nameWithOwner: "demo-reviewer/dotfiles", description: "Shell and editor setup", openPullRequests: 0, pushedAt: ago(20_000)),
+            ProjectSummary(nameWithOwner: "lighthouse/charts", description: "Tide and weather charts", openPullRequests: 1, pushedAt: ago(30_000)),
         ]
     }
     func markAllRead() async throws { for index in notificationStore.indices { notificationStore[index].unread = false } }

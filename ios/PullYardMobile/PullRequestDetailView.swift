@@ -1153,7 +1153,7 @@ struct ComposerSheet: View {
                     Button("Cancel") { if trimmed.isEmpty { dismiss() } else { confirmClose = true } }.disabled(isSending)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
-                    ScrollView(.horizontal, showsIndicators: false) {
+                    ScrollView(.horizontal, showsIndicators: false) { Group {
                         HStack(spacing: 18) {
                             formatButton("bold") { wrapSelection("**", "**") }
                             formatButton("italic") { wrapSelection("_", "_") }
@@ -1164,7 +1164,7 @@ struct ComposerSheet: View {
                             formatButton("link") { wrapSelection("[", "](https://)") }
                             formatButton("at") { insert("@") }
                         }
-                    }
+                    }.background(HorizontalOnly()) }
                     Button { focused = false } label: { Image(systemName: "keyboard.chevron.compact.down") }
                 }
                 if !request.isApprove && request.alternateTitle == nil {
@@ -1211,7 +1211,7 @@ struct ComposerSheet: View {
         if let token = mentionToken {
             let matches = request.participants.filter { token.isEmpty || $0.localizedCaseInsensitiveContains(token) }.prefix(6)
             if !matches.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
+                ScrollView(.horizontal, showsIndicators: false) { Group {
                     HStack(spacing: 8) {
                         ForEach(Array(matches), id: \.self) { login in
                             Button { completeMention(login, token: token) } label: {
@@ -1225,7 +1225,7 @@ struct ComposerSheet: View {
                             .buttonStyle(.pyPlain)
                         }
                     }
-                }
+                }.background(HorizontalOnly()) }
             }
         }
     }
@@ -1428,7 +1428,7 @@ private struct ReactionStrip: View {
 
     var body: some View {
         let present = comment.reactions?.nonEmpty ?? []
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal, showsIndicators: false) { Group {
             HStack(spacing: 6) {
                 ForEach(present.map(\.0), id: \.self) { kind in
                     let count = comment.reactions?.count(kind) ?? 0
@@ -1459,7 +1459,7 @@ private struct ReactionStrip: View {
                     .accessibilityLabel("Add reaction")
                 }
             }
-        }
+        }.background(HorizontalOnly()) }
     }
 }
 
