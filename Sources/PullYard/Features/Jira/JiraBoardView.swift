@@ -464,12 +464,6 @@ struct JiraBoardView: View {
         }
     }
 
-    private var filtering: Bool { !assignees.isEmpty || !search.trimmingCharacters(in: .whitespaces).isEmpty }
-
-    private func matches(_ issue: JiraIssue) -> Bool {
-        JiraIssueFilter.matches(issue, assignees: assignees, query: search)
-    }
-
     @ViewBuilder
     private var errorBanner: some View {
         if let error = work.error ?? model.error {
@@ -498,11 +492,12 @@ struct JiraBoardView: View {
                     snapshot: work.backlog,
                     isScrum: model.board?.isScrum == true,
                     moving: work.moving,
-                    filter: matches,
-                    filtering: filtering,
+                    assignees: assignees,
+                    query: search,
                     onOpen: { opened = $0 },
                     onMove: { key, sprint in Task { await work.move(key, toSprint: sprint) } }
                 )
+                .equatable()
             }
         }
     }
@@ -521,13 +516,14 @@ struct JiraBoardView: View {
             VStack(spacing: 0) {
                 errorBanner
                 JiraIssueListView(
-                    issues: work.list.issues.filter(matches),
+                    issues: JiraIssueFilter.filter(work.list.issues, assignees: assignees, query: search),
                     total: work.list.issues.count,
                     hasMore: work.list.next != nil,
                     loadingMore: work.loadingMore,
                     onOpen: { opened = $0 },
                     onLoadMore: { Task { await work.loadMore() } }
                 )
+                .equatable()
             }
         }
     }
@@ -676,7 +672,7 @@ struct JiraBoardView: View {
     // MARK: Columns
 
     private var visibleIssues: [JiraIssue] {
-        model.issues.filter(matches)
+        JiraIssueFilter.filter(model.issues, assignees: assignees, query: search)
     }
 
     @ViewBuilder
@@ -707,6 +703,7 @@ struct JiraBoardView: View {
                             JiraBoardColumnView(column: entry.column, issues: entry.issues, tint: JiraStyle.columnTint(index: index, count: groups.count, issues: entry.issues), moving: model.moving, canDrop: !model.columns.isEmpty) { opened = $0 } onDrop: { key, before in
                                 Task { await model.move(key, to: entry.column, before: before) }
                             }
+                            .equatable()
                         }
                     }
                     .padding(18)
@@ -774,7 +771,7 @@ struct JiraAccountTabs: View {
     }
 }
 
-struct JiraBoardColumnView: View {
+struct JiraBoardColumnView: View, Equatable {
     let column: JiraBoardColumn
     let issues: [JiraIssue]
     var tint: Color = .sySky
@@ -788,6 +785,11 @@ struct JiraBoardColumnView: View {
     @Environment(\.colorScheme) private var scheme
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 20, style: .continuous) }
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.column == b.column && a.issues == b.issues && a.tint == b.tint && a.canDrop == b.canDrop
+            && a.moving.filter { key in a.issues.contains { $0.key == key } } == b.moving.filter { key in b.issues.contains { $0.key == key } }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -954,14 +956,7 @@ private struct FlowLabels: View {
     let labels: [String]
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 4) { chips(labels) }
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(stride(from: 0, to: labels.count, by: 2)), id: \.self) { i in
-                    HStack(spacing: 4) { chips(Array(labels[i..<min(i + 2, labels.count)])) }
-                }
-            }
-        }
+        ChipFlow(spacing: 4) { chips(labels) }
     }
 
     @ViewBuilder
@@ -975,6 +970,56 @@ private struct FlowLabels: View {
                 .padding(.vertical, 2)
                 .background(Capsule().fill(Color.syIndigo.opacity(0.12)))
         }
+    }
+}
+
+private struct ChipFlow: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(subviews, width: proposal.width ?? .infinity)
+        let width = rows.map(\.width).max() ?? 0
+        let height = rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(rows.count - 1, 0))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(subviews, width: bounds.width) {
+            var x = bounds.minX
+            for (index, size) in zip(row.indices, row.sizes) {
+                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row {
+        var indices: [Int] = []
+        var sizes: [CGSize] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> [Row] {
+        var rows: [Row] = []
+        var row = Row()
+        for (index, subview) in subviews.enumerated() {
+            var size = subview.sizeThatFits(.unspecified)
+            size.width = min(size.width, width)
+            let next = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            if !row.indices.isEmpty, next > width {
+                rows.append(row)
+                row = Row()
+            }
+            row.width = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            row.height = max(row.height, size.height)
+            row.indices.append(index)
+            row.sizes.append(size)
+        }
+        if !row.indices.isEmpty { rows.append(row) }
+        return rows
     }
 }
 

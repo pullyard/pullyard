@@ -164,10 +164,26 @@ enum JiraIssueMerge {
 /// The board header's assignee filter and search, shared by all three tabs.
 enum JiraIssueFilter {
     static func matches(_ issue: JiraIssue, assignees: Set<String>, query: String) -> Bool {
-        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        return (assignees.isEmpty || assignees.contains(issue.assignee ?? JiraPeopleFilter.unassigned))
-            && (q.isEmpty || issue.key.lowercased().contains(q) || issue.summary.lowercased().contains(q)
-                || issue.labels.contains { $0.lowercased().contains(q) })
+        matches(issue, assignees: assignees, normalized: normalize(query))
+    }
+
+    static func normalize(_ query: String) -> String {
+        query.trimmingCharacters(in: .whitespaces).lowercased()
+    }
+
+    static func matches(_ issue: JiraIssue, assignees: Set<String>, normalized q: String) -> Bool {
+        (assignees.isEmpty || assignees.contains(issue.assignee ?? JiraPeopleFilter.unassigned))
+            && (q.isEmpty || contains(issue.key, q) || contains(issue.summary, q) || issue.labels.contains { contains($0, q) })
+    }
+
+    private static func contains(_ text: String, _ q: String) -> Bool {
+        text.range(of: q, options: .caseInsensitive) != nil
+    }
+
+    static func filter(_ issues: [JiraIssue], assignees: Set<String>, query: String) -> [JiraIssue] {
+        let q = normalize(query)
+        if assignees.isEmpty, q.isEmpty { return issues }
+        return issues.filter { matches($0, assignees: assignees, normalized: q) }
     }
 }
 
@@ -481,86 +497,172 @@ private struct JiraTabButtonStyle: ButtonStyle {
 
 // MARK: - Backlog
 
-struct JiraBacklogView: View {
+struct JiraBacklogView: View, Equatable {
     let snapshot: JiraBacklogSnapshot
     let isScrum: Bool
     let moving: Set<String>
-    let filter: (JiraIssue) -> Bool
-    let filtering: Bool
+    let assignees: Set<String>
+    let query: String
     let onOpen: (JiraIssue) -> Void
     let onMove: (String, Int?) -> Void
     @State private var collapsed: Set<String> = []
+    @State private var targetSlice: String?
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.snapshot == b.snapshot && a.isScrum == b.isScrum && a.moving == b.moving
+            && a.assignees == b.assignees && a.query == b.query
+    }
+
+    private var filtering: Bool { !assignees.isEmpty || !JiraIssueFilter.normalize(query).isEmpty }
+
+    private enum Slice: Identifiable {
+        case header(JiraBacklogSection, visible: Int)
+        case row(JiraBacklogSection, JiraIssue, first: Bool, last: Bool)
+        case empty(JiraBacklogSection)
+
+        var section: JiraBacklogSection {
+            switch self {
+            case .header(let s, _), .row(let s, _, _, _), .empty(let s): return s
+            }
+        }
+
+        var id: String {
+            switch self {
+            case .header(let s, _): return "\(s.id)/header"
+            case .row(let s, let issue, _, _): return "\(s.id)/\(issue.key)"
+            case .empty(let s): return "\(s.id)/empty"
+            }
+        }
+
+        var closesSection: Bool {
+            switch self {
+            case .header: return false
+            case .row(_, _, _, let last): return last
+            case .empty: return true
+            }
+        }
+    }
+
+    private var slices: [Slice] {
+        var out: [Slice] = []
+        for section in snapshot.sections {
+            let visible = JiraIssueFilter.filter(section.issues, assignees: assignees, query: query)
+            out.append(.header(section, visible: visible.count))
+            if collapsed.contains(section.id) { continue }
+            if visible.isEmpty {
+                out.append(.empty(section))
+            } else {
+                for (i, issue) in visible.enumerated() {
+                    out.append(.row(section, issue, first: i == 0, last: i == visible.count - 1))
+                }
+            }
+        }
+        return out
+    }
 
     var body: some View {
+        let targetSection = targetSlice.flatMap { id in id.split(separator: "/").first.map(String.init) }
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                ForEach(snapshot.sections) { section in
-                    JiraBacklogSectionView(
-                        section: section,
-                        visible: section.issues.filter(filter),
-                        filtering: filtering,
-                        canDrop: isScrum,
-                        moving: moving,
-                        collapsed: collapsed.contains(section.id),
-                        onToggle: {
-                            withAnimation(Motion.smooth) {
-                                if collapsed.contains(section.id) { collapsed.remove(section.id) } else { collapsed.insert(section.id) }
-                            }
-                        },
-                        onOpen: onOpen,
-                        onDrop: { onMove($0, section.sprintID) }
-                    )
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(slices) { slice in
+                    let section = slice.section
+                    let isCollapsed = collapsed.contains(section.id)
+                    sliceContent(slice, collapsed: isCollapsed)
+                        .modifier(JiraSliceSurface(
+                            top: { if case .header = slice { return true }; return false }(),
+                            bottom: slice.closesSection || isCollapsed,
+                            radius: 16,
+                            fill: Color.syPanel.opacity(0.6),
+                            stroke: targetSection == section.id ? Color.syAccent : Color.syLine,
+                            lineWidth: targetSection == section.id ? 1.5 : 1
+                        ))
+                        .padding(.bottom, slice.closesSection || isCollapsed ? 14 : 0)
+                        .dropDestination(for: String.self) { keys, _ in
+                            guard isScrum, let key = keys.first, !section.issues.contains(where: { $0.key == key }) else { return false }
+                            onMove(key, section.sprintID)
+                            return true
+                        } isTargeted: { on in
+                            if on, isScrum { targetSlice = slice.id } else if targetSlice == slice.id { targetSlice = nil }
+                        }
                 }
             }
             .padding(16)
+            .animation(Motion.fade, value: targetSection)
         }
+    }
+
+    @ViewBuilder
+    private func sliceContent(_ slice: Slice, collapsed isCollapsed: Bool) -> some View {
+        switch slice {
+        case .header(let section, let visible):
+            JiraBacklogSectionHeader(section: section, visible: visible, filtering: filtering, collapsed: isCollapsed) {
+                withAnimation(Motion.smooth) {
+                    if collapsed.contains(section.id) { collapsed.remove(section.id) } else { collapsed.insert(section.id) }
+                }
+            }
+        case .row(_, let issue, let first, let last):
+            JiraBacklogRow(issue: issue, busy: moving.contains(issue.key)) { onOpen(issue) }
+                .draggable(issue.key)
+                .overlay(alignment: .bottom) { if !last { Divider().opacity(0.5).padding(.horizontal, 1) } }
+                .modifier(JiraSliceSurface(top: first, bottom: last, radius: 12, fill: Color.syRaised, stroke: Color.syLine, lineWidth: 1))
+                .padding(.horizontal, 8)
+                .padding(.bottom, last ? 8 : 0)
+        case .empty(let section):
+            Text(emptyText(section))
+                .font(.syCallout)
+                .foregroundStyle(Color.syDim)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syLineStrong, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)
+        }
+    }
+
+    private func emptyText(_ section: JiraBacklogSection) -> String {
+        if filtering, !section.issues.isEmpty { return "Nothing here matches the filter" }
+        if section.sprint == nil { return "Your backlog is empty" }
+        return isScrum ? "Plan this sprint by dragging work items here" : "No work items"
     }
 }
 
-private struct JiraBacklogSectionView: View {
+private struct JiraSliceSurface: ViewModifier {
+    let top: Bool
+    let bottom: Bool
+    let radius: CGFloat
+    let fill: Color
+    let stroke: Color
+    let lineWidth: CGFloat
+
+    func body(content: Content) -> some View {
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: top ? radius : 0,
+            bottomLeadingRadius: bottom ? radius : 0,
+            bottomTrailingRadius: bottom ? radius : 0,
+            topTrailingRadius: top ? radius : 0,
+            style: .continuous
+        )
+        content
+            .background(shape.fill(fill))
+            .overlay {
+                shape
+                    .strokeBorder(stroke, lineWidth: lineWidth)
+                    .padding(.top, top ? 0 : -4)
+                    .padding(.bottom, bottom ? 0 : -4)
+                    .clipped()
+                    .allowsHitTesting(false)
+            }
+    }
+}
+
+private struct JiraBacklogSectionHeader: View {
     let section: JiraBacklogSection
-    let visible: [JiraIssue]
+    let visible: Int
     let filtering: Bool
-    let canDrop: Bool
-    let moving: Set<String>
     let collapsed: Bool
     let onToggle: () -> Void
-    let onOpen: (JiraIssue) -> Void
-    let onDrop: (String) -> Void
-    @State private var targeted = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            if !collapsed {
-                if visible.isEmpty {
-                    emptyRow
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(visible) { issue in
-                            JiraBacklogRow(issue: issue, busy: moving.contains(issue.key)) { onOpen(issue) }
-                                .draggable(issue.key)
-                            if issue.id != visible.last?.id { Divider().opacity(0.5) }
-                        }
-                    }
-                    .pyCardSurface(radius: 12)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 8)
-                }
-            }
-        }
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.syPanel.opacity(0.6)))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(targeted ? Color.syAccent : Color.syLine, lineWidth: targeted ? 1.5 : 1))
-        .dropDestination(for: String.self) { keys, _ in
-            guard canDrop, let key = keys.first, !section.issues.contains(where: { $0.key == key }) else { return false }
-            onDrop(key)
-            return true
-        } isTargeted: { targeted = canDrop && $0 }
-        .animation(Motion.fade, value: targeted)
-    }
-
-    private var header: some View {
         Button(action: onToggle) {
             HStack(spacing: 8) {
                 Image(systemName: "chevron.right")
@@ -599,44 +701,31 @@ private struct JiraBacklogSectionView: View {
     private var countLabel: String {
         let total = section.issues.count
         let noun = total == 1 ? "work item" : "work items"
-        return filtering && visible.count != total ? "(\(visible.count) of \(total) \(noun))" : "(\(total) \(noun))"
+        return filtering && visible != total ? "(\(visible) of \(total) \(noun))" : "(\(total) \(noun))"
     }
 
-    /// To do / in progress / done counts, like Jira's sprint header.
     private var statusSummary: some View {
-        let issues = section.issues
-        let counts = [("new", Color.syMuted), ("indeterminate", Color.sySky), ("done", Color.syGreen)].map { cat, color in
-            (count: issues.filter { cat == "new" ? ($0.statusCategory != "indeterminate" && $0.statusCategory != "done") : $0.statusCategory == cat }.count, color: color)
+        var todo = 0, doing = 0, done = 0
+        for issue in section.issues {
+            switch issue.statusCategory {
+            case "indeterminate": doing += 1
+            case "done": done += 1
+            default: todo += 1
+            }
         }
+        let counts = [(todo, Color.syMuted), (doing, Color.sySky), (done, Color.syGreen)]
         return HStack(spacing: 4) {
             ForEach(Array(counts.enumerated()), id: \.offset) { _, c in
-                Text("\(c.count)")
+                Text("\(c.0)")
                     .font(.syCaption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(c.color)
+                    .foregroundStyle(c.1)
                     .frame(minWidth: 18)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 5).fill(c.color.opacity(0.14)))
+                    .background(RoundedRectangle(cornerRadius: 5).fill(c.1.opacity(0.14)))
             }
         }
         .help("To do · In progress · Done")
-    }
-
-    private var emptyRow: some View {
-        Text(emptyText)
-            .font(.syCallout)
-            .foregroundStyle(Color.syDim)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .background(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syLineStrong, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
-            .padding(.horizontal, 8)
-            .padding(.bottom, 8)
-    }
-
-    private var emptyText: String {
-        if filtering, !section.issues.isEmpty { return "Nothing here matches the filter" }
-        if section.sprint == nil { return "Your backlog is empty" }
-        return canDrop ? "Plan this sprint by dragging work items here" : "No work items"
     }
 }
 
@@ -789,7 +878,7 @@ private enum JiraListColumns {
     static let minWidth: CGFloat = 1000
 }
 
-struct JiraIssueListView: View {
+struct JiraIssueListView: View, Equatable {
     let issues: [JiraIssue]
     let total: Int
     let hasMore: Bool
@@ -797,23 +886,27 @@ struct JiraIssueListView: View {
     let onOpen: (JiraIssue) -> Void
     let onLoadMore: () -> Void
 
+    static func == (a: Self, b: Self) -> Bool {
+        a.total == b.total && a.hasMore == b.hasMore && a.loadingMore == b.loadingMore && a.issues == b.issues
+    }
+
     var body: some View {
         GeometryReader { geo in
-            ScrollView([.vertical, .horizontal]) {
+            let width = max(JiraListColumns.minWidth, geo.size.width - 32)
+            ScrollView(width > geo.size.width - 32 ? [.vertical, .horizontal] : .vertical) {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                     Section {
                         ForEach(issues) { issue in
                             JiraListRow(issue: issue) { onOpen(issue) }
-                            Divider().opacity(0.5)
+                                .overlay(alignment: .bottom) { Divider().opacity(0.5) }
                         }
                         footer
                     } header: {
                         headerRow
                     }
                 }
-                .frame(width: max(JiraListColumns.minWidth, geo.size.width - 32))
+                .frame(width: width)
                 .pyCardSurface(radius: 12)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(16)
             }
         }
@@ -830,7 +923,7 @@ struct JiraIssueListView: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 36)
-        .background(Color.syRaised)
+        .background(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12, style: .continuous).fill(Color.syRaised))
         .overlay(alignment: .bottom) { Rectangle().fill(Color.syLineStrong).frame(height: 1) }
     }
 
@@ -863,6 +956,7 @@ private struct JiraListRow: View {
     let issue: JiraIssue
     let onOpen: () -> Void
     @State private var hover = false
+    private static let createdStyle = Date.FormatStyle(date: .abbreviated, time: .omitted)
 
     var body: some View {
         HStack(spacing: 12) {
@@ -891,7 +985,7 @@ private struct JiraListRow: View {
             .frame(width: JiraListColumns.priority, alignment: .leading)
             JiraStatusPill(status: issue.status, category: issue.statusCategory)
                 .frame(width: JiraListColumns.status, alignment: .leading)
-            Text(issue.created.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
+            Text(issue.created.map { $0.formatted(Self.createdStyle) } ?? "—")
                 .font(.syCallout.monospacedDigit())
                 .foregroundStyle(Color.syMuted)
                 .lineLimit(1)

@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SwiftUI
 
 enum GitHubURL {
@@ -212,20 +213,82 @@ enum VisualState {
     }
 }
 
+@MainActor
+enum AvatarImages {
+    private static let cache: NSCache<NSURL, NSImage> = {
+        let c = NSCache<NSURL, NSImage>()
+        c.countLimit = 800
+        return c
+    }()
+    private static var inFlight: [URL: Task<CGImage?, Never>] = [:]
+    private static var failed: [URL: Date] = [:]
+
+    static func cached(_ url: URL) -> NSImage? { cache.object(forKey: url as NSURL) }
+
+    static func load(_ url: URL, pixels: Int) async -> NSImage? {
+        if let hit = cached(url) { return hit }
+        if let at = failed[url], Date().timeIntervalSince(at) < 300 { return nil }
+        let task = inFlight[url] ?? Task.detached(priority: .utility) { () -> CGImage? in
+            guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return nil }
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: max(pixels, 16),
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true
+            ]
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        }
+        inFlight[url] = task
+        let cg = await task.value
+        inFlight[url] = nil
+        guard let cg else {
+            failed[url] = Date()
+            return nil
+        }
+        if let hit = cached(url) { return hit }
+        let image = NSImage(cgImage: cg, size: NSSize(width: CGFloat(cg.width) / 2, height: CGFloat(cg.height) / 2))
+        cache.setObject(image, forKey: url as NSURL)
+        return image
+    }
+}
+
 struct Avatar: View {
     let url: String?
     var size: CGFloat = 20
     var ring = false
+    @State private var loaded: Loaded?
+
+    private struct Loaded {
+        let url: URL
+        let image: NSImage
+    }
 
     var body: some View {
-        AsyncImage(url: resolved) { image in
-            image.resizable().interpolation(.medium)
-        } placeholder: {
-            Circle().fill(.quaternary)
+        let resolved = resolved
+        Group {
+            if let image = image(for: resolved) {
+                Image(nsImage: image).resizable().interpolation(.medium)
+            } else {
+                Circle().fill(.quaternary)
+            }
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
         .overlay { if ring { Circle().strokeBorder(Color.syLineStrong, lineWidth: 0.5) } }
+        .task(id: resolved) {
+            guard let resolved, AvatarImages.cached(resolved) == nil else { return }
+            if let image = await AvatarImages.load(resolved, pixels: Int(size * 2)) {
+                loaded = Loaded(url: resolved, image: image)
+            }
+        }
+    }
+
+    private func image(for url: URL?) -> NSImage? {
+        guard let url else { return nil }
+        if let loaded, loaded.url == url { return loaded.image }
+        return AvatarImages.cached(url)
     }
 
     private var resolved: URL? {
