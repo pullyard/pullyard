@@ -7,6 +7,9 @@ final class SpeechDictation: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var transcript = ""
     @Published private(set) var level: CGFloat = 0
+    @Published private(set) var levels: [CGFloat] = Array(repeating: 0, count: SpeechDictation.historyLength)
+    @Published private(set) var startedAt = Date()
+    static let historyLength = 36
     @Published var error: String?
 
     private let engine = AVAudioEngine()
@@ -42,12 +45,14 @@ final class SpeechDictation: ObservableObject {
             input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
                 request.append(buffer)
                 let level = Self.rms(buffer)
-                Task { @MainActor in self?.level = level }
+                Task { @MainActor in self?.push(level) }
             }
             engine.prepare()
             try engine.start()
             self.request = request
             transcript = ""
+            startedAt = Date()
+            levels = Array(repeating: 0, count: Self.historyLength)
             isRecording = true
             task = recognizer.recognitionTask(with: request) { [weak self] result, error in
                 Task { @MainActor in
@@ -60,6 +65,12 @@ final class SpeechDictation: ObservableObject {
             self.error = error.localizedDescription
             finish()
         }
+    }
+
+    private func push(_ value: CGFloat) {
+        guard isRecording else { return }
+        level = value
+        levels = Array((levels + [value]).suffix(Self.historyLength))
     }
 
     func stop() {
@@ -92,8 +103,9 @@ final class SpeechDictation: ObservableObject {
         guard let data = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return 0 }
         var sum: Float = 0
         for index in 0..<Int(buffer.frameLength) { sum += data[index] * data[index] }
-        let value = sqrt(sum / Float(buffer.frameLength))
-        return CGFloat(min(1, value * 12))
+        let value = Double(sqrt(sum / Float(buffer.frameLength)))
+        let db = 20 * log10(max(value, 1e-6))
+        return CGFloat(min(1, max(0, (db + 55) / 45)))
     }
 }
 
@@ -121,5 +133,42 @@ struct DictationButton: View {
         }
         .buttonStyle(.pyPlain)
         .accessibilityLabel(dictation.isRecording ? "Stop dictation" : "Dictate")
+    }
+}
+
+struct DictationLevelStrip: View {
+    @ObservedObject var dictation: SpeechDictation
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle().fill(MobileTheme.red).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(dictation.level > 0.25 ? "Listening…" : "Speak now")
+                    .mobileFont(size: 13, weight: .semibold).foregroundStyle(MobileTheme.ink)
+                Text(timerInterval: dictation.startedAt...Date.distantFuture, countsDown: false)
+                    .mobileFont(size: 11).monospacedDigit().foregroundStyle(MobileTheme.muted)
+            }
+            .frame(width: 78, alignment: .leading)
+            GeometryReader { geo in
+                let count = max(dictation.levels.count, 1)
+                let gap: CGFloat = 2.5
+                let width = max(2, (geo.size.width - gap * CGFloat(count - 1)) / CGFloat(count))
+                HStack(alignment: .center, spacing: gap) {
+                    ForEach(Array(dictation.levels.enumerated()), id: \.offset) { index, value in
+                        Capsule()
+                            .fill(LinearGradient(colors: [MobileTheme.violet, MobileTheme.sky, MobileTheme.coral], startPoint: .bottom, endPoint: .top))
+                            .frame(width: width, height: max(3, geo.size.height * value))
+                            .opacity(0.35 + 0.65 * Double(index) / Double(count))
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .animation(.linear(duration: 0.06), value: dictation.levels)
+            }
+            .frame(height: 26)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(MobileTheme.red.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Recording your voice")
     }
 }
