@@ -74,7 +74,12 @@ struct PRDetailContent: View {
                     ClaudeFixBanner(pr: pr) { showFix = true }
                 }
             }
-            TabStrip(items: tabItems, selection: $model.tab, shortcuts: true)
+            HStack(spacing: 0) {
+                TabStrip(items: tabItems, selection: $model.tab, shortcuts: true)
+                if model.tab == .conversation {
+                    ConversationSortMenu().padding(.trailing, 12)
+                }
+            }
             .padding(.top, 6)
             Divider()
             ZStack {
@@ -787,7 +792,7 @@ struct MergeStatusBar: View {
                 Button("Show in conversation") {
                     showConflicts = false
                     model.tab = .conversation
-                    model.scrollToBottomToken += 1
+                    model.scrollToLatestToken += 1
                 }
                 Spacer()
                 Button("Resolve with agent…") {
@@ -810,7 +815,7 @@ struct MergeStatusBar: View {
         case .showConversation: model.tab = .conversation
         case .showConflicts:
             model.tab = .conversation
-            model.scrollToBottomToken += 1
+            model.scrollToLatestToken += 1
         case .updateBranch:
             Task { if await model.simple(Q.updateBranch) { app.showToast("Branch updated from \(pr.baseRefName)") } }
         case .readyForReview:
@@ -887,14 +892,16 @@ struct ConversationTab: View {
     let model: PRDetailModel
     let pr: PullRequestDetail
     @Environment(AppModel.self) private var app
+    @AppStorage(ConversationOrder.key) private var newestFirst = true
 
     private var text: String { model.commentDraft }
 
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
-            HTMLView(html: model.html, scrollToBottomToken: model.scrollToBottomToken, onAction: handle, onLink: openLink)
+            HTMLView(html: model.html, scrollToLatestToken: model.scrollToLatestToken, onAction: handle, onLink: openLink)
                 .liveRefresh(updated: model.lastUpdated, refreshing: model.loading, footer: false, web: true, button: false) { await model.load(full: true) }
+                .task(id: newestFirst) { model.renderHTML() }
             Divider()
             HStack(alignment: .bottom, spacing: 8) {
                 ComposerBox(text: $model.commentDraft, placeholder: "Comment (Markdown) — ⌘↩ to send", minHeight: 56).frame(height: 64)

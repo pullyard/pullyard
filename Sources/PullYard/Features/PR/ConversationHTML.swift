@@ -1,5 +1,13 @@
 import Foundation
 
+enum ConversationOrder {
+    static let key = "conversation.newestFirst"
+
+    static var newestFirst: Bool {
+        UserDefaults.standard.object(forKey: key) as? Bool ?? true
+    }
+}
+
 enum ConversationHTML {
     static func esc(_ s: String) -> String {
         var r = ""
@@ -86,7 +94,7 @@ enum ConversationHTML {
         """
     }
 
-    static func render(pr: PullRequestDetail, conflicts: ConflictState? = nil, repo: RepoRef? = nil) -> String {
+    static func render(pr: PullRequestDetail, conflicts: ConflictState? = nil, repo: RepoRef? = nil, newestFirst: Bool = ConversationOrder.newestFirst) -> String {
         let authorLogin = pr.author?.login
         var out = commentBox(author: pr.author, date: pr.createdAt, html: pr.bodyHTML, note: "description", highlight: true)
         var byReview: [String: [ReviewThread]] = [:]
@@ -94,27 +102,32 @@ enum ConversationHTML {
             if let rid = t.comments.nodes.first?.pullRequestReview?.id { byReview[rid, default: []].append(t) }
         }
         var rendered = Set<String>()
+        var truncated = ""
         if (pr.timelineItems.totalCount ?? 0) > pr.timelineItems.nodes.count {
-            out += "<div class=\"event\"><span class=\"ic\">…</span><span>\("Showing the latest \(pr.timelineItems.nodes.count) of \(pr.timelineItems.totalCount ?? 0) events") — <a href=\"\(esc(pr.url))\">\("full history")</a></span></div>"
+            truncated = "<div class=\"event\"><span class=\"ic\">…</span><span>\("Showing the latest \(pr.timelineItems.nodes.count) of \(pr.timelineItems.totalCount ?? 0) events") — <a href=\"\(esc(pr.url))\">\("full history")</a></span></div>"
         }
+        var items: [String] = []
         for item in pr.timelineItems.nodes {
             if item.typename == "PullRequestReview" {
                 let threads = byReview[item.id ?? ""] ?? []
                 threads.forEach { rendered.insert($0.id) }
-                out += review(item, threads: threads, highlight: item.author?.login == authorLogin)
+                items.append(review(item, threads: threads, highlight: item.author?.login == authorLogin))
             } else {
-                out += common(item, authorLogin: authorLogin, base: pr.baseRefName)
+                items.append(common(item, authorLogin: authorLogin, base: pr.baseRefName))
             }
         }
         let rest = pr.reviewThreads.nodes.filter { !rendered.contains($0.id) }
-        if !rest.isEmpty {
-            out += "<h3 class=\"sec\">\("Review threads")</h3>" + rest.map(thread).joined()
-        }
-        if let conflicts {
-            out += conflictBox(conflicts, pr: pr, repo: repo)
+        let restHTML = rest.isEmpty ? "" : "<h3 class=\"sec\">\("Review threads")</h3>" + rest.map(thread).joined()
+        let conflictHTML = conflicts.map { conflictBox($0, pr: pr, repo: repo) } ?? ""
+        if newestFirst {
+            out += latestAnchor + conflictHTML + items.reversed().joined() + restHTML + truncated
+        } else {
+            out += truncated + items.joined() + restHTML + conflictHTML
         }
         return page(out)
     }
+
+    private static let latestAnchor = "<div id=\"py-latest\"></div>"
 
     private static func conflictBox(_ state: ConflictState, pr: PullRequestDetail, repo: RepoRef?) -> String {
         let base = "<code>\(esc(pr.baseRefName))</code>"
@@ -143,11 +156,10 @@ enum ConversationHTML {
         """
     }
 
-    static func render(issue: IssueDetail) -> String {
+    static func render(issue: IssueDetail, newestFirst: Bool = ConversationOrder.newestFirst) -> String {
         var out = commentBox(author: issue.author, date: issue.createdAt, html: issue.bodyHTML, note: "description", highlight: true)
-        for item in issue.timelineItems.nodes {
-            out += common(item, authorLogin: issue.author?.login, base: "")
-        }
+        let items = issue.timelineItems.nodes.map { common($0, authorLogin: issue.author?.login, base: "") }
+        out += newestFirst ? latestAnchor + items.reversed().joined() : items.joined()
         return page(out)
     }
 

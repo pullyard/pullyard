@@ -427,7 +427,7 @@ struct SearchListView: View {
     }
 
     private var query: String {
-        [baseQuery, "is:\(kind)", stateFilter.query, "archived:false", sort.query, text]
+        [baseQuery, "is:\(kind)", stateFilter.query, "archived:false", RepoFocus.shared.query(app.cacheAccount), sort.query, text]
             .filter { !$0.isEmpty }.joined(separator: " ")
     }
 
@@ -468,6 +468,7 @@ struct SearchListView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
+            FocusBanner()
             LoadingBar(active: model.loading && !model.showingCached && !model.items.isEmpty)
             Divider()
             List(selection: Binding(get: { app.detailRoot }, set: { app.select($0) })) {

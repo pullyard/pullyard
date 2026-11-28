@@ -409,6 +409,9 @@ struct SidebarView: View {
                 }
                 SidebarRow(section: .claude, title: "Agents", icon: "terminal.fill", color: .syCoral, count: app.claude.attentionCount > 0 ? app.claude.attentionCount : app.claude.tabs.filter(\.running).count)
             }
+            SidebarGroup("") {
+                FocusSidebarRow()
+            }
             if app.forge != nil {
                 forgeSections
             } else {
@@ -417,6 +420,7 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .environment(\.sidebarCompact, compact)
+        .task(id: "\(RepoFocus.shared.query(app.cacheAccount))|\(app.cacheAccount ?? "")") { await app.refreshFocusCounts() }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
                 if !compact, app.forge == nil {
@@ -435,7 +439,7 @@ struct SidebarView: View {
         let caps = app.forgeCaps
         SidebarGroup(app.provider.requestsTitle) {
             ForEach(caps.pullFilters) { f in
-                SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0), group: app.provider.requestsTitle)
+                SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.sidebarReviewCount : (f == .mine ? app.sidebarMineCount : 0), group: app.provider.requestsTitle)
             }
             if caps.pullFilters.contains(.mine) {
                 SidebarRow(section: .myPRsByRepo, title: "My \(app.provider.requestShort)s by project", icon: "folder.fill", color: .syCoral)
@@ -459,7 +463,7 @@ struct SidebarView: View {
     private var gitHubSections: some View {
         SidebarGroup("Pull requests") {
             ForEach(PRFilter.allCases) { f in
-                SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.reviewRequestCount : (f == .mine ? app.myPRCount : 0), group: "Pull requests")
+                SidebarRow(section: .prs(f), title: f.title, icon: f.tileIcon, color: f.tint, count: f == .reviewRequested ? app.sidebarReviewCount : (f == .mine ? app.sidebarMineCount : 0), group: "Pull requests")
             }
             SidebarRow(section: .myPRsByRepo, title: "My PRs by project", icon: "folder.fill", color: .syCoral)
             SidebarRow(section: .stacks, title: "Stacks", icon: "square.stack.3d.up.fill", color: .syIndigo)

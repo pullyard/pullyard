@@ -3,12 +3,14 @@ import WebKit
 
 struct HTMLView: NSViewRepresentable {
     let html: String
-    var scrollToBottomToken = 0
+    var scrollToLatestToken = 0
     var onAction: (String, String) -> Void = { _, _ in }
     var onLink: (URL) -> Void = { LinkBrowser.open($0) }
     var zoom = TextZoom.shared.scale
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    static let latestScript = "(function(){var a=document.getElementById(\"py-latest\");if(a){window.scrollTo(0,Math.max(0,a.getBoundingClientRect().top+window.scrollY-16));}else{window.scrollTo(0,document.body.scrollHeight);}})()"
 
     private static let topScript = """
     (function(){var last=null;function check(){var top=window.scrollY<=0;if(top!==last){last=top;window.webkit.messageHandlers.app.postMessage({type:"atTop",id:top?"1":"0"});}}window.addEventListener("scroll",check,{passive:true});check();})();
@@ -26,14 +28,14 @@ struct HTMLView: NSViewRepresentable {
         view.setValue(false, forKey: "drawsBackground")
         view.allowsMagnification = true
         view.pageZoom = zoom
-        context.coordinator.render(in: view, html: html, token: scrollToBottomToken)
+        context.coordinator.render(in: view, html: html, token: scrollToLatestToken)
         return view
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
         context.coordinator.parent = self
         if view.pageZoom != zoom { view.pageZoom = zoom }
-        context.coordinator.render(in: view, html: html, token: scrollToBottomToken)
+        context.coordinator.render(in: view, html: html, token: scrollToLatestToken)
     }
 
     static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
@@ -60,7 +62,7 @@ struct HTMLView: NSViewRepresentable {
 
         init(_ parent: HTMLView) {
             self.parent = parent
-            self.token = parent.scrollToBottomToken
+            self.token = parent.scrollToLatestToken
         }
 
         func render(in view: WKWebView, html: String, token: Int) {
@@ -71,7 +73,7 @@ struct HTMLView: NSViewRepresentable {
             guard html != self.html else {
                 if scrollBottom {
                     scrollBottom = false
-                    view.evaluateJavaScript("window.scrollTo(0, document.body.scrollHeight)")
+                    view.evaluateJavaScript(HTMLView.latestScript)
                 }
                 return
             }
@@ -86,7 +88,7 @@ struct HTMLView: NSViewRepresentable {
                let data = try? JSONEncoder().encode(body), let json = String(data: data, encoding: .utf8) {
                 let bottom = scrollBottom
                 scrollBottom = false
-                let script = "document.body.innerHTML=\(json);window.__pyTimes&&window.__pyTimes();" + (bottom ? "window.scrollTo(0, document.body.scrollHeight);" : "") + "void 0;"
+                let script = "document.body.innerHTML=\(json);window.__pyTimes&&window.__pyTimes();" + (bottom ? HTMLView.latestScript + ";" : "") + "void 0;"
                 view.evaluateJavaScript(script) { [weak self, weak view] _, error in
                     guard error != nil, let self, let view, self.html == html else { return }
                     self.reload(view, html: html)
@@ -119,7 +121,7 @@ struct HTMLView: NSViewRepresentable {
             ready = true
             if scrollBottom {
                 scrollBottom = false
-                webView.evaluateJavaScript("window.scrollTo(0, document.body.scrollHeight)")
+                webView.evaluateJavaScript(HTMLView.latestScript)
             } else if let y = restoreY {
                 webView.evaluateJavaScript("window.scrollTo(0, \(y))")
             }

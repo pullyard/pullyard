@@ -80,7 +80,7 @@ final class StacksModel {
             }
         }
         do {
-            let query = [PRFilter.mine.query, "is:pr", "is:open", "archived:false", "sort:updated-desc"].joined(separator: " ")
+            let query = [PRFilter.mine.query, "is:pr", "is:open", "archived:false", RepoFocus.shared.query(account), "sort:updated-desc"].filter { !$0.isEmpty }.joined(separator: " ")
             let items = try await api.search(query).nodes.filter(\.isPR)
             var repos: [(repo: RepoRef, stacked: Bool, numbers: [Int])] = []
             for item in items {
@@ -141,7 +141,7 @@ struct StacksListView: View {
 
     var body: some View {
         List(selection: Binding(get: { app.detailRoot }, set: select)) {
-            ForEach(model.entries) { entry in
+            ForEach(model.entries.filter { RepoFocus.shared.includes($0.ref.repo.full, account: app.cacheAccount) }) { entry in
                 StackRow(entry: entry)
                     .tag(Route.pr(entry.ref))
                     .listRowSeparator(.visible)
@@ -161,7 +161,7 @@ struct StacksListView: View {
             await model.load(api: app.api, account: app.cacheAccount, force: true)
         }
         .columnTitle("Stacks", subtitle: model.entries.isEmpty ? "" : "\(model.entries.count)")
-        .task(id: "\(app.cacheAccount ?? "")|\(app.api != nil)") {
+        .task(id: "\(app.cacheAccount ?? "")|\(app.api != nil)|\(RepoFocus.shared.query(app.cacheAccount))") {
             model.restore(account: app.cacheAccount)
             await model.load(api: app.api, account: app.cacheAccount)
             loaded = true

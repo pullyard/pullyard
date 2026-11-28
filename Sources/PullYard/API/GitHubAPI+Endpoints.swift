@@ -96,6 +96,16 @@ extension GitHubAPI {
         try await graphQL(Q.badges)
     }
 
+    func focusCounts(_ scope: String) async throws -> (reviews: Int, mine: Int) {
+        struct Count: Decodable { let issueCount: Int }
+        struct R: Decodable { let rr: Count; let mine: Count }
+        let r: R = try await graphQL(Q.focusCounts, [
+            "rr": "is:pr is:open review-requested:@me archived:false \(scope)",
+            "mine": "is:pr is:open author:@me archived:false \(scope)"
+        ])
+        return (r.rr.issueCount, r.mine.issueCount)
+    }
+
     func pullRequest(_ ref: ItemRef) async throws -> PRDetailResponse {
         let vars: [String: Any?] = ["owner": ref.repo.owner, "name": ref.repo.name, "number": ref.number]
         do {
