@@ -52,6 +52,19 @@ struct OverviewView: View {
                 }
                 if !model.pinnedProjects.isEmpty { pinnedProjects }
                 if !model.savedSearches.isEmpty { savedSearches }
+                if JiraStore.shared.isConfigured || model.isDemo {
+                    NavigationLink(value: Route.jiraBoard) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "rectangle.split.3x1").foregroundStyle(MobileTheme.accent)
+                            Text("Jira board").mobileFont(size: 15, weight: .semibold).foregroundStyle(MobileTheme.ink)
+                            Spacer()
+                            Image(systemName: "chevron.right").mobileFont(size: 12, weight: .semibold).foregroundStyle(MobileTheme.muted)
+                        }
+                        .padding(16)
+                        .pyGlass(in: RoundedRectangle(cornerRadius: PYRadius.card, style: .continuous), interactive: true, fallback: MobileTheme.card)
+                    }
+                    .buttonStyle(.pyPlain)
+                }
                 NavigationLink(value: Route.allPulls) {
                     HStack(spacing: 10) {
                         Image(systemName: "list.bullet.rectangle").foregroundStyle(MobileTheme.accent)

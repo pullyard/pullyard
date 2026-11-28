@@ -151,7 +151,7 @@ final class JiraStore: ObservableObject {
 
     private func site(_ id: String) -> JiraSite? { sites.first { $0.id == id } }
 
-    private func client(for site: JiraSite) -> JiraREST? {
+    func client(for site: JiraSite) -> JiraREST? {
         guard let base = URL(string: site.site), let token = Self.loadToken(site.id) else { return nil }
         return JiraREST(base: base, email: site.email, token: token)
     }
@@ -220,15 +220,25 @@ struct JiraREST {
         email.isEmpty ? "Bearer \(token)" : "Basic " + Data("\(email):\(token)".utf8).base64EncodedString()
     }
 
-    private func get(_ path: String) async throws -> Any {
+    func get(_ path: String) async throws -> Any {
+        try await send(path, method: "GET", body: nil)
+    }
+
+    @discardableResult
+    func send(_ path: String, method: String, body: [String: Any]?) async throws -> Any {
         guard let url = URL(string: base.absoluteString + path) else { throw JiraError.badSite }
         var request = URLRequest(url: url, timeoutInterval: 20)
+        request.httpMethod = method
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
         let (data, response) = try await URLSession.shared.data(for: request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         switch code {
-        case 200..<300: return try JSONSerialization.jsonObject(with: data)
+        case 200..<300: return data.isEmpty ? [String: Any]() : try JSONSerialization.jsonObject(with: data)
         case 401, 403: throw JiraError.unauthorized
         case 404: throw JiraError.notFound(path)
         default: throw JiraError.server(code)

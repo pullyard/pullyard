@@ -161,6 +161,10 @@ struct RootView: View {
                 KeyboardDismisser.install()
                 IslandPresenter.shared.install(feedback: model.feedback)
             }
+            let arguments = ProcessInfo.processInfo.arguments
+            if model.isDemo, let index = arguments.firstIndex(of: "-PYOpen"), arguments.indices.contains(index + 1), let url = URL(string: arguments[index + 1]) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { handleURL(url) }
+            }
         }
         .tint(MobileTheme.accent)
         .preferredColorScheme(AppearanceMode(rawValue: appearanceRaw)?.colorScheme)
@@ -399,6 +403,8 @@ struct RouteDestination: View {
             AgentChatView(session: session)
         case .agents:
             AgentSessionsView()
+        case .jiraBoard:
+            JiraBoardView()
         case let .fileDiff(key, path):
             FileDiffView(key: key, path: path)
         case let .notification(id):

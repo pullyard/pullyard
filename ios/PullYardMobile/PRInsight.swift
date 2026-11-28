@@ -159,6 +159,7 @@ enum DeepLink {
             let parts = ([url.host ?? ""] + url.pathComponents.filter { $0 != "/" }).filter { !$0.isEmpty }
             if parts.first == "pull", parts.count >= 4, let number = Int(parts[3]) { return .pull(PRKey(repo: "\(parts[1])/\(parts[2])", number: number)) }
             if parts.first == "project", parts.count >= 3 { return .project("\(parts[1])/\(parts[2])") }
+            if parts.first == "jira" { return .jiraBoard }
             return nil
         }
         guard let host = url.host?.lowercased(), host == "github.com" || host == "www.github.com" else { return nil }
