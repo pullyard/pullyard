@@ -1,5 +1,40 @@
 import SwiftUI
 
+enum ProjectsMode: String, CaseIterable, Identifiable {
+    case repositories, jira
+    var id: String { rawValue }
+    static let key = "projects.mode"
+}
+
+struct ProjectsHome: View {
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject private var jira = JiraStore.shared
+    @AppStorage(ProjectsMode.key) private var mode: ProjectsMode = .repositories
+
+    private var hasJira: Bool { jira.isConfigured || model.isDemo }
+
+    var body: some View {
+        Group {
+            if hasJira, mode == .jira {
+                JiraBoardView()
+            } else {
+                ProjectsView()
+            }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if hasJira {
+                Picker("Show", selection: $mode) {
+                    Text("Repositories").tag(ProjectsMode.repositories)
+                    Text("Jira").tag(ProjectsMode.jira)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+            }
+        }
+    }
+}
+
 struct ProjectsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var query = ""

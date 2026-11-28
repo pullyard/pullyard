@@ -219,6 +219,12 @@ struct RootView: View {
             if router.top(in: .agents) != .agent(id) { router.open(.agent(id), in: .agents) }
             return
         }
+        if url.scheme == "pullyard", url.host == "jira" {
+            UserDefaults.standard.set(ProjectsMode.jira.rawValue, forKey: ProjectsMode.key)
+            router.popToRoot(.projects)
+            model.selectedTab = .projects
+            return
+        }
         if url.scheme == "pullyard", url.host == "tab", let name = url.pathComponents.dropFirst().first, let tab = AppTab(rawValue: name) {
             router.popToRoot(tab)
             model.selectedTab = tab
@@ -347,7 +353,7 @@ struct MainTabsView: View {
     }
 
     private var pullsStack: some View { NavigationStack(path: $router.pullsPath) { OverviewView().routeDestinations() } }
-    private var projectsStack: some View { NavigationStack(path: $router.projectsPath) { ProjectsView().routeDestinations() } }
+    private var projectsStack: some View { NavigationStack(path: $router.projectsPath) { ProjectsHome().routeDestinations() } }
     private var inboxStack: some View { NavigationStack(path: $router.inboxPath) { InboxView().routeDestinations() } }
     private var searchStack: some View { NavigationStack(path: $router.searchPath) { SearchView().routeDestinations() } }
     private var agentsStack: some View { NavigationStack(path: $router.agentsPath) { AgentsHome().routeDestinations() } }

@@ -363,9 +363,15 @@ final class JiraBoardStore: ObservableObject {
             }
             error = nil
         } catch {
-            guard token == generation else { return }
+            guard token == generation, !Self.isCancellation(error) else { return }
             self.error = error.localizedDescription
         }
+    }
+
+    static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if let url = error as? URLError, url.code == .cancelled { return true }
+        return (error as NSError).code == NSURLErrorCancelled
     }
 
     var hasMoreList: Bool { list.count < listTotal }
@@ -382,8 +388,18 @@ final class JiraBoardStore: ObservableObject {
             list += page.cards.filter { !known.contains($0.key) }
             listTotal = page.total
         } catch {
-            self.error = error.localizedDescription
+            if !Self.isCancellation(error) { self.error = error.localizedDescription }
         }
+    }
+
+    func move(_ card: JiraCard, to column: JiraColumnInfo) async -> Bool {
+        guard card.statusID.map(column.statusIDs.contains) != true else { return true }
+        let options = await moves(for: card)
+        guard let move = options.first(where: { $0.toID.map(column.statusIDs.contains) == true }) else {
+            error = String(format: L("%@ can't move to %@ from %@ — the workflow has no such transition."), card.key, column.name, card.status)
+            return false
+        }
+        return await apply(move, to: card)
     }
 
     func moves(for card: JiraCard) async -> [JiraMove] {
