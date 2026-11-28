@@ -78,6 +78,13 @@ final class SpeechDictation: ObservableObject {
         finish()
     }
 
+    func discard() {
+        task?.cancel()
+        task = nil
+        transcript = ""
+        finish()
+    }
+
     private func finish() {
         if engine.isRunning {
             engine.stop()
@@ -138,6 +145,7 @@ struct DictationButton: View {
 
 struct DictationLevelStrip: View {
     @ObservedObject var dictation: SpeechDictation
+    let onCancel: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -165,10 +173,21 @@ struct DictationLevelStrip: View {
                 .animation(.linear(duration: 0.06), value: dictation.levels)
             }
             .frame(height: 26)
+            Button(action: onCancel) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(MobileTheme.muted)
+                    .frame(width: 30, height: 30)
+                    .background(MobileTheme.ink.opacity(0.07), in: Circle())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.pyPlain)
+            .accessibilityLabel("Cancel dictation")
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.leading, 12).padding(.trailing, 2).padding(.vertical, 2)
         .background(MobileTheme.red.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Recording your voice")
     }
 }
