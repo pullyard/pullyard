@@ -697,6 +697,22 @@ struct ReposResponse: Decodable {
     let viewer: V
 }
 
+struct GitHubOwner: Decodable, Hashable, Identifiable {
+    let login: String
+    let avatarUrl: String?
+    var id: String { login }
+}
+
+struct OrganizationsResponse: Decodable {
+    struct V: Decodable { let organizations: Nodes<GitHubOwner> }
+    let viewer: V
+}
+
+struct OwnerReposResponse: Decodable {
+    struct O: Decodable { let repositories: RepoConnection }
+    let repositoryOwner: O?
+}
+
 struct RepoInfoResponse: Decodable {
     struct R: Decodable {
         let nameWithOwner: String

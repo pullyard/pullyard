@@ -199,6 +199,18 @@ extension GitHubAPI {
         return r.viewer.repositories
     }
 
+    /// Organizations you belong to.
+    func organizations() async throws -> [GitHubOwner] {
+        let r: OrganizationsResponse = try await graphQL(Q.organizations)
+        return r.viewer.organizations.nodes
+    }
+
+    /// Repositories of a user or organization, newest push first.
+    func ownerRepos(_ login: String, after: String?) async throws -> RepoConnection? {
+        let r: OwnerReposResponse = try await graphQL(Q.ownerRepos, ["login": login, "after": after])
+        return r.repositoryOwner?.repositories
+    }
+
     func repoInfo(_ repo: RepoRef) async throws -> RepoInfoResponse.R? {
         let r: RepoInfoResponse = try await graphQL(Q.repoInfo, ["owner": repo.owner, "name": repo.name])
         return r.repository

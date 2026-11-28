@@ -144,6 +144,17 @@ enum Q {
     }
     """
 
+    static let organizations = """
+    query Orgs { viewer { organizations(first: 50) { nodes { login avatarUrl } } } }
+    """
+
+    static let ownerRepos = """
+    query OwnerRepos($login: String!, $after: String) { repositoryOwner(login: $login) { repositories(first: 50, after: $after, orderBy: {field: PUSHED_AT, direction: DESC}) {
+      totalCount pageInfo { hasNextPage endCursor }
+      nodes { nameWithOwner description isPrivate isFork isArchived stargazerCount pushedAt url primaryLanguage { name color } pullRequests(states: OPEN) { totalCount } issues(states: OPEN) { totalCount } }
+    } } }
+    """
+
     static let repos = """
     query Repos($after: String) { viewer { repositories(first: 50, after: $after, orderBy: {field: PUSHED_AT, direction: DESC}, ownerAffiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]) {
       totalCount pageInfo { hasNextPage endCursor }

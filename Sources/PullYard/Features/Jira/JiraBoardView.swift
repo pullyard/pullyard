@@ -277,6 +277,8 @@ struct JiraBoardView: View {
     @State private var assignees: Set<String> = []
     @State private var showPeople = false
     @State private var opened: JiraIssue?
+    @State private var work = JiraWorkModel.shared
+    @AppStorage(JiraBoardTab.storageKey) private var tab: JiraBoardTab = .sprint
     @Environment(\.openSettings) private var openSettings
 
     private var connections: JiraConnections { .shared }
@@ -288,12 +290,17 @@ struct JiraBoardView: View {
             } else {
                 VStack(spacing: 0) {
                     header
-                    content
+                    switch tab {
+                    case .sprint: content
+                    case .backlog: backlogContent
+                    case .list: listContent
+                    }
                 }
                 .background { PYBackdrop(tints: boardTints).equatable() }
             }
         }
         .task(id: model.connectionID) { await model.refresh() }
+        .task(id: workTaskID) { await loadWork() }
         .onChange(of: connections.connections.map(\.id)) { _, _ in model.syncConnections() }
         .onAppear { assignees = JiraBoardFilter.load(model.connectionID, me: model.me?.name) }
         .onChange(of: model.connectionID) { _, id in assignees = JiraBoardFilter.load(id, me: model.me?.name) }
@@ -305,7 +312,7 @@ struct JiraBoardView: View {
             if let issue = opened {
                 JiraIssueOverlay(issue: issue) {
                     withAnimation(Motion.fade) { opened = nil }
-                } onChange: { model.replace($0) }
+                } onChange: { model.replace($0); work.replace($0) }
                 .id(issue.key)
                 .transition(.opacity)
             }
@@ -324,9 +331,9 @@ struct JiraBoardView: View {
                             .frame(maxWidth: 480, alignment: .leading)
                     }
                     Spacer(minLength: 8)
-                    if model.loading { WakeLoader() }
+                    if loading { WakeLoader() }
                     HStack(spacing: 2) {
-                        Button { Task { await model.refresh() } } label: {
+                        Button { Task { await refreshTab() } } label: {
                             Image(systemName: "arrow.clockwise").frame(width: 28, height: 26)
                         }
                         .buttonStyle(.plain)
@@ -349,7 +356,8 @@ struct JiraBoardView: View {
                 }
                 HStack(spacing: 10) {
                     boardMenu
-                    sprintPill
+                    JiraBoardTabsBar(selection: $tab)
+                    if tab == .sprint { sprintPill }
                     Spacer(minLength: 8)
                     assigneeFilter
                         .padding(.horizontal, 6)
@@ -404,12 +412,124 @@ struct JiraBoardView: View {
     }
 
     private var searchField: some View {
-        PYSearchPill(text: $search, prompt: "Search board")
+        PYSearchPill(text: $search, prompt: searchPrompt)
     }
 
     private var boardTints: [Color] {
         let count = max(model.columns.count, 1)
         return (0..<min(count, 4)).map { JiraStyle.columnTint(index: $0, count: count, issues: []) }
+    }
+
+    private var searchPrompt: String {
+        switch tab {
+        case .sprint: return "Search board"
+        case .backlog: return "Search backlog"
+        case .list: return "Search work"
+        }
+    }
+
+    private var loading: Bool {
+        switch tab {
+        case .sprint: return model.loading
+        case .backlog: return model.loading || work.loadingBacklog
+        case .list: return model.loading || work.loadingList
+        }
+    }
+
+    // MARK: Backlog and List
+
+    private struct WorkTaskID: Equatable {
+        let tab: JiraBoardTab
+        let connection: String?
+        let board: Int?
+    }
+
+    private var workTaskID: WorkTaskID { WorkTaskID(tab: tab, connection: model.connectionID, board: model.board?.id) }
+
+    /// Shows the tab's cached data for this account and board at once, then fetches it fresh.
+    private func loadWork() async {
+        work.show(connection: model.connectionID, board: model.board)
+        switch tab {
+        case .sprint: break
+        case .backlog: await work.loadBacklog()
+        case .list: await work.loadList()
+        }
+    }
+
+    private func refreshTab() async {
+        switch tab {
+        case .sprint: await model.refresh()
+        case .backlog: await work.loadBacklog()
+        case .list: await work.loadList()
+        }
+    }
+
+    private var filtering: Bool { !assignees.isEmpty || !search.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    private func matches(_ issue: JiraIssue) -> Bool {
+        JiraIssueFilter.matches(issue, assignees: assignees, query: search)
+    }
+
+    @ViewBuilder
+    private var errorBanner: some View {
+        if let error = work.error ?? model.error {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+                .font(.syCaption)
+                .foregroundStyle(Color.syRed)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .onTapGesture { work.error = nil; model.error = nil }
+        }
+    }
+
+    @ViewBuilder
+    private var backlogContent: some View {
+        if work.backlog.fetchedAt == nil, work.error == nil, model.board != nil || !model.loadedOnce {
+            JiraBacklogSkeleton()
+        } else if let error = work.error, work.backlog.fetchedAt == nil {
+            PYEmptyState(title: "Couldn't load the backlog", message: error, aurora: false)
+        } else if model.loadedOnce, model.boards.isEmpty {
+            PYEmptyState(title: "No boards", message: "This Jira account has no boards you can see.", aurora: false)
+        } else {
+            VStack(spacing: 0) {
+                errorBanner
+                JiraBacklogView(
+                    snapshot: work.backlog,
+                    isScrum: model.board?.isScrum == true,
+                    moving: work.moving,
+                    filter: matches,
+                    filtering: filtering,
+                    onOpen: { opened = $0 },
+                    onMove: { key, sprint in Task { await work.move(key, toSprint: sprint) } }
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var listContent: some View {
+        if work.list.fetchedAt == nil, work.error == nil, model.board != nil || !model.loadedOnce {
+            JiraListSkeleton()
+        } else if let error = work.error, work.list.fetchedAt == nil {
+            PYEmptyState(title: "Couldn't load work items", message: error, aurora: false)
+        } else if model.loadedOnce, model.boards.isEmpty {
+            PYEmptyState(title: "No boards", message: "This Jira account has no boards you can see.", aurora: false)
+        } else if work.list.issues.isEmpty {
+            PYEmptyState(title: "No work items", message: "This project has no work items yet.", aurora: false)
+        } else {
+            VStack(spacing: 0) {
+                errorBanner
+                JiraIssueListView(
+                    issues: work.list.issues.filter(matches),
+                    total: work.list.issues.count,
+                    hasMore: work.list.next != nil,
+                    loadingMore: work.loadingMore,
+                    onOpen: { opened = $0 },
+                    onLoadMore: { Task { await work.loadMore() } }
+                )
+            }
+        }
     }
 
     private var boardMenu: some View {
@@ -451,7 +571,7 @@ struct JiraBoardView: View {
     /// Everyone with an issue on the board, you first (even with nothing assigned), then by name.
     private var people: [JiraPerson] {
         var seen = Set<String>()
-        var list = model.issues.compactMap { i -> JiraPerson? in
+        var list = filterSource.compactMap { i -> JiraPerson? in
             guard let n = i.assignee, seen.insert(n).inserted else { return nil }
             return JiraPerson(name: n, avatar: i.assigneeAvatar)
         }
@@ -467,7 +587,16 @@ struct JiraBoardView: View {
         return list
     }
 
-    private var hasUnassigned: Bool { model.issues.contains { $0.assignee == nil } }
+    private var hasUnassigned: Bool { filterSource.contains { $0.assignee == nil } }
+
+    /// The issues the current tab shows, whose assignees make up the people filter.
+    private var filterSource: [JiraIssue] {
+        switch tab {
+        case .sprint: return model.issues
+        case .backlog: return work.backlog.allIssues
+        case .list: return work.list.issues
+        }
+    }
 
     private var assigneeFilter: some View {
         let all = people
@@ -547,11 +676,7 @@ struct JiraBoardView: View {
     // MARK: Columns
 
     private var visibleIssues: [JiraIssue] {
-        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        return model.issues.filter { i in
-            (assignees.isEmpty || assignees.contains(i.assignee ?? JiraPeopleFilter.unassigned))
-                && (q.isEmpty || i.key.lowercased().contains(q) || i.summary.lowercased().contains(q) || i.labels.contains { $0.lowercased().contains(q) })
-        }
+        model.issues.filter(matches)
     }
 
     @ViewBuilder

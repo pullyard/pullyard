@@ -408,7 +408,9 @@ struct SidebarView: View {
     var compact = false
 
     var body: some View {
-        List {
+        // Clicks go through the list's own selection, not a tap gesture on each row: a gesture
+        // takes the mouse-down, and then the list can only start a reorder drag from the row's edge.
+        List(selection: Binding(get: { app.section }, set: { if let s = $0 { app.section = s } })) {
             SidebarGroup("") {
                 SidebarItemList(group: "top", items: topItems)
             }
@@ -422,6 +424,7 @@ struct SidebarView: View {
             .environment(\.sidebarGroupKeys, keys)
         }
         .listStyle(.sidebar)
+        .background(SidebarHighlightOff())
         .environment(\.sidebarCompact, compact)
         .task(id: "\(RepoFocus.shared.query(app.cacheAccount))|\(app.cacheAccount ?? "")") { await app.refreshFocusCounts() }
         .safeAreaInset(edge: .bottom) {
@@ -526,6 +529,7 @@ struct SidebarView: View {
         return PRFilter.allCases.map {
             SidebarItem(section: .prs($0), title: $0.title, icon: $0.tileIcon, color: $0.tint, count: prCount($0), group: title)
         } + [
+            SidebarItem(section: .allPRs, title: "All PRs", icon: "rectangle.stack.fill", color: .sySky, group: title),
             SidebarItem(section: .myPRsByRepo, title: "My PRs by project", icon: "folder.fill", color: .syCoral, group: title),
             SidebarItem(section: .stacks, title: "Stacks", icon: "square.stack.3d.up.fill", color: .syIndigo, group: title),
         ]
@@ -727,11 +731,6 @@ struct SidebarItemList: View {
         let visible = layout.arranged(items, group: group)
         ForEach(visible) { item in
             SidebarRow(section: item.section, title: layout.title(for: item.section, default: item.title), icon: item.icon, color: item.color, count: item.count, group: item.group)
-                .draggable(SidebarDrag.row(group: group, id: item.id).payload) {
-                    Label(layout.title(for: item.section, default: item.title), systemImage: item.icon)
-                        .padding(6)
-                }
-                .sidebarDropTarget(group: group, keys: groupKeys, row: (item.id, visible))
                 .contextMenu {
                     Button("Rename\u{2026}") { layout.renaming = item }
                     if layout.hasCustomName(item.section) {
@@ -742,6 +741,10 @@ struct SidebarItemList: View {
                         Button("Reset Sidebar Order and Names") { withAnimation(Motion.fade) { layout.resetAll() } }
                     }
                 }
+        }
+        // The list's own drag-to-reorder: `.draggable` on a row inside a sidebar List never starts a drag.
+        .onMove { from, to in
+            withAnimation(Motion.smooth) { layout.move(in: group, visible: visible, from: from, to: to) }
         }
     }
 }
@@ -812,8 +815,8 @@ struct SidebarRow: View {
                 }
             }
             .contentShape(Rectangle())
-        // A tap gesture, not a Button: a Button swallows the mouse-down and the row could not be dragged to reorder.
-        .onTapGesture { app.section = section }
+        // Selected through the sidebar List's selection (see SidebarView), so the whole row can be dragged to reorder.
+        .tag(section)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { app.section = section }
         .onHover { hovering = $0 }
@@ -941,6 +944,8 @@ struct ContentColumn: View {
             SearchListView(title: f.title, kind: "pr", baseQuery: f.query).id("pr-\(f.rawValue)")
         case .myPRsByRepo:
             SearchListView(title: "My PRs by project", kind: "pr", baseQuery: PRFilter.mine.query, grouped: true).id("pr-mine-by-repo")
+        case .allPRs:
+            AllPRsView()
         case .stacks:
             StacksListView()
         case .issues(let f):
@@ -1186,6 +1191,40 @@ private struct EdgePanelContent: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .surface(.list)
             }
+        }
+    }
+}
+
+/// Turns off the sidebar table's own selection highlight; rows draw their own.
+private struct SidebarHighlightOff: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let v = Probe()
+        return v
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? Probe)?.apply()
+    }
+
+    private final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            apply()
+            DispatchQueue.main.async { [weak self] in self?.apply() }
+        }
+
+        func apply() {
+            guard let root = window?.contentView ?? superview else { return }
+            for table in Self.tables(in: root) where table.style == .sourceList || table.enclosingScrollView?.frame.width ?? 0 < 420 {
+                table.selectionHighlightStyle = .none
+            }
+        }
+
+        private static func tables(in view: NSView) -> [NSTableView] {
+            var out: [NSTableView] = []
+            if let t = view as? NSTableView { out.append(t) }
+            for sub in view.subviews { out += tables(in: sub) }
+            return out
         }
     }
 }

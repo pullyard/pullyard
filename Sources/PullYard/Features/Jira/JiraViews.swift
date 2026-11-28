@@ -298,6 +298,7 @@ struct JiraTab: View {
     @State private var open: Set<String> = []
     @State private var reload = 0
     @State private var lastUpdated: Date?
+    @State private var opened: JiraIssue?
     @Environment(AppModel.self) private var app
 
     static func keys(for pr: PullRequestDetail) -> [String] {
@@ -342,6 +343,18 @@ struct JiraTab: View {
             .animation(Motion.smooth, value: linking)
             .animation(Motion.smooth, value: open)
         }
+        .overlay {
+            if let issue = opened {
+                JiraIssueOverlay(issue: issue) {
+                    withAnimation(Motion.fade) { opened = nil }
+                } onChange: { updated in
+                    if let i = issues.firstIndex(where: { $0.key == updated.key }) { issues[i] = updated }
+                }
+                .id(issue.key)
+                .transition(.opacity)
+            }
+        }
+        .animation(Motion.fade, value: opened?.key)
         .task(id: "\(account.connections.map(\.id).joined())|\(keys.joined(separator: ","))|\(reload)") { await load(keys) }
         .onChange(of: app.refreshTick) {
             Task {
@@ -396,7 +409,7 @@ struct JiraTab: View {
     private func entry(_ key: String, primary: Bool, manual: Bool) -> some View {
         if let issue = issues.first(where: { $0.key == key }) {
             if primary || open.contains(key) {
-                JiraIssueCard(issue: issue, manual: manual, onUnlink: { unlink(key) }, onHide: manual ? nil : { hide(key) }, onCollapse: primary ? nil : { open.remove(key) }) { updated in
+                JiraIssueCard(issue: issue, editable: true, manual: manual, onOpen: { withAnimation(Motion.fade) { opened = issue } }, onUnlink: { unlink(key) }, onHide: manual ? nil : { hide(key) }, onCollapse: primary ? nil : { open.remove(key) }) { updated in
                     if let i = issues.firstIndex(where: { $0.key == updated.key }) { issues[i] = updated }
                 }
             } else {
@@ -630,6 +643,8 @@ struct JiraIssueCard: View {
     /// Fields and description can be changed in place (the board's ticket view).
     var editable = false
     var manual = false
+    /// Makes the key and title open the full ticket view (the board's dialog).
+    var onOpen: (() -> Void)?
     var onUnlink: () -> Void = {}
     var onHide: (() -> Void)?
     var onCollapse: (() -> Void)?
@@ -664,6 +679,7 @@ struct JiraIssueCard: View {
             HStack(alignment: .center, spacing: 10) {
                 IconTile(systemImage: JiraStyle.typeIcon(issue.type), color: JiraStyle.typeColor(issue.type), size: 24)
                 Text(issue.key).font(.syCallout.weight(.semibold).monospaced()).foregroundStyle(Color.syText)
+                    .onTapGesture { onOpen?() }
                 if let type = issue.type { Text(type).font(.syCaption).foregroundStyle(Color.syMuted) }
                 if JiraConnections.shared.hasSeveral, let c = JiraConnections.shared.connection(issue.connectionID) {
                     Text(c.name)
@@ -676,6 +692,12 @@ struct JiraIssueCard: View {
                 }
                 Spacer()
                 statusMenu
+                if let onOpen {
+                    Button(action: onOpen) { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                        .buttonStyle(.borderless)
+                        .help("Open ticket")
+                        .accessibilityLabel("Open ticket")
+                }
                 if let onCollapse {
                     Button(action: onCollapse) { Image(systemName: "chevron.up") }
                         .buttonStyle(.borderless)
@@ -695,7 +717,11 @@ struct JiraIssueCard: View {
                     .accessibilityLabel("Close")
                 }
             }
-            Text(issue.summary).font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText).textSelection(.enabled)
+            if let onOpen {
+                JiraOpenTitle(text: issue.summary, action: onOpen)
+            } else {
+                Text(issue.summary).font(.syTitle3.weight(.semibold)).foregroundStyle(Color.syText).textSelection(.enabled)
+            }
             if editable { JiraIssueFields(issue: issue, onChange: onChange) } else { meta }
             if editingDescription {
                 JiraDescriptionEditor(issue: issue) {
@@ -901,7 +927,9 @@ struct JiraIssueCard: View {
                 JiraMiniBoard(columns: columns, issueKey: issue.key,
                               current: columnIndex(issue.statusID, in: columns),
                               target: hoverTransition.flatMap { t in columnIndex(t.toID, in: columns) },
-                              targetName: hoverTransition?.to)
+                              targetName: hoverTransition?.to,
+                              currentColor: JiraStyle.statusColor(issue.statusCategory),
+                              targetColor: hoverTransition.map { JiraStyle.statusColor($0.toCategory) } ?? .syAgentAccent)
                     .padding(.horizontal, 4)
                     .padding(.top, 4)
                     .padding(.bottom, 6)
@@ -939,7 +967,7 @@ struct JiraIssueCard: View {
             }
         }
         .padding(6)
-        .frame(width: columns.isEmpty ? 300 : min(620, max(340, CGFloat(columns.count) * 78 + 20)))
+        .frame(width: columns.isEmpty ? 270 : min(500, max(290, CGFloat(columns.count) * 62 + 16)))
         .onDisappear { hoverTransition = nil }
     }
 
@@ -984,7 +1012,7 @@ private struct JiraStatusRow: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Circle().fill(color).frame(width: 8, height: 8)
-                    .frame(width: 26, height: 26)
+                    .frame(width: 22, height: 22)
                     .background(Circle().fill(color.opacity(current ? 0.18 : 0.1)))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(name)
@@ -1001,7 +1029,7 @@ private struct JiraStatusRow: View {
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.vertical, 2)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hover && !current ? Color.syText.opacity(0.07) : Color.clear))
             .contentShape(Rectangle())
         }
@@ -1150,6 +1178,8 @@ struct JiraMiniBoard: View {
     let current: Int?
     let target: Int?
     let targetName: String?
+    var currentColor: Color = .syText
+    var targetColor: Color = .syAgentAccent
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1161,14 +1191,14 @@ struct JiraMiniBoard: View {
             HStack(spacing: 5) {
                 Text(issueKey).font(.syCaption2.weight(.semibold).monospaced()).foregroundStyle(Color.syMuted)
                 if let current {
-                    Text(columns[current].name).font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syText.opacity(0.8))
+                    Text(columns[current].name).font(.syCaption2.weight(.semibold)).foregroundStyle(currentColor)
                 }
                 if let target, target != current {
-                    Image(systemName: "arrow.right").font(.syCaption2.weight(.bold)).foregroundStyle(Color.syAgentAccent)
-                    Text(columns[target].name).font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syAgentAccent)
+                    Image(systemName: "arrow.right").font(.syCaption2.weight(.bold)).foregroundStyle(targetColor)
+                    Text(columns[target].name).font(.syCaption2.weight(.semibold)).foregroundStyle(targetColor)
                 } else if targetName != nil, target == nil {
-                    Image(systemName: "arrow.right").font(.syCaption2.weight(.bold)).foregroundStyle(Color.syAgentAccent)
-                    Text("\(targetName ?? "") · not on this board").font(.syCaption2.weight(.semibold)).foregroundStyle(Color.syAgentAccent)
+                    Image(systemName: "arrow.right").font(.syCaption2.weight(.bold)).foregroundStyle(targetColor)
+                    Text("\(targetName ?? "") · not on this board").font(.syCaption2.weight(.semibold)).foregroundStyle(targetColor)
                 } else {
                     Text("· hover a status to see where it goes").font(.syCaption2).foregroundStyle(Color.syDim)
                 }
@@ -1184,29 +1214,29 @@ struct JiraMiniBoard: View {
         let moving = target != nil && target != current
         return VStack(spacing: 4) {
             Text(column.name)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(isTarget ? Color.syAgentAccent : (isCurrent ? Color.syText : Color.syDim))
+                .font(.system(size: 8.5, weight: .semibold))
+                .foregroundStyle(isTarget ? targetColor : (isCurrent ? currentColor : Color.syDim))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity)
             ZStack {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(isTarget ? Color.syAgentAccent.opacity(0.12) : Color.syText.opacity(0.05))
+                    .fill(isTarget ? targetColor.opacity(0.12) : Color.syText.opacity(0.05))
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .strokeBorder(isTarget ? Color.syAgentAccent.opacity(0.6) : Color.syLine, style: StrokeStyle(lineWidth: 1, dash: isTarget ? [3, 2] : []))
+                    .strokeBorder(isTarget ? targetColor.opacity(0.6) : Color.syLine, style: StrokeStyle(lineWidth: 1, dash: isTarget ? [3, 2] : []))
                 VStack(spacing: 3) {
                     if isCurrent {
-                        card(Color.syText.opacity(moving ? 0.18 : 0.55))
+                        card(currentColor.opacity(moving ? 0.3 : 0.85))
                     }
                     if isTarget {
-                        card(Color.syAgentAccent)
+                        card(targetColor)
                     }
                     if !isCurrent && !isTarget {
                         RoundedRectangle(cornerRadius: 2).fill(Color.syText.opacity(0.06)).frame(height: 7).padding(.horizontal, 6)
                     }
                 }
             }
-            .frame(height: 34)
+            .frame(height: 26)
         }
         .frame(maxWidth: .infinity)
     }
@@ -1216,5 +1246,30 @@ struct JiraMiniBoard: View {
             .fill(color)
             .frame(height: 12)
             .padding(.horizontal, 6)
+    }
+}
+
+/// A ticket title that opens the full ticket view, underlined on hover.
+private struct JiraOpenTitle: View {
+    let text: String
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(text)
+                .font(.syTitle3.weight(.semibold))
+                .foregroundStyle(Color.syText)
+                .underline(hover, color: Color.syMuted)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            hover = inside
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+        .help("Open ticket")
     }
 }
