@@ -2395,11 +2395,19 @@ struct AgentBranchMenu: View {
             .buttonStyle(.plain)
             .fixedSize()
             .onHover { hover = $0 }
-            .help(branch + (git.worktree.map { " · worktree " + $0 } ?? "") + (tab.followsOtherWorktree ? " · the agent is working here, not in the session folder" : "") + (pr.map { " · #\($0.number)" } ?? ""))
+            .help(helpText(branch: branch, git: git))
             .popover(isPresented: $open, arrowEdge: .bottom) { panel(branch: branch, git: git) }
         } else {
             Color.clear.frame(width: 0, height: 0)
         }
+    }
+
+    private func helpText(branch: String, git: GitWorkingCopy) -> String {
+        var parts = [branch]
+        if let worktree = git.worktree { parts.append("worktree " + worktree) }
+        if tab.followsOtherWorktree { parts.append("the agent is working here, not in the session folder") }
+        if let pr { parts.append("#\(pr.number)") }
+        return parts.joined(separator: " · ")
     }
 
     private func label(branch: String, git: GitWorkingCopy) -> some View {
