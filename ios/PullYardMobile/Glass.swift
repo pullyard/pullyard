@@ -99,3 +99,13 @@ extension View {
             .presentationDragIndicator(.visible)
     }
 }
+
+struct HStrip<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) { content }
+            .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
