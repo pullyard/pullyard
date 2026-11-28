@@ -234,8 +234,13 @@ struct ChatComposer: View {
                             .allowsHitTesting(false)
                     }
                 }
+                if recorder.phase != .idle {
+                    DictationBar(recorder: recorder, onStop: dictate, onCancel: { recorder.cancel() })
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
                 bottomBar
             }
+            .animation(Motion.smooth, value: recorder.phase)
             .padding(10)
             .pyGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous), fallback: .syRaised)
             .padding(12)
@@ -402,8 +407,6 @@ struct ChatComposer: View {
             Image(systemName: "mic")
         case .recording:
             Image(systemName: "stop.circle.fill")
-                .scaleEffect(1 + recorder.level * 0.25)
-                .animation(.easeOut(duration: 0.1), value: recorder.level)
         case .transcribing:
             PYLoader(size: 12, label: "Transcribing")
         }
