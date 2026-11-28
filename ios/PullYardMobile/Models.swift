@@ -383,6 +383,7 @@ enum Route: Codable, Hashable {
     case browse(repo: String, ref: String?, path: String)
     case agent(String)
     case agents
+    case jiraBoard
 }
 
 struct PushedBranch: Codable, Hashable, Identifiable {
