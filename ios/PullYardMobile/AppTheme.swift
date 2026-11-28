@@ -147,18 +147,12 @@ struct BrandBackdrop: View {
         ZStack(alignment: .top) {
             MobileTheme.canvas
             if ThemeStore.isBrand {
-                GeometryReader { geo in
-                    ZStack {
-                        Ellipse().fill(MobileTheme.violet.opacity(0.16)).frame(width: geo.size.width * 1.1, height: 260).blur(radius: 70)
-                            .offset(x: -geo.size.width * 0.3, y: -90)
-                        Ellipse().fill(MobileTheme.sky.opacity(0.16)).frame(width: geo.size.width, height: 240).blur(radius: 70)
-                            .offset(x: geo.size.width * 0.35, y: -70)
-                        Ellipse().fill(MobileTheme.coral.opacity(0.08)).frame(width: geo.size.width * 0.8, height: 200).blur(radius: 80)
-                            .offset(x: 0, y: 40)
-                    }
-                    .frame(width: geo.size.width, height: 320, alignment: .top)
+                ZStack {
+                    RadialGradient(colors: [MobileTheme.violet.opacity(0.14), .clear], center: UnitPoint(x: 0.15, y: 0), startRadius: 0, endRadius: 340)
+                    RadialGradient(colors: [MobileTheme.sky.opacity(0.14), .clear], center: UnitPoint(x: 0.9, y: 0.05), startRadius: 0, endRadius: 320)
+                    RadialGradient(colors: [MobileTheme.coral.opacity(0.06), .clear], center: UnitPoint(x: 0.5, y: 0.45), startRadius: 0, endRadius: 280)
                 }
-                .frame(height: 320)
+                .frame(height: 420)
                 .allowsHitTesting(false)
             }
         }
