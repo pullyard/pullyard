@@ -496,10 +496,27 @@ private struct AgentWake: View {
 
     var body: some View {
         let active = phase == .working || phase == .waiting
-        Capsule()
-            .fill(active ? AnyShapeStyle(LinearGradient(colors: [WidgetPalette.violet, WidgetPalette.sky, AgentPhaseStyle.color(phase)], startPoint: .leading, endPoint: .trailing)) : AnyShapeStyle(AgentPhaseStyle.color(phase).opacity(0.55)))
-            .frame(height: 3)
-            .opacity(active ? 1 : 0.8)
+        ZStack {
+            WaveLine(phase: 0, amplitude: active ? 3 : 0)
+                .stroke(
+                    active
+                        ? AnyShapeStyle(LinearGradient(colors: [WidgetPalette.violet, WidgetPalette.sky, AgentPhaseStyle.color(phase)], startPoint: .leading, endPoint: .trailing))
+                        : AnyShapeStyle(AgentPhaseStyle.color(phase).opacity(0.6)),
+                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
+                )
+            if !active {
+                HStack {
+                    Spacer()
+                    Image(systemName: AgentPhaseStyle.symbol(phase))
+                        .font(.system(size: 9, weight: .heavy))
+                        .foregroundStyle(WidgetPalette.navy)
+                        .frame(width: 18, height: 18)
+                        .background(Circle().fill(AgentPhaseStyle.color(phase)))
+                }
+            }
+        }
+        .frame(height: 18)
+        .accessibilityHidden(true)
     }
 }
 
@@ -595,10 +612,8 @@ private struct AgentLockScreenView: View {
         .padding(.horizontal, 18).padding(.vertical, 16)
         .background {
             ZStack {
-                LinearGradient(colors: [WidgetPalette.navyTop, WidgetPalette.navy], startPoint: .topLeading, endPoint: .bottomTrailing)
-                RadialGradient(colors: [WidgetPalette.violet.opacity(0.28), .clear], center: .topLeading, startRadius: 0, endRadius: 220)
-                RadialGradient(colors: [WidgetPalette.sky.opacity(0.18), .clear], center: .topTrailing, startRadius: 0, endRadius: 200)
-                RadialGradient(colors: [AgentPhaseStyle.color(phase).opacity(0.14), .clear], center: .bottomTrailing, startRadius: 0, endRadius: 180)
+                LinearGradient(colors: [WidgetPalette.navyTop, WidgetPalette.navy], startPoint: .top, endPoint: .bottom)
+                RadialGradient(colors: [AgentPhaseStyle.color(phase).opacity(0.16), .clear], center: .topTrailing, startRadius: 0, endRadius: 220)
             }
         }
     }

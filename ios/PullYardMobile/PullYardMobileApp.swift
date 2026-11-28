@@ -12,6 +12,10 @@ struct PullYardMobileApp: App {
         UIRefreshControl.appearance().tintColor = .clear
         ThemeStore.update(ThemeStore.style)
         BackgroundSync.register()
+        AgentActivities.dismissFinished()
+        NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: nil) { _ in
+            AgentActivities.endAllBeforeExit()
+        }
         AgentIntentBridge.respond = { session, request, allow in
             try await LinkClient.shared.respondRemote(session: session, requestID: request, allow: allow)
         }
@@ -173,6 +177,7 @@ struct RootView: View {
         .preferredColorScheme(AppearanceMode(rawValue: appearanceRaw)?.colorScheme)
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                AgentActivities.dismissFinished()
                 LinkClient.shared.enterForeground()
                 KeyboardDismisser.install()
                 model.reloadFocus()
