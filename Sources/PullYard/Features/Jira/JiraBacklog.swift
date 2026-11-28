@@ -543,16 +543,15 @@ private struct JiraBacklogSectionView: View {
                             if issue.id != visible.last?.id { Divider().opacity(0.5) }
                         }
                     }
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.syRaised))
-                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syLine))
+                    .pyCardSurface(radius: 12)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .padding(.horizontal, 8)
                     .padding(.bottom, 8)
                 }
             }
         }
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.syText.opacity(targeted ? 0.08 : 0.035)))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(targeted ? Color.syAccent : Color.clear, lineWidth: 1.5))
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.syPanel.opacity(0.6)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(targeted ? Color.syAccent : Color.syLine, lineWidth: targeted ? 1.5 : 1))
         .dropDestination(for: String.self) { keys, _ in
             guard canDrop, let key = keys.first, !section.issues.contains(where: { $0.key == key }) else { return false }
             onDrop(key)
@@ -764,12 +763,11 @@ struct JiraBacklogSkeleton: View {
                             .frame(height: 40)
                         }
                     }
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.syRaised))
-                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.syLine))
+                    .pyCardSurface(radius: 12)
                     .padding(.horizontal, 8)
                     .padding(.bottom, 8)
                 }
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color.syText.opacity(0.035)))
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.syPanel.opacity(0.6)))
             }
             Spacer(minLength: 0)
         }
@@ -814,8 +812,7 @@ struct JiraIssueListView: View {
                     }
                 }
                 .frame(width: max(JiraListColumns.minWidth, geo.size.width - 32))
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color.syRaised))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.syLine))
+                .pyCardSurface(radius: 12)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(16)
             }
@@ -947,8 +944,7 @@ struct JiraListSkeleton: View {
             }
             Spacer(minLength: 0)
         }
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.syRaised))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.syLine))
+        .pyCardSurface(radius: 12)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

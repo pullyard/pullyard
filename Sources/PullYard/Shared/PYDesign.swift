@@ -191,6 +191,7 @@ struct WindowRootFrame: Layout {
 
 struct PYListRowBackground: View {
     let selected: Bool
+    var hover = false
     var accent: Color = .syAccent
     @Environment(\.colorScheme) private var scheme
 
@@ -199,8 +200,8 @@ struct PYListRowBackground: View {
         ZStack {
             Color.syList
             shape
-                .fill(selected ? accent.opacity(scheme == .dark ? 0.20 : 0.12) : Color.syRaised.opacity(scheme == .dark ? 0.55 : 0.75))
-                .overlay(shape.strokeBorder(selected ? accent.opacity(0.5) : Color.syLine, lineWidth: 1))
+                .fill(selected ? accent.opacity(scheme == .dark ? 0.20 : 0.12) : Color.syRaised.opacity(hover ? 1 : (scheme == .dark ? 0.55 : 0.75)))
+                .overlay(shape.strokeBorder(selected ? accent.opacity(0.5) : (hover ? Color.syLineStrong : Color.syLine), lineWidth: 1))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
         }
@@ -209,12 +210,16 @@ struct PYListRowBackground: View {
 
 struct PYListRow: ViewModifier {
     let selected: Bool
+    @State private var hover = false
 
     func body(content: Content) -> some View {
         if Theme.isBrand {
             content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onHover { hover = $0 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 22))
-                .listRowBackground(PYListRowBackground(selected: selected))
+                .listRowBackground(PYListRowBackground(selected: selected, hover: hover))
                 .listRowSeparator(.hidden)
         } else {
             content

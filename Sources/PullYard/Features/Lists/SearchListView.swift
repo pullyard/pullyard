@@ -733,7 +733,7 @@ struct ItemRow: View {
         .padding(.vertical, density == .compact ? 2 : 4)
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
-        .hoverHighlight(radius: 10)
+        .hoverHighlight(radius: 10, color: Theme.isBrand ? .clear : .syText)
         .padding(.horizontal, -6)
         .help(item.title)
         .accessibilityElement(children: .ignore)
