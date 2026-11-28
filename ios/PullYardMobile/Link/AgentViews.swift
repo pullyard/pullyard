@@ -1382,6 +1382,11 @@ struct AgentChatView: View {
                 .padding(.leading, 14).padding(.trailing, 6).padding(.top, 8)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            if dictation.isRecording {
+                DictationLevelStrip(dictation: dictation)
+                    .padding(.horizontal, 10).padding(.top, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             if !attachments.isEmpty {
                 AgentAttachmentStrip(attachments: attachments) { item in attachments.removeAll { $0.id == item.id } }
                     .padding(.horizontal, 10).padding(.top, 4)
